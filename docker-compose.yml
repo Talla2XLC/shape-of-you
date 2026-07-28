@@ -1,0 +1,64 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: shape_of_you
+      POSTGRES_USER: shape_of_you
+      POSTGRES_PASSWORD: shape_of_you
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shape_of_you -d shape_of_you"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5432:5432"
+    volumes:
+      - shape_of_you_postgres:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://shape_of_you:shape_of_you@postgres:5432/shape_of_you
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "3000:3000"
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "dist/database/migrate.js"]
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://shape_of_you:shape_of_you@postgres:5432/shape_of_you
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  shape_of_you_postgres:

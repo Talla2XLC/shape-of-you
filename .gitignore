@@ -1,0 +1,32 @@
+# 4DreamTeam mutable local state
+.4dt/
+
+# IDE and operating system
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+keys/
+*.key
+*.pem
+
+# Temporary files
+*.tmp
+*.bak
+*.log
+
+# Node.js and generated build output
+node_modules/
+.pnpm-store/
+dist/
+coverage/
+
+# Deployment runtime state
+deploy/staging/*.env
+!deploy/staging/*.env.example
+deploy/staging/.release-state/

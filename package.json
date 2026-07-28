@@ -1,0 +1,26 @@
+{
+  "name": "shape-of-you",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=24 <27"
+  },
+  "scripts": {
+    "build": "pnpm -r --sort build",
+    "dev": "pnpm --filter @shape-of-you/contracts build && pnpm --filter @shape-of-you/config build && pnpm --filter @shape-of-you/api dev",
+    "lint": "eslint .",
+    "test": "pnpm --filter @shape-of-you/api test",
+    "test:unit": "pnpm --filter @shape-of-you/api test:unit",
+    "test:integration": "pnpm --filter @shape-of-you/api test:integration",
+    "typecheck": "pnpm -r --sort typecheck",
+    "db:generate": "pnpm --filter @shape-of-you/api db:generate",
+    "db:migrate": "pnpm --filter @shape-of-you/api db:migrate"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.0",
+    "eslint": "^9.39.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0"
+  }
+}

@@ -1,0 +1,116 @@
+services:
+  edge:
+    image: "${EDGE_IMAGE:?EDGE_IMAGE is required}@${EDGE_DIGEST:?EDGE_DIGEST is required}"
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "3001:8080"
+    networks:
+      - edge
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--output-document=-",
+          "http://127.0.0.1:8080/edge-health"
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    mem_limit: 64m
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  api:
+    image: "${API_IMAGE:?API_IMAGE is required}@${API_DIGEST:?API_DIGEST is required}"
+    env_file:
+      - /etc/shape-of-you/staging/api.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - edge
+      - database_access
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    mem_limit: 384m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  migrate:
+    image: "${API_IMAGE:?API_IMAGE is required}@${API_DIGEST:?API_DIGEST is required}"
+    command: ["node", "dist/database/migrate.js"]
+    env_file:
+      - /etc/shape-of-you/staging/api.env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - database_access
+    profiles:
+      - operations
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  edge:
+  database_access:

@@ -1,0 +1,145 @@
+name: Deploy staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: Full 40-character Git commit SHA
+        required: true
+        type: string
+      api_digest:
+        description: Published API sha256 digest
+        required: true
+        type: string
+      edge_digest:
+        description: Published edge sha256 digest
+        required: true
+        type: string
+      schema_backward_compatible:
+        description: Previous API image can run after this migration
+        required: true
+        default: false
+        type: boolean
+      run_write_smoke:
+        description: Create a synthetic WeightMeasurement during smoke
+        required: true
+        default: true
+        type: boolean
+
+concurrency:
+  group: shape-of-you-staging
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment:
+      name: staging
+      url: http://2.58.15.24:3001/
+
+    env:
+      VM_HOST: ${{ vars.STAGING_VM_HOST }}
+      VM_USER: ${{ vars.STAGING_VM_USER }}
+      VM_PORT: ${{ vars.STAGING_VM_PORT }}
+      GHCR_NAMESPACE: ${{ vars.GHCR_NAMESPACE }}
+      RELEASE_ID: ${{ inputs.release_id }}
+      API_DIGEST: ${{ inputs.api_digest }}
+      EDGE_DIGEST: ${{ inputs.edge_digest }}
+      SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.schema_backward_compatible }}
+      RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_id }}
+
+      - name: Validate deployment inputs
+        shell: bash
+        run: |
+          set -eu
+          printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$'
+          printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$VM_HOST" | grep -Eq '^[A-Za-z0-9.-]+$'
+          printf '%s\n' "$VM_USER" | grep -Eq '^[a-z_][a-z0-9_-]*$'
+          printf '%s\n' "$VM_PORT" | grep -Eq '^[0-9]{1,5}$'
+          printf '%s\n' "$GHCR_NAMESPACE" | grep -Eq '^[a-z0-9][a-z0-9._-]*$'
+
+      - name: Configure SSH
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_VM_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_VM_KNOWN_HOSTS }}
+        run: |
+          set -eu
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      - name: Create immutable release manifest
+        shell: bash
+        run: |
+          set -eu
+          umask 077
+          cat > release.env <<EOF
+          RELEASE_ID=$RELEASE_ID
+          API_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-api
+          API_DIGEST=$API_DIGEST
+          EDGE_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-edge
+          EDGE_DIGEST=$EDGE_DIGEST
+          SCHEMA_BACKWARD_COMPATIBLE=$SCHEMA_BACKWARD_COMPATIBLE
+          EOF
+
+      - name: Transfer deployment package
+        shell: bash
+        run: |
+          set -eu
+          target="$VM_USER@$VM_HOST"
+          remote_tmp="/tmp/shape-of-you-staging-$GITHUB_RUN_ID"
+          ssh -p "$VM_PORT" "$target" "install -d -m 0700 '$remote_tmp'"
+          scp -P "$VM_PORT" -r deploy/staging/. "$target:$remote_tmp/"
+          scp -P "$VM_PORT" release.env "$target:$remote_tmp/release.env"
+          ssh -p "$VM_PORT" "$target" \
+            "sudo install -d -m 0755 '/opt/shape-of-you/staging/packages/$RELEASE_ID' &&
+             sudo cp -R '$remote_tmp/.' '/opt/shape-of-you/staging/packages/$RELEASE_ID/' &&
+             sudo chmod 0755 '/opt/shape-of-you/staging/packages/$RELEASE_ID/scripts/'*.sh &&
+             rm -rf '$remote_tmp'"
+
+      - name: Install runtime environment
+        shell: bash
+        env:
+          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+        run: |
+          set -eu
+          test -n "$DATABASE_URL"
+          target="$VM_USER@$VM_HOST"
+          {
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+          } | ssh -p "$VM_PORT" "$target" \
+            "sudo install -d -m 0700 /etc/shape-of-you/staging &&
+             sudo tee /etc/shape-of-you/staging/api.env >/dev/null &&
+             sudo chmod 0600 /etc/shape-of-you/staging/api.env"
+
+      - name: Pull, migrate, deploy and smoke
+        shell: bash
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          target="$VM_USER@$VM_HOST"
+          package="/opt/shape-of-you/staging/packages/$RELEASE_ID"
+          printf '%s' "$GHCR_TOKEN" | ssh -p "$VM_PORT" "$target" \
+            "set -eu
+             docker_config=\$(mktemp -d)
+             trap 'sudo rm -rf \"\$docker_config\"' EXIT HUP INT TERM
+             sudo env DOCKER_CONFIG=\"\$docker_config\" \
+               docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin >/dev/null
+             sudo env DOCKER_CONFIG=\"\$docker_config\" RUN_WRITE_SMOKE='$RUN_WRITE_SMOKE' \
+               '$package/scripts/deploy.sh' '$package/release.env'"
