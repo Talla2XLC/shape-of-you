@@ -118,6 +118,8 @@ boundaries must not be implicitly shared between deployable services.
 - Staging, commits, pushes, tags, releases, deployments, migrations,
   destructive actions, production access, and secret access require the
   corresponding explicit approvals.
+- When asking the operator to create a Git commit or push changes, always
+  propose a concise Conventional Commit message suitable for the current diff.
 - Never disclose credentials, private keys, tokens, `.env` contents, dumps, or
   production data in chat, documentation, plans, reports, or commits.
 
@@ -147,6 +149,12 @@ superseding ADR.
 The workspace `sources/` directory is only a staging area for approved
 materials, not the project root. Register external paths through `4dt-sources`
 with operator approval. Do not read secrets or unrelated files.
+
+With explicit operator approval for a named host and purpose, DevOps may invoke
+an existing operator-managed OpenSSH profile from `~/.ssh/config`. Do not read,
+copy, print, or store private-key or SSH configuration contents; use strict
+host-key checking. Otherwise, use workspace-managed SSH material only when the
+task explicitly requires it.
 
 ## Language and Communication
 

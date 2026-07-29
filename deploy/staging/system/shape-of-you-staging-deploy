@@ -1,0 +1,138 @@
+#!/bin/sh
+set -eu
+
+# This launcher is installed root-owned on the VM. Its stdin protocol is the
+# only privileged interface available to the GitHub deployment identity.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+SYSTEM_ROOT=/opt/shape-of-you/staging/system
+DEPLOY_ROOT=/opt/shape-of-you/staging
+RUNTIME_ENV=/etc/shape-of-you/staging/api.env
+RELEASE_ENV=
+DOCKER_CONFIG_DIR=
+
+cleanup() {
+  if [ -n "$RELEASE_ENV" ]; then
+    rm -f "$RELEASE_ENV"
+  fi
+
+  if [ -n "$DOCKER_CONFIG_DIR" ]; then
+    rm -rf "$DOCKER_CONFIG_DIR"
+  fi
+}
+
+trap cleanup EXIT HUP INT TERM
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 2
+}
+
+[ "$#" -eq 0 ] || fail 'Deployment wrapper accepts no arguments.'
+
+RELEASE_ID=
+API_DIGEST=
+EDGE_DIGEST=
+SCHEMA_BACKWARD_COMPATIBLE=
+RUN_WRITE_SMOKE=
+GHCR_NAMESPACE=
+GHCR_ACTOR=
+DATABASE_URL=
+GHCR_TOKEN=
+seen_keys=' '
+
+while IFS= read -r input_line || [ -n "$input_line" ]; do
+  case "$input_line" in
+    *=*)
+      input_key=${input_line%%=*}
+      input_value=${input_line#*=}
+      ;;
+    *)
+      fail 'Malformed deployment input.'
+      ;;
+  esac
+
+  case "$input_key" in
+    RELEASE_ID|API_DIGEST|EDGE_DIGEST|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|DATABASE_URL|GHCR_TOKEN)
+      case "$seen_keys" in
+        *" $input_key "*) fail "Duplicate input: $input_key." ;;
+      esac
+      seen_keys="$seen_keys$input_key "
+      case "$input_key" in
+        RELEASE_ID) RELEASE_ID=$input_value ;;
+        API_DIGEST) API_DIGEST=$input_value ;;
+        EDGE_DIGEST) EDGE_DIGEST=$input_value ;;
+        SCHEMA_BACKWARD_COMPATIBLE) SCHEMA_BACKWARD_COMPATIBLE=$input_value ;;
+        RUN_WRITE_SMOKE) RUN_WRITE_SMOKE=$input_value ;;
+        GHCR_NAMESPACE) GHCR_NAMESPACE=$input_value ;;
+        GHCR_ACTOR) GHCR_ACTOR=$input_value ;;
+        DATABASE_URL) DATABASE_URL=$input_value ;;
+        GHCR_TOKEN) GHCR_TOKEN=$input_value ;;
+      esac
+      ;;
+    *)
+      fail "Unexpected deployment input: $input_key."
+      ;;
+  esac
+done
+
+[ -n "$RELEASE_ID" ] || fail 'RELEASE_ID is required.'
+[ -n "$API_DIGEST" ] || fail 'API_DIGEST is required.'
+[ -n "$EDGE_DIGEST" ] || fail 'EDGE_DIGEST is required.'
+[ -n "$SCHEMA_BACKWARD_COMPATIBLE" ] || fail 'SCHEMA_BACKWARD_COMPATIBLE is required.'
+[ -n "$RUN_WRITE_SMOKE" ] || fail 'RUN_WRITE_SMOKE is required.'
+[ -n "$GHCR_NAMESPACE" ] || fail 'GHCR_NAMESPACE is required.'
+[ -n "$GHCR_ACTOR" ] || fail 'GHCR_ACTOR is required.'
+[ -n "$DATABASE_URL" ] || fail 'DATABASE_URL is required.'
+[ -n "$GHCR_TOKEN" ] || fail 'GHCR_TOKEN is required.'
+
+printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid RELEASE_ID.'
+printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid API_DIGEST.'
+printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid EDGE_DIGEST.'
+printf '%s\n' "$GHCR_NAMESPACE" | grep -Eq '^[a-z0-9][a-z0-9._-]*$' || fail 'Invalid GHCR_NAMESPACE.'
+printf '%s\n' "$GHCR_ACTOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]*$' || fail 'Invalid GHCR_ACTOR.'
+
+case "$SCHEMA_BACKWARD_COMPATIBLE" in
+  true|false) ;;
+  *) fail 'Invalid SCHEMA_BACKWARD_COMPATIBLE.' ;;
+esac
+
+case "$RUN_WRITE_SMOKE" in
+  true|false) ;;
+  *) fail 'Invalid RUN_WRITE_SMOKE.' ;;
+esac
+
+case "$DATABASE_URL" in
+  postgresql://*) ;;
+  *) fail 'DATABASE_URL must use the postgresql scheme.' ;;
+esac
+
+test -x "$SYSTEM_ROOT/scripts/deploy.sh" || fail 'Root-owned deployment scripts are missing.'
+test -f "$SYSTEM_ROOT/compose.yaml" || fail 'Root-owned Compose file is missing.'
+
+umask 077
+install -d -m 0700 /etc/shape-of-you/staging
+runtime_file=$(mktemp /etc/shape-of-you/staging/api.env.XXXXXX)
+printf 'DATABASE_URL=%s\n' "$DATABASE_URL" > "$runtime_file"
+install -m 0600 "$runtime_file" "$RUNTIME_ENV"
+rm -f "$runtime_file"
+
+RELEASE_ENV=$(mktemp /run/shape-of-you-staging-release.XXXXXX)
+cat > "$RELEASE_ENV" <<EOF
+RELEASE_ID=$RELEASE_ID
+API_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-api
+API_DIGEST=$API_DIGEST
+EDGE_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-edge
+EDGE_DIGEST=$EDGE_DIGEST
+SCHEMA_BACKWARD_COMPATIBLE=$SCHEMA_BACKWARD_COMPATIBLE
+EOF
+
+DOCKER_CONFIG_DIR=$(mktemp -d)
+printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
+  docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin >/dev/null
+
+COMPOSE_FILE="$SYSTEM_ROOT/compose.yaml" \
+DEPLOY_ROOT="$DEPLOY_ROOT" \
+RUNTIME_ENV="$RUNTIME_ENV" \
+RUN_WRITE_SMOKE="$RUN_WRITE_SMOKE" \
+DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
+  "$SYSTEM_ROOT/scripts/deploy.sh" "$RELEASE_ENV"

@@ -39,7 +39,8 @@ services:
   api:
     image: "${API_IMAGE:?API_IMAGE is required}@${API_DIGEST:?API_DIGEST is required}"
     env_file:
-      - /etc/shape-of-you/staging/api.env
+      - path: /etc/shape-of-you/staging/api.env
+        format: raw
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0
@@ -84,7 +85,8 @@ services:
     image: "${API_IMAGE:?API_IMAGE is required}@${API_DIGEST:?API_DIGEST is required}"
     command: ["node", "dist/database/migrate.js"]
     env_file:
-      - /etc/shape-of-you/staging/api.env
+      - path: /etc/shape-of-you/staging/api.env
+        format: raw
     environment:
       NODE_ENV: production
       HOST: 0.0.0.0

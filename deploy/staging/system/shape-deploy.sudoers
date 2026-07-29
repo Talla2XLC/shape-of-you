@@ -1,0 +1,3 @@
+# Root-owned deployment entrypoint. The wrapper validates every stdin field;
+# no arguments, shell, Docker CLI, or writable deployment script is permitted.
+shape-deploy ALL=(root) NOPASSWD: /usr/local/sbin/shape-of-you-staging-deploy ""

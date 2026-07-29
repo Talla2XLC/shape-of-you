@@ -54,11 +54,6 @@ jobs:
       RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
 
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.release_id }}
-
       - name: Validate deployment inputs
         shell: bash
         run: |
@@ -67,7 +62,7 @@ jobs:
           printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$VM_HOST" | grep -Eq '^[A-Za-z0-9.-]+$'
-          printf '%s\n' "$VM_USER" | grep -Eq '^[a-z_][a-z0-9_-]*$'
+          test "$VM_USER" = 'shape-deploy'
           printf '%s\n' "$VM_PORT" | grep -Eq '^[0-9]{1,5}$'
           printf '%s\n' "$GHCR_NAMESPACE" | grep -Eq '^[a-z0-9][a-z0-9._-]*$'
 
@@ -83,63 +78,29 @@ jobs:
           printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
           chmod 0600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
 
-      - name: Create immutable release manifest
-        shell: bash
-        run: |
-          set -eu
-          umask 077
-          cat > release.env <<EOF
-          RELEASE_ID=$RELEASE_ID
-          API_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-api
-          API_DIGEST=$API_DIGEST
-          EDGE_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-edge
-          EDGE_DIGEST=$EDGE_DIGEST
-          SCHEMA_BACKWARD_COMPATIBLE=$SCHEMA_BACKWARD_COMPATIBLE
-          EOF
-
-      - name: Transfer deployment package
-        shell: bash
-        run: |
-          set -eu
-          target="$VM_USER@$VM_HOST"
-          remote_tmp="/tmp/shape-of-you-staging-$GITHUB_RUN_ID"
-          ssh -p "$VM_PORT" "$target" "install -d -m 0700 '$remote_tmp'"
-          scp -P "$VM_PORT" -r deploy/staging/. "$target:$remote_tmp/"
-          scp -P "$VM_PORT" release.env "$target:$remote_tmp/release.env"
-          ssh -p "$VM_PORT" "$target" \
-            "sudo install -d -m 0755 '/opt/shape-of-you/staging/packages/$RELEASE_ID' &&
-             sudo cp -R '$remote_tmp/.' '/opt/shape-of-you/staging/packages/$RELEASE_ID/' &&
-             sudo chmod 0755 '/opt/shape-of-you/staging/packages/$RELEASE_ID/scripts/'*.sh &&
-             rm -rf '$remote_tmp'"
-
-      - name: Install runtime environment
+      - name: Run restricted staging deployment wrapper
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-        run: |
-          set -eu
-          test -n "$DATABASE_URL"
-          target="$VM_USER@$VM_HOST"
-          {
-            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
-          } | ssh -p "$VM_PORT" "$target" \
-            "sudo install -d -m 0700 /etc/shape-of-you/staging &&
-             sudo tee /etc/shape-of-you/staging/api.env >/dev/null &&
-             sudo chmod 0600 /etc/shape-of-you/staging/api.env"
-
-      - name: Pull, migrate, deploy and smoke
-        shell: bash
-        env:
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
+          test -n "$DATABASE_URL"
+          test -n "$GHCR_TOKEN"
           target="$VM_USER@$VM_HOST"
-          package="/opt/shape-of-you/staging/packages/$RELEASE_ID"
-          printf '%s' "$GHCR_TOKEN" | ssh -p "$VM_PORT" "$target" \
-            "set -eu
-             docker_config=\$(mktemp -d)
-             trap 'sudo rm -rf \"\$docker_config\"' EXIT HUP INT TERM
-             sudo env DOCKER_CONFIG=\"\$docker_config\" \
-               docker login ghcr.io --username '$GITHUB_ACTOR' --password-stdin >/dev/null
-             sudo env DOCKER_CONFIG=\"\$docker_config\" RUN_WRITE_SMOKE='$RUN_WRITE_SMOKE' \
-               '$package/scripts/deploy.sh' '$package/release.env'"
+          {
+            printf 'RELEASE_ID=%s\n' "$RELEASE_ID"
+            printf 'API_DIGEST=%s\n' "$API_DIGEST"
+            printf 'EDGE_DIGEST=%s\n' "$EDGE_DIGEST"
+            printf 'SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$SCHEMA_BACKWARD_COMPATIBLE"
+            printf 'RUN_WRITE_SMOKE=%s\n' "$RUN_WRITE_SMOKE"
+            printf 'GHCR_NAMESPACE=%s\n' "$GHCR_NAMESPACE"
+            printf 'GHCR_ACTOR=%s\n' "$GITHUB_ACTOR"
+            printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
+          } | ssh -p "$VM_PORT" "$target" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "sudo -n /usr/local/sbin/shape-of-you-staging-deploy"
