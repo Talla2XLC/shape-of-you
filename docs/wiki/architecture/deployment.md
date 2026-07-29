@@ -24,9 +24,10 @@ Actions, а собственный nginx Shape of You публикует web и 
 ### Delivery
 
 GitHub Actions выполняет проверки, собирает immutable OCI images и публикует
-их в GHCR с tag по commit SHA. Manual workflow с Environment `staging`
-принимает конкретные image digests и передаёт allowlisted structured input
-единственному root-owned wrapper через stdin. VM получает готовые images, но
+их в GHCR с tag по commit SHA. Каждый успешный push в `main` автоматически
+вызывает Environment `staging` deployment с конкретными image digests и
+передаёт allowlisted structured input единственному root-owned wrapper через
+stdin. VM получает готовые images, но
 не build context, toolchain, Compose file или writable deployment scripts.
 
 На VM `shape-deploy` не состоит в группе `docker` и имеет passwordless `sudo`

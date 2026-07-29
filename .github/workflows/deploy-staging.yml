@@ -1,6 +1,23 @@
 name: Deploy staging
 
 on:
+  workflow_call:
+    inputs:
+      release_id:
+        required: true
+        type: string
+      api_digest:
+        required: true
+        type: string
+      edge_digest:
+        required: true
+        type: string
+      schema_backward_compatible:
+        required: true
+        type: boolean
+      run_write_smoke:
+        required: true
+        type: boolean
   workflow_dispatch:
     inputs:
       release_id:

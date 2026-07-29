@@ -73,7 +73,9 @@ Deployment authority — digest, а не tag. Workflow сохраняет proven
 
 ### Deployment
 
-`deploy-staging.yml` запускается вручную и требует:
+`publish-staging.yml` автоматически запускает `deploy-staging.yml` после
+quality и публикации обоих images для каждого push в `main`. Ручной запуск
+`deploy-staging.yml` сохраняется для targeted retry и требует:
 
 - полный commit SHA;
 - API digest;
@@ -125,6 +127,7 @@ PostgreSQL container и чужой Compose этой командой не зат
 
 - [ADR о временном deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md).
 - [ADR о выделенной deployment identity](../../adr/20260729-use-dedicated-staging-deployment-identity.md).
+- [ADR об автоматическом deployment main](../../adr/20260729-auto-deploy-main-to-staging.md).
 
 ## Открытые вопросы
 
