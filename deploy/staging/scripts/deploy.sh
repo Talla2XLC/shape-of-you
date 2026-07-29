@@ -37,7 +37,7 @@ RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
 mkdir -p "$RELEASE_DIR"
 install -m 0600 "$RELEASE_ENV_INPUT" "$RELEASE_DIR/release.env"
 
-"$SCRIPT_DIR/vm-preflight.sh" "$RELEASE_DIR/release.env"
+sh "$SCRIPT_DIR/vm-preflight.sh" "$RELEASE_DIR/release.env"
 
 compose() {
   docker compose \
@@ -65,13 +65,13 @@ if [ -n "$published_api_ports" ]; then
   exit 1
 fi
 
-if ! RELEASE_ID="$RELEASE_ID" "$SCRIPT_DIR/smoke.sh"; then
+if ! RELEASE_ID="$RELEASE_ID" sh "$SCRIPT_DIR/smoke.sh"; then
   printf '%s\n' "Deployment smoke failed." >&2
 
   if [ "$SCHEMA_BACKWARD_COMPATIBLE" = "true" ] && [ -L "$CURRENT_LINK" ]; then
     previous_release=$(basename "$(readlink -f "$CURRENT_LINK")")
     printf '%s\n' "Attempting application rollback to $previous_release." >&2
-    RUN_WRITE_SMOKE=false "$SCRIPT_DIR/rollback.sh" "$previous_release"
+    RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/rollback.sh" "$previous_release"
   else
     printf '%s\n' \
       "Automatic rollback is disabled because schema compatibility is not confirmed." >&2

@@ -36,7 +36,7 @@ compose() {
 compose pull api edge
 compose up --detach --remove-orphans api edge
 
-RELEASE_ID="$TARGET_RELEASE" RUN_WRITE_SMOKE=false "$SCRIPT_DIR/smoke.sh"
+RELEASE_ID="$TARGET_RELEASE" RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/smoke.sh"
 
 old_current=
 if [ -L "$CURRENT_LINK" ]; then

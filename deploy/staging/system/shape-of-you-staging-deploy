@@ -127,7 +127,7 @@ control_head=$(git -C "$CONTROL_ROOT" rev-parse FETCH_HEAD)
 git -C "$CONTROL_ROOT" checkout --detach --force "$CONTROL_SHA"
 
 CONTROL_STAGING="$CONTROL_ROOT/deploy/staging"
-test -x "$CONTROL_STAGING/scripts/deploy.sh" || fail 'Verified deployment script is missing.'
+test -f "$CONTROL_STAGING/scripts/deploy.sh" || fail 'Verified deployment script is missing.'
 test -f "$CONTROL_STAGING/compose.yaml" || fail 'Verified Compose file is missing.'
 
 umask 077
@@ -156,4 +156,4 @@ DEPLOY_ROOT="$DEPLOY_ROOT" \
 RUNTIME_ENV="$RUNTIME_ENV" \
 RUN_WRITE_SMOKE="$RUN_WRITE_SMOKE" \
 DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
-  "$CONTROL_STAGING/scripts/deploy.sh" "$RELEASE_ENV"
+  sh "$CONTROL_STAGING/scripts/deploy.sh" "$RELEASE_ENV"
