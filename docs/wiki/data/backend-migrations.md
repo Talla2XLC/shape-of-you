@@ -53,7 +53,7 @@ backfill и не меняет authority.
 
 ## Открытые вопросы
 
-- Проверка staging migration на отдельной `shape_of_you_api`.
+- Проверка staging migration на отдельной `shape_of_you_api` выполнена 2026-07-29: one-shot runner применил migration до startup API, после чего synthetic HTTP acceptance подтвердил write/read `WeightMeasurement`.
 - Согласованная с владельцем общего cluster retention policy.
 
 ## Связанные материалы

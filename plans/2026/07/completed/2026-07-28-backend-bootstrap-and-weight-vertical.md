@@ -1,8 +1,8 @@
 ---
 title: Backend bootstrap и вертикаль WeightMeasurement
-status: active
+status: completed
 created: 2026-07-28
-updated: 2026-07-28
+updated: 2026-07-29
 related_roadmap_items:
   - DEV-023
 related_board_items:
@@ -145,7 +145,8 @@ runtime-validated HTTP contract до миграции и integration tests.
   `/ready` при недоступной БД — `503`.
 - Production-like deploy artifact проверен отдельно: он запускается без
   devDependencies; Vitest в него не входит.
-- В текущей среде отсутствует Docker daemon. Поэтому integration tests,
-  migration на чистой PostgreSQL и `docker compose up --build` не могли быть
-  фактически выполнены и остаются blocker полного quality acceptance. План
-  сохраняет статус `active` до выполнения этих проверок в Docker-capable среде.
+- Локальный Docker daemon был недоступен во время первичной реализации, поэтому
+  runtime acceptance перенесли в staging. 29 июля 2026 года dedicated staging
+  deployment подтвердил migration runner, Compose runtime, health/readiness,
+  idempotent create/read и cursor pagination на synthetic immutable данных.
+  Независимый quality review принял evidence; план завершён.

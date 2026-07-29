@@ -66,6 +66,6 @@ Pino logger используется для JSON structured logging. `fastify.cl
 
 ## Связанные материалы
 
-- [План DEV-023](../../plans/2026/07/2026-07-28-backend-bootstrap-and-weight-vertical.md)
+- [План DEV-023](../../plans/2026/07/completed/2026-07-28-backend-bootstrap-and-weight-vertical.md)
 - [Репозиторий и runtime](../wiki/architecture/repository-and-runtime.md)
 - [Node.js, TypeScript и pnpm workspaces](20260728-use-nodejs-typescript-and-pnpm-workspaces.md)
