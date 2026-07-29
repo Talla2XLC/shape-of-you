@@ -32,7 +32,8 @@ GitHub Actions выполняет проверки, собирает immutable O
 На VM `shape-deploy` не состоит в группе `docker` и имеет passwordless `sudo`
 только для `/usr/local/sbin/shape-of-you-staging-deploy` без аргументов.
 Wrapper и вызываемые Compose/scripts расположены в root-owned
-`/opt/shape-of-you/staging/system`. Это отделяет identity CI от личной
+`/opt/shape-of-you/staging/control`, который wrapper fetch-ит только из
+проверяемого текущего `origin/main` по `CONTROL_SHA`. Это отделяет identity CI от личной
 учётной записи оператора и не делает Docker доступом CI общего назначения.
 
 ### Runtime boundary

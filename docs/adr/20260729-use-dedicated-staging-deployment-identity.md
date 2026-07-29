@@ -5,7 +5,7 @@ title: "Выделенная учётная запись и ограниченн
 status: accepted
 date: 2026-07-29
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260729-use-verified-main-for-staging-deployment-control"
 tags:
   - "deployment"
   - "security"

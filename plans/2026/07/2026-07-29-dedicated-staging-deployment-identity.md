@@ -48,15 +48,15 @@ approvals.
 ## Риски
 
 Root wrapper остаётся privileged, потому что deployment использует Docker. Его
-код и вызываемые assets должны оставаться root-owned. Обновление assets вручную
-создаёт небольшую операционную цену, но не создаёт новый deployable service и
-не меняет domain/data ownership boundaries.
+код и `sudoers` должны оставаться root-owned. Compose/scripts получаются через
+проверяемый `main` согласно superseding ADR, что не создаёт новый deployable
+service и не меняет domain/data ownership boundaries.
 
 ## Architecture Review
 
 1. **Избыточная сложность:** один wrapper и один `sudoers` rule проще и уже,
-   чем выдача Docker group или набор разрешённых Docker commands. Ручное
-   обновление static assets — осознанная цена за минимальные привилегии.
+   чем выдача Docker group или набор разрешённых Docker commands. Root wrapper
+   меняется редко, а control files обновляются через проверяемый `main`.
 2. **Преждевременные сервисные границы:** wrapper и nginx остаются deployment
    adapters, а не deployable services или bounded contexts.
 3. **Domain-Driven Design:** deployment identity не меняет domain model, API

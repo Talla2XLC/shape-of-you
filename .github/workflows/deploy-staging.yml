@@ -96,6 +96,7 @@ jobs:
             printf 'RUN_WRITE_SMOKE=%s\n' "$RUN_WRITE_SMOKE"
             printf 'GHCR_NAMESPACE=%s\n' "$GHCR_NAMESPACE"
             printf 'GHCR_ACTOR=%s\n' "$GITHUB_ACTOR"
+            printf 'CONTROL_SHA=%s\n' "$GITHUB_SHA"
             printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } | ssh -p "$VM_PORT" "$target" \

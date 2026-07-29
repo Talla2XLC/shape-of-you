@@ -51,9 +51,17 @@ compose --profile operations pull
 compose --profile operations run --rm migrate
 compose up --detach --remove-orphans api edge
 
-published_api_port=$(compose port api 3000 2>/dev/null || true)
-if [ -n "$published_api_port" ]; then
-  printf '%s\n' "API unexpectedly publishes host port $published_api_port." >&2
+api_container=$(compose ps --quiet api)
+if [ -z "$api_container" ]; then
+  printf '%s\n' 'API container was not found after startup.' >&2
+  exit 1
+fi
+
+published_api_ports=$(docker inspect \
+  --format '{{range $port, $bindings := .HostConfig.PortBindings}}{{if $bindings}}{{$port}} {{end}}{{end}}' \
+  "$api_container")
+if [ -n "$published_api_ports" ]; then
+  printf '%s\n' "API unexpectedly publishes host port(s): $published_api_ports" >&2
   exit 1
 fi
 

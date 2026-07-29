@@ -4,8 +4,10 @@ set -eu
 # This launcher is installed root-owned on the VM. Its stdin protocol is the
 # only privileged interface available to the GitHub deployment identity.
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
-SYSTEM_ROOT=/opt/shape-of-you/staging/system
 DEPLOY_ROOT=/opt/shape-of-you/staging
+CONTROL_ROOT=/opt/shape-of-you/staging/control
+CONTROL_REPOSITORY=https://github.com/Talla2XLC/shape-of-you.git
+CONTROL_BRANCH=main
 RUNTIME_ENV=/etc/shape-of-you/staging/api.env
 RELEASE_ENV=
 DOCKER_CONFIG_DIR=
@@ -36,6 +38,7 @@ SCHEMA_BACKWARD_COMPATIBLE=
 RUN_WRITE_SMOKE=
 GHCR_NAMESPACE=
 GHCR_ACTOR=
+CONTROL_SHA=
 DATABASE_URL=
 GHCR_TOKEN=
 seen_keys=' '
@@ -52,7 +55,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|EDGE_DIGEST|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|DATABASE_URL|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|EDGE_DIGEST|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -65,6 +68,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
         RUN_WRITE_SMOKE) RUN_WRITE_SMOKE=$input_value ;;
         GHCR_NAMESPACE) GHCR_NAMESPACE=$input_value ;;
         GHCR_ACTOR) GHCR_ACTOR=$input_value ;;
+        CONTROL_SHA) CONTROL_SHA=$input_value ;;
         DATABASE_URL) DATABASE_URL=$input_value ;;
         GHCR_TOKEN) GHCR_TOKEN=$input_value ;;
       esac
@@ -82,10 +86,12 @@ done
 [ -n "$RUN_WRITE_SMOKE" ] || fail 'RUN_WRITE_SMOKE is required.'
 [ -n "$GHCR_NAMESPACE" ] || fail 'GHCR_NAMESPACE is required.'
 [ -n "$GHCR_ACTOR" ] || fail 'GHCR_ACTOR is required.'
+[ -n "$CONTROL_SHA" ] || fail 'CONTROL_SHA is required.'
 [ -n "$DATABASE_URL" ] || fail 'DATABASE_URL is required.'
 [ -n "$GHCR_TOKEN" ] || fail 'GHCR_TOKEN is required.'
 
 printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid RELEASE_ID.'
+printf '%s\n' "$CONTROL_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid CONTROL_SHA.'
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid API_DIGEST.'
 printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid EDGE_DIGEST.'
 printf '%s\n' "$GHCR_NAMESPACE" | grep -Eq '^[a-z0-9][a-z0-9._-]*$' || fail 'Invalid GHCR_NAMESPACE.'
@@ -106,8 +112,23 @@ case "$DATABASE_URL" in
   *) fail 'DATABASE_URL must use the postgresql scheme.' ;;
 esac
 
-test -x "$SYSTEM_ROOT/scripts/deploy.sh" || fail 'Root-owned deployment scripts are missing.'
-test -f "$SYSTEM_ROOT/compose.yaml" || fail 'Root-owned Compose file is missing.'
+if [ -d "$CONTROL_ROOT/.git" ]; then
+  git -C "$CONTROL_ROOT" remote set-url origin "$CONTROL_REPOSITORY"
+else
+  test -d "$CONTROL_ROOT" || install -d -o root -g root -m 0755 "$CONTROL_ROOT"
+  test -z "$(find "$CONTROL_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" || \
+    fail 'Control checkout path is unexpectedly non-empty.'
+  git clone --no-checkout "$CONTROL_REPOSITORY" "$CONTROL_ROOT"
+fi
+
+git -C "$CONTROL_ROOT" fetch --depth=1 origin "$CONTROL_BRANCH"
+control_head=$(git -C "$CONTROL_ROOT" rev-parse FETCH_HEAD)
+[ "$CONTROL_SHA" = "$control_head" ] || fail 'CONTROL_SHA does not match current origin/main.'
+git -C "$CONTROL_ROOT" checkout --detach --force "$CONTROL_SHA"
+
+CONTROL_STAGING="$CONTROL_ROOT/deploy/staging"
+test -x "$CONTROL_STAGING/scripts/deploy.sh" || fail 'Verified deployment script is missing.'
+test -f "$CONTROL_STAGING/compose.yaml" || fail 'Verified Compose file is missing.'
 
 umask 077
 install -d -m 0700 /etc/shape-of-you/staging
@@ -130,9 +151,9 @@ DOCKER_CONFIG_DIR=$(mktemp -d)
 printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
   docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin >/dev/null
 
-COMPOSE_FILE="$SYSTEM_ROOT/compose.yaml" \
+COMPOSE_FILE="$CONTROL_STAGING/compose.yaml" \
 DEPLOY_ROOT="$DEPLOY_ROOT" \
 RUNTIME_ENV="$RUNTIME_ENV" \
 RUN_WRITE_SMOKE="$RUN_WRITE_SMOKE" \
 DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
-  "$SYSTEM_ROOT/scripts/deploy.sh" "$RELEASE_ENV"
+  "$CONTROL_STAGING/scripts/deploy.sh" "$RELEASE_ENV"

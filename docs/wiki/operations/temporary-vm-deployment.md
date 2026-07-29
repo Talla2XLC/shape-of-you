@@ -89,16 +89,16 @@ sudo -n /usr/local/sbin/shape-of-you-staging-deploy
 ```
 
 Wrapper принимает только allowlisted values, создаёт runtime env, выполняет
-GHCR login во временном `DOCKER_CONFIG` и запускает static script
-`/opt/shape-of-you/staging/system/scripts/deploy.sh`. GitHub Actions не
+GHCR login во временном `DOCKER_CONFIG`, проверяет `CONTROL_SHA` как текущий
+`origin/main` и запускает script из root-owned checkout
+`/opt/shape-of-you/staging/control/deploy/staging/scripts/deploy.sh`. GitHub Actions не
 передаёт на VM Compose file, scripts или произвольную shell-команду. Успешный
 release становится `current`, предыдущий — `previous`.
 
-Перед первым запуском оператор из проверенного checkout запускает
+Перед первым запуском и после изменения самого root wrapper оператор из проверенного checkout запускает
 `sudo sh deploy/staging/system/install-root-owned-assets.sh`. Скрипт не
-выполняется GitHub Actions и устанавливает wrapper, Compose file, scripts и
-`sudoers` как `root:root`; обновление этих assets является отдельной
-maintenance-операцией с review.
+выполняется GitHub Actions и устанавливает wrapper и `sudoers` как `root:root`.
+Обычное обновление Compose/scripts после этого не требует SSH-copy на VM.
 
 ### Остановка
 
