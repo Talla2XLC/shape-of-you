@@ -236,11 +236,17 @@ Architecture Review не выявил более простого вариант
 
 До отдельных approvals не выполнены:
 
-- read-only VM inventory и проверка route `host.docker.internal:5431`;
-- создание database/login role `shape_of_you_api`;
-- GitHub Environment, variables и secrets;
-- Git commit/push, publication images, migrations и deployment;
+- root-owned installation deployment wrapper/assets и отдельный SSH key для
+  `shape-deploy`;
+- фактические migrations и deployment;
 - фактические VM smoke, rollback и restore verification.
+
+Выполнены с отдельными approvals: read-only VM inventory, disposable
+container probe маршрута `host.docker.internal:5431`, создание
+`shape_of_you_api` database/login role, GitHub Environment variables/secrets и
+публикация immutable images. Личная учётная запись оператора исключается из
+delivery path отдельным планом
+`plans/2026/07/2026-07-29-dedicated-staging-deployment-identity.md`.
 
 ## Связанные материалы
 

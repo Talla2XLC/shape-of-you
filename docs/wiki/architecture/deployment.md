@@ -15,8 +15,9 @@ tags:
 
 Утверждена временная staging topology на общей VM: images собираются в GitHub
 Actions, а собственный nginx Shape of You публикует web и API через один
-внешний port. Repository artifacts для topology подготовлены, но GitHub
-configuration, database provisioning и deployment на VM ещё не выполнены.
+внешний port. Database и GitHub Environment подготовлены; первый deployment
+остаётся отдельным operator gate. GitHub Actions использует выделенную identity
+`shape-deploy`, а не личную учётную запись оператора.
 
 ## Содержание
 
@@ -24,8 +25,15 @@ configuration, database provisioning и deployment на VM ещё не выпо�
 
 GitHub Actions выполняет проверки, собирает immutable OCI images и публикует
 их в GHCR с tag по commit SHA. Manual workflow с Environment `staging`
-принимает конкретные image digests, а VM получает только deployment package и
-готовые images; application build context и toolchain ей не нужны.
+принимает конкретные image digests и передаёт allowlisted structured input
+единственному root-owned wrapper через stdin. VM получает готовые images, но
+не build context, toolchain, Compose file или writable deployment scripts.
+
+На VM `shape-deploy` не состоит в группе `docker` и имеет passwordless `sudo`
+только для `/usr/local/sbin/shape-of-you-staging-deploy` без аргументов.
+Wrapper и вызываемые Compose/scripts расположены в root-owned
+`/opt/shape-of-you/staging/system`. Это отделяет identity CI от личной
+учётной записи оператора и не делает Docker доступом CI общего назначения.
 
 ### Runtime boundary
 
@@ -90,10 +98,14 @@ authentication, HTTPS, secrets, backup retention, SLO и целевом cloud т
 
 ## Открытые вопросы
 
-- Фактическая доступность `host.docker.internal:5431` из API container на VM.
-- Проверенные resource limits и отсутствие конфликта host port `3001`.
 - Согласованная с владельцем общего cluster backup/restore procedure.
 - Domain, TLS termination, authentication и authorization до real-data gate.
+
+Read-only inventory VM и disposable container probe подтвердили, что
+`host.docker.internal:5431` доступен из Docker container, а host port `3001`
+свободен. VM имеет ограниченный запас памяти и уже использует swap, поэтому
+limits `384m` для API и `64m` для edge требуют наблюдения перед каждым
+расширением staging нагрузки.
 
 ## Связанные материалы
 

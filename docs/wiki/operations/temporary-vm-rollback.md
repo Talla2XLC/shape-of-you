@@ -30,13 +30,13 @@ release.
 После отдельного approval rollback запускается:
 
 ```sh
-/opt/shape-of-you/staging/packages/<commit-sha>/scripts/rollback.sh
+/opt/shape-of-you/staging/system/scripts/rollback.sh
 ```
 
 Либо для конкретного release:
 
 ```sh
-/opt/shape-of-you/staging/packages/<commit-sha>/scripts/rollback.sh \
+/opt/shape-of-you/staging/system/scripts/rollback.sh \
   <target-commit-sha>
 ```
 
