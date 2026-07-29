@@ -34,7 +34,7 @@ compose() {
 }
 
 compose pull api edge
-compose up --detach --remove-orphans api edge
+compose up --detach --wait --wait-timeout 90 --remove-orphans api edge
 
 RELEASE_ID="$TARGET_RELEASE" RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/smoke.sh"
 
