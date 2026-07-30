@@ -32,6 +32,14 @@ database и credentials каждого владельца.
 `shape_of_you_api` и отдельную login role. Это разделяет ownership и доступ,
 но не изолирует API от отказов и upgrades общего cluster.
 
+Revocable authentication sessions принадлежат тому же backend и хранятся в его
+PostgreSQL database. Raw credentials не сохраняются.
+
+Binary media принадлежат соответствующим domain records, но физически
+размещаются в private S3-compatible object storage. PostgreSQL хранит media
+identity, ownership, lifecycle и object metadata. Знание object key не даёт
+права доступа.
+
 ### Запрещённая связанность
 
 - Прямое чтение или запись базы данных другого сервиса.
@@ -57,6 +65,7 @@ database и credentials каждого владельца.
 - Конкретное соответствие контекстов и владельцев данных.
 - Transport и lifecycle read model.
 - Policies retention, deletion, encryption, backup и access control.
+- Согласованный restore relational metadata и object storage.
 
 ## Связанные материалы
 
@@ -65,3 +74,5 @@ database и credentials каждого владельца.
 - `../../adr/20260728-deployable-service-autonomy.md`
 - `../../adr/20260728-api-or-event-only-cross-service-communication.md`
 - `../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md`
+- `../../adr/20260729-store-revocable-auth-sessions-in-postgresql.md`
+- `../../adr/20260729-use-s3-compatible-object-storage-for-media.md`

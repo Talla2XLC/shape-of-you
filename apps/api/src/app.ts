@@ -1,22 +1,22 @@
-import fastifySwagger from "@fastify/swagger";
-import Fastify, {
-  type FastifyError,
-  type FastifyInstance
-} from "fastify";
+import "reflect-metadata";
+
+import { NestFactory } from "@nestjs/core";
+import {
+  FastifyAdapter,
+  type NestFastifyApplication
+} from "@nestjs/platform-fastify";
+import type { FastifyInstance } from "fastify";
 
 import type { AppConfig } from "@shape-of-you/config";
-import type { ErrorResponse } from "@shape-of-you/contracts";
 
+import { AppModule } from "./application/app.module.js";
 import {
   createDatabase,
   type DatabaseContext
 } from "./database/context.js";
-import { ApplicationError } from "./domain/errors.js";
-import {
-  registerHealthRoutes,
-  type ReadinessProbe
-} from "./routes/health.js";
-import { registerWeightMeasurementRoutes } from "./routes/weight-measurements.js";
+import { ApplicationExceptionFilter } from "./http/application-exception.filter.js";
+import { FastifyLoggerService } from "./http/fastify-logger.service.js";
+import type { ReadinessProbe } from "./system/system.controller.js";
 import {
   WeightMeasurementRepository,
   type WeightMeasurementStore
@@ -34,33 +34,36 @@ export interface BuildAppOptions {
   readonly store?: WeightMeasurementStore;
 }
 
-function errorResponse(
-  statusCode: number,
-  error: string,
-  message: string
-): ErrorResponse {
-  return { statusCode, error, message };
+/**
+ * Returns the underlying Fastify instance for adapter-specific operations.
+ *
+ * @param app - Bootstrapped Nest application using FastifyAdapter.
+ * @returns Fastify instance used for request injection and structured logging.
+ */
+export function getFastifyInstance(
+  app: NestFastifyApplication
+): FastifyInstance {
+  return app.getHttpAdapter().getInstance() as FastifyInstance;
 }
 
 /**
- * Builds and configures the Fastify API without starting a network listener.
+ * Builds and initializes the Nest API without starting a network listener.
  *
  * The application closes only database contexts that it creates itself.
  *
  * @param options - Validated configuration and optional injected dependencies.
- * @returns A configured Fastify instance ready to listen or inject requests.
+ * @returns An initialized Nest application ready to listen or inject requests.
  * @throws Error when no WeightMeasurement store can be constructed.
  */
 export async function buildApp(
   options: BuildAppOptions
-): Promise<FastifyInstance> {
-  const app = Fastify({
+): Promise<NestFastifyApplication> {
+  const adapter = new FastifyAdapter({
     logger:
       options.config.NODE_ENV === "test"
         ? false
         : { level: options.config.LOG_LEVEL }
   });
-
   const ownsDatabase = !options.database && !options.store;
   const database =
     options.database ??
@@ -82,64 +85,22 @@ export async function buildApp(
       : async () => {
           throw new Error("Database is not configured");
         });
-
-  await app.register(fastifySwagger, {
-    openapi: {
-      info: {
-        title: "Shape of You API",
-        description: "Initial modular backend API",
-        version: "0.1.0"
-      }
-    }
-  });
-
-  app.setErrorHandler(
-    (error: FastifyError, _request, reply) => {
-      if (error.validation) {
-        return reply
-          .code(400)
-          .send(
-            errorResponse(
-              400,
-              "VALIDATION_ERROR",
-              "Request validation failed"
-            )
-          );
-      }
-
-      if (error instanceof ApplicationError) {
-        return reply
-          .code(error.statusCode)
-          .send(errorResponse(error.statusCode, error.code, error.message));
-      }
-
-      app.log.error({ err: error }, "unhandled request error");
-      return reply
-        .code(500)
-        .send(
-          errorResponse(500, "INTERNAL_SERVER_ERROR", "Internal server error")
-        );
-    }
+  const logger =
+    options.config.NODE_ENV === "test"
+      ? false
+      : new FastifyLoggerService(adapter.getInstance().log);
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule.register({
+      store,
+      readinessProbe,
+      database,
+      ownsDatabase
+    }),
+    adapter,
+    { logger }
   );
 
-  await registerHealthRoutes(app, readinessProbe);
-  await registerWeightMeasurementRoutes(app, store);
-
-  app.get(
-    "/openapi.json",
-    {
-      schema: {
-        hide: true
-      }
-    },
-    async () => app.swagger()
-  );
-
-  if (ownsDatabase && database) {
-    app.addHook("onClose", async () => {
-      await database.pool.end();
-    });
-  }
-
+  app.useGlobalFilters(new ApplicationExceptionFilter());
+  await app.init();
   return app;
 }

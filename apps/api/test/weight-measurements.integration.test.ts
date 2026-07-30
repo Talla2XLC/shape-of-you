@@ -2,12 +2,12 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
-import type { FastifyInstance } from "fastify";
+import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
 
-import { buildApp } from "../src/app.js";
+import { buildApp, getFastifyInstance } from "../src/app.js";
 import {
   createDatabase,
   type DatabaseContext
@@ -16,7 +16,7 @@ import { runMigrations } from "../src/database/migrate.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
-let app: FastifyInstance;
+let app: NestFastifyApplication;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:17-alpine")
@@ -65,17 +65,18 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
       provenance: { channel: "integration-test" }
     };
 
-    const created = await app.inject({
+    const fastify = getFastifyInstance(app);
+    const created = await fastify.inject({
       method: "POST",
       url: "/v1/weight-measurements",
       payload
     });
-    const duplicate = await app.inject({
+    const duplicate = await fastify.inject({
       method: "POST",
       url: "/v1/weight-measurements",
       payload
     });
-    const read = await app.inject({
+    const read = await fastify.inject({
       method: "GET",
       url: `/v1/weight-measurements/${created.json().id as string}`
     });
@@ -94,12 +95,13 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
   });
 
   it("lists with a stable cursor order", async () => {
+    const fastify = getFastifyInstance(app);
     for (const [index, measuredAt] of [
       "2026-07-29T06:00:00.000Z",
       "2026-07-30T06:00:00.000Z",
       "2026-07-31T06:00:00.000Z"
     ].entries()) {
-      const response = await app.inject({
+      const response = await fastify.inject({
         method: "POST",
         url: "/v1/weight-measurements",
         payload: {
@@ -116,12 +118,12 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
       expect(response.statusCode).toBe(201);
     }
 
-    const firstPage = await app.inject({
+    const firstPage = await fastify.inject({
       method: "GET",
       url: "/v1/weight-measurements?limit=2"
     });
     const firstBody = firstPage.json();
-    const secondPage = await app.inject({
+    const secondPage = await fastify.inject({
       method: "GET",
       url: `/v1/weight-measurements?limit=2&cursor=${encodeURIComponent(
         firstBody.nextCursor as string

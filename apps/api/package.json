@@ -20,12 +20,18 @@
     "db:migrate": "tsx src/database/migrate.ts"
   },
   "dependencies": {
-    "@fastify/swagger": "^9.6.1",
+    "@nestjs/common": "^11.1.28",
+    "@nestjs/core": "^11.1.28",
+    "@nestjs/platform-fastify": "^11.1.28",
     "@shape-of-you/config": "workspace:*",
     "@shape-of-you/contracts": "workspace:*",
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
     "drizzle-orm": "^0.44.7",
     "fastify": "^5.6.1",
-    "pg": "^8.16.3"
+    "pg": "^8.16.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^11.7.2",

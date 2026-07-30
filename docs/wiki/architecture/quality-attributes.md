@@ -36,6 +36,10 @@ Baseline отдаёт приоритет безопасности, целост�
 
 Сбои наблюдаемы и допускают повторную обработку без тихой потери данных. При наличии deployable boundaries runtime artifacts минимальны и собираются независимо.
 
+Stateful components вводятся только с определёнными ownership, backup,
+retention, restore и observability. PostgreSQL и object storage требуют
+согласованного recovery для media metadata; Redis не становится authority.
+
 ### Масштабируемость
 
 Масштабирование опирается на ясное владение, stateless interfaces там, где они уместны, возможности PostgreSQL и измеренные bottlenecks. Распределённые системы не вводятся без подтверждённой необходимости.
@@ -57,3 +61,4 @@ Baseline отдаёт приоритет безопасности, целост�
 - `drivers.md`
 - `../domain/overview.md`
 - `migration-strategy.md`
+- `stateful-infrastructure.md`

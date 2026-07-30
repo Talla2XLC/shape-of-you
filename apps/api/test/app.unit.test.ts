@@ -1,13 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
-import type {
-  CreateWeightMeasurement,
-  WeightMeasurement,
-  WeightMeasurementList
+import {
+  CreateWeightMeasurementSchema,
+  type CreateWeightMeasurement,
+  type WeightMeasurement,
+  type WeightMeasurementList
 } from "@shape-of-you/contracts";
 
-import { buildApp } from "../src/app.js";
+import { buildApp, getFastifyInstance } from "../src/app.js";
 import {
   toNewWeightMeasurement
 } from "../src/domain/weight-measurement.js";
@@ -86,8 +87,12 @@ describe("API bootstrap", () => {
       readinessProbe: async () => undefined
     });
 
-    const health = await app.inject({ method: "GET", url: "/health" });
-    const openapi = await app.inject({ method: "GET", url: "/openapi.json" });
+    const fastify = getFastifyInstance(app);
+    const health = await fastify.inject({ method: "GET", url: "/health" });
+    const openapi = await fastify.inject({
+      method: "GET",
+      url: "/openapi.json"
+    });
 
     expect(health.statusCode).toBe(200);
     expect(health.json()).toEqual({ status: "ok" });
@@ -95,6 +100,10 @@ describe("API bootstrap", () => {
     expect(openapi.json().paths).toHaveProperty(
       "/v1/weight-measurements"
     );
+    expect(
+      openapi.json().paths["/v1/weight-measurements"].post.requestBody
+        .content["application/json"].schema
+    ).toEqual(CreateWeightMeasurementSchema);
     expect(
       openapi.json().paths["/v1/weight-measurements"].post.requestBody
     ).toBeDefined();
@@ -111,7 +120,10 @@ describe("API bootstrap", () => {
       }
     });
 
-    const response = await app.inject({ method: "GET", url: "/ready" });
+    const response = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/ready"
+    });
 
     expect(response.statusCode).toBe(503);
     expect(response.json()).toEqual({
@@ -129,7 +141,7 @@ describe("API bootstrap", () => {
       readinessProbe: async () => undefined
     });
 
-    const response = await app.inject({
+    const response = await getFastifyInstance(app).inject({
       method: "POST",
       url: "/v1/weight-measurements",
       payload: { ...baselineInput, weightKg: 0 }
@@ -148,7 +160,7 @@ describe("API bootstrap", () => {
       readinessProbe: async () => undefined
     });
 
-    const response = await app.inject({
+    const response = await getFastifyInstance(app).inject({
       method: "POST",
       url: "/v1/weight-measurements",
       payload: { ...baselineInput, timezone: "Mars/Olympus_Mons" }
@@ -156,6 +168,32 @@ describe("API bootstrap", () => {
 
     expect(response.statusCode).toBe(400);
     expect(response.json().message).toContain("IANA timezone");
+
+    await app.close();
+  });
+
+  it("rejects handler output that violates the shared response schema", async () => {
+    const store = new FakeStore();
+    store.list = async () =>
+      ({ items: [{ invalid: true }], nextCursor: null }) as unknown as
+        WeightMeasurementList;
+    const app = await buildApp({
+      config,
+      store,
+      readinessProbe: async () => undefined
+    });
+
+    const response = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/v1/weight-measurements"
+    });
+
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({
+      statusCode: 500,
+      error: "INTERNAL_SERVER_ERROR",
+      message: "Internal server error"
+    });
 
     await app.close();
   });

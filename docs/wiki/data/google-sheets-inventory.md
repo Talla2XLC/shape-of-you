@@ -13,7 +13,11 @@ tags:
 
 ## Кратко
 
-Инвентаризация таблицы `Fitness Tracker` на основе наблюдаемых данных для DEV-027. Таблица остаётся текущим operational authority до проверенного dual-run и cutover. Страница описывает наблюдаемый источник и не предписывает схему базы данных.
+Инвентаризация таблицы `Fitness Tracker` на основе наблюдаемых данных для
+DEV-023. Таблица остаётся текущим operational authority до проверенного
+dual-run и cutover. Страница описывает структуру источника; значимое поведение
+детализировано в отдельном behavior catalog. Обе страницы не предписывают
+схему базы данных.
 
 ## Содержание
 
@@ -48,6 +52,7 @@ Extraction baseline остаётся draft. Workbook рассматривает�
 ## Связанные материалы
 
 - [Source of truth и authority](source-of-truth-and-authority.md)
+- [Каталог поведения Google Sheets](google-sheets-behavior-catalog.md)
 - [Provenance и identifiers](provenance-and-identifiers.md)
 - [Целостность и lifecycle](integrity-and-lifecycle.md)
 - [Карта извлечения домена](../domain/domain-extraction-map.md)

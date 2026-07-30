@@ -2,10 +2,10 @@
 id: "decisions-20260728-use-fastify-for-initial-http-api"
 kind: adr
 title: "Fastify для начального HTTP API"
-status: accepted
+status: superseded
 date: 2026-07-28
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260729-use-nestjs-with-fastify-and-nuxt"
 tags:
   - "api"
   - "runtime"
@@ -34,6 +34,9 @@ Pino logger используется для JSON structured logging. `fastify.cl
 
 Решение относится к одному начальному modular backend и не создаёт
 обязательство использовать Fastify во всех будущих deployables.
+
+Решение выполнило задачу начального среза и затем было superseded выбором
+NestJS как application framework с сохранением Fastify через FastifyAdapter.
 
 ## Рассмотренные альтернативы
 
@@ -69,3 +72,4 @@ Pino logger используется для JSON structured logging. `fastify.cl
 - [План DEV-023](../../plans/2026/07/completed/2026-07-28-backend-bootstrap-and-weight-vertical.md)
 - [Репозиторий и runtime](../wiki/architecture/repository-and-runtime.md)
 - [Node.js, TypeScript и pnpm workspaces](20260728-use-nodejs-typescript-and-pnpm-workspaces.md)
+- [NestJS с FastifyAdapter и Nuxt](20260729-use-nestjs-with-fastify-and-nuxt.md)

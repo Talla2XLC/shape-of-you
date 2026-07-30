@@ -34,7 +34,13 @@ Deployable services не должны напрямую зависеть друг
 
 ### Начальная позиция по deployment
 
-Modular monorepo не требует microservices. DEV-023 реализован как один Fastify backend с одной PostgreSQL database. Новая deployable boundary требует конкретного driver — масштабирования, владения, изоляции или независимого release — и отдельного ADR.
+Modular monorepo не требует microservices. Текущий срез DEV-023 реализован как
+один NestJS backend с `FastifyAdapter`, одной PostgreSQL database и первой
+вертикалью `WeightMeasurement`. Миграция application framework не изменила
+deployable topology; Nest modules остаются логическими boundaries. Новая
+deployable boundary или Kafka требует
+конкретного driver — масштабирования, владения, изоляции, независимого release,
+stream replay или нескольких независимых consumers — и отдельного review.
 
 Для временного staging утверждён deployment на общей VM: OCI images собираются
 в GitHub Actions, публикуются в GHCR и запускаются отдельным Compose project.
@@ -66,3 +72,5 @@ Modular monorepo не требует microservices. DEV-023 реализован
 - [ADR об автономности deployable service](../../adr/20260728-deployable-service-autonomy.md)
 - [ADR о canonical Markdown Wiki](../../adr/20260728-use-canonical-markdown-wiki-in-git.md)
 - [ADR о временном deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
+- [ADR о NestJS, FastifyAdapter и Nuxt](../../adr/20260729-use-nestjs-with-fastify-and-nuxt.md)
+- [ADR о PostgreSQL outbox до Kafka](../../adr/20260729-use-postgresql-outbox-before-kafka.md)

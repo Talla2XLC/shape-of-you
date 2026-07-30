@@ -1,10 +1,11 @@
 import { loadConfig } from "@shape-of-you/config";
 
-import { buildApp } from "./app.js";
+import { buildApp, getFastifyInstance } from "./app.js";
 
 async function main(): Promise<void> {
   const config = loadConfig();
   const app = await buildApp({ config });
+  const logger = getFastifyInstance(app).log;
   let shuttingDown = false;
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
@@ -12,7 +13,7 @@ async function main(): Promise<void> {
       return;
     }
     shuttingDown = true;
-    app.log.info({ signal }, "graceful shutdown started");
+    logger.info({ signal }, "graceful shutdown started");
 
     const timeout = new Promise<never>((_resolve, reject) => {
       setTimeout(
@@ -23,9 +24,9 @@ async function main(): Promise<void> {
 
     try {
       await Promise.race([app.close(), timeout]);
-      app.log.info("graceful shutdown completed");
+      logger.info("graceful shutdown completed");
     } catch (error) {
-      app.log.error({ err: error }, "graceful shutdown failed");
+      logger.error({ err: error }, "graceful shutdown failed");
       process.exitCode = 1;
     }
   };
@@ -37,10 +38,7 @@ async function main(): Promise<void> {
     void shutdown("SIGTERM");
   });
 
-  await app.listen({
-    host: config.HOST,
-    port: config.PORT
-  });
+  await app.listen(config.PORT, config.HOST);
 }
 
 main().catch((error: unknown) => {

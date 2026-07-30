@@ -10,7 +10,11 @@ tags: []
 
 ## Кратко
 
-Shape of You — долгосрочная production-платформа, развиваемая по принципу architecture-first и организованная как modular monorepo. Начальный runtime представлен одним deployable Fastify API с PostgreSQL и первой вертикалью `WeightMeasurement`.
+Shape of You — долгосрочная production-платформа, развиваемая по принципу
+architecture-first и организованная как modular monorepo. Текущий runtime
+представлен одним deployable NestJS API с `FastifyAdapter`, PostgreSQL и первой
+вертикалью `WeightMeasurement`. Будущий web-клиент использует Nuxt и тот же
+backend contract.
 
 ## Содержание
 
@@ -25,18 +29,28 @@ Shape of You — долгосрочная production-платформа, раз�
 - PostgreSQL с Drizzle ORM и Drizzle Kit.
 - Docker Compose для локальной разработки.
 - Единый backend как authority бизнес-правил для web- и mobile-клиентов.
+- NestJS с FastifyAdapter как текущий backend runtime.
+- Nuxt как framework будущего web-клиента без дублирования backend logic.
+- PostgreSQL transactional outbox до появления измеримых оснований для Kafka.
+- PostgreSQL для revocable authentication sessions без обязательного Redis.
+- Private S3-compatible object storage для будущих пользовательских media.
 - Строгие границы deployable service и владения данными, когда появление deployables обосновано.
 - Запрет межсервисного SQL; взаимодействие через API, события или опубликованные read model.
 
 ### Текущая позиция
 
-Bounded contexts — логические границы, а не deployable services. Текущая реализация — один modular backend; внутри него первая предметная вертикаль отделяет transport schemas, domain validation и PostgreSQL repository без generic CRUD abstraction. Новая deployable boundary по-прежнему требует отдельного driver и ADR.
+Bounded contexts — логические границы, а не deployable services. Текущая
+реализация — один modular backend; Nest modules сохраняют единую deployable
+topology. Внутри backend transport schemas, domain validation и PostgreSQL
+repositories разделены без generic CRUD abstraction. Новая deployable boundary
+или Kafka требуют отдельного подтверждённого driver и ADR.
 
 ## Основания
 
 - Baseline, предоставленный оператором 2026-07-28.
 - Принятые ADR.
-- Проверка репозитория подтверждает отсутствие runtime реализации.
+- Проверка фактического NestJS runtime, PostgreSQL integration tests и
+  production Docker image.
 
 ## Решения
 
@@ -55,5 +69,6 @@ Bounded contexts — логические границы, а не deployable ser
 - `quality-attributes.md`
 - `data-ownership.md`
 - `repository-and-runtime.md`
+- `stateful-infrastructure.md`
 - `migration-strategy.md`
 - `../domain/bounded-contexts.md`

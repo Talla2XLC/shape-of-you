@@ -58,7 +58,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-docs.ps1
 
 - `package.json`, `pnpm-workspace.yaml` и `.env.example`.
 - `docker-compose.yml` и `apps/api/Dockerfile`.
-- Проверенные локально build, typecheck, lint и unit tests.
+- Проверенные локально build, typecheck, lint, unit и PostgreSQL integration
+  tests, а также production Docker image.
 
 ## Решения
 
@@ -66,8 +67,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-docs.ps1
 
 ## Открытые вопросы
 
-- Compose smoke и integration suite должны быть повторно выполнены в среде с
-  Docker; текущая Codex-среда не предоставляет container runtime.
+- Synthetic staging smoke для новой версии выполняется только после отдельного
+  разрешения на deployment.
 
 ## Связанные материалы
 

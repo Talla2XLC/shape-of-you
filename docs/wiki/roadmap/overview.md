@@ -18,8 +18,8 @@ tags:
 
 ### Последовательность
 
-1. **DEV-027 — Workspace and baseline**: baseline репозитория, canonical Markdown Wiki и ADR, планы и документация Product/Domain/Architecture.
-2. **DEV-023 — Backend API and domain extraction**: создать стабильный backend-контракт и извлечь доменную логику из Google Sheets без преждевременного переноса authority данных.
+1. **DEV-027 — Workspace and baseline — завершён**: baseline репозитория, canonical Markdown Wiki и ADR, планы и документация Product/Domain/Architecture.
+2. **DEV-023 — Backend API and domain extraction — выполняется**: создать стабильный backend-контракт и извлечь доменную логику из Google Sheets без преждевременного переноса authority данных. Завершены backend bootstrap и первая вертикаль `WeightMeasurement`; остальные предметные вертикали и общий lifecycle ещё не реализованы.
 3. **DEV-024 — PostgreSQL migration and dual-run**: inventory, mapping, backfill, reconciliation, контролируемое сосуществование, критерии cutover и rollback.
 4. **DEV-025 — Web MVP**: выпустить первый web-клиент, использующий стабильный backend-контракт.
 5. **DEV-026 — Mobile client**: добавить мобильный доступ через тот же backend-контракт.
@@ -42,7 +42,8 @@ tags:
 
 ## Открытые вопросы
 
-- Scope, зависимости, acceptance criteria, оценки и приоритеты внутри каждого пункта roadmap.
+- Приоритеты предметных вертикалей внутри DEV-023 после восстановления полного behavior catalog Google Sheets.
+- Scope, зависимости, acceptance criteria и оценки DEV-024—DEV-026.
 - Связана ли нумерация DEV с внешним tracker.
 
 ## Связанные материалы
@@ -50,3 +51,4 @@ tags:
 - [Границы продукта](../product/scope.md)
 - [Стратегия миграции](../architecture/migration-strategy.md)
 - [Репозиторий и runtime](../architecture/repository-and-runtime.md)
+- [План завершения DEV-023](../../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)

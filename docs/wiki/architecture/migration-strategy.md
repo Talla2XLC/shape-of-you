@@ -46,7 +46,7 @@ DEV-023 извлекает backend-контракты и доменную лог
 
 ## Открытые вопросы
 
-- Полный inventory Google Sheets и доступ к нему.
+- Полный проверяемый каталог formulas, validation rules, scripts и workflow transitions Google Sheets; текущая инвентаризация сохраняет их только на уровне domain baseline.
 - Стратегия identifiers и качество исторических данных.
 - Dual-write или иной механизм dual-run.
 - Допуски reconciliation, метрики и длительность cutover, окно rollback.
