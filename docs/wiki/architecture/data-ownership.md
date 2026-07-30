@@ -35,6 +35,18 @@ database и credentials каждого владельца.
 Revocable authentication sessions принадлежат тому же backend и хранятся в его
 PostgreSQL database. Raw credentials не сохраняются.
 
+Authentication identity `User` и domain identity `Person` разделены. `Person`
+является владельцем fitness-данных, а `User` получает явный
+`PersonAccessGrant` с ролью `owner`, `editor`, `viewer` или `coach`. Отношение
+many-to-many позволяет одному аккаунту работать с несколькими людьми и
+нескольким аккаунтам получать контролируемый доступ к одному человеку.
+
+Domain facts, plans, observations, recommendations и media metadata являются
+person-scoped. Переданный клиентом `person_id` сам по себе не предоставляет
+доступ: application layer проверяет authenticated `User` и действующий grant.
+До реализации authentication разрешён только явно настроенный synthetic
+staging/test context без real data.
+
 Binary media принадлежат соответствующим domain records, но физически
 размещаются в private S3-compatible object storage. PostgreSQL хранит media
 identity, ownership, lifecycle и object metadata. Знание object key не даёт
@@ -59,6 +71,8 @@ identity, ownership, lifecycle и object metadata. Знание object key не 
 ## Решения
 
 - Логическое владение важнее физического разделения PostgreSQL.
+- `User` отвечает за authentication, `Person` — за domain ownership.
+- Multi-access выражается явными grants, а не копированием fitness-данных.
 
 ## Открытые вопросы
 
@@ -66,6 +80,7 @@ identity, ownership, lifecycle и object metadata. Знание object key не 
 - Transport и lifecycle read model.
 - Policies retention, deletion, encryption, backup и access control.
 - Согласованный restore relational metadata и object storage.
+- Точная permission matrix, invitation lifecycle и actor audit.
 
 ## Связанные материалы
 
@@ -76,3 +91,5 @@ identity, ownership, lifecycle и object metadata. Знание object key не 
 - `../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md`
 - `../../adr/20260729-store-revocable-auth-sessions-in-postgresql.md`
 - `../../adr/20260729-use-s3-compatible-object-storage-for-media.md`
+- `../../adr/20260730-separate-user-access-from-person-data-ownership.md`
+- `../../adr/20260730-use-typed-provenance-and-append-only-supersession.md`

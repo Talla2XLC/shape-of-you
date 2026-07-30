@@ -5,7 +5,8 @@ created: 2026-07-29
 updated: 2026-07-29
 related_roadmap_items:
   - DEV-023
-related_board_items: []
+related_board_items:
+  - TASK-0010
 ---
 
 # Завершение backend-контракта и доменной логики DEV-023
@@ -82,8 +83,10 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 
 До реализации соответствующих schema и публичных API необходимо согласовать:
 
-1. Subject identity, ownership данных и границу будущей authentication.
-2. Общую модель provenance, source reference, correction и supersession.
+1. `User`/`Person` identity, ownership данных и границу будущей authentication
+   — утверждено ADR от 2026-07-30.
+2. Общую модель provenance, source reference, correction и supersession —
+   утверждено ADR от 2026-07-30.
 3. Семантику локального дня, `DayClosure`/`JournalDay` и correction closed day.
 4. Identity упражнений и versioning тренировочной программы.
 5. Identity catalog питания и обязательность nutrition snapshot.
@@ -148,7 +151,7 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 
 | Модуль | Authority tables | Derived или decision models |
 | --- | --- | --- |
-| Shared identity and provenance | `subjects`, revocable auth sessions, source references, corrections, media metadata | append-only audit timeline |
+| Shared identity and provenance | `users`, `persons`, person access grants, revocable auth sessions, source references, media metadata | append-only audit timeline |
 | Physical State and Goals | weight/body measurements, goal versions | trends и current goal projection |
 | Nutrition | brands, ingredients, foods, compositions, meals, meal items, nutrition snapshots | daily nutrition totals |
 | Training and Performance | exercises, program versions, prescriptions, workout sessions, performed sets | personal records и progression candidates |
@@ -201,13 +204,15 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 - Разделить business rule, projection, integration workflow и governance.
 - Пометить неизвестное как blocker или явно утверждённое deferred behavior.
 
-### 2. Общие доменные контракты
+### 2. Общие доменные контракты — решения утверждены, implementation не начат
 
-- Спроектировать subject identity без привязки к будущему UI.
-- Спроектировать provenance/source reference и общий idempotency contract.
-- Спроектировать correction/supersession и append-only audit chronology.
+- Реализовать разделение authentication `User` и domain `Person`.
+- Реализовать person-scoped provenance/source reference и idempotency contract.
+- Реализовать correction/supersession и append-only audit chronology на
+  `WeightMeasurement`.
 - Спроектировать versioned policy и evidence reference.
-- Утвердить ADR до schema/API implementation.
+- Выполнить отдельный план
+  `completed/2026-07-30-person-identity-provenance-and-corrections.md`.
 
 ### 3. Physical State and Goals
 

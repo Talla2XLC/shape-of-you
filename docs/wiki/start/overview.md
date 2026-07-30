@@ -25,7 +25,13 @@ Shape of You — персональная AI-платформа для обос�
 
 ### Текущий этап
 
-DEV-027 завершил workspace, продуктовый и доменный baseline, архитектурную документацию, набор ADR и версионируемые планы. В DEV-023 реализованы один NestJS API с `FastifyAdapter`, PostgreSQL persistence и вертикаль `WeightMeasurement`; питание, тренировки, восстановление, coaching, intake и общий lifecycle ещё не реализованы. Google Sheets остаётся authoritative source рабочих fitness-данных до проверенного dual-run с PostgreSQL и утверждённого cutover.
+DEV-027 завершил workspace, продуктовый и доменный baseline, архитектурную
+документацию, набор ADR и версионируемые планы. В DEV-023 реализованы один
+NestJS API с `FastifyAdapter`, PostgreSQL persistence и person-scoped вертикаль
+`WeightMeasurement` с typed provenance и append-only corrections; питание,
+тренировки, восстановление, coaching, intake и общий lifecycle ещё не
+реализованы. Google Sheets остаётся authoritative source рабочих fitness-данных
+до проверенного dual-run с PostgreSQL и утверждённого cutover.
 
 ## Основания
 

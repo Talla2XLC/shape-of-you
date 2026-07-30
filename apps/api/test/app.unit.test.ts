@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
 import {
+  type CorrectWeightMeasurement,
   CreateWeightMeasurementSchema,
   type CreateWeightMeasurement,
   type WeightMeasurement,
+  type WeightMeasurementHistory,
   type WeightMeasurementList
 } from "@shape-of-you/contracts";
 
@@ -23,49 +25,96 @@ const config: AppConfig = {
   PORT: 3_000,
   DATABASE_URL: "postgresql://unused:unused@127.0.0.1:1/unused",
   LOG_LEVEL: "silent",
+  PERSON_CONTEXT_MODE: "synthetic",
+  SYNTHETIC_PERSON_ID: "00000000-0000-4000-8000-000000000001",
   SHUTDOWN_TIMEOUT_MS: 1_000
 };
+
+const personId = "00000000-0000-4000-8000-000000000001";
+const sourceReferenceId = "01983f6c-e470-7000-8000-000000000002";
 
 const baselineInput: CreateWeightMeasurement = {
   measuredAt: "2026-07-28T05:30:00.000Z",
   timezone: "Europe/Moscow",
   weightKg: 82.125,
-  source: "manual",
   dedupeKey: "manual:2026-07-28T05:30:00Z",
-  provenance: { channel: "api" }
+  sourceReference: {
+    channel: "manual",
+    externalSystem: null,
+    externalRecordId: null,
+    occurredAt: "2026-07-28T05:30:00.000Z"
+  }
 };
 
 const baselineMeasurement: WeightMeasurement = {
   id: "01983f6c-e470-7000-8000-000000000001",
+  personId,
   measuredAt: baselineInput.measuredAt,
   localDate: "2026-07-28",
   timezone: baselineInput.timezone,
   weightKg: baselineInput.weightKg,
-  source: baselineInput.source,
-  sourceRecordId: null,
+  sourceReference: {
+    id: sourceReferenceId,
+    ...baselineInput.sourceReference,
+    ingestedAt: "2026-07-28T05:30:01.000Z"
+  },
   dedupeKey: baselineInput.dedupeKey,
   confidence: null,
-  provenance: baselineInput.provenance,
+  supersedesId: null,
+  correctionReason: null,
   createdAt: "2026-07-28T05:30:01.000Z"
 };
 
 class FakeStore implements WeightMeasurementStore {
   public async create(
+    activePersonId: string,
     input: CreateWeightMeasurement
   ): Promise<CreateWeightMeasurementResult> {
-    toNewWeightMeasurement(input);
+    toNewWeightMeasurement(
+      activePersonId,
+      sourceReferenceId,
+      input
+    );
     return {
       created: true,
       measurement: {
         ...baselineMeasurement,
+        personId: activePersonId,
         measuredAt: input.measuredAt,
         timezone: input.timezone,
         weightKg: input.weightKg,
-        source: input.source,
-        sourceRecordId: input.sourceRecordId ?? null,
+        sourceReference: {
+          ...baselineMeasurement.sourceReference,
+          ...input.sourceReference
+        },
+        dedupeKey: input.dedupeKey,
+        confidence: input.confidence ?? null
+      }
+    };
+  }
+
+  public async correct(
+    activePersonId: string,
+    id: string,
+    input: CorrectWeightMeasurement
+  ): Promise<CreateWeightMeasurementResult> {
+    return {
+      created: true,
+      measurement: {
+        ...baselineMeasurement,
+        id: "01983f6c-e470-7000-8000-000000000003",
+        personId: activePersonId,
+        measuredAt: input.measuredAt,
+        timezone: input.timezone,
+        weightKg: input.weightKg,
+        sourceReference: {
+          ...baselineMeasurement.sourceReference,
+          ...input.sourceReference
+        },
         dedupeKey: input.dedupeKey,
         confidence: input.confidence ?? null,
-        provenance: input.provenance
+        supersedesId: id,
+        correctionReason: input.reason
       }
     };
   }
@@ -76,6 +125,10 @@ class FakeStore implements WeightMeasurementStore {
 
   public async list(): Promise<WeightMeasurementList> {
     return { items: [baselineMeasurement], nextCursor: null };
+  }
+
+  public async history(): Promise<WeightMeasurementHistory> {
+    return { items: [baselineMeasurement] };
   }
 }
 

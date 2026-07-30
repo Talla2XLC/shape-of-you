@@ -15,12 +15,25 @@ const environmentSchema = z.object({
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
+  PERSON_CONTEXT_MODE: z.enum(["synthetic", "authenticated"]),
+  SYNTHETIC_PERSON_ID: z.string().uuid().optional(),
   SHUTDOWN_TIMEOUT_MS: z.coerce
     .number()
     .int()
     .min(100)
     .max(60_000)
     .default(10_000)
+}).superRefine((environment, context) => {
+  if (
+    environment.PERSON_CONTEXT_MODE === "synthetic" &&
+    !environment.SYNTHETIC_PERSON_ID
+  ) {
+    context.addIssue({
+      code: "custom",
+      path: ["SYNTHETIC_PERSON_ID"],
+      message: "SYNTHETIC_PERSON_ID is required in synthetic mode"
+    });
+  }
 });
 
 /** Validated runtime configuration shared by deployable applications. */

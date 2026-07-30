@@ -46,6 +46,8 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       LOG_LEVEL: info
+      PERSON_CONTEXT_MODE: synthetic
+      SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
       SHUTDOWN_TIMEOUT_MS: 10000
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -92,6 +94,8 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       LOG_LEVEL: info
+      PERSON_CONTEXT_MODE: synthetic
+      SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
       SHUTDOWN_TIMEOUT_MS: 10000
     extra_hosts:
       - "host.docker.internal:host-gateway"

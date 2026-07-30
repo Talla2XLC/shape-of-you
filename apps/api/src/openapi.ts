@@ -1,9 +1,11 @@
 import {
+  CorrectWeightMeasurementSchema,
   CreateWeightMeasurementSchema,
   ErrorResponseSchema,
   HealthResponseSchema,
   ListWeightMeasurementsQuerySchema,
   ReadinessResponseSchema,
+  WeightMeasurementHistorySchema,
   WeightMeasurementIdParamsSchema,
   WeightMeasurementListSchema,
   WeightMeasurementSchema
@@ -153,6 +155,84 @@ export function createOpenApiDocument(): object {
               description: "Invalid identifier",
               content: {
                 "application/json": { schema: ErrorResponseSchema }
+              }
+            },
+            "404": {
+              description: "Measurement not found",
+              content: {
+                "application/json": { schema: ErrorResponseSchema }
+              }
+            }
+          }
+        }
+      },
+      "/v1/weight-measurements/{id}/corrections": {
+        post: {
+          tags: ["weight-measurements"],
+          summary: "Append an immutable correction",
+          parameters: [
+            schemaParameter(
+              "id",
+              "path",
+              true,
+              WeightMeasurementIdParamsSchema.properties.id
+            )
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: CorrectWeightMeasurementSchema
+              }
+            }
+          },
+          responses: {
+            "200": {
+              description: "Existing idempotent correction",
+              content: {
+                "application/json": { schema: WeightMeasurementSchema }
+              }
+            },
+            "201": {
+              description: "Correction appended",
+              content: {
+                "application/json": { schema: WeightMeasurementSchema }
+              }
+            },
+            "404": {
+              description: "Measurement not found",
+              content: {
+                "application/json": { schema: ErrorResponseSchema }
+              }
+            },
+            "409": {
+              description: "Measurement was already superseded",
+              content: {
+                "application/json": { schema: ErrorResponseSchema }
+              }
+            }
+          }
+        }
+      },
+      "/v1/weight-measurements/{id}/history": {
+        get: {
+          tags: ["weight-measurements"],
+          summary: "Read the complete correction chain",
+          parameters: [
+            schemaParameter(
+              "id",
+              "path",
+              true,
+              WeightMeasurementIdParamsSchema.properties.id
+            )
+          ],
+          responses: {
+            "200": {
+              description: "Original-to-current correction chain",
+              content: {
+                "application/json": {
+                  schema: WeightMeasurementHistorySchema
+                }
               }
             },
             "404": {

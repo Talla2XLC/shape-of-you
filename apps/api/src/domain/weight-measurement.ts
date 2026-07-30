@@ -1,10 +1,13 @@
 import type {
+  CorrectWeightMeasurement,
   CreateWeightMeasurement,
+  SourceReference,
   WeightMeasurement
 } from "@shape-of-you/contracts";
 
 import type {
   NewWeightMeasurementRow,
+  SourceReferenceRow,
   WeightMeasurementRow
 } from "../database/schema.js";
 import { DomainValidationError } from "./errors.js";
@@ -50,12 +53,21 @@ export function deriveLocalDate(
 /**
  * Converts validated API input into the row owned by the persistence layer.
  *
+ * @param personId - UUID of the Person that owns the fact.
+ * @param sourceReferenceId - UUID of the persisted provenance record.
  * @param input - Validated WeightMeasurement creation contract.
+ * @param correction - Optional supersession link and mandatory correction reason.
  * @returns Insertable row with derived local date and normalized numerics.
  * @throws DomainValidationError when the measurement instant is invalid.
  */
 export function toNewWeightMeasurement(
-  input: CreateWeightMeasurement
+  personId: string,
+  sourceReferenceId: string,
+  input: CreateWeightMeasurement | CorrectWeightMeasurement,
+  correction?: {
+    readonly supersedesId: string;
+    readonly reason: string;
+  }
 ): NewWeightMeasurementRow {
   const measuredAt = new Date(input.measuredAt);
 
@@ -64,16 +76,39 @@ export function toNewWeightMeasurement(
   }
 
   return {
+    personId,
     measuredAt,
     localDate: deriveLocalDate(measuredAt, input.timezone),
     timezone: input.timezone,
     weightKg: input.weightKg.toFixed(3),
-    source: input.source,
-    sourceRecordId: input.sourceRecordId ?? null,
+    source: input.sourceReference.channel,
+    sourceReferenceId,
     dedupeKey: input.dedupeKey,
     confidence:
       input.confidence == null ? null : input.confidence.toFixed(3),
-    provenance: input.provenance
+    supersedesId: correction?.supersedesId ?? null,
+    correctionReason: correction?.reason ?? null
+  };
+}
+
+/**
+ * Converts persisted provenance into its public typed representation.
+ *
+ * Private ingestion metadata and raw snapshots deliberately remain internal.
+ *
+ * @param row - SourceReference row owned by the same Person as the fact.
+ * @returns Public provenance contract.
+ */
+export function toSourceReference(
+  row: SourceReferenceRow
+): SourceReference {
+  return {
+    id: row.id,
+    channel: row.channel,
+    externalSystem: row.externalSystem,
+    externalRecordId: row.externalRecordId,
+    occurredAt: row.occurredAt?.toISOString() ?? null,
+    ingestedAt: row.ingestedAt.toISOString()
   };
 }
 
@@ -81,22 +116,25 @@ export function toNewWeightMeasurement(
  * Converts a persisted WeightMeasurement row into its public API contract.
  *
  * @param row - Row read from the API-owned PostgreSQL schema.
+ * @param sourceReference - Typed provenance owned by the same Person.
  * @returns Serialized immutable WeightMeasurement.
  */
 export function toWeightMeasurement(
-  row: WeightMeasurementRow
+  row: WeightMeasurementRow,
+  sourceReference: SourceReferenceRow
 ): WeightMeasurement {
   return {
     id: row.id,
+    personId: row.personId,
     measuredAt: row.measuredAt.toISOString(),
     localDate: row.localDate,
     timezone: row.timezone,
     weightKg: Number(row.weightKg),
-    source: row.source,
-    sourceRecordId: row.sourceRecordId,
+    sourceReference: toSourceReference(sourceReference),
     dedupeKey: row.dedupeKey,
     confidence: row.confidence === null ? null : Number(row.confidence),
-    provenance: row.provenance,
+    supersedesId: row.supersedesId,
+    correctionReason: row.correctionReason,
     createdAt: row.createdAt.toISOString()
   };
 }

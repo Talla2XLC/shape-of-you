@@ -18,11 +18,20 @@ tags:
 
 ### Термины
 
+- **User** — authentication identity аккаунта, который входит в систему и
+  выполняет действия.
+- **Person** — domain identity человека, которому принадлежат fitness-данные.
+- **Person access grant** — явное право `User` работать с выбранным `Person` в
+  роли `owner`, `editor`, `viewer` или `coach`.
 - **Authoritative source** — система, значение которой считается operational truth для определённого набора данных. Сейчас эту роль для рабочих fitness-данных выполняет Google Sheets.
 - **Atomic event** — одно нормализованное и независимо валидируемое observation или action, извлечённое из пользовательского ввода.
 - **Closed day** — день, защищённый от автоматического неоднозначного изменения; точные правила закрытия пока открыты.
-- **Provenance** — свидетельства происхождения факта, включая `source` и `source_id`, где применимо.
-- **Dedupe key** — стабильная identity, предотвращающая повторную обработку одного события.
+- **Provenance** — типизированные свидетельства происхождения факта, включая
+  source channel, source reference, timestamps и confidence.
+- **Dedupe key** — стабильная identity повторяемой операции внутри `Person` и
+  source channel.
+- **Supersession** — append-only замена ошибочного факта новым immutable fact с
+  сохранением исходной записи и причины correction.
 - **AI Timeline** — append-only chronology событий с источниками; corrections и reversals являются связанными событиями.
 - **Readiness** — сведения о текущем восстановлении и способности переносить нагрузку; высокая readiness сама по себе не разрешает progression.
 - **Load Risk** — оценка риска за несколько дней, способная ограничить progression.
@@ -41,6 +50,7 @@ tags:
 ## Решения
 
 - Глоссарий определяет язык, а не схемы данных.
+- `User` и `Person` не являются взаимозаменяемыми терминами.
 
 ## Открытые вопросы
 
@@ -52,3 +62,5 @@ tags:
 - `overview.md`
 - `bounded-contexts.md`
 - `../architecture/migration-strategy.md`
+- `../../adr/20260730-separate-user-access-from-person-data-ownership.md`
+- `../../adr/20260730-use-typed-provenance-and-append-only-supersession.md`

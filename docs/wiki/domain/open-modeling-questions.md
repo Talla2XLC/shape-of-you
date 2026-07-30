@@ -21,7 +21,6 @@ tags:
 
 - Окончательное имя, владение и invariants `DayClosure` или `JournalDay`.
 - Versioning и acceptance semantics для тренировочных prescriptions.
-- Identity и correction semantics для независимо принадлежащих фактов.
 - Границы privacy, consent, retention и deletion для wearable и health evidence.
 
 ### Недостаток свидетельств
@@ -40,7 +39,11 @@ tags:
 
 ## Решения
 
-Ни один открытый вопрос не разрешён предположением. Рекомендуемая следующая архитектурная задача — сфокусированный domain review authority, семантики DayRecord, versioning программы, identity и privacy до работы над ERD или API.
+Identity владельца и correction semantics разрешены ADR: fitness facts
+принадлежат `Person`, доступ предоставляется `User` через grant, correction
+создаёт новый immutable fact с `supersedes_id`. Следующий domain review должен
+сфокусироваться на Day lifecycle, versioning программы, privacy и policy
+boundaries.
 
 ## Открытые вопросы
 
@@ -52,3 +55,5 @@ tags:
 - [Карта извлечения домена](domain-extraction-map.md)
 - [Инвентаризация Google Sheets](../data/google-sheets-inventory.md)
 - [Каталог ADR](../../adr/)
+- [User, Person и права доступа](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
+- [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)

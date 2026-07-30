@@ -25,3 +25,11 @@ export class NotFoundError extends ApplicationError {
     this.name = "NotFoundError";
   }
 }
+
+/** Indicates that a command conflicts with the current immutable fact graph. */
+export class ConflictError extends ApplicationError {
+  public constructor(message: string) {
+    super(message, 409, "CONFLICT");
+    this.name = "ConflictError";
+  }
+}

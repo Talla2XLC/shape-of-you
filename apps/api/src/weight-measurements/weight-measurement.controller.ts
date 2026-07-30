@@ -12,14 +12,18 @@ import {
 import type { FastifyReply } from "fastify";
 
 import {
+  CorrectWeightMeasurementSchema,
   CreateWeightMeasurementSchema,
   ListWeightMeasurementsQuerySchema,
+  WeightMeasurementHistorySchema,
   WeightMeasurementIdParamsSchema,
   WeightMeasurementListSchema,
   WeightMeasurementSchema,
+  type CorrectWeightMeasurement,
   type CreateWeightMeasurement,
   type ListWeightMeasurementsQuery,
   type WeightMeasurement,
+  type WeightMeasurementHistory,
   type WeightMeasurementIdParams,
   type WeightMeasurementList
 } from "@shape-of-you/contracts";
@@ -51,6 +55,39 @@ export class WeightMeasurementController {
     const result = await this.service.create(input);
     void reply.code(result.created ? 201 : 200);
     return result.measurement;
+  }
+
+  /** Appends an immutable correction to a current fact. */
+  @Post(":id/corrections")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(WeightMeasurementSchema))
+  public async correct(
+    @Param(new JsonSchemaPipe<WeightMeasurementIdParams>(
+      WeightMeasurementIdParamsSchema
+    ))
+    params: WeightMeasurementIdParams,
+    @Body(new JsonSchemaPipe<CorrectWeightMeasurement>(
+      CorrectWeightMeasurementSchema
+    ))
+    input: CorrectWeightMeasurement,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<WeightMeasurement> {
+    const result = await this.service.correct(params.id, input);
+    void reply.code(result.created ? 201 : 200);
+    return result.measurement;
+  }
+
+  /** Returns the complete correction chain containing a fact. */
+  @Get(":id/history")
+  @UseInterceptors(
+    new JsonSchemaResponseInterceptor(WeightMeasurementHistorySchema)
+  )
+  public history(
+    @Param(new JsonSchemaPipe<WeightMeasurementIdParams>(
+      WeightMeasurementIdParamsSchema
+    ))
+    params: WeightMeasurementIdParams
+  ): Promise<WeightMeasurementHistory> {
+    return this.service.history(params.id);
   }
 
   /** Lists immutable facts in stable descending keyset order. */

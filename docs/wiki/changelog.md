@@ -14,6 +14,19 @@ tags: []
 
 ## Содержание
 
+### 2026-07-30 — Person identity, provenance and corrections
+
+- Разделены authentication `User`, владелец fitness-данных `Person` и
+  many-to-many `PersonAccessGrant`.
+- `WeightMeasurement` переведён на person-scoped dedupe и typed
+  `SourceReference`; произвольный публичный JSONB `provenance` удалён.
+- Реализованы append-only corrections, current-state list и полная history
+  chain без перезаписи исходных фактов.
+- Добавлена data-preserving migration; clean и legacy-upgrade траектории
+  проверены PostgreSQL integration tests.
+- Google Sheets остаётся authoritative source; рабочие данные не переносились,
+  VM migration и deployment не выполнялись.
+
 ### 2026-07-29 — Backend Bootstrap and Staging Delivery
 
 - Создан modular monorepo на Node.js, TypeScript и pnpm с одним deployable API.

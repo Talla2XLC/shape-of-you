@@ -1,8 +1,29 @@
 import type { FromSchema } from "json-schema-to-ts";
 
-export const WeightMeasurementSourceSchema = {
-  type: "string",
-  enum: ["manual", "google_sheets", "import"]
+import {
+  SourceReferenceInputSchema,
+  SourceReferenceSchema
+} from "./source-reference.js";
+
+const nullableUuidSchema = {
+  anyOf: [
+    { type: "string", format: "uuid" },
+    { type: "null" }
+  ]
+} as const;
+
+const nullableConfidenceSchema = {
+  anyOf: [
+    { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001 },
+    { type: "null" }
+  ]
+} as const;
+
+const weightValueSchema = {
+  type: "number",
+  minimum: 0.5,
+  maximum: 700,
+  multipleOf: 0.001
 } as const;
 
 export const WeightMeasurementSchema = {
@@ -11,47 +32,40 @@ export const WeightMeasurementSchema = {
   additionalProperties: false,
   required: [
     "id",
+    "personId",
     "measuredAt",
     "localDate",
     "timezone",
     "weightKg",
-    "source",
-    "sourceRecordId",
+    "sourceReference",
     "dedupeKey",
     "confidence",
-    "provenance",
+    "supersedesId",
+    "correctionReason",
     "createdAt"
   ],
   properties: {
     id: { type: "string", format: "uuid" },
+    personId: { type: "string", format: "uuid" },
     measuredAt: { type: "string", format: "date-time" },
     localDate: { type: "string", format: "date" },
     timezone: { type: "string", minLength: 1, maxLength: 64 },
-    weightKg: {
-      type: "number",
-      minimum: 0.5,
-      maximum: 700,
-      multipleOf: 0.001
-    },
-    source: WeightMeasurementSourceSchema,
-    sourceRecordId: {
+    weightKg: weightValueSchema,
+    sourceReference: SourceReferenceSchema,
+    dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
+    confidence: nullableConfidenceSchema,
+    supersedesId: nullableUuidSchema,
+    correctionReason: {
       anyOf: [
         { type: "string", minLength: 1, maxLength: 512 },
         { type: "null" }
       ]
     },
-    dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
-    confidence: {
-      anyOf: [
-        { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001 },
-        { type: "null" }
-      ]
-    },
-    provenance: { type: "object", additionalProperties: true },
     createdAt: { type: "string", format: "date-time" }
   }
 } as const;
 
+/** Immutable person-owned weight fact. */
 export type WeightMeasurement = FromSchema<typeof WeightMeasurementSchema>;
 
 export const CreateWeightMeasurementSchema = {
@@ -62,39 +76,50 @@ export const CreateWeightMeasurementSchema = {
     "measuredAt",
     "timezone",
     "weightKg",
-    "source",
-    "dedupeKey",
-    "provenance"
+    "sourceReference",
+    "dedupeKey"
   ],
   properties: {
     measuredAt: { type: "string", format: "date-time" },
     timezone: { type: "string", minLength: 1, maxLength: 64 },
-    weightKg: {
-      type: "number",
-      minimum: 0.5,
-      maximum: 700,
-      multipleOf: 0.001
-    },
-    source: WeightMeasurementSourceSchema,
-    sourceRecordId: {
-      anyOf: [
-        { type: "string", minLength: 1, maxLength: 512 },
-        { type: "null" }
-      ]
-    },
+    weightKg: weightValueSchema,
+    sourceReference: SourceReferenceInputSchema,
     dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
-    confidence: {
-      anyOf: [
-        { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001 },
-        { type: "null" }
-      ]
-    },
-    provenance: { type: "object", additionalProperties: true }
+    confidence: nullableConfidenceSchema
   }
 } as const;
 
+/** Command contract for idempotent weight fact creation. */
 export type CreateWeightMeasurement = FromSchema<
   typeof CreateWeightMeasurementSchema
+>;
+
+export const CorrectWeightMeasurementSchema = {
+  $id: "CorrectWeightMeasurement",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "measuredAt",
+    "timezone",
+    "weightKg",
+    "sourceReference",
+    "dedupeKey",
+    "reason"
+  ],
+  properties: {
+    measuredAt: { type: "string", format: "date-time" },
+    timezone: { type: "string", minLength: 1, maxLength: 64 },
+    weightKg: weightValueSchema,
+    sourceReference: SourceReferenceInputSchema,
+    dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
+    confidence: nullableConfidenceSchema,
+    reason: { type: "string", minLength: 1, maxLength: 512 }
+  }
+} as const;
+
+/** Full replacement snapshot used to correct an immutable weight fact. */
+export type CorrectWeightMeasurement = FromSchema<
+  typeof CorrectWeightMeasurementSchema
 >;
 
 export const WeightMeasurementIdParamsSchema = {
@@ -146,4 +171,23 @@ export const WeightMeasurementListSchema = {
 
 export type WeightMeasurementList = FromSchema<
   typeof WeightMeasurementListSchema
+>;
+
+export const WeightMeasurementHistorySchema = {
+  $id: "WeightMeasurementHistory",
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: {
+      type: "array",
+      minItems: 1,
+      items: WeightMeasurementSchema
+    }
+  }
+} as const;
+
+/** Ordered complete supersession chain for a weight fact. */
+export type WeightMeasurementHistory = FromSchema<
+  typeof WeightMeasurementHistorySchema
 >;

@@ -11,6 +11,10 @@ import type { AppConfig } from "@shape-of-you/config";
 
 import { AppModule } from "./application/app.module.js";
 import {
+  SyntheticPersonContext,
+  type PersonContext
+} from "./application/person-context.js";
+import {
   createDatabase,
   type DatabaseContext
 } from "./database/context.js";
@@ -32,6 +36,8 @@ export interface BuildAppOptions {
   readonly readinessProbe?: ReadinessProbe;
   /** Optional persistence implementation used for isolated application tests. */
   readonly store?: WeightMeasurementStore;
+  /** Optional Person resolution boundary, primarily for isolated tests. */
+  readonly personContext?: PersonContext;
 }
 
 /**
@@ -76,6 +82,19 @@ export async function buildApp(
     throw new Error("A WeightMeasurement store is required");
   }
 
+  const personContext =
+    options.personContext ??
+    (options.config.PERSON_CONTEXT_MODE === "synthetic" &&
+    options.config.SYNTHETIC_PERSON_ID
+      ? new SyntheticPersonContext(options.config.SYNTHETIC_PERSON_ID)
+      : undefined);
+
+  if (!personContext) {
+    throw new Error(
+      "Authenticated Person context is not implemented; use explicit synthetic mode"
+    );
+  }
+
   const readinessProbe =
     options.readinessProbe ??
     (database
@@ -92,6 +111,7 @@ export async function buildApp(
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule.register({
       store,
+      personContext,
       readinessProbe,
       database,
       ownsDatabase

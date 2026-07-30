@@ -64,7 +64,7 @@ privacy checks.
 - Media access требует authorization независимо от знания object key.
 - Backup/restore PostgreSQL и object storage согласуются через documented
   retention и recovery process.
-- Deletion subject data должна охватывать metadata, object versions и derived
+- Deletion данных `Person` должна охватывать metadata, object versions и derived
   thumbnails.
 - CDN может быть добавлен позднее без изменения domain ownership.
 

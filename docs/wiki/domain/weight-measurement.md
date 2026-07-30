@@ -13,14 +13,15 @@ tags:
 
 ## Кратко
 
-`WeightMeasurement` — неизменяемый факт измерения веса с абсолютным временем,
-локальной датой пользователя, provenance и стабильной deduplication identity.
+`WeightMeasurement` — принадлежащий `Person` неизменяемый факт измерения веса с
+абсолютным временем, локальной датой, typed provenance и стабильной
+deduplication identity.
 
 ## Содержание
 
-Поля факта: UUID `id`, `measuredAt`, derived `localDate`, IANA `timezone`,
-`weightKg`, `source`, nullable `sourceRecordId`, `dedupeKey`, nullable
-`confidence`, JSONB `provenance` и `createdAt`.
+Поля факта: UUID `id`, `personId`, `measuredAt`, derived `localDate`, IANA
+`timezone`, `weightKg`, typed `sourceReference`, `dedupeKey`, nullable
+`confidence`, nullable `supersedesId`/`correctionReason` и `createdAt`.
 
 Инварианты первой вертикали:
 
@@ -30,10 +31,17 @@ tags:
 - `confidence` при наличии находится в диапазоне `0..1`;
 - `measuredAt` хранится как `timestamptz`;
 - сервер вычисляет `localDate` из `measuredAt` в проверенной IANA `timezone`;
-- unique `dedupeKey` делает create idempotent и не разрешает overwrite;
-- `sourceRecordId` не обязателен для `manual`;
-- `source` и `provenance` сохраняют путь будущего импорта Google Sheets;
-- corrections и supersession пока не реализованы.
+- unique `(person_id, source, dedupe_key)` делает create idempotent в границе
+  владельца и source channel;
+- `SourceReference` содержит typed channel, optional external identity,
+  source timestamp и ingestion timestamp; private raw snapshot не входит в
+  публичный контракт;
+- correction создаёт новый факт с новым UUID, `supersedes_id`, причиной и
+  собственной provenance, не изменяя исходную запись;
+- один факт не может иметь две конкурирующие замены, а cross-person
+  supersession запрещён database constraints;
+- current-state query исключает заменённые факты, history возвращает полную
+  линейную цепочку.
 
 ## Основания
 
@@ -46,11 +54,12 @@ tags:
 - Google Sheets остаётся authoritative source; API не выполняет dual-write,
   backfill или cutover.
 - Проекции не заменяют исходный факт.
+- Временный synthetic `Person` используется только для test/staging до
+  реализации authentication и не является authorization precedent.
 
 ## Открытые вопросы
 
-- Correction/supersession contract.
-- Dedupe policy будущего Google Sheets importer.
+- Точная idempotency identity multi-event Google Sheets importer.
 
 ## Связанные материалы
 

@@ -30,9 +30,12 @@ Server-side sessions в Redis дали бы быстрый ephemeral store, од
 ## Решение
 
 Хранить отзываемые refresh sessions в принадлежащей backend PostgreSQL
-database. Session record содержит stable identity, subject, hash refresh
+database. Session record содержит stable identity `User`, hash refresh
 credential, device/client metadata, created/last-used/expiry/revocation time и
 ссылку rotation lineage. Raw refresh credentials не сохраняются.
+
+`Person` не владеет authentication session. Доступ `User` к fitness-данным
+конкретного `Person` проверяется отдельно через `PersonAccessGrant`.
 
 Web-клиент передаёт refresh credential только через `HttpOnly`, `Secure` и
 подходящую `SameSite` cookie. Mobile-клиент хранит credential в platform secure
@@ -76,7 +79,7 @@ Redis не добавляется ради sessions. Он рассматрива
   сравнения hashes.
 - Raw tokens, cookies и credentials запрещено писать в logs, audit payloads и
   documentation.
-- Compromise response может отозвать одну session, все sessions subject или
+- Compromise response может отозвать одну session, все sessions `User` или
   rotation family.
 - Redis остаётся опциональным infrastructure adapter и не проникает в domain
   contracts.
@@ -98,3 +101,4 @@ Redis не добавляется ради sessions. Он рассматрива
 - [Владение данными](../wiki/architecture/data-ownership.md)
 - [Deployment topology](../wiki/architecture/deployment.md)
 - [NestJS с FastifyAdapter и Nuxt](20260729-use-nestjs-with-fastify-and-nuxt.md)
+- [User, Person и права доступа](20260730-separate-user-access-from-person-data-ownership.md)

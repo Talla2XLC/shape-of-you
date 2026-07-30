@@ -1,13 +1,19 @@
 import { Inject, Injectable } from "@nestjs/common";
 
 import type {
+  CorrectWeightMeasurement,
   CreateWeightMeasurement,
   ListWeightMeasurementsQuery,
   WeightMeasurement,
+  WeightMeasurementHistory,
   WeightMeasurementList
 } from "@shape-of-you/contracts";
 
-import { WEIGHT_MEASUREMENT_STORE } from "../application/tokens.js";
+import type { PersonContext } from "../application/person-context.js";
+import {
+  PERSON_CONTEXT,
+  WEIGHT_MEASUREMENT_STORE
+} from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
 import type {
   CreateWeightMeasurementResult,
@@ -19,7 +25,9 @@ import type {
 export class WeightMeasurementService {
   public constructor(
     @Inject(WEIGHT_MEASUREMENT_STORE)
-    private readonly store: WeightMeasurementStore
+    private readonly store: WeightMeasurementStore,
+    @Inject(PERSON_CONTEXT)
+    private readonly personContext: PersonContext
   ) {}
 
   /**
@@ -31,7 +39,25 @@ export class WeightMeasurementService {
   public create(
     input: CreateWeightMeasurement
   ): Promise<CreateWeightMeasurementResult> {
-    return this.store.create(input);
+    return this.store.create(this.personContext.getPersonId(), input);
+  }
+
+  /**
+   * Appends a replacement fact that supersedes the selected current fact.
+   *
+   * @param id - Existing fact UUID.
+   * @param input - Full corrected snapshot and mandatory reason.
+   * @returns Idempotent correction outcome.
+   */
+  public correct(
+    id: string,
+    input: CorrectWeightMeasurement
+  ): Promise<CreateWeightMeasurementResult> {
+    return this.store.correct(
+      this.personContext.getPersonId(),
+      id,
+      input
+    );
   }
 
   /**
@@ -42,7 +68,10 @@ export class WeightMeasurementService {
    * @throws NotFoundError when no measurement has the requested UUID.
    */
   public async findById(id: string): Promise<WeightMeasurement> {
-    const measurement = await this.store.findById(id);
+    const measurement = await this.store.findById(
+      this.personContext.getPersonId(),
+      id
+    );
     if (!measurement) {
       throw new NotFoundError("WeightMeasurement was not found");
     }
@@ -58,6 +87,28 @@ export class WeightMeasurementService {
   public list(
     query: ListWeightMeasurementsQuery
   ): Promise<WeightMeasurementList> {
-    return this.store.list(query.limit ?? 50, query.cursor);
+    return this.store.list(
+      this.personContext.getPersonId(),
+      query.limit ?? 50,
+      query.cursor
+    );
+  }
+
+  /**
+   * Returns the complete ordered correction chain containing a fact.
+   *
+   * @param id - Any fact UUID in the correction chain.
+   * @returns Complete chain from original to current fact.
+   * @throws NotFoundError when the fact is not owned by the active Person.
+   */
+  public async history(id: string): Promise<WeightMeasurementHistory> {
+    const history = await this.store.history(
+      this.personContext.getPersonId(),
+      id
+    );
+    if (!history) {
+      throw new NotFoundError("WeightMeasurement was not found");
+    }
+    return history;
   }
 }

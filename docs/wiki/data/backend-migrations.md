@@ -31,10 +31,16 @@ Compiled migration runner входит в API image, но обычный API pro
 перед обновлением API. Drizzle ведёт migration journal и применяет только ещё
 не выполненные SQL files.
 
-Первая migration создаёт enum `weight_measurement_source`, таблицу
-`weight_measurements`, unique index по `dedupe_key` и database checks для
-`weight_kg`/`confidence`. Миграция не импортирует Google Sheets, не выполняет
-backfill и не меняет authority.
+Первая migration создаёт enum `weight_measurement_source` и исходную таблицу
+`weight_measurements`. Вторая migration добавляет `Person`, `User`,
+`PersonAccessGrant`, `SourceReference`, person-scoped dedupe и append-only
+supersession constraints. Существующие synthetic weight rows получают
+фиксированного synthetic `Person`, а прежний JSONB `provenance` переносится в
+private raw snapshot соответствующего `SourceReference`.
+
+Обе траектории проверяются integration tests: применение на чистой БД и upgrade
+с исходной schema и существующим synthetic fact. Миграция не импортирует Google
+Sheets, не выполняет backfill рабочих данных и не меняет authority.
 
 Изменение существующей принятой migration после её применения запрещено.
 Следующее изменение schema создаёт новый migration file.
@@ -42,6 +48,7 @@ backfill и не меняет authority.
 ## Основания
 
 - `apps/api/drizzle/20260728183725_real_vermin.sql`.
+- `apps/api/drizzle/20260730131840_person_identity_provenance_corrections.sql`.
 - `apps/api/src/database/migrate.ts`.
 - Drizzle schema и integration test чистой БД.
 
@@ -53,7 +60,9 @@ backfill и не меняет authority.
 
 ## Открытые вопросы
 
-- Проверка staging migration на отдельной `shape_of_you_api` выполнена 2026-07-29: one-shot runner применил migration до startup API, после чего synthetic HTTP acceptance подтвердил write/read `WeightMeasurement`.
+- Первая staging migration на отдельной `shape_of_you_api` проверена 2026-07-29.
+  Применение второй migration на VM требует отдельного deployment approval;
+  локальные clean/upgrade integration tests пройдены.
 - Согласованная с владельцем общего cluster retention policy.
 
 ## Связанные материалы

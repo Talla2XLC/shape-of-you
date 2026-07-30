@@ -25,6 +25,8 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://shape_of_you:shape_of_you@postgres:5432/shape_of_you
       LOG_LEVEL: info
+      PERSON_CONTEXT_MODE: synthetic
+      SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
       SHUTDOWN_TIMEOUT_MS: 10000
     depends_on:
       migrate:
@@ -54,6 +56,8 @@ services:
       PORT: 3000
       DATABASE_URL: postgresql://shape_of_you:shape_of_you@postgres:5432/shape_of_you
       LOG_LEVEL: info
+      PERSON_CONTEXT_MODE: synthetic
+      SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
       SHUTDOWN_TIMEOUT_MS: 10000
     depends_on:
       postgres:

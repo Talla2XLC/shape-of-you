@@ -19,7 +19,12 @@ tags:
 ### Последовательность
 
 1. **DEV-027 — Workspace and baseline — завершён**: baseline репозитория, canonical Markdown Wiki и ADR, планы и документация Product/Domain/Architecture.
-2. **DEV-023 — Backend API and domain extraction — выполняется**: создать стабильный backend-контракт и извлечь доменную логику из Google Sheets без преждевременного переноса authority данных. Завершены backend bootstrap и первая вертикаль `WeightMeasurement`; остальные предметные вертикали и общий lifecycle ещё не реализованы.
+2. **DEV-023 — Backend API and domain extraction — выполняется**: создать
+   стабильный backend-контракт и извлечь доменную логику из Google Sheets без
+   преждевременного переноса authority данных. Завершены backend bootstrap,
+   person/access/provenance foundation и первая вертикаль `WeightMeasurement`
+   с corrections; остальные предметные verticals и общий lifecycle ещё не
+   реализованы.
 3. **DEV-024 — PostgreSQL migration and dual-run**: inventory, mapping, backfill, reconciliation, контролируемое сосуществование, критерии cutover и rollback.
 4. **DEV-025 — Web MVP**: выпустить первый web-клиент, использующий стабильный backend-контракт.
 5. **DEV-026 — Mobile client**: добавить мобильный доступ через тот же backend-контракт.
