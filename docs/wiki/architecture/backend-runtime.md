@@ -15,8 +15,8 @@ tags:
 
 Текущий реализованный runtime — один NestJS API в `apps/api`, использующий
 `FastifyAdapter`, PostgreSQL и Drizzle ORM. Он предоставляет system endpoints
-и первую полную предметную вертикаль `WeightMeasurement`, сохраняя прежние
-публичные contracts и deployable topology.
+предметные вертикали `WeightMeasurement`, `BodyMeasurementSession` и
+`PhysicalGoal`, сохраняя один deployable modular backend.
 
 ## Содержание
 
@@ -44,6 +44,11 @@ application boundaries, но не становятся microservices. PostgreSQL
 transactional outbox будет добавлен только вместе с первым подтверждённым
 асинхронным workflow; Kafka в текущую topology не входит.
 
+Модули Physical State предоставляют append-only body corrections, stable
+current/history queries, versioned goals и optimistic lifecycle transitions.
+Transport validation не преобразует типы request body или response; безопасное
+coercion включено только для URL params и query strings.
+
 ## Основания
 
 - Реализация в `apps/api/src/`.
@@ -70,3 +75,5 @@ transactional outbox будет добавлен только вместе с п
 - [Репозиторий и runtime](repository-and-runtime.md)
 - [Deployment topology](deployment.md)
 - [API WeightMeasurement](../api/weight-measurements.md)
+- [API BodyMeasurementSession](../api/body-measurement-sessions.md)
+- [API PhysicalGoal](../api/physical-goals.md)

@@ -31,6 +31,23 @@ dual-run и cutover. Страница описывает структуру ис
 
 Workbook смешивает исходные факты, policy, workflow state и projections. Поэтому границы листов являются свидетельствами для discovery, но не будущими границами агрегатов, таблиц, модулей или сервисов. `Daily_Log` преимущественно является legacy projection над независимо принадлежащими фактами.
 
+### Operational source pointer
+
+До завершения verified dual-run и cutover authoritative operational workbook:
+
+- title: `Fitness Tracker`;
+- spreadsheet ID: `1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik`;
+- direct URL:
+  `https://docs.google.com/spreadsheets/d/1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik/edit`;
+- locale: `ru_RU`;
+- timezone: `Europe/Moscow`.
+
+Для read-only Google Sheets connector calls следует использовать exact URL или
+spreadsheet ID. Поиск Drive по title может не вернуть workbook и не является
+проверкой отсутствия доступа. Metadata по прямой ссылке должна читаться до
+range reads. Workbook остаётся read-only для агентов без отдельного явного
+разрешения оператора на конкретную write operation.
+
 ## Основания
 
 Свидетельства собраны из metadata таблицы и ограниченного чтения всех 26 наблюдаемых листов. Заголовки прочитаны для Settings, Dashboard, Daily_Log, Foods, Ingredients, Brands, Food_Ingredients, Meals, Training, Program, Weight, Personal Records, Body, Changelog, Roadmap, Ideas, Rules, Decisions, NL_Engine, AI_Inbox, Self_Healing, AI_Timeline, AI_Insights, Load_Risk, Weight_Autopilot и Coach_Planner. Чтение формул подтвердило основные зависимости projections. Персональные fitness-значения на страницу не копировались.
@@ -41,9 +58,8 @@ Extraction baseline остаётся draft. Workbook рассматривает�
 
 ## Открытые вопросы
 
-- Является ли одно измерение веса на календарную дату строгим бизнес-правилом или только текущим соглашением?
+- Точные privacy и retention rules для body photo и notes до real-data import.
 - Может ли один приготовленный продукт содержать один ингредиент несколько раз для разных этапов приготовления?
-- Является ли `Daily_Log.Weight` намеренно денормализованным кэшем `Weight` или вторым путём ввода?
 - Какие правила в `Rules` являются business policy, а какие относятся к операциям и governance таблицы?
 - Что является authoritative exercise catalog? Отдельный справочный лист упражнений не обнаружен.
 - Какие sheet-level statuses являются controlled vocabularies, а какие — свободным текстом?

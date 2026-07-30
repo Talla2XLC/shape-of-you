@@ -62,8 +62,7 @@ export type SourceReferenceInput = FromSchema<
   typeof SourceReferenceInputSchema
 >;
 
-export const SourceReferenceSchema = {
-  $id: "SourceReference",
+export const EmbeddedSourceReferenceSchema = {
   type: "object",
   additionalProperties: false,
   required: [
@@ -79,6 +78,11 @@ export const SourceReferenceSchema = {
     ...SourceReferenceInputSchema.properties,
     ingestedAt: { type: "string", format: "date-time" }
   }
+} as const;
+
+export const SourceReferenceSchema = {
+  $id: "SourceReference",
+  ...EmbeddedSourceReferenceSchema
 } as const;
 
 /** Persisted public provenance without a private raw source snapshot. */

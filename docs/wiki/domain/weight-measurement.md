@@ -53,6 +53,11 @@ deduplication identity.
 
 - Google Sheets остаётся authoritative source; API не выполняет dual-write,
   backfill или cutover.
+- Внутри workbook лист `Weight` является authoritative журналом веса, а
+  `Daily_Log.Weight` — legacy projection и reconciliation evidence. Зеркало не
+  создаёт второй domain fact.
+- Несколько настоящих измерений одного `Person` за локальный день разрешены;
+  unique constraint по `localDate` отсутствует.
 - Проекции не заменяют исходный факт.
 - Временный synthetic `Person` используется только для test/staging до
   реализации authentication и не является authorization precedent.
@@ -66,3 +71,4 @@ deduplication identity.
 - [API WeightMeasurement](../api/weight-measurements.md)
 - [Provenance и identifiers](../data/provenance-and-identifiers.md)
 - [Source of truth и authority](../data/source-of-truth-and-authority.md)
+- [Сеансы замеров тела и физические цели](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md)

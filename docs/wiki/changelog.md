@@ -10,9 +10,26 @@ tags: []
 
 ## Кратко
 
-Базовый набор проектных знаний создан 2026-07-28. Подготовлены первый backend vertical и repository-local артефакты временного staging-развёртывания; live-проверки PostgreSQL, Docker Compose, VM и GitHub Actions остаются отдельными операционными воротами.
+Базовый набор проектных знаний создан 2026-07-28. Реализованы backend
+вертикали веса, замеров тела и версионируемых физических целей; перенос
+реальных данных Google Sheets остаётся отдельным этапом после завершения API.
 
 ## Содержание
+
+### 2026-07-30 — Physical State measurements and versioned goals
+
+- Реализован `BodyMeasurementSession` с typed values, person-scoped
+  idempotency, append-only corrections, current list и полной history chain.
+- Реализован `PhysicalGoal`: narrative/dynamic criteria, immutable versions,
+  optimistic activation и terminal lifecycle.
+- Общий PostgreSQL enum переименован в `source_channel`; composite foreign keys
+  защищают goal/person ownership.
+- Добавлена pure reconciliation policy для `Weight` и `Daily_Log.Weight`,
+  которая сообщает mismatch и не создаёт второй domain fact.
+- Локально пройдены lint, typecheck, build, 12 unit tests, 11 PostgreSQL 17
+  integration tests и проверка canonical documentation.
+- Реальные строки Google Sheets не читались тестами и не переносились в БД;
+  staging deployment и VM migration не выполнялись.
 
 ### 2026-07-30 — Person identity, provenance and corrections
 

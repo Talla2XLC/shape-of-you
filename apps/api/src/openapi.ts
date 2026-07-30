@@ -1,9 +1,25 @@
 import {
+  BodyMeasurementSessionHistorySchema,
+  BodyMeasurementSessionIdParamsSchema,
+  BodyMeasurementSessionListSchema,
+  BodyMeasurementSessionSchema,
+  CorrectBodyMeasurementSessionSchema,
+  CreateBodyMeasurementSessionSchema,
+  CreatePhysicalGoalSchema,
+  CreatePhysicalGoalVersionSchema,
   CorrectWeightMeasurementSchema,
   CreateWeightMeasurementSchema,
   ErrorResponseSchema,
   HealthResponseSchema,
+  ListBodyMeasurementSessionsQuerySchema,
+  ListPhysicalGoalsQuerySchema,
   ListWeightMeasurementsQuerySchema,
+  PhysicalGoalHistorySchema,
+  PhysicalGoalIdParamsSchema,
+  PhysicalGoalListSchema,
+  PhysicalGoalSchema,
+  PhysicalGoalTransitionSchema,
+  PhysicalGoalVersionParamsSchema,
   ReadinessResponseSchema,
   WeightMeasurementHistorySchema,
   WeightMeasurementIdParamsSchema,
@@ -18,6 +34,347 @@ function schemaParameter(
   schema: object
 ): object {
   return { name, in: location, required, schema };
+}
+
+function bodyMeasurementPaths(): Record<string, object> {
+  return {
+    "/v1/body-measurement-sessions": {
+      post: {
+        tags: ["body-measurements"],
+        summary: "Create an immutable body measurement session",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: CreateBodyMeasurementSessionSchema
+            }
+          }
+        },
+        responses: {
+          "200": {
+            description: "Existing session for the dedupe key",
+            content: {
+              "application/json": {
+                schema: BodyMeasurementSessionSchema
+              }
+            }
+          },
+          "201": {
+            description: "Session created",
+            content: {
+              "application/json": {
+                schema: BodyMeasurementSessionSchema
+              }
+            }
+          },
+          "400": {
+            description: "Invalid request",
+            content: {
+              "application/json": { schema: ErrorResponseSchema }
+            }
+          }
+        }
+      },
+      get: {
+        tags: ["body-measurements"],
+        summary: "List current body measurement sessions",
+        parameters: [
+          schemaParameter(
+            "limit",
+            "query",
+            false,
+            ListBodyMeasurementSessionsQuerySchema.properties.limit
+          ),
+          schemaParameter(
+            "cursor",
+            "query",
+            false,
+            ListBodyMeasurementSessionsQuerySchema.properties.cursor
+          ),
+          schemaParameter(
+            "metric",
+            "query",
+            false,
+            ListBodyMeasurementSessionsQuerySchema.properties.metric
+          )
+        ],
+        responses: {
+          "200": {
+            description: "Stable session page",
+            content: {
+              "application/json": {
+                schema: BodyMeasurementSessionListSchema
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/body-measurement-sessions/{id}": {
+      get: {
+        tags: ["body-measurements"],
+        summary: "Read a body measurement session",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            BodyMeasurementSessionIdParamsSchema.properties.id
+          )
+        ],
+        responses: {
+          "200": {
+            description: "Session found",
+            content: {
+              "application/json": {
+                schema: BodyMeasurementSessionSchema
+              }
+            }
+          },
+          "404": {
+            description: "Session not found",
+            content: {
+              "application/json": { schema: ErrorResponseSchema }
+            }
+          }
+        }
+      }
+    },
+    "/v1/body-measurement-sessions/{id}/corrections": {
+      post: {
+        tags: ["body-measurements"],
+        summary: "Append a full body session correction",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            BodyMeasurementSessionIdParamsSchema.properties.id
+          )
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: CorrectBodyMeasurementSessionSchema
+            }
+          }
+        },
+        responses: {
+          "200": {
+            description: "Existing idempotent correction",
+            content: {
+              "application/json": {
+                schema: BodyMeasurementSessionSchema
+              }
+            }
+          },
+          "201": {
+            description: "Correction appended",
+            content: {
+              "application/json": {
+                schema: BodyMeasurementSessionSchema
+              }
+            }
+          },
+          "409": {
+            description: "Session already superseded",
+            content: {
+              "application/json": { schema: ErrorResponseSchema }
+            }
+          }
+        }
+      }
+    },
+    "/v1/body-measurement-sessions/{id}/history": {
+      get: {
+        tags: ["body-measurements"],
+        summary: "Read the complete body session correction chain",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            BodyMeasurementSessionIdParamsSchema.properties.id
+          )
+        ],
+        responses: {
+          "200": {
+            description: "Original-to-current session chain",
+            content: {
+              "application/json": {
+                schema: BodyMeasurementSessionHistorySchema
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
+function physicalGoalPaths(): Record<string, object> {
+  const goalResponse = {
+    description: "PhysicalGoal aggregate",
+    content: {
+      "application/json": { schema: PhysicalGoalSchema }
+    }
+  };
+  const transitionBody = {
+    required: true,
+    content: {
+      "application/json": { schema: PhysicalGoalTransitionSchema }
+    }
+  };
+  return {
+    "/v1/physical-goals": {
+      post: {
+        tags: ["physical-goals"],
+        summary: "Create a goal and first draft version",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: CreatePhysicalGoalSchema }
+          }
+        },
+        responses: { "200": goalResponse, "201": goalResponse }
+      },
+      get: {
+        tags: ["physical-goals"],
+        summary: "List goals by lifecycle status",
+        parameters: [
+          schemaParameter(
+            "status",
+            "query",
+            false,
+            ListPhysicalGoalsQuerySchema.properties.status
+          )
+        ],
+        responses: {
+          "200": {
+            description: "Goal list",
+            content: {
+              "application/json": { schema: PhysicalGoalListSchema }
+            }
+          }
+        }
+      }
+    },
+    "/v1/physical-goals/{id}": {
+      get: {
+        tags: ["physical-goals"],
+        summary: "Read one PhysicalGoal",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            PhysicalGoalIdParamsSchema.properties.id
+          )
+        ],
+        responses: { "200": goalResponse }
+      }
+    },
+    "/v1/physical-goals/{id}/versions": {
+      post: {
+        tags: ["physical-goals"],
+        summary: "Append an immutable draft version",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            PhysicalGoalIdParamsSchema.properties.id
+          )
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: CreatePhysicalGoalVersionSchema
+            }
+          }
+        },
+        responses: { "200": goalResponse, "201": goalResponse }
+      }
+    },
+    "/v1/physical-goals/{id}/versions/{version}/activate": {
+      post: {
+        tags: ["physical-goals"],
+        summary: "Activate one immutable version",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            PhysicalGoalVersionParamsSchema.properties.id
+          ),
+          schemaParameter(
+            "version",
+            "path",
+            true,
+            PhysicalGoalVersionParamsSchema.properties.version
+          )
+        ],
+        requestBody: transitionBody,
+        responses: { "200": goalResponse }
+      }
+    },
+    "/v1/physical-goals/{id}/complete": {
+      post: {
+        tags: ["physical-goals"],
+        summary: "Complete an active goal",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            PhysicalGoalIdParamsSchema.properties.id
+          )
+        ],
+        requestBody: transitionBody,
+        responses: { "200": goalResponse }
+      }
+    },
+    "/v1/physical-goals/{id}/cancel": {
+      post: {
+        tags: ["physical-goals"],
+        summary: "Cancel a draft or active goal",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            PhysicalGoalIdParamsSchema.properties.id
+          )
+        ],
+        requestBody: transitionBody,
+        responses: { "200": goalResponse }
+      }
+    },
+    "/v1/physical-goals/{id}/history": {
+      get: {
+        tags: ["physical-goals"],
+        summary: "Read every immutable goal version",
+        parameters: [
+          schemaParameter(
+            "id",
+            "path",
+            true,
+            PhysicalGoalIdParamsSchema.properties.id
+          )
+        ],
+        responses: {
+          "200": {
+            description: "Goal and immutable versions",
+            content: {
+              "application/json": { schema: PhysicalGoalHistorySchema }
+            }
+          }
+        }
+      }
+    }
+  };
 }
 
 /**
@@ -243,7 +600,9 @@ export function createOpenApiDocument(): object {
             }
           }
         }
-      }
+      },
+      ...bodyMeasurementPaths(),
+      ...physicalGoalPaths()
     }
   };
 }

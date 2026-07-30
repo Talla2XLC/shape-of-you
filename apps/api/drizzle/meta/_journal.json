@@ -15,6 +15,20 @@
       "when": 1785417520572,
       "tag": "20260730131840_person_identity_provenance_corrections",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785437645181,
+      "tag": "20260730185405_physical_state_goals",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785438845459,
+      "tag": "20260730191405_enforce_goal_ownership",
+      "breakpoints": true
     }
   ]
 }

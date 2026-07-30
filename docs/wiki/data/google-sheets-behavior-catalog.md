@@ -29,7 +29,7 @@ schema. Архитектурные предложения остаются в pr
 
 | Листы | Наблюдаемая ответственность | Классификация |
 | --- | --- | --- |
-| `Weight`, `Body` | Измерения веса и тела по времени | Исходные факты Physical State |
+| `Weight`, `Body` | Измерения веса и тела по времени | Исходные facts Physical State; строка `Body` является одним measurement session |
 | `Foods`, `Ingredients`, `Brands`, `Food_Ingredients` | Каталог питания и состав продуктов | Справочники Nutrition |
 | `Meals` | Факты приёмов пищи с зафиксированными calories и macros | Исходные факты Nutrition с catalog reference и snapshot |
 | `Training` | Выполненные тренировки, упражнения и session grouping | Исходные факты Training |
@@ -67,6 +67,8 @@ schema. Архитектурные предложения остаются в pr
 
 `Daily_Log` смешивает независимо принадлежащие факты и вычисляемые поля:
 
+- `Weight` является authoritative журналом веса, а `Daily_Log.Weight` —
+  проверяемым legacy mirror, не вторым fact channel;
 - nutrition totals агрегируются из `Meals` по локальной дате;
 - оставшиеся protein и calories вычисляются относительно текущей policy;
 - calories target выбирается по типу дня;
@@ -174,8 +176,8 @@ baseline; после явного разрешения оператора про
 
 - Исторические нарушения requiredness и controlled vocabularies не
   доказываются чтением ограниченных диапазонов.
-- Не утверждены conflict policy разных source channels и cardinality
-  измерений в один локальный день.
+- Conflict policy независимых будущих source channels остаётся открытой;
+  подтверждённое зеркало `Weight`/`Daily_Log.Weight` разрешено отдельно.
 - Не утверждены privacy, retention и deletion для source text, photos и
   wearable evidence.
 - Не определён authoritative exercise catalog.

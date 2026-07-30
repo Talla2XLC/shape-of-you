@@ -25,6 +25,14 @@ import {
   WeightMeasurementRepository,
   type WeightMeasurementStore
 } from "./storage/weight-measurement-repository.js";
+import {
+  BodyMeasurementSessionRepository,
+  type BodyMeasurementSessionStore
+} from "./storage/body-measurement-session-repository.js";
+import {
+  PhysicalGoalRepository,
+  type PhysicalGoalStore
+} from "./storage/physical-goal-repository.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -36,6 +44,10 @@ export interface BuildAppOptions {
   readonly readinessProbe?: ReadinessProbe;
   /** Optional persistence implementation used for isolated application tests. */
   readonly store?: WeightMeasurementStore;
+  /** Optional body-session persistence used for isolated application tests. */
+  readonly bodyMeasurementSessionStore?: BodyMeasurementSessionStore;
+  /** Optional goal persistence used for isolated application tests. */
+  readonly physicalGoalStore?: PhysicalGoalStore;
   /** Optional Person resolution boundary, primarily for isolated tests. */
   readonly personContext?: PersonContext;
 }
@@ -77,9 +89,17 @@ export async function buildApp(
   const store =
     options.store ??
     (database ? new WeightMeasurementRepository(database) : undefined);
+  const bodyMeasurementSessionStore =
+    options.bodyMeasurementSessionStore ??
+    (database
+      ? new BodyMeasurementSessionRepository(database)
+      : undefined);
+  const physicalGoalStore =
+    options.physicalGoalStore ??
+    (database ? new PhysicalGoalRepository(database) : undefined);
 
-  if (!store) {
-    throw new Error("A WeightMeasurement store is required");
+  if (!store || !bodyMeasurementSessionStore || !physicalGoalStore) {
+    throw new Error("All Physical State persistence stores are required");
   }
 
   const personContext =
@@ -111,6 +131,8 @@ export async function buildApp(
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule.register({
       store,
+      bodyMeasurementSessionStore,
+      physicalGoalStore,
       personContext,
       readinessProbe,
       database,

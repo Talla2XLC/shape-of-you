@@ -6,9 +6,15 @@ import type { ReadinessProbe } from "../system/system.controller.js";
 import type { PersonContext } from "./person-context.js";
 import { SystemModule } from "../system/system.module.js";
 import type { WeightMeasurementStore } from "../storage/weight-measurement-repository.js";
+import type { BodyMeasurementSessionStore } from "../storage/body-measurement-session-repository.js";
+import type { PhysicalGoalStore } from "../storage/physical-goal-repository.js";
+import { BodyMeasurementSessionModule } from "../body-measurement-sessions/body-measurement-session.module.js";
+import { PhysicalGoalModule } from "../physical-goals/physical-goal.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
 import {
   PERSON_CONTEXT,
+  BODY_MEASUREMENT_SESSION_STORE,
+  PHYSICAL_GOAL_STORE,
   READINESS_PROBE,
   WEIGHT_MEASUREMENT_STORE
 } from "./tokens.js";
@@ -19,6 +25,10 @@ export interface AppModuleOptions {
   readonly personContext: PersonContext;
   /** Persistence boundary used by the WeightMeasurement module. */
   readonly store: WeightMeasurementStore;
+  /** Persistence boundary used by the BodyMeasurementSession module. */
+  readonly bodyMeasurementSessionStore: BodyMeasurementSessionStore;
+  /** Persistence boundary used by the PhysicalGoal module. */
+  readonly physicalGoalStore: PhysicalGoalStore;
   /** Probe that resolves only when required dependencies are ready. */
   readonly readinessProbe: ReadinessProbe;
   /** Database context available to the application, when configured. */
@@ -43,6 +53,14 @@ class RuntimeDependenciesModule {
           useValue: options.store
         },
         {
+          provide: BODY_MEASUREMENT_SESSION_STORE,
+          useValue: options.bodyMeasurementSessionStore
+        },
+        {
+          provide: PHYSICAL_GOAL_STORE,
+          useValue: options.physicalGoalStore
+        },
+        {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
@@ -56,6 +74,8 @@ class RuntimeDependenciesModule {
       ],
       exports: [
         PERSON_CONTEXT,
+        BODY_MEASUREMENT_SESSION_STORE,
+        PHYSICAL_GOAL_STORE,
         WEIGHT_MEASUREMENT_STORE,
         READINESS_PROBE,
         DatabaseLifecycle
@@ -79,7 +99,9 @@ export class AppModule {
       imports: [
         RuntimeDependenciesModule.register(options),
         SystemModule,
-        WeightMeasurementModule
+        WeightMeasurementModule,
+        BodyMeasurementSessionModule,
+        PhysicalGoalModule
       ]
     };
   }

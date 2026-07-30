@@ -51,6 +51,10 @@ Coaching потребляет опубликованные свидетельс�
 ## Решения
 
 - Сохранить пять draft contexts, пока уточняются aggregates и policies.
+- В Physical State measurements принадлежат `Person` как immutable facts:
+  вес хранится отдельными `WeightMeasurement`, а одна строка `Body` становится
+  aggregate `BodyMeasurementSession` с typed values. Physical goals являются
+  versioned plans, а не measurements или policies.
 - На этом этапе не объединять Physical State and Goals с Recovery and Readiness в контекст `Observations`.
 - Распределение по сервисам или базам данных не утверждено.
 
@@ -67,3 +71,5 @@ Coaching потребляет опубликованные свидетельс�
 - [Владение данными](../architecture/data-ownership.md)
 - [Репозиторий и runtime](../architecture/repository-and-runtime.md)
 - [Границы продукта](../product/scope.md)
+- [BodyMeasurementSession](body-measurement-session.md)
+- [PhysicalGoal](physical-goal.md)

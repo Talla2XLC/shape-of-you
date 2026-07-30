@@ -15,6 +15,12 @@ import {
   toNewWeightMeasurement
 } from "../src/domain/weight-measurement.js";
 import type {
+  BodyMeasurementSessionStore
+} from "../src/storage/body-measurement-session-repository.js";
+import type {
+  PhysicalGoalStore
+} from "../src/storage/physical-goal-repository.js";
+import type {
   CreateWeightMeasurementResult,
   WeightMeasurementStore
 } from "../src/storage/weight-measurement-repository.js";
@@ -132,11 +138,40 @@ class FakeStore implements WeightMeasurementStore {
   }
 }
 
+const unreachable = async (): Promise<never> => {
+  throw new Error("store method was not expected in this test");
+};
+
+const bodyMeasurementSessionStore: BodyMeasurementSessionStore = {
+  create: unreachable,
+  correct: unreachable,
+  findById: unreachable,
+  list: unreachable,
+  history: unreachable
+};
+
+const physicalGoalStore: PhysicalGoalStore = {
+  create: unreachable,
+  addVersion: unreachable,
+  activate: unreachable,
+  complete: unreachable,
+  cancel: unreachable,
+  findById: unreachable,
+  history: unreachable,
+  list: unreachable
+};
+
+const physicalStateStores = {
+  bodyMeasurementSessionStore,
+  physicalGoalStore
+};
+
 describe("API bootstrap", () => {
   it("serves health and OpenAPI generated from route schemas", async () => {
     const app = await buildApp({
       config,
       store: new FakeStore(),
+      ...physicalStateStores,
       readinessProbe: async () => undefined
     });
 
@@ -160,6 +195,10 @@ describe("API bootstrap", () => {
     expect(
       openapi.json().paths["/v1/weight-measurements"].post.requestBody
     ).toBeDefined();
+    expect(openapi.json().paths).toHaveProperty(
+      "/v1/body-measurement-sessions"
+    );
+    expect(openapi.json().paths).toHaveProperty("/v1/physical-goals");
 
     await app.close();
   });
@@ -168,6 +207,7 @@ describe("API bootstrap", () => {
     const app = await buildApp({
       config,
       store: new FakeStore(),
+      ...physicalStateStores,
       readinessProbe: async () => {
         throw new Error("database unavailable");
       }
@@ -191,6 +231,7 @@ describe("API bootstrap", () => {
     const app = await buildApp({
       config,
       store: new FakeStore(),
+      ...physicalStateStores,
       readinessProbe: async () => undefined
     });
 
@@ -210,6 +251,7 @@ describe("API bootstrap", () => {
     const app = await buildApp({
       config,
       store: new FakeStore(),
+      ...physicalStateStores,
       readinessProbe: async () => undefined
     });
 
@@ -233,6 +275,7 @@ describe("API bootstrap", () => {
     const app = await buildApp({
       config,
       store,
+      ...physicalStateStores,
       readinessProbe: async () => undefined
     });
 

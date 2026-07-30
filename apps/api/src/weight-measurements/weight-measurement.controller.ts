@@ -62,7 +62,8 @@ export class WeightMeasurementController {
   @UseInterceptors(new JsonSchemaResponseInterceptor(WeightMeasurementSchema))
   public async correct(
     @Param(new JsonSchemaPipe<WeightMeasurementIdParams>(
-      WeightMeasurementIdParamsSchema
+      WeightMeasurementIdParamsSchema,
+      true
     ))
     params: WeightMeasurementIdParams,
     @Body(new JsonSchemaPipe<CorrectWeightMeasurement>(
@@ -83,7 +84,8 @@ export class WeightMeasurementController {
   )
   public history(
     @Param(new JsonSchemaPipe<WeightMeasurementIdParams>(
-      WeightMeasurementIdParamsSchema
+      WeightMeasurementIdParamsSchema,
+      true
     ))
     params: WeightMeasurementIdParams
   ): Promise<WeightMeasurementHistory> {
@@ -97,7 +99,8 @@ export class WeightMeasurementController {
   )
   public list(
     @Query(new JsonSchemaPipe<ListWeightMeasurementsQuery>(
-      ListWeightMeasurementsQuerySchema
+      ListWeightMeasurementsQuerySchema,
+      true
     ))
     query: ListWeightMeasurementsQuery
   ): Promise<WeightMeasurementList> {
@@ -109,7 +112,8 @@ export class WeightMeasurementController {
   @UseInterceptors(new JsonSchemaResponseInterceptor(WeightMeasurementSchema))
   public findById(
     @Param(new JsonSchemaPipe<WeightMeasurementIdParams>(
-      WeightMeasurementIdParamsSchema
+      WeightMeasurementIdParamsSchema,
+      true
     ))
     params: WeightMeasurementIdParams
   ): Promise<WeightMeasurement> {

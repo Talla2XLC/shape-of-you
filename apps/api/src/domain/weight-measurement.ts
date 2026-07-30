@@ -1,7 +1,6 @@
 import type {
   CorrectWeightMeasurement,
   CreateWeightMeasurement,
-  SourceReference,
   WeightMeasurement
 } from "@shape-of-you/contracts";
 
@@ -11,6 +10,7 @@ import type {
   WeightMeasurementRow
 } from "../database/schema.js";
 import { DomainValidationError } from "./errors.js";
+import { toSourceReference } from "./source-reference.js";
 
 /**
  * Derives the calendar date of a measurement in its declared IANA timezone.
@@ -88,27 +88,6 @@ export function toNewWeightMeasurement(
       input.confidence == null ? null : input.confidence.toFixed(3),
     supersedesId: correction?.supersedesId ?? null,
     correctionReason: correction?.reason ?? null
-  };
-}
-
-/**
- * Converts persisted provenance into its public typed representation.
- *
- * Private ingestion metadata and raw snapshots deliberately remain internal.
- *
- * @param row - SourceReference row owned by the same Person as the fact.
- * @returns Public provenance contract.
- */
-export function toSourceReference(
-  row: SourceReferenceRow
-): SourceReference {
-  return {
-    id: row.id,
-    channel: row.channel,
-    externalSystem: row.externalSystem,
-    externalRecordId: row.externalRecordId,
-    occurredAt: row.occurredAt?.toISOString() ?? null,
-    ingestedAt: row.ingestedAt.toISOString()
   };
 }
 

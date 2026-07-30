@@ -12,10 +12,13 @@ import { map, type Observable } from "rxjs";
 
 type JsonSchema = Readonly<Record<string, unknown>>;
 
-function compileSchema(schema: JsonSchema): ValidateFunction {
+function compileSchema(
+  schema: JsonSchema,
+  coerceTypes: boolean
+): ValidateFunction {
   const ajv = new Ajv({
     allErrors: true,
-    coerceTypes: true,
+    coerceTypes,
     multipleOfPrecision: 6,
     strict: false,
     useDefaults: true
@@ -34,8 +37,14 @@ function compileSchema(schema: JsonSchema): ValidateFunction {
 export class JsonSchemaPipe<T> implements PipeTransform<unknown, T> {
   private readonly validate: ValidateFunction;
 
-  public constructor(schema: JsonSchema) {
-    this.validate = compileSchema(schema);
+  /**
+   * Creates a validator for one transport boundary.
+   *
+   * @param schema - JSON Schema for the boundary value.
+   * @param coerceTypes - Whether URL string values may be safely coerced.
+   */
+  public constructor(schema: JsonSchema, coerceTypes = false) {
+    this.validate = compileSchema(schema, coerceTypes);
   }
 
   /**
@@ -63,7 +72,7 @@ export class JsonSchemaResponseInterceptor
   private readonly validate: ValidateFunction;
 
   public constructor(schema: JsonSchema) {
-    this.validate = compileSchema(schema);
+    this.validate = compileSchema(schema, false);
   }
 
   /**

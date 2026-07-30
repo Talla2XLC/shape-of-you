@@ -204,7 +204,7 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 - Разделить business rule, projection, integration workflow и governance.
 - Пометить неизвестное как blocker или явно утверждённое deferred behavior.
 
-### 2. Общие доменные контракты — решения утверждены, implementation не начат
+### 2. Общие доменные контракты — завершено
 
 - Реализовать разделение authentication `User` и domain `Person`.
 - Реализовать person-scoped provenance/source reference и idempotency contract.
@@ -219,6 +219,8 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 - Завершить модель веса correction path и двойного источника.
 - Добавить body measurements и goals.
 - Добавить историю и доменные projections без переноса real data.
+- Выполнить отдельный план
+  `completed/2026-07-30-physical-state-measurements-and-goals.md`.
 
 ### 4. Nutrition
 

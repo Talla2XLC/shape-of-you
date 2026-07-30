@@ -13,7 +13,6 @@ import { alias } from "drizzle-orm/pg-core";
 import type {
   CorrectWeightMeasurement,
   CreateWeightMeasurement,
-  SourceReferenceInput,
   WeightMeasurement,
   WeightMeasurementHistory,
   WeightMeasurementList
@@ -38,19 +37,14 @@ import {
   toNewWeightMeasurement,
   toWeightMeasurement
 } from "../domain/weight-measurement.js";
-
-type Transaction = Parameters<
-  Parameters<DatabaseContext["db"]["transaction"]>[0]
->[0];
+import {
+  discardUnusedSourceReference,
+  ensureSourceReference
+} from "./source-reference-repository.js";
 
 interface JoinedMeasurement {
   readonly measurement: WeightMeasurementRow;
   readonly sourceReference: SourceReferenceRow;
-}
-
-interface EnsuredSourceReference {
-  readonly row: SourceReferenceRow;
-  readonly inserted: boolean;
 }
 
 /** Result of an idempotent WeightMeasurement create or correction operation. */
@@ -132,58 +126,6 @@ export interface WeightMeasurementStore {
 
 function serializeJoined(row: JoinedMeasurement): WeightMeasurement {
   return toWeightMeasurement(row.measurement, row.sourceReference);
-}
-
-async function ensureSourceReference(
-  transaction: Transaction,
-  personId: string,
-  input: SourceReferenceInput
-): Promise<EnsuredSourceReference> {
-  const inserted = await transaction
-    .insert(sourceReferences)
-    .values({
-      personId,
-      channel: input.channel,
-      externalSystem: input.externalSystem,
-      externalRecordId: input.externalRecordId,
-      occurredAt: input.occurredAt ? new Date(input.occurredAt) : null
-    })
-    .onConflictDoNothing()
-    .returning();
-
-  if (inserted[0]) {
-    return { row: inserted[0], inserted: true };
-  }
-
-  if (!input.externalSystem || !input.externalRecordId) {
-    throw new Error("SourceReference insert failed without a unique key");
-  }
-
-  const existing = await transaction.query.sourceReferences.findFirst({
-    where: and(
-      eq(sourceReferences.personId, personId),
-      eq(sourceReferences.channel, input.channel),
-      eq(sourceReferences.externalSystem, input.externalSystem),
-      eq(sourceReferences.externalRecordId, input.externalRecordId)
-    )
-  });
-
-  if (!existing) {
-    throw new Error("SourceReference conflict did not resolve");
-  }
-
-  return { row: existing, inserted: false };
-}
-
-async function discardUnusedSourceReference(
-  transaction: Transaction,
-  sourceReference: EnsuredSourceReference
-): Promise<void> {
-  if (sourceReference.inserted) {
-    await transaction
-      .delete(sourceReferences)
-      .where(eq(sourceReferences.id, sourceReference.row.id));
-  }
 }
 
 /** PostgreSQL implementation of the WeightMeasurement persistence contract. */

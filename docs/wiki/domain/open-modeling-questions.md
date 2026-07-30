@@ -25,11 +25,12 @@ tags:
 
 ### Недостаток свидетельств
 
-- Cardinality измерений веса и тела за один день.
+- Privacy, retention и deletion body photo и notes до real-data import.
 - Authoritative exercise catalog и identifiers упражнений.
 - Нормализация timezone для timestamps устройств и пользовательского ввода.
 - Поведение catalog snapshot при изменении состава продукта.
-- Conflict policy для конкурирующих фактов из разных channels.
+- Conflict policy для независимых будущих channels за пределами подтверждённого
+  зеркала `Weight`/`Daily_Log.Weight`.
 
 После разрешения вопросы удаляются или переформулируются здесь. Архитектурные решения с существенной стоимостью изменения фиксируются в ADR.
 
@@ -43,7 +44,8 @@ Identity владельца и correction semantics разрешены ADR: fitn
 принадлежат `Person`, доступ предоставляется `User` через grant, correction
 создаёт новый immutable fact с `supersedes_id`. Следующий domain review должен
 сфокусироваться на Day lifecycle, versioning программы, privacy и policy
-boundaries.
+boundaries. Cardinality physical measurements, body session aggregate,
+versioned physical goals и authority зеркала веса разрешены отдельным ADR.
 
 ## Открытые вопросы
 
@@ -57,3 +59,4 @@ boundaries.
 - [Каталог ADR](../../adr/)
 - [User, Person и права доступа](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
+- [Сеансы замеров тела и физические цели](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md)

@@ -150,6 +150,21 @@ The workspace `sources/` directory is only a staging area for approved
 materials, not the project root. Register external paths through `4dt-sources`
 with operator approval. Do not read secrets or unrelated files.
 
+Until the verified Google Sheets cutover is complete, the authoritative
+operational workbook is `Fitness Tracker`:
+
+- spreadsheet ID:
+  `1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik`;
+- direct URL:
+  `https://docs.google.com/spreadsheets/d/1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik/edit`;
+- use the exact URL or spreadsheet ID for Google Sheets connector reads;
+- do not treat a failed Drive title search as evidence that access is missing;
+- keep the workbook read-only unless the operator explicitly approves a
+  specific write operation.
+
+Canonical migration context and authority rules remain in
+`docs/wiki/data/google-sheets-inventory.md` and related ADR/Wiki pages.
+
 With explicit operator approval for a named host and purpose, DevOps may invoke
 an existing operator-managed OpenSSH profile from `~/.ssh/config`. Do not read,
 copy, print, or store private-key or SSH configuration contents; use strict

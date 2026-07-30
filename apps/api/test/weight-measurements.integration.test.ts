@@ -184,7 +184,7 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
       [payload.dedupeKey]
     );
 
-    expect(created.statusCode).toBe(201);
+    expect(created.statusCode, created.body).toBe(201);
     expect(created.json().localDate).toBe("2026-07-28");
     expect(created.json().personId).toBe(syntheticPersonId);
     expect(duplicate.statusCode).toBe(200);
@@ -432,5 +432,249 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
     expect(currentIds).not.toContain(originalBody.id);
     expect(currentIds).toContain(correctedBody.id);
     expect(correctedBody.sourceReference).not.toHaveProperty("rawSnapshot");
+  });
+});
+
+describe("Physical State PostgreSQL vertical", () => {
+  it("creates the physical-state schema and renames the shared source enum", async () => {
+    const relations = await database.pool.query<{
+      body_sessions: string | null;
+      physical_goals: string | null;
+    }>(
+      `select
+         to_regclass('public.body_measurement_sessions')::text as body_sessions,
+         to_regclass('public.physical_goals')::text as physical_goals`
+    );
+    const enumTypes = await database.pool.query<{ name: string }>(
+      `select typname as name
+         from pg_type
+        where typname in ('source_channel', 'weight_measurement_source')
+        order by typname`
+    );
+
+    expect(relations.rows[0]).toEqual({
+      body_sessions: "body_measurement_sessions",
+      physical_goals: "physical_goals"
+    });
+    expect(enumTypes.rows).toEqual([{ name: "source_channel" }]);
+  });
+
+  it("creates, deduplicates, filters and corrects body sessions", async () => {
+    const fastify = getFastifyInstance(app);
+    const payload = {
+      measuredAt: "2026-08-03T06:00:00.000Z",
+      timezone: "Europe/Moscow",
+      values: [
+        { metric: "waist", value: 81.25, unit: "cm" },
+        { metric: "chest", value: 101.5, unit: "cm" }
+      ],
+      dedupeKey: "integration:body:create",
+      note: "Morning measurement",
+      sourceReference: {
+        channel: "import",
+        externalSystem: "google_sheets",
+        externalRecordId: "Body!2",
+        occurredAt: "2026-08-03T06:00:00.000Z"
+      }
+    };
+    const created = await fastify.inject({
+      method: "POST",
+      url: "/v1/body-measurement-sessions",
+      payload
+    });
+    const duplicate = await fastify.inject({
+      method: "POST",
+      url: "/v1/body-measurement-sessions",
+      payload
+    });
+    const invalid = await fastify.inject({
+      method: "POST",
+      url: "/v1/body-measurement-sessions",
+      payload: {
+        ...payload,
+        dedupeKey: "integration:body:invalid",
+        values: [
+          { metric: "waist", value: 81.25, unit: "cm" },
+          { metric: "waist", value: 82, unit: "cm" }
+        ]
+      }
+    });
+    const corrected = await fastify.inject({
+      method: "POST",
+      url: `/v1/body-measurement-sessions/${created.json().id as string}/corrections`,
+      payload: {
+        ...payload,
+        dedupeKey: "integration:body:correction",
+        values: [
+          { metric: "waist", value: 80.75, unit: "cm" },
+          { metric: "chest", value: 101.5, unit: "cm" }
+        ],
+        reason: "Waist value was transcribed incorrectly"
+      }
+    });
+    const history = await fastify.inject({
+      method: "GET",
+      url: `/v1/body-measurement-sessions/${corrected.json().id as string}/history`
+    });
+    const waistOnly = await fastify.inject({
+      method: "GET",
+      url: "/v1/body-measurement-sessions?metric=waist"
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json().values).toHaveLength(2);
+    expect(duplicate.statusCode).toBe(200);
+    expect(duplicate.json().id).toBe(created.json().id);
+    expect(invalid.statusCode).toBe(400);
+    expect(corrected.statusCode).toBe(201);
+    expect(corrected.json().supersedesId).toBe(created.json().id);
+    expect(history.statusCode).toBe(200);
+    expect(
+      history.json().items.map((item: { id: string }) => item.id)
+    ).toEqual([created.json().id, corrected.json().id]);
+    expect(waistOnly.statusCode).toBe(200);
+    expect(
+      waistOnly
+        .json()
+        .items.some(
+          (item: { id: string }) => item.id === corrected.json().id
+        )
+    ).toBe(true);
+    expect(
+      waistOnly
+        .json()
+        .items.some(
+          (item: { id: string }) => item.id === created.json().id
+        )
+    ).toBe(false);
+  });
+
+  it("versions and transitions narrative physical goals optimistically", async () => {
+    const fastify = getFastifyInstance(app);
+    const firstPayload = {
+      intent: "Reduce body fat while preserving performance",
+      effectiveFrom: "2026-08-01",
+      targetDate: null,
+      criteria: [
+        {
+          metric: "body_fat_percentage",
+          mode: "directional",
+          direction: "decrease",
+          targetValue: null,
+          minimumValue: null,
+          maximumValue: null,
+          unit: "percent"
+        },
+        {
+          metric: "weight",
+          mode: "dynamic",
+          direction: null,
+          targetValue: null,
+          minimumValue: null,
+          maximumValue: null,
+          unit: "kg"
+        }
+      ],
+      dedupeKey: "integration:goal:v1",
+      sourceReference: {
+        channel: "import",
+        externalSystem: "google_sheets",
+        externalRecordId: "Settings!goals",
+        occurredAt: "2026-08-01T00:00:00.000Z"
+      }
+    };
+    const created = await fastify.inject({
+      method: "POST",
+      url: "/v1/physical-goals",
+      payload: firstPayload
+    });
+    const goalId = created.json().id as string;
+    const secondVersion = await fastify.inject({
+      method: "POST",
+      url: `/v1/physical-goals/${goalId}/versions`,
+      payload: {
+        ...firstPayload,
+        intent: "Reduce body fat and keep weight within an adaptive range",
+        dedupeKey: "integration:goal:v2"
+      }
+    });
+    const activated = await fastify.inject({
+      method: "POST",
+      url: `/v1/physical-goals/${goalId}/versions/2/activate`,
+      payload: { expectedLockVersion: 0 }
+    });
+    const staleActivation = await fastify.inject({
+      method: "POST",
+      url: `/v1/physical-goals/${goalId}/versions/1/activate`,
+      payload: { expectedLockVersion: 0 }
+    });
+    const completed = await fastify.inject({
+      method: "POST",
+      url: `/v1/physical-goals/${goalId}/complete`,
+      payload: { expectedLockVersion: 1 }
+    });
+    const terminalVersion = await fastify.inject({
+      method: "POST",
+      url: `/v1/physical-goals/${goalId}/versions`,
+      payload: {
+        ...firstPayload,
+        dedupeKey: "integration:goal:v3"
+      }
+    });
+    const history = await fastify.inject({
+      method: "GET",
+      url: `/v1/physical-goals/${goalId}/history`
+    });
+    const completedList = await fastify.inject({
+      method: "GET",
+      url: "/v1/physical-goals?status=completed"
+    });
+    const otherGoal = await fastify.inject({
+      method: "POST",
+      url: "/v1/physical-goals",
+      payload: {
+        ...firstPayload,
+        dedupeKey: "integration:goal:other",
+        sourceReference: {
+          ...firstPayload.sourceReference,
+          externalRecordId: "Settings!other-goal"
+        }
+      }
+    });
+    const crossGoalVersionId = otherGoal.json().latestVersion.id as string;
+    const crossGoalCurrentVersion = database.pool.query(
+      "update physical_goals set current_version_id = $1 where id = $2",
+      [crossGoalVersionId, goalId]
+    );
+    await expect(crossGoalCurrentVersion).rejects.toMatchObject({
+      code: "23503"
+    });
+
+    expect(created.statusCode, created.body).toBe(201);
+    expect(created.json().status).toBe("draft");
+    expect(created.json().currentVersion).toBeNull();
+    expect(secondVersion.statusCode).toBe(201);
+    expect(secondVersion.json().latestVersion.version).toBe(2);
+    expect(activated.statusCode).toBe(201);
+    expect(activated.json().status).toBe("active");
+    expect(activated.json().currentVersion.version).toBe(2);
+    expect(activated.json().lockVersion).toBe(1);
+    expect(staleActivation.statusCode).toBe(409);
+    expect(completed.statusCode).toBe(201);
+    expect(completed.json().status).toBe("completed");
+    expect(completed.json().lockVersion).toBe(2);
+    expect(terminalVersion.statusCode).toBe(409);
+    expect(history.statusCode).toBe(200);
+    expect(
+      history
+        .json()
+        .versions.map((version: { version: number }) => version.version)
+    ).toEqual([1, 2]);
+    expect(completedList.statusCode).toBe(200);
+    expect(
+      completedList
+        .json()
+        .items.some((goal: { id: string }) => goal.id === goalId)
+    ).toBe(true);
   });
 });

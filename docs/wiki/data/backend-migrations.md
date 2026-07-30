@@ -38,7 +38,13 @@ supersession constraints. Существующие synthetic weight rows пол�
 фиксированного synthetic `Person`, а прежний JSONB `provenance` переносится в
 private raw snapshot соответствующего `SourceReference`.
 
-Обе траектории проверяются integration tests: применение на чистой БД и upgrade
+Третья migration переименовывает общий enum в `source_channel` без изменения
+значений и добавляет `BodyMeasurementSession`, typed values, `PhysicalGoal`,
+immutable goal versions и criteria. Четвёртая усиливает ownership: composite
+foreign keys запрещают связать goal с current version другого goal или
+`Person`.
+
+Все траектории проверяются integration tests: применение на чистой БД и upgrade
 с исходной schema и существующим synthetic fact. Миграция не импортирует Google
 Sheets, не выполняет backfill рабочих данных и не меняет authority.
 
@@ -49,6 +55,8 @@ Sheets, не выполняет backfill рабочих данных и не м�
 
 - `apps/api/drizzle/20260728183725_real_vermin.sql`.
 - `apps/api/drizzle/20260730131840_person_identity_provenance_corrections.sql`.
+- `apps/api/drizzle/20260730185405_physical_state_goals.sql`.
+- `apps/api/drizzle/20260730191405_enforce_goal_ownership.sql`.
 - `apps/api/src/database/migrate.ts`.
 - Drizzle schema и integration test чистой БД.
 
@@ -70,5 +78,7 @@ Sheets, не выполняет backfill рабочих данных и не м�
 - [PostgreSQL с Drizzle](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md)
 - [Локальный запуск](../architecture/local-development.md)
 - [WeightMeasurement](../domain/weight-measurement.md)
+- [BodyMeasurementSession](../domain/body-measurement-session.md)
+- [PhysicalGoal](../domain/physical-goal.md)
 - [Временный deployment](../operations/temporary-vm-deployment.md)
 - [Rollback](../operations/temporary-vm-rollback.md)
