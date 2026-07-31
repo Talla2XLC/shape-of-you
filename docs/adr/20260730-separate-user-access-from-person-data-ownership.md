@@ -72,7 +72,10 @@ real fitness data. Временный synthetic person context допускае�
 
 ## Последствия
 
-- Все новые domain verticals проектируются как person-scoped.
+- Все facts, plans, observations, recommendations, targets, connections и
+  media metadata новых domain verticals проектируются как person-scoped.
+  Переиспользуемые reference definitions следуют отдельному ADR и не
+  копируются на каждого `Person`.
 - Existing `WeightMeasurement` должен получить `person_id` до real-data
   migration; migration synthetic данных не передаёт authority от Google Sheets.
 - Authorization становится отдельной application concern и не размазывается
@@ -101,3 +104,4 @@ real fitness data. Временный synthetic person context допускае�
 - [Provenance и identifiers](../wiki/data/provenance-and-identifiers.md)
 - [Отзываемые authentication sessions](20260729-store-revocable-auth-sessions-in-postgresql.md)
 - [План общих fact-контрактов](../../plans/2026/07/completed/2026-07-30-person-identity-provenance-and-corrections.md)
+- [Shared reference definitions и person-owned state](20260731-separate-shared-reference-definitions-from-person-owned-state.md)

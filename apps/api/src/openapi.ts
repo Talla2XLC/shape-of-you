@@ -3,16 +3,30 @@ import {
   BodyMeasurementSessionIdParamsSchema,
   BodyMeasurementSessionListSchema,
   BodyMeasurementSessionSchema,
+  BrandSchema,
+  CatalogIdParamsSchema,
+  CorrectMealSchema,
   CorrectBodyMeasurementSessionSchema,
   CreateBodyMeasurementSessionSchema,
+  CreateBrandSchema,
+  CreateBrandVersionSchema,
+  CreateFoodSchema,
+  CreateFoodVersionSchema,
+  CreateIngredientSchema,
+  CreateIngredientVersionSchema,
+  CreateMealSchema,
   CreatePhysicalGoalSchema,
   CreatePhysicalGoalVersionSchema,
   CorrectWeightMeasurementSchema,
   CreateWeightMeasurementSchema,
   ErrorResponseSchema,
+  FoodOverlaySchema,
+  FoodSchema,
   HealthResponseSchema,
+  IngredientSchema,
   ListBodyMeasurementSessionsQuerySchema,
   ListPhysicalGoalsQuerySchema,
+  ListMealsQuerySchema,
   ListWeightMeasurementsQuerySchema,
   PhysicalGoalHistorySchema,
   PhysicalGoalIdParamsSchema,
@@ -20,11 +34,18 @@ import {
   PhysicalGoalSchema,
   PhysicalGoalTransitionSchema,
   PhysicalGoalVersionParamsSchema,
+  DailyNutritionTotalsQuerySchema,
+  DailyNutritionTotalsSchema,
+  MealHistorySchema,
+  MealIdParamsSchema,
+  MealListSchema,
+  MealSchema,
   ReadinessResponseSchema,
   WeightMeasurementHistorySchema,
   WeightMeasurementIdParamsSchema,
   WeightMeasurementListSchema,
-  WeightMeasurementSchema
+  WeightMeasurementSchema,
+  UpsertFoodOverlaySchema
 } from "@shape-of-you/contracts";
 
 function schemaParameter(
@@ -377,6 +398,258 @@ function physicalGoalPaths(): Record<string, object> {
   };
 }
 
+function nutritionCatalogPaths(): Record<string, object> {
+  const idParameter = schemaParameter(
+    "id",
+    "path",
+    true,
+    CatalogIdParamsSchema.properties.id
+  );
+  const operation = (
+    summary: string,
+    requestSchema: object,
+    responseSchema: object
+  ) => ({
+    tags: ["nutrition-catalog"],
+    summary,
+    requestBody: {
+      required: true,
+      content: { "application/json": { schema: requestSchema } }
+    },
+    responses: {
+      "200": {
+        description: "Catalog entry updated",
+        content: { "application/json": { schema: responseSchema } }
+      },
+      "201": {
+        description: "Catalog entry created",
+        content: { "application/json": { schema: responseSchema } }
+      }
+    }
+  });
+  const read = (summary: string, responseSchema: object) => ({
+    tags: ["nutrition-catalog"],
+    summary,
+    parameters: [idParameter],
+    responses: {
+      "200": {
+        description: "Accessible catalog entry",
+        content: { "application/json": { schema: responseSchema } }
+      },
+      "404": {
+        description: "Catalog entry is absent or inaccessible",
+        content: { "application/json": { schema: ErrorResponseSchema } }
+      }
+    }
+  });
+  return {
+    "/v1/nutrition/catalog/brands": {
+      post: operation("Create Brand", CreateBrandSchema, BrandSchema)
+    },
+    "/v1/nutrition/catalog/brands/{id}": {
+      get: read("Read Brand", BrandSchema)
+    },
+    "/v1/nutrition/catalog/brands/{id}/versions": {
+      post: {
+        ...operation(
+          "Append immutable Brand version",
+          CreateBrandVersionSchema,
+          BrandSchema
+        ),
+        parameters: [idParameter]
+      }
+    },
+    "/v1/nutrition/catalog/ingredients": {
+      post: operation(
+        "Create Ingredient",
+        CreateIngredientSchema,
+        IngredientSchema
+      )
+    },
+    "/v1/nutrition/catalog/ingredients/{id}": {
+      get: read("Read Ingredient", IngredientSchema)
+    },
+    "/v1/nutrition/catalog/ingredients/{id}/versions": {
+      post: {
+        ...operation(
+          "Append immutable Ingredient version",
+          CreateIngredientVersionSchema,
+          IngredientSchema
+        ),
+        parameters: [idParameter]
+      }
+    },
+    "/v1/nutrition/catalog/foods": {
+      post: operation("Create Food", CreateFoodSchema, FoodSchema)
+    },
+    "/v1/nutrition/catalog/foods/{id}": {
+      get: read("Read Food", FoodSchema)
+    },
+    "/v1/nutrition/catalog/foods/{id}/versions": {
+      post: {
+        ...operation(
+          "Append immutable Food version",
+          CreateFoodVersionSchema,
+          FoodSchema
+        ),
+        parameters: [idParameter]
+      }
+    },
+    "/v1/nutrition/catalog/foods/{id}/overlay": {
+      put: {
+        ...operation(
+          "Replace Person-owned Food preferences",
+          UpsertFoodOverlaySchema,
+          FoodOverlaySchema
+        ),
+        parameters: [idParameter]
+      }
+    }
+  };
+}
+
+function mealPaths(): Record<string, object> {
+  const mealIdParameter = schemaParameter(
+    "id",
+    "path",
+    true,
+    MealIdParamsSchema.properties.id
+  );
+  return {
+    "/v1/nutrition/meals": {
+      post: {
+        tags: ["nutrition-meals"],
+        summary: "Create an immutable Meal snapshot",
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: CreateMealSchema }
+          }
+        },
+        responses: {
+          "200": {
+            description: "Existing Meal for the dedupe key",
+            content: { "application/json": { schema: MealSchema } }
+          },
+          "201": {
+            description: "Meal created",
+            content: { "application/json": { schema: MealSchema } }
+          }
+        }
+      },
+      get: {
+        tags: ["nutrition-meals"],
+        summary: "List current Meal snapshots",
+        parameters: [
+          schemaParameter(
+            "limit",
+            "query",
+            false,
+            ListMealsQuerySchema.properties.limit
+          ),
+          schemaParameter(
+            "cursor",
+            "query",
+            false,
+            ListMealsQuerySchema.properties.cursor
+          ),
+          schemaParameter(
+            "localDate",
+            "query",
+            false,
+            ListMealsQuerySchema.properties.localDate
+          )
+        ],
+        responses: {
+          "200": {
+            description: "Current Meal page",
+            content: { "application/json": { schema: MealListSchema } }
+          }
+        }
+      }
+    },
+    "/v1/nutrition/meals/{id}": {
+      get: {
+        tags: ["nutrition-meals"],
+        summary: "Read one Meal snapshot",
+        parameters: [mealIdParameter],
+        responses: {
+          "200": {
+            description: "Meal found",
+            content: { "application/json": { schema: MealSchema } }
+          },
+          "404": {
+            description: "Meal not found",
+            content: { "application/json": { schema: ErrorResponseSchema } }
+          }
+        }
+      }
+    },
+    "/v1/nutrition/meals/{id}/corrections": {
+      post: {
+        tags: ["nutrition-meals"],
+        summary: "Append a full Meal correction",
+        parameters: [mealIdParameter],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: CorrectMealSchema }
+          }
+        },
+        responses: {
+          "200": {
+            description: "Existing idempotent correction",
+            content: { "application/json": { schema: MealSchema } }
+          },
+          "201": {
+            description: "Correction appended",
+            content: { "application/json": { schema: MealSchema } }
+          }
+        }
+      }
+    },
+    "/v1/nutrition/meals/{id}/history": {
+      get: {
+        tags: ["nutrition-meals"],
+        summary: "Read the complete Meal correction chain",
+        parameters: [mealIdParameter],
+        responses: {
+          "200": {
+            description: "Original-to-current Meal chain",
+            content: {
+              "application/json": { schema: MealHistorySchema }
+            }
+          }
+        }
+      }
+    },
+    "/v1/nutrition/daily-totals": {
+      get: {
+        tags: ["nutrition-meals"],
+        summary: "Calculate current daily nutrition totals",
+        parameters: [
+          schemaParameter(
+            "localDate",
+            "query",
+            true,
+            DailyNutritionTotalsQuerySchema.properties.localDate
+          )
+        ],
+        responses: {
+          "200": {
+            description: "Daily totals",
+            content: {
+              "application/json": {
+                schema: DailyNutritionTotalsSchema
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
 /**
  * Builds the public OpenAPI document from the shared runtime schemas.
  *
@@ -602,7 +875,9 @@ export function createOpenApiDocument(): object {
         }
       },
       ...bodyMeasurementPaths(),
-      ...physicalGoalPaths()
+      ...physicalGoalPaths(),
+      ...nutritionCatalogPaths(),
+      ...mealPaths()
     }
   };
 }

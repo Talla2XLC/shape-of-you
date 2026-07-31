@@ -21,6 +21,9 @@ import type {
   PhysicalGoalStore
 } from "../src/storage/physical-goal-repository.js";
 import type {
+  NutritionStore
+} from "../src/storage/nutrition-repository.js";
+import type {
   CreateWeightMeasurementResult,
   WeightMeasurementStore
 } from "../src/storage/weight-measurement-repository.js";
@@ -161,9 +164,29 @@ const physicalGoalStore: PhysicalGoalStore = {
   list: unreachable
 };
 
+const nutritionStore: NutritionStore = {
+  createBrand: unreachable,
+  appendBrandVersion: unreachable,
+  findBrand: unreachable,
+  createIngredient: unreachable,
+  appendIngredientVersion: unreachable,
+  findIngredient: unreachable,
+  createFood: unreachable,
+  appendFoodVersion: unreachable,
+  findFood: unreachable,
+  upsertFoodOverlay: unreachable,
+  createMeal: unreachable,
+  correctMeal: unreachable,
+  findMeal: unreachable,
+  listMeals: unreachable,
+  mealHistory: unreachable,
+  dailyTotals: unreachable
+};
+
 const physicalStateStores = {
   bodyMeasurementSessionStore,
-  physicalGoalStore
+  physicalGoalStore,
+  nutritionStore
 };
 
 describe("API bootstrap", () => {
@@ -199,6 +222,10 @@ describe("API bootstrap", () => {
       "/v1/body-measurement-sessions"
     );
     expect(openapi.json().paths).toHaveProperty("/v1/physical-goals");
+    expect(openapi.json().paths).toHaveProperty(
+      "/v1/nutrition/catalog/foods"
+    );
+    expect(openapi.json().paths).toHaveProperty("/v1/nutrition/meals");
 
     await app.close();
   });

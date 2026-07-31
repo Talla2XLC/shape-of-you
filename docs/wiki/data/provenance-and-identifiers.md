@@ -38,6 +38,13 @@ Idempotency key ограничивается как минимум `person_id` �
 Глобальный `dedupe_key` существующего первого vertical является временным
 техническим долгом.
 
+Общие catalog definitions не являются person-owned facts. Для них используется
+отдельная source identity: provider/source key, external record id, fetched
+timestamp, checksum, parser version и review state. Один source record может
+быть сопоставлен с canonical revision, но похожее имя не является достаточным
+основанием для merge. Person-owned meals используют обычный typed fact
+provenance и могут ссылаться на точную catalog revision.
+
 ## Основания
 
 Заголовки из Foods, Ingredients, Brands, Food_Ingredients, Training, Body, NL_Engine, AI_Inbox, Self_Healing, AI_Timeline, AI_Insights, Load_Risk, Weight_Autopilot и Coach_Planner.
@@ -50,6 +57,8 @@ Idempotency key ограничивается как минимум `person_id` �
 - Использовать `Person` как владельца facts и append-only supersession для
   corrections.
 - Не создавать универсальную таблицу `facts` или polymorphic revision store.
+- Не переиспользовать person-scoped `SourceReference` как identity общей
+  catalog record.
 
 ## Открытые вопросы
 
@@ -66,3 +75,4 @@ Idempotency key ограничивается как минимум `person_id` �
 - [Кандидаты в агрегаты](../domain/candidate-aggregates.md)
 - [User, Person и права доступа](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
+- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)

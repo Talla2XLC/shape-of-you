@@ -47,6 +47,25 @@ person-scoped. Переданный клиентом `person_id` сам по с�
 До реализации authentication разрешён только явно настроенный synthetic
 staging/test context без real data.
 
+Переиспользуемые reference definitions не являются fitness facts только из-за
+того, что на них ссылается персональный факт. Общие brands, ingredients,
+foods, exercises, provider/device models и product policy definitions
+версионируются без копирования на каждого `Person`. Person-owned overlays
+содержат только персональные aliases, preferences, availability, visibility и
+ссылки на доступные shared versions. Private custom items имеют явного
+владельца и не публикуются автоматически.
+
+Facts, observations, plans, targets, connections, consents, recommendations и
+decisions остаются person-scoped и при необходимости закрепляются за точной
+shared version и собственным immutable snapshot. В Nutrition `Meal` сохраняет
+nutrient snapshot; в Training program и performed work не становятся частью
+`ExerciseCatalog`; в Recovery provider model не владеет наблюдениями человека.
+
+Provenance общей catalog record отделён от person-scoped `SourceReference`
+fitness-факта. Внешние catalog records имеют source-specific identity,
+checksum, parser version и review lifecycle; импорт не предоставляет доступ к
+персональным данным.
+
 Binary media принадлежат соответствующим domain records, но физически
 размещаются в private S3-compatible object storage. PostgreSQL хранит media
 identity, ownership, lifecycle и object metadata. Знание object key не даёт
@@ -73,6 +92,8 @@ identity, ownership, lifecycle и object metadata. Знание object key не 
 - Логическое владение важнее физического разделения PostgreSQL.
 - `User` отвечает за authentication, `Person` — за domain ownership.
 - Multi-access выражается явными grants, а не копированием fitness-данных.
+- Shared reference data, personal overlays и person-owned facts имеют разные
+  ownership и lifecycle; универсальная person-scoped модель для них запрещена.
 
 ## Открытые вопросы
 
@@ -93,3 +114,5 @@ identity, ownership, lifecycle и object metadata. Знание object key не 
 - `../../adr/20260729-use-s3-compatible-object-storage-for-media.md`
 - `../../adr/20260730-separate-user-access-from-person-data-ownership.md`
 - `../../adr/20260730-use-typed-provenance-and-append-only-supersession.md`
+- `../../adr/20260731-use-layered-versioned-nutrition-catalog.md`
+- `../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md`

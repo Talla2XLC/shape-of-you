@@ -69,7 +69,7 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 | Область | Наблюдаемый источник | Реализовано | Основной gap до завершения DEV-023 |
 | --- | --- | --- | --- |
 | Physical State and Goals | `Weight`, `Body`, goals, часть `Daily_Log` | Только `WeightMeasurement` create/read/list, provenance и dedupe | Body measurements, goals, correction/supersession, разрешение двойного пути `Weight`/`Daily_Log`, история и projections |
-| Nutrition | `Foods`, `Ingredients`, `Brands`, `Food_Ingredients`, `Meals` | Нет | Catalog identity, состав продуктов, meal/intake facts, nutrition snapshots, дневные итоги и правила изменения catalog |
+| Nutrition | `Foods`, `Ingredients`, `Brands`, `Food_Ingredients`, `Meals` | Shared/private versioned catalog, overlays, staged source records, immutable Meal snapshots/corrections и daily totals | Real-data import/cutover, external source selection и moderation/write authorization |
 | Training and Performance | `Training`, `Program`, `Personal Records` | Нет | Authoritative exercise identity, versioned program prescriptions, sessions, sets, completed work, derived PR и progression policies |
 | Recovery and Readiness | wearable/recovery evidence, `Load_Risk` inputs | Нет | Observation contract, provenance устройств, timezone, readiness policy, многодневное окно и safety gates |
 | Coaching and Decision Support | `AI_Insights`, `Load_Risk`, `Weight_Autopilot`, `Coach_Planner` | Нет | Versioned policies, evidence references, recommendation lifecycle, acceptance/rejection и запрет превращать recommendations в выполненные facts |
@@ -88,11 +88,18 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 2. Общую модель provenance, source reference, correction и supersession —
    утверждено ADR от 2026-07-30.
 3. Семантику локального дня, `DayClosure`/`JournalDay` и correction closed day.
-4. Identity упражнений и versioning тренировочной программы.
-5. Identity catalog питания и обязательность nutrition snapshot.
-6. Observation contract, timezone и privacy/retention для device evidence.
+4. Shared identity упражнений и person-owned training state — ownership
+   утверждён ADR от 2026-07-31; exact schema и versioning программы остаются
+   решением Training vertical.
+5. Identity catalog питания и обязательность nutrition snapshot —
+   утверждено ADR от 2026-07-31.
+6. Shared provider/device definitions и person-owned connections, consents и
+   observations — ownership утверждён ADR от 2026-07-31; exact observation,
+   timezone и privacy/retention contract остаются решением Recovery vertical.
 7. Lifecycle recommendation: proposed, accepted, rejected и executed.
-8. Versioning business policies, thresholds и effective dates.
+8. Shared policy definitions/versions и person-owned targets/overrides —
+   ownership утверждён ADR от 2026-07-31; exact thresholds и effective dates
+   остаются решением соответствующей vertical.
 9. Conflict policy для конкурирующих source channels.
 
 Решения с высокой стоимостью изменения фиксируются отдельными ADR. Один лист
@@ -224,9 +231,14 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 
 ### 4. Nutrition
 
-- Реализовать catalog entities и их identity.
-- Реализовать meal/intake facts и immutable nutrition snapshots.
-- Реализовать дневные nutrition projections.
+- Реализован shared versioned catalog, person overlays и private items без
+  копирования canonical content на каждого `Person`.
+- Реализованы staged source-neutral external catalog records без конкретного
+  network connector.
+- Реализованы meal/intake facts, immutable nutrition snapshots и дневные
+  query projections.
+- Выполнен отдельный план
+  `completed/2026-07-31-nutrition-catalog-meals-and-projections.md`.
 
 ### 5. Training and Performance
 

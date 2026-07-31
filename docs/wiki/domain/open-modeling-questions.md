@@ -26,11 +26,15 @@ tags:
 ### Недостаток свидетельств
 
 - Privacy, retention и deletion body photo и notes до real-data import.
-- Authoritative exercise catalog и identifiers упражнений.
+- Exact schema, external mappings и moderation lifecycle shared
+  `ExerciseCatalog`.
 - Нормализация timezone для timestamps устройств и пользовательского ввода.
-- Поведение catalog snapshot при изменении состава продукта.
 - Conflict policy для независимых будущих channels за пределами подтверждённого
   зеркала `Weight`/`Daily_Log.Weight`.
+- Выбор внешних Nutrition catalog sources, их license/attribution, quality,
+  rate limits и moderation policy.
+- Actor roles и write authorization shared Nutrition catalog до multi-user
+  runtime; текущий synthetic context не является production moderation model.
 
 После разрешения вопросы удаляются или переформулируются здесь. Архитектурные решения с существенной стоимостью изменения фиксируются в ADR.
 
@@ -46,6 +50,12 @@ Identity владельца и correction semantics разрешены ADR: fitn
 сфокусироваться на Day lifecycle, versioning программы, privacy и policy
 boundaries. Cardinality physical measurements, body session aggregate,
 versioned physical goals и authority зеркала веса разрешены отдельным ADR.
+Shared Nutrition catalog, person overlays, private items, immutable meal
+snapshots и external ingestion boundary также разрешены отдельным ADR.
+Cross-context ownership shared reference definitions, person overlays,
+person-owned state и external source records разрешён отдельным ADR; exact
+schemas Training, Recovery и Coaching остаются решениями соответствующих
+verticals.
 
 ## Открытые вопросы
 
@@ -60,3 +70,5 @@ versioned physical goals и authority зеркала веса разрешены
 - [User, Person и права доступа](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
 - [Сеансы замеров тела и физические цели](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md)
+- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
+- [Shared reference definitions и person-owned state](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)

@@ -8,13 +8,16 @@ import { SystemModule } from "../system/system.module.js";
 import type { WeightMeasurementStore } from "../storage/weight-measurement-repository.js";
 import type { BodyMeasurementSessionStore } from "../storage/body-measurement-session-repository.js";
 import type { PhysicalGoalStore } from "../storage/physical-goal-repository.js";
+import type { NutritionStore } from "../storage/nutrition-repository.js";
 import { BodyMeasurementSessionModule } from "../body-measurement-sessions/body-measurement-session.module.js";
 import { PhysicalGoalModule } from "../physical-goals/physical-goal.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
+import { NutritionModule } from "../nutrition/nutrition.module.js";
 import {
   PERSON_CONTEXT,
   BODY_MEASUREMENT_SESSION_STORE,
   PHYSICAL_GOAL_STORE,
+  NUTRITION_STORE,
   READINESS_PROBE,
   WEIGHT_MEASUREMENT_STORE
 } from "./tokens.js";
@@ -29,6 +32,8 @@ export interface AppModuleOptions {
   readonly bodyMeasurementSessionStore: BodyMeasurementSessionStore;
   /** Persistence boundary used by the PhysicalGoal module. */
   readonly physicalGoalStore: PhysicalGoalStore;
+  /** Persistence boundary used by the Nutrition module. */
+  readonly nutritionStore: NutritionStore;
   /** Probe that resolves only when required dependencies are ready. */
   readonly readinessProbe: ReadinessProbe;
   /** Database context available to the application, when configured. */
@@ -61,6 +66,10 @@ class RuntimeDependenciesModule {
           useValue: options.physicalGoalStore
         },
         {
+          provide: NUTRITION_STORE,
+          useValue: options.nutritionStore
+        },
+        {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
@@ -76,6 +85,7 @@ class RuntimeDependenciesModule {
         PERSON_CONTEXT,
         BODY_MEASUREMENT_SESSION_STORE,
         PHYSICAL_GOAL_STORE,
+        NUTRITION_STORE,
         WEIGHT_MEASUREMENT_STORE,
         READINESS_PROBE,
         DatabaseLifecycle
@@ -101,7 +111,8 @@ export class AppModule {
         SystemModule,
         WeightMeasurementModule,
         BodyMeasurementSessionModule,
-        PhysicalGoalModule
+        PhysicalGoalModule,
+        NutritionModule
       ]
     };
   }

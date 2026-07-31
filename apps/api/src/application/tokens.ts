@@ -14,3 +14,6 @@ export const BODY_MEASUREMENT_SESSION_STORE = Symbol(
 
 /** Injection token for the PhysicalGoal persistence boundary. */
 export const PHYSICAL_GOAL_STORE = Symbol("PHYSICAL_GOAL_STORE");
+
+/** Injection token for the Nutrition catalog and Meal persistence boundary. */
+export const NUTRITION_STORE = Symbol("NUTRITION_STORE");

@@ -20,7 +20,7 @@ Draft-карта от механизмов таблицы к доменным п
 | Область таблицы | Доменная интерпретация | Форма authority |
 | --- | --- | --- |
 | Weight, Body, goals | Physical State and Goals | Независимые измерения и факты целей |
-| Foods, Ingredients, Meals | Nutrition | Catalog references, факты intake и snapshots |
+| Foods, Ingredients, Brands, Food_Ingredients, Meals | Nutrition | Общий версионируемый catalog, person-owned overlays, факты intake и immutable snapshots |
 | Training, Program, Personal Records | Training and Performance | Версионируемые prescriptions, sessions, выполненная работа и derived records |
 | Wearable и recovery evidence | Recovery and Readiness | Observations и readiness assessments с сохранением provenance |
 | AI Insights, Load Risk, Weight Autopilot, Coach Planner | Coaching and Decision Support | Рекомендации и решения со ссылками на свидетельства |
@@ -36,11 +36,18 @@ Intake, reconciliation, timeline и self-healing — вспомогательн�
 
 Использовать пять сохранённых draft bounded contexts внутри первоначально modular backend, а также явные adapters и read models. Governance остаётся вне runtime domain. Это логическая модель, а не решение о service topology.
 
+Nutrition catalog является общим reference knowledge, а не копией на каждого
+`Person` и не adapter cache одного provider. External source records проходят
+staging и explicit matching, после чего могут создавать новую canonical
+revision. Person-owned `Meal` ссылается на точную catalog version и сохраняет
+собственный nutrient snapshot.
+
 ## Открытые вопросы
 
 - Какой точный lifecycle и invariants обосновывают узкий кандидат `DayClosure` или `JournalDay`?
 - Должен ли GoalProfile принадлежать Coaching или отдельному модулю Profile?
-- Является ли FoodCatalog собственностью продукта или adapter cache внешних nutrition data?
+- Какие конкретные внешние nutrition sources допустимы по качеству, license,
+  attribution и rate limits?
 - Требуют ли health-device observations отдельной границы Health Data из-за privacy и consent?
 
 ## Связанные материалы
@@ -48,3 +55,4 @@ Intake, reconciliation, timeline и self-healing — вспомогательн�
 - [Кандидаты в агрегаты](candidate-aggregates.md)
 - [Invariants](invariants.md)
 - [Source of truth и authority](../data/source-of-truth-and-authority.md)
+- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)

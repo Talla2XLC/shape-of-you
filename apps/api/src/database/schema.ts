@@ -77,6 +77,27 @@ export const physicalGoalUnit = pgEnum("physical_goal_unit", [
   "percent",
   "cm"
 ]);
+export const catalogVisibility = pgEnum("catalog_visibility", [
+  "shared",
+  "private"
+]);
+export const nutritionUnit = pgEnum("nutrition_unit", [
+  "g",
+  "ml",
+  "serving",
+  "piece"
+]);
+export const catalogSourceRecordStatus = pgEnum(
+  "catalog_source_record_status",
+  ["staged", "matched", "rejected"]
+);
+export const mealKind = pgEnum("meal_kind", [
+  "breakfast",
+  "lunch",
+  "dinner",
+  "snack",
+  "other"
+]);
 
 function physicalGoalVersionOwnershipColumns(): [
   AnyPgColumn,
@@ -88,6 +109,30 @@ function physicalGoalVersionOwnershipColumns(): [
     physicalGoalVersions.goalId,
     physicalGoalVersions.personId
   ];
+}
+
+function nutritionBrandVersionOwnershipColumns(): [
+  AnyPgColumn,
+  AnyPgColumn
+] {
+  return [nutritionBrandVersions.id, nutritionBrandVersions.brandId];
+}
+
+function nutritionIngredientVersionOwnershipColumns(): [
+  AnyPgColumn,
+  AnyPgColumn
+] {
+  return [
+    nutritionIngredientVersions.id,
+    nutritionIngredientVersions.ingredientId
+  ];
+}
+
+function nutritionFoodVersionOwnershipColumns(): [
+  AnyPgColumn,
+  AnyPgColumn
+] {
+  return [nutritionFoodVersions.id, nutritionFoodVersions.foodId];
 }
 
 export const persons = pgTable("persons", {
@@ -495,6 +540,531 @@ export const physicalGoalCriteria = pgTable(
   ]
 );
 
+export const nutritionCatalogSources = pgTable(
+  "nutrition_catalog_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    key: varchar("key", { length: 128 }).notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    licenseName: varchar("license_name", { length: 256 }),
+    termsUrl: text("terms_url"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("nutrition_catalog_sources_key_uq").on(table.key)
+  ]
+);
+
+export const nutritionCatalogSourceRecords = pgTable(
+  "nutrition_catalog_source_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sourceId: uuid("source_id").notNull(),
+    externalRecordId: varchar("external_record_id", {
+      length: 512
+    }).notNull(),
+    fetchedAt: timestamp("fetched_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
+    checksum: varchar("checksum", { length: 128 }).notNull(),
+    parserVersion: varchar("parser_version", { length: 128 }).notNull(),
+    status: catalogSourceRecordStatus("status").default("staged").notNull(),
+    rawSnapshot: jsonb("raw_snapshot").$type<unknown>(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_source_record_source_fk",
+      columns: [table.sourceId],
+      foreignColumns: [nutritionCatalogSources.id]
+    }),
+    unique("nutrition_source_records_source_external_uq").on(
+      table.sourceId,
+      table.externalRecordId
+    )
+  ]
+);
+
+export const nutritionBrands = pgTable(
+  "nutrition_brands",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    visibility: catalogVisibility("visibility").notNull(),
+    ownerPersonId: uuid("owner_person_id"),
+    currentVersionId: uuid("current_version_id"),
+    lockVersion: integer("lock_version").default(0).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_brand_owner_fk",
+      columns: [table.ownerPersonId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "nutrition_brand_current_version_fk",
+      columns: [table.currentVersionId, table.id],
+      foreignColumns: nutritionBrandVersionOwnershipColumns()
+    }),
+    check(
+      "nutrition_brands_visibility_owner",
+      sql`(${table.visibility} = 'shared' AND ${table.ownerPersonId} IS NULL)
+          OR (${table.visibility} = 'private' AND ${table.ownerPersonId} IS NOT NULL)`
+    )
+  ]
+);
+
+export const nutritionBrandVersions = pgTable(
+  "nutrition_brand_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    brandId: uuid("brand_id").notNull(),
+    version: integer("version").notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    type: varchar("type", { length: 256 }),
+    note: text("note"),
+    sourceRecordId: uuid("source_record_id"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_brand_version_brand_fk",
+      columns: [table.brandId],
+      foreignColumns: [nutritionBrands.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "nutrition_brand_version_source_fk",
+      columns: [table.sourceRecordId],
+      foreignColumns: [nutritionCatalogSourceRecords.id]
+    }),
+    unique("nutrition_brand_versions_brand_version_uq").on(
+      table.brandId,
+      table.version
+    ),
+    unique("nutrition_brand_versions_id_brand_uq").on(
+      table.id,
+      table.brandId
+    ),
+    check(
+      "nutrition_brand_versions_version_positive",
+      sql`${table.version} > 0`
+    )
+  ]
+);
+
+export const nutritionIngredients = pgTable(
+  "nutrition_ingredients",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    visibility: catalogVisibility("visibility").notNull(),
+    ownerPersonId: uuid("owner_person_id"),
+    currentVersionId: uuid("current_version_id"),
+    lockVersion: integer("lock_version").default(0).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_ingredient_owner_fk",
+      columns: [table.ownerPersonId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "nutrition_ingredient_current_version_fk",
+      columns: [table.currentVersionId, table.id],
+      foreignColumns: nutritionIngredientVersionOwnershipColumns()
+    }),
+    check(
+      "nutrition_ingredients_visibility_owner",
+      sql`(${table.visibility} = 'shared' AND ${table.ownerPersonId} IS NULL)
+          OR (${table.visibility} = 'private' AND ${table.ownerPersonId} IS NOT NULL)`
+    )
+  ]
+);
+
+export const nutritionIngredientVersions = pgTable(
+  "nutrition_ingredient_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ingredientId: uuid("ingredient_id").notNull(),
+    version: integer("version").notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    category: varchar("category", { length: 256 }),
+    referenceQuantity: numeric("reference_quantity", {
+      precision: 12,
+      scale: 3
+    }).notNull(),
+    referenceUnit: nutritionUnit("reference_unit").notNull(),
+    caloriesKcal: numeric("calories_kcal", {
+      precision: 12,
+      scale: 3
+    }).notNull(),
+    proteinG: numeric("protein_g", { precision: 12, scale: 3 }).notNull(),
+    fatG: numeric("fat_g", { precision: 12, scale: 3 }).notNull(),
+    carbsG: numeric("carbs_g", { precision: 12, scale: 3 }).notNull(),
+    sourceRecordId: uuid("source_record_id"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_ingredient_version_item_fk",
+      columns: [table.ingredientId],
+      foreignColumns: [nutritionIngredients.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "nutrition_ingredient_version_source_fk",
+      columns: [table.sourceRecordId],
+      foreignColumns: [nutritionCatalogSourceRecords.id]
+    }),
+    unique("nutrition_ingredient_versions_item_version_uq").on(
+      table.ingredientId,
+      table.version
+    ),
+    unique("nutrition_ingredient_versions_id_item_uq").on(
+      table.id,
+      table.ingredientId
+    ),
+    check(
+      "nutrition_ingredient_versions_positive_values",
+      sql`${table.version} > 0
+          AND ${table.referenceQuantity} > 0
+          AND ${table.caloriesKcal} >= 0
+          AND ${table.proteinG} >= 0
+          AND ${table.fatG} >= 0
+          AND ${table.carbsG} >= 0`
+    )
+  ]
+);
+
+export const nutritionFoods = pgTable(
+  "nutrition_foods",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    visibility: catalogVisibility("visibility").notNull(),
+    ownerPersonId: uuid("owner_person_id"),
+    currentVersionId: uuid("current_version_id"),
+    lockVersion: integer("lock_version").default(0).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_food_owner_fk",
+      columns: [table.ownerPersonId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "nutrition_food_current_version_fk",
+      columns: [table.currentVersionId, table.id],
+      foreignColumns: nutritionFoodVersionOwnershipColumns()
+    }),
+    check(
+      "nutrition_foods_visibility_owner",
+      sql`(${table.visibility} = 'shared' AND ${table.ownerPersonId} IS NULL)
+          OR (${table.visibility} = 'private' AND ${table.ownerPersonId} IS NOT NULL)`
+    )
+  ]
+);
+
+export const nutritionFoodVersions = pgTable(
+  "nutrition_food_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    foodId: uuid("food_id").notNull(),
+    version: integer("version").notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    type: varchar("type", { length: 256 }),
+    category: varchar("category", { length: 256 }),
+    referenceQuantity: numeric("reference_quantity", {
+      precision: 12,
+      scale: 3
+    }).notNull(),
+    referenceUnit: nutritionUnit("reference_unit").notNull(),
+    caloriesKcal: numeric("calories_kcal", {
+      precision: 12,
+      scale: 3
+    }).notNull(),
+    proteinG: numeric("protein_g", { precision: 12, scale: 3 }).notNull(),
+    fatG: numeric("fat_g", { precision: 12, scale: 3 }).notNull(),
+    carbsG: numeric("carbs_g", { precision: 12, scale: 3 }).notNull(),
+    brandVersionId: uuid("brand_version_id"),
+    sourceRecordId: uuid("source_record_id"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_food_version_food_fk",
+      columns: [table.foodId],
+      foreignColumns: [nutritionFoods.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "nutrition_food_version_brand_fk",
+      columns: [table.brandVersionId],
+      foreignColumns: [nutritionBrandVersions.id]
+    }),
+    foreignKey({
+      name: "nutrition_food_version_source_fk",
+      columns: [table.sourceRecordId],
+      foreignColumns: [nutritionCatalogSourceRecords.id]
+    }),
+    unique("nutrition_food_versions_food_version_uq").on(
+      table.foodId,
+      table.version
+    ),
+    unique("nutrition_food_versions_id_food_uq").on(
+      table.id,
+      table.foodId
+    ),
+    check(
+      "nutrition_food_versions_positive_values",
+      sql`${table.version} > 0
+          AND ${table.referenceQuantity} > 0
+          AND ${table.caloriesKcal} >= 0
+          AND ${table.proteinG} >= 0
+          AND ${table.fatG} >= 0
+          AND ${table.carbsG} >= 0`
+    )
+  ]
+);
+
+export const nutritionFoodVersionIngredients = pgTable(
+  "nutrition_food_version_ingredients",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    foodVersionId: uuid("food_version_id").notNull(),
+    position: smallint("position").notNull(),
+    ingredientVersionId: uuid("ingredient_version_id").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    unit: nutritionUnit("unit").notNull(),
+    preparation: varchar("preparation", { length: 256 }),
+    required: boolean("required").default(true).notNull(),
+    note: text("note"),
+    confidence: numeric("confidence", { precision: 4, scale: 3 })
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_food_composition_food_fk",
+      columns: [table.foodVersionId],
+      foreignColumns: [nutritionFoodVersions.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "nutrition_food_composition_ingredient_fk",
+      columns: [table.ingredientVersionId],
+      foreignColumns: [nutritionIngredientVersions.id]
+    }),
+    unique("nutrition_food_composition_position_uq").on(
+      table.foodVersionId,
+      table.position
+    ),
+    unique("nutrition_food_composition_ingredient_uq").on(
+      table.foodVersionId,
+      table.ingredientVersionId
+    ),
+    check(
+      "nutrition_food_composition_values",
+      sql`${table.position} > 0
+          AND ${table.quantity} > 0
+          AND (${table.confidence} IS NULL
+               OR (${table.confidence} >= 0 AND ${table.confidence} <= 1))`
+    )
+  ]
+);
+
+export const nutritionFoodOverlays = pgTable(
+  "nutrition_food_overlays",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    foodId: uuid("food_id").notNull(),
+    alias: varchar("alias", { length: 256 }),
+    favorite: boolean("favorite").default(false).notNull(),
+    hidden: boolean("hidden").default(false).notNull(),
+    preferredQuantity: numeric("preferred_quantity", {
+      precision: 12,
+      scale: 3
+    }),
+    preferredUnit: nutritionUnit("preferred_unit"),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_food_overlay_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "nutrition_food_overlay_food_fk",
+      columns: [table.foodId],
+      foreignColumns: [nutritionFoods.id]
+    }),
+    unique("nutrition_food_overlays_person_food_uq").on(
+      table.personId,
+      table.foodId
+    ),
+    check(
+      "nutrition_food_overlays_preferred_shape",
+      sql`(${table.preferredQuantity} IS NULL AND ${table.preferredUnit} IS NULL)
+          OR (${table.preferredQuantity} > 0 AND ${table.preferredUnit} IS NOT NULL)`
+    )
+  ]
+);
+
+export const meals = pgTable(
+  "meals",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id),
+    occurredAt: timestamp("occurred_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    kind: mealKind("kind").notNull(),
+    description: text("description"),
+    note: text("note"),
+    photoMediaId: uuid("photo_media_id"),
+    source: sourceChannel("source").notNull(),
+    sourceReferenceId: uuid("source_reference_id").notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    supersedesId: uuid("supersedes_id"),
+    correctionReason: varchar("correction_reason", { length: 512 }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("meals_id_person_uq").on(table.id, table.personId),
+    foreignKey({
+      name: "meals_supersedes_same_person_fk",
+      columns: [table.supersedesId, table.personId],
+      foreignColumns: [table.id, table.personId]
+    }),
+    foreignKey({
+      name: "meals_source_reference_same_person_fk",
+      columns: [table.sourceReferenceId, table.personId],
+      foreignColumns: [sourceReferences.id, sourceReferences.personId]
+    }),
+    uniqueIndex("meals_person_source_dedupe_uq").on(
+      table.personId,
+      table.source,
+      table.dedupeKey
+    ),
+    uniqueIndex("meals_supersedes_uq")
+      .on(table.supersedesId)
+      .where(sql`${table.supersedesId} IS NOT NULL`),
+    check(
+      "meals_confidence_range",
+      sql`${table.confidence} IS NULL
+          OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`
+    ),
+    check(
+      "meals_correction_shape",
+      sql`(${table.supersedesId} IS NULL AND ${table.correctionReason} IS NULL)
+          OR (${table.supersedesId} IS NOT NULL AND ${table.correctionReason} IS NOT NULL)`
+    ),
+    check(
+      "meals_no_self_supersession",
+      sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
+    )
+  ]
+);
+
+export const mealItems = pgTable(
+  "meal_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    mealId: uuid("meal_id").notNull(),
+    position: smallint("position").notNull(),
+    foodVersionId: uuid("food_version_id"),
+    label: varchar("label", { length: 256 }).notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
+    unit: nutritionUnit("unit").notNull(),
+    caloriesKcal: numeric("calories_kcal", {
+      precision: 12,
+      scale: 3
+    }).notNull(),
+    proteinG: numeric("protein_g", { precision: 12, scale: 3 }).notNull(),
+    fatG: numeric("fat_g", { precision: 12, scale: 3 }).notNull(),
+    carbsG: numeric("carbs_g", { precision: 12, scale: 3 }).notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "meal_item_meal_fk",
+      columns: [table.mealId],
+      foreignColumns: [meals.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "meal_item_food_version_fk",
+      columns: [table.foodVersionId],
+      foreignColumns: [nutritionFoodVersions.id]
+    }),
+    unique("meal_items_meal_position_uq").on(
+      table.mealId,
+      table.position
+    ),
+    check(
+      "meal_items_positive_values",
+      sql`${table.position} > 0
+          AND ${table.quantity} > 0
+          AND ${table.caloriesKcal} >= 0
+          AND ${table.proteinG} >= 0
+          AND ${table.fatG} >= 0
+          AND ${table.carbsG} >= 0`
+    )
+  ]
+);
+
 /** Persisted SourceReference row returned by Drizzle queries. */
 export type SourceReferenceRow = typeof sourceReferences.$inferSelect;
 /** Insertable SourceReference row accepted by Drizzle mutations. */
@@ -520,3 +1090,29 @@ export type PhysicalGoalVersionRow =
 /** Persisted typed criterion owned by a PhysicalGoal version. */
 export type PhysicalGoalCriterionRow =
   typeof physicalGoalCriteria.$inferSelect;
+/** Persisted shared or private Nutrition Brand identity. */
+export type NutritionBrandRow = typeof nutritionBrands.$inferSelect;
+/** Persisted immutable Nutrition Brand version. */
+export type NutritionBrandVersionRow =
+  typeof nutritionBrandVersions.$inferSelect;
+/** Persisted shared or private Nutrition Ingredient identity. */
+export type NutritionIngredientRow =
+  typeof nutritionIngredients.$inferSelect;
+/** Persisted immutable Nutrition Ingredient version. */
+export type NutritionIngredientVersionRow =
+  typeof nutritionIngredientVersions.$inferSelect;
+/** Persisted shared or private Nutrition Food identity. */
+export type NutritionFoodRow = typeof nutritionFoods.$inferSelect;
+/** Persisted immutable Nutrition Food version. */
+export type NutritionFoodVersionRow =
+  typeof nutritionFoodVersions.$inferSelect;
+/** Persisted immutable Food composition row. */
+export type NutritionFoodCompositionRow =
+  typeof nutritionFoodVersionIngredients.$inferSelect;
+/** Persisted Person-owned Food overlay. */
+export type NutritionFoodOverlayRow =
+  typeof nutritionFoodOverlays.$inferSelect;
+/** Persisted Person-owned Meal fact. */
+export type MealRow = typeof meals.$inferSelect;
+/** Persisted immutable Meal snapshot item. */
+export type MealItemRow = typeof mealItems.$inferSelect;

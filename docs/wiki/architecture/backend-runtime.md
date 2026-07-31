@@ -16,7 +16,8 @@ tags:
 Текущий реализованный runtime — один NestJS API в `apps/api`, использующий
 `FastifyAdapter`, PostgreSQL и Drizzle ORM. Он предоставляет system endpoints
 предметные вертикали `WeightMeasurement`, `BodyMeasurementSession` и
-`PhysicalGoal`, сохраняя один deployable modular backend.
+`PhysicalGoal`, а также Nutrition catalog и `Meal`, сохраняя один deployable
+modular backend.
 
 ## Содержание
 
@@ -49,11 +50,17 @@ current/history queries, versioned goals и optimistic lifecycle transitions.
 Transport validation не преобразует типы request body или response; безопасное
 coercion включено только для URL params и query strings.
 
+Модуль Nutrition предоставляет shared/private versioned catalog, Person-owned
+overlays, immutable Meal snapshots/corrections и query-only daily totals.
+Source-neutral catalog ingestion ограничен staged database records: network
+adapter, scheduler и отдельный deployable отсутствуют.
+
 ## Основания
 
 - Реализация в `apps/api/src/`.
 - Unit tests в `apps/api/test/app.unit.test.ts`.
 - Integration tests в `apps/api/test/weight-measurements.integration.test.ts`.
+- Integration tests в `apps/api/test/nutrition.integration.test.ts`.
 
 ## Решения
 
@@ -77,3 +84,5 @@ coercion включено только для URL params и query strings.
 - [API WeightMeasurement](../api/weight-measurements.md)
 - [API BodyMeasurementSession](../api/body-measurement-sessions.md)
 - [API PhysicalGoal](../api/physical-goals.md)
+- [API Nutrition catalog](../api/nutrition-catalog.md)
+- [API Meal](../api/meals.md)

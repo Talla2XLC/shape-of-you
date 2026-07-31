@@ -33,6 +33,10 @@ import {
   PhysicalGoalRepository,
   type PhysicalGoalStore
 } from "./storage/physical-goal-repository.js";
+import {
+  NutritionRepository,
+  type NutritionStore
+} from "./storage/nutrition-repository.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -48,6 +52,8 @@ export interface BuildAppOptions {
   readonly bodyMeasurementSessionStore?: BodyMeasurementSessionStore;
   /** Optional goal persistence used for isolated application tests. */
   readonly physicalGoalStore?: PhysicalGoalStore;
+  /** Optional Nutrition persistence used for isolated application tests. */
+  readonly nutritionStore?: NutritionStore;
   /** Optional Person resolution boundary, primarily for isolated tests. */
   readonly personContext?: PersonContext;
 }
@@ -97,9 +103,17 @@ export async function buildApp(
   const physicalGoalStore =
     options.physicalGoalStore ??
     (database ? new PhysicalGoalRepository(database) : undefined);
+  const nutritionStore =
+    options.nutritionStore ??
+    (database ? new NutritionRepository(database) : undefined);
 
-  if (!store || !bodyMeasurementSessionStore || !physicalGoalStore) {
-    throw new Error("All Physical State persistence stores are required");
+  if (
+    !store ||
+    !bodyMeasurementSessionStore ||
+    !physicalGoalStore ||
+    !nutritionStore
+  ) {
+    throw new Error("All application persistence stores are required");
   }
 
   const personContext =
@@ -133,6 +147,7 @@ export async function buildApp(
       store,
       bodyMeasurementSessionStore,
       physicalGoalStore,
+      nutritionStore,
       personContext,
       readinessProbe,
       database,

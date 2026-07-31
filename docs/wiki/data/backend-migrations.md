@@ -44,6 +44,13 @@ immutable goal versions и criteria. Четвёртая усиливает owner
 foreign keys запрещают связать goal с current version другого goal или
 `Person`.
 
+Пятая migration добавляет layered Nutrition catalog, immutable versions и
+composition, Person-owned food overlays, source-neutral staged catalog
+records, `Meal` snapshots и append-only corrections. Checks разделяют shared
+и private ownership, composite foreign keys фиксируют принадлежность current
+version своему root, а короткие explicit constraint names не превышают предел
+PostgreSQL identifier.
+
 Все траектории проверяются integration tests: применение на чистой БД и upgrade
 с исходной schema и существующим synthetic fact. Миграция не импортирует Google
 Sheets, не выполняет backfill рабочих данных и не меняет authority.
@@ -57,6 +64,7 @@ Sheets, не выполняет backfill рабочих данных и не м�
 - `apps/api/drizzle/20260730131840_person_identity_provenance_corrections.sql`.
 - `apps/api/drizzle/20260730185405_physical_state_goals.sql`.
 - `apps/api/drizzle/20260730191405_enforce_goal_ownership.sql`.
+- `apps/api/drizzle/20260731090108_rare_zarda.sql`.
 - `apps/api/src/database/migrate.ts`.
 - Drizzle schema и integration test чистой БД.
 
@@ -80,5 +88,7 @@ Sheets, не выполняет backfill рабочих данных и не м�
 - [WeightMeasurement](../domain/weight-measurement.md)
 - [BodyMeasurementSession](../domain/body-measurement-session.md)
 - [PhysicalGoal](../domain/physical-goal.md)
+- [Nutrition catalog](../domain/nutrition-catalog.md)
+- [Meal](../domain/meal.md)
 - [Временный deployment](../operations/temporary-vm-deployment.md)
 - [Rollback](../operations/temporary-vm-rollback.md)

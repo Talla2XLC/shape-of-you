@@ -31,6 +31,15 @@ Google Sheets остаётся authoritative source до прохождения 
 
 Authority назначается для каждого типа факта или артефакта. Лист, содержащий несколько типов, не становится автоматически авторитетным целиком.
 
+Для Nutrition canonical `Brand`, `Ingredient` и `FoodVersion` являются общими
+reference definitions внутри backend после будущего cutover, а персональный
+catalog хранит overlays и private items. До cutover Google Sheets остаётся
+operational authority для текущих catalog records и meals.
+
+`Meal` всегда фиксирует собственный typed nutrient snapshot. Изменение
+catalog food создаёт новую version и не пересчитывает исторический intake.
+Daily nutrition totals являются производной projection над current meals.
+
 ## Основания
 
 Наблюдаемый двойной путь веса в Weight и Daily_Log; агрегация Meals в Daily_Log; derivation из Training в Personal Records и Program; lifecycle source_text/event/queue/write в NL_Engine и AI_Inbox; контракт repair с read-back в Self_Healing.
@@ -46,7 +55,6 @@ cutover с Google Sheets не изменяется.
 
 ## Открытые вопросы
 
-- Должен ли meal сохранять nutrition snapshot, если его catalog food позднее изменится?
 - Может ли пользователь намеренно переопределять вычисленные дневные итоги и как представить такой override?
 - Становится ли рекомендация Program действующей только после явного принятия пользователем?
 - Какая conflict policy применяется к независимым будущим channels, например
@@ -58,3 +66,4 @@ cutover с Google Sheets не изменяется.
 - [ADR о cutover с Google Sheets](../../adr/20260728-keep-google-sheets-authoritative-until-verified-cutover.md)
 - [Целостность и lifecycle](integrity-and-lifecycle.md)
 - [Доменные invariants](../domain/invariants.md)
+- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)

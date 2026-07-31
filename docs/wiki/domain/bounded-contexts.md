@@ -55,6 +55,19 @@ Coaching потребляет опубликованные свидетельс�
   вес хранится отдельными `WeightMeasurement`, а одна строка `Body` становится
   aggregate `BodyMeasurementSession` с typed values. Physical goals являются
   versioned plans, а не measurements или policies.
+- В Nutrition переиспользуемые brands, ingredients и foods образуют общий
+  версионируемый catalog, а aliases, preferred servings и private recipes
+  остаются person-owned. `Meal` является person-owned immutable fact и
+  сохраняет nutrient snapshot, закреплённый за временем intake.
+- В Training определения exercises являются shared versioned reference data,
+  а programs, sessions, performed sets, personal records и progression
+  decisions принадлежат `Person`.
+- В Recovery provider/device model и capabilities являются shared reference
+  data, а connection, consent, device instance и observations принадлежат
+  `Person`.
+- В Coaching policy definitions и versions являются shared, а targets,
+  разрешённые overrides и decisions принадлежат `Person` и закрепляются за
+  точной policy version.
 - На этом этапе не объединять Physical State and Goals с Recovery and Readiness в контекст `Observations`.
 - Распределение по сервисам или базам данных не утверждено.
 
@@ -73,3 +86,5 @@ Coaching потребляет опубликованные свидетельс�
 - [Границы продукта](../product/scope.md)
 - [BodyMeasurementSession](body-measurement-session.md)
 - [PhysicalGoal](physical-goal.md)
+- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
+- [Shared reference definitions и person-owned state](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)

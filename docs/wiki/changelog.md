@@ -16,6 +16,21 @@ tags: []
 
 ## Содержание
 
+### 2026-07-31 — Nutrition catalog, Meal snapshots и daily totals
+
+- Реализован layered catalog: shared immutable brands, ingredients и foods,
+  private items и Person-owned food overlays без копирования canonical content.
+- `FoodVersion` фиксирует composition по точным Ingredient revisions; shared
+  version не может зависеть от private definition.
+- Реализованы immutable `Meal` snapshots, idempotent create, append-only
+  corrections, current/history reads и query-only daily totals.
+- Добавлена source-neutral staging schema для будущих external catalogs без
+  network adapter, scraper, scheduler или автоматического merge.
+- Clean и upgrade migrations проверены на PostgreSQL 17; пройдены 16 unit и
+  16 integration tests, typecheck, build, lint и canonical docs validation.
+- Реальные строки Google Sheets, production/staging database и внешние
+  источники не изменялись.
+
 ### 2026-07-30 — Physical State measurements and versioned goals
 
 - Реализован `BodyMeasurementSession` с typed values, person-scoped
