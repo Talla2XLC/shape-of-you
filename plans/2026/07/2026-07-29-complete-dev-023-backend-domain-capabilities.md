@@ -242,10 +242,11 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 
 ### 5. Training and Performance
 
-- Утвердить exercise catalog и identifiers.
-- Реализовать versioned program prescriptions.
-- Реализовать sessions, sets, completed work, personal records и progression
-  candidates.
+- Реализованы общий версионируемый справочник упражнений, персональные версии
+  программ, неизменяемые тренировочные сессии, вычисляемые личные рекорды и
+  кандидаты прогрессии.
+- Выполнен отдельный план
+  `completed/2026-07-31-training-and-performance.md`.
 
 ### 6. Recovery and Readiness
 

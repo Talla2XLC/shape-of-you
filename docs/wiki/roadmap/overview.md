@@ -23,8 +23,9 @@ tags:
    стабильный backend-контракт и извлечь доменную логику из Google Sheets без
    преждевременного переноса authority данных. Завершены backend bootstrap,
    person/access/provenance foundation и первая вертикаль `WeightMeasurement`
-   с corrections, Physical State/Goals и Nutrition catalog/Meals; Training,
-   Recovery, Coaching, Intake и общий day lifecycle ещё не реализованы.
+   с corrections, Physical State/Goals, Nutrition catalog/Meals и Training and
+   Performance; Recovery, Coaching, Intake и общий day lifecycle ещё не
+   реализованы.
 3. **DEV-024 — PostgreSQL migration and dual-run**: inventory, mapping, backfill, reconciliation, контролируемое сосуществование, критерии cutover и rollback.
 4. **DEV-025 — Web MVP**: выпустить первый web-клиент, использующий стабильный backend-контракт.
 5. **DEV-026 — Mobile client**: добавить мобильный доступ через тот же backend-контракт.

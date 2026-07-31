@@ -98,6 +98,11 @@ export const mealKind = pgEnum("meal_kind", [
   "snack",
   "other"
 ]);
+export const trainingLoadBasis = pgEnum("training_load_basis", [
+  "external_weight",
+  "body_weight",
+  "assisted"
+]);
 
 function physicalGoalVersionOwnershipColumns(): [
   AnyPgColumn,
@@ -133,6 +138,25 @@ function nutritionFoodVersionOwnershipColumns(): [
   AnyPgColumn
 ] {
   return [nutritionFoodVersions.id, nutritionFoodVersions.foodId];
+}
+
+function trainingExerciseVersionOwnershipColumns(): [
+  AnyPgColumn,
+  AnyPgColumn
+] {
+  return [trainingExerciseVersions.id, trainingExerciseVersions.exerciseId];
+}
+
+function trainingProgramVersionOwnershipColumns(): [
+  AnyPgColumn,
+  AnyPgColumn,
+  AnyPgColumn
+] {
+  return [
+    trainingProgramVersions.id,
+    trainingProgramVersions.programId,
+    trainingProgramVersions.personId
+  ];
 }
 
 export const persons = pgTable("persons", {
@@ -1065,6 +1089,467 @@ export const mealItems = pgTable(
   ]
 );
 
+export const trainingExerciseCatalogSources = pgTable(
+  "training_exercise_catalog_sources",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    key: varchar("key", { length: 128 }).notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    licenseName: varchar("license_name", { length: 256 }),
+    termsUrl: text("terms_url"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [unique("training_exercise_sources_key_uq").on(table.key)]
+);
+
+export const trainingExerciseCatalogSourceRecords = pgTable(
+  "training_exercise_catalog_source_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sourceId: uuid("source_id").notNull(),
+    externalRecordId: varchar("external_record_id", {
+      length: 512
+    }).notNull(),
+    fetchedAt: timestamp("fetched_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
+    checksum: varchar("checksum", { length: 128 }).notNull(),
+    parserVersion: varchar("parser_version", { length: 128 }).notNull(),
+    status: catalogSourceRecordStatus("status").default("staged").notNull(),
+    rawSnapshot: jsonb("raw_snapshot").$type<unknown>(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_exercise_source_record_source_fk",
+      columns: [table.sourceId],
+      foreignColumns: [trainingExerciseCatalogSources.id]
+    }),
+    unique("training_exercise_source_records_external_uq").on(
+      table.sourceId,
+      table.externalRecordId
+    )
+  ]
+);
+
+export const trainingExercises = pgTable(
+  "training_exercises",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    visibility: catalogVisibility("visibility").notNull(),
+    ownerPersonId: uuid("owner_person_id"),
+    currentVersionId: uuid("current_version_id"),
+    lockVersion: integer("lock_version").default(0).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_exercise_owner_fk",
+      columns: [table.ownerPersonId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "training_exercise_current_version_fk",
+      columns: [table.currentVersionId, table.id],
+      foreignColumns: trainingExerciseVersionOwnershipColumns()
+    }),
+    check(
+      "training_exercises_visibility_owner",
+      sql`(${table.visibility} = 'shared' AND ${table.ownerPersonId} IS NULL)
+          OR (${table.visibility} = 'private' AND ${table.ownerPersonId} IS NOT NULL)`
+    )
+  ]
+);
+
+export const trainingExerciseVersions = pgTable(
+  "training_exercise_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    exerciseId: uuid("exercise_id").notNull(),
+    version: integer("version").notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    category: varchar("category", { length: 256 }),
+    movementPattern: varchar("movement_pattern", { length: 256 }),
+    equipment: varchar("equipment", { length: 256 }),
+    instructions: text("instructions"),
+    note: text("note"),
+    sourceRecordId: uuid("source_record_id"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_exercise_version_exercise_fk",
+      columns: [table.exerciseId],
+      foreignColumns: [trainingExercises.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "training_exercise_version_source_fk",
+      columns: [table.sourceRecordId],
+      foreignColumns: [trainingExerciseCatalogSourceRecords.id]
+    }),
+    unique("training_exercise_versions_exercise_version_uq").on(
+      table.exerciseId,
+      table.version
+    ),
+    unique("training_exercise_versions_id_exercise_uq").on(
+      table.id,
+      table.exerciseId
+    ),
+    check(
+      "training_exercise_versions_version_positive",
+      sql`${table.version} > 0`
+    )
+  ]
+);
+
+export const trainingExerciseOverlays = pgTable(
+  "training_exercise_overlays",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    exerciseId: uuid("exercise_id").notNull(),
+    alias: varchar("alias", { length: 256 }),
+    available: boolean("available").default(true).notNull(),
+    note: text("note"),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_exercise_overlay_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "training_exercise_overlay_exercise_fk",
+      columns: [table.exerciseId],
+      foreignColumns: [trainingExercises.id]
+    }),
+    unique("training_exercise_overlays_person_exercise_uq").on(
+      table.personId,
+      table.exerciseId
+    )
+  ]
+);
+
+export const trainingPrograms = pgTable(
+  "training_programs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    currentVersionId: uuid("current_version_id"),
+    activeVersionId: uuid("active_version_id"),
+    lockVersion: integer("lock_version").default(0).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_program_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "training_program_current_version_fk",
+      columns: [table.currentVersionId, table.id, table.personId],
+      foreignColumns: trainingProgramVersionOwnershipColumns()
+    }),
+    foreignKey({
+      name: "training_program_active_version_fk",
+      columns: [table.activeVersionId, table.id, table.personId],
+      foreignColumns: trainingProgramVersionOwnershipColumns()
+    }),
+    unique("training_programs_id_person_uq").on(table.id, table.personId),
+    uniqueIndex("training_programs_person_active_uq")
+      .on(table.personId)
+      .where(sql`${table.activeVersionId} IS NOT NULL`)
+  ]
+);
+
+export const trainingProgramVersions = pgTable(
+  "training_program_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    programId: uuid("program_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    version: integer("version").notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    note: text("note"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_program_version_program_fk",
+      columns: [table.programId, table.personId],
+      foreignColumns: [trainingPrograms.id, trainingPrograms.personId]
+    }).onDelete("cascade"),
+    unique("training_program_versions_program_version_uq").on(
+      table.programId,
+      table.version
+    ),
+    unique("training_program_versions_id_program_person_uq").on(
+      table.id,
+      table.programId,
+      table.personId
+    ),
+    unique("training_program_versions_id_person_uq").on(
+      table.id,
+      table.personId
+    ),
+    check(
+      "training_program_versions_version_positive",
+      sql`${table.version} > 0`
+    )
+  ]
+);
+
+export const trainingProgramWorkouts = pgTable(
+  "training_program_workouts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    programVersionId: uuid("program_version_id").notNull(),
+    position: smallint("position").notNull(),
+    name: varchar("name", { length: 256 }).notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_program_workout_version_fk",
+      columns: [table.programVersionId],
+      foreignColumns: [trainingProgramVersions.id]
+    }).onDelete("cascade"),
+    unique("training_program_workouts_version_position_uq").on(
+      table.programVersionId,
+      table.position
+    ),
+    check(
+      "training_program_workouts_position_positive",
+      sql`${table.position} > 0`
+    )
+  ]
+);
+
+export const trainingProgramPrescriptions = pgTable(
+  "training_program_prescriptions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    workoutId: uuid("workout_id").notNull(),
+    position: smallint("position").notNull(),
+    exerciseId: uuid("exercise_id").notNull(),
+    exerciseVersionId: uuid("exercise_version_id").notNull(),
+    loadBasis: trainingLoadBasis("load_basis").notNull(),
+    targetWeightKg: numeric("target_weight_kg", {
+      precision: 12,
+      scale: 3
+    }),
+    targetSets: smallint("target_sets").notNull(),
+    targetRepsMin: integer("target_reps_min").notNull(),
+    targetRepsMax: integer("target_reps_max").notNull(),
+    targetRir: numeric("target_rir", { precision: 4, scale: 1 }),
+    progressionIncrementKg: numeric("progression_increment_kg", {
+      precision: 12,
+      scale: 3
+    }),
+    note: text("note")
+  },
+  (table) => [
+    foreignKey({
+      name: "training_program_prescription_workout_fk",
+      columns: [table.workoutId],
+      foreignColumns: [trainingProgramWorkouts.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "training_program_prescription_exercise_fk",
+      columns: [table.exerciseVersionId, table.exerciseId],
+      foreignColumns: trainingExerciseVersionOwnershipColumns()
+    }),
+    unique("training_program_prescriptions_workout_position_uq").on(
+      table.workoutId,
+      table.position
+    ),
+    check(
+      "training_program_prescriptions_values",
+      sql`${table.position} > 0
+          AND (${table.targetWeightKg} IS NULL OR ${table.targetWeightKg} >= 0)
+          AND ${table.targetSets} > 0
+          AND ${table.targetRepsMin} > 0
+          AND ${table.targetRepsMax} >= ${table.targetRepsMin}
+          AND (${table.targetRir} IS NULL OR ${table.targetRir} >= 0)
+          AND (${table.progressionIncrementKg} IS NULL OR ${table.progressionIncrementKg} > 0)`
+    )
+  ]
+);
+
+export const workoutSessions = pgTable(
+  "workout_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    occurredAt: timestamp("occurred_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    programVersionId: uuid("program_version_id"),
+    workoutName: varchar("workout_name", { length: 256 }).notNull(),
+    feeling: varchar("feeling", { length: 256 }),
+    note: text("note"),
+    source: sourceChannel("source").notNull(),
+    sourceReferenceId: uuid("source_reference_id").notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    supersedesId: uuid("supersedes_id"),
+    correctionReason: varchar("correction_reason", { length: 512 }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "workout_session_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "workout_session_program_version_person_fk",
+      columns: [table.programVersionId, table.personId],
+      foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.personId]
+    }),
+    foreignKey({
+      name: "workout_session_source_reference_person_fk",
+      columns: [table.sourceReferenceId, table.personId],
+      foreignColumns: [sourceReferences.id, sourceReferences.personId]
+    }),
+    foreignKey({
+      name: "workout_session_supersedes_person_fk",
+      columns: [table.supersedesId, table.personId],
+      foreignColumns: [table.id, table.personId]
+    }),
+    unique("workout_sessions_id_person_uq").on(table.id, table.personId),
+    uniqueIndex("workout_sessions_person_source_dedupe_uq").on(
+      table.personId,
+      table.source,
+      table.dedupeKey
+    ),
+    uniqueIndex("workout_sessions_supersedes_uq")
+      .on(table.supersedesId)
+      .where(sql`${table.supersedesId} IS NOT NULL`),
+    check(
+      "workout_sessions_confidence_range",
+      sql`${table.confidence} IS NULL
+          OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`
+    ),
+    check(
+      "workout_sessions_correction_shape",
+      sql`(${table.supersedesId} IS NULL AND ${table.correctionReason} IS NULL)
+          OR (${table.supersedesId} IS NOT NULL AND ${table.correctionReason} IS NOT NULL)`
+    ),
+    check(
+      "workout_sessions_no_self_supersession",
+      sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
+    )
+  ]
+);
+
+export const performedExercises = pgTable(
+  "performed_exercises",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sessionId: uuid("session_id").notNull(),
+    position: smallint("position").notNull(),
+    exerciseId: uuid("exercise_id").notNull(),
+    exerciseVersionId: uuid("exercise_version_id").notNull(),
+    exerciseLabel: varchar("exercise_label", { length: 256 }).notNull(),
+    loadBasis: trainingLoadBasis("load_basis").notNull(),
+    feeling: varchar("feeling", { length: 256 }),
+    note: text("note")
+  },
+  (table) => [
+    foreignKey({
+      name: "performed_exercise_session_fk",
+      columns: [table.sessionId],
+      foreignColumns: [workoutSessions.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "performed_exercise_version_fk",
+      columns: [table.exerciseVersionId, table.exerciseId],
+      foreignColumns: trainingExerciseVersionOwnershipColumns()
+    }),
+    unique("performed_exercises_session_position_uq").on(
+      table.sessionId,
+      table.position
+    ),
+    check("performed_exercises_position_positive", sql`${table.position} > 0`)
+  ]
+);
+
+export const performedSets = pgTable(
+  "performed_sets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    performedExerciseId: uuid("performed_exercise_id").notNull(),
+    position: smallint("position").notNull(),
+    weightKg: numeric("weight_kg", { precision: 12, scale: 3 }),
+    reps: integer("reps").notNull(),
+    rir: numeric("rir", { precision: 4, scale: 1 })
+  },
+  (table) => [
+    foreignKey({
+      name: "performed_set_exercise_fk",
+      columns: [table.performedExerciseId],
+      foreignColumns: [performedExercises.id]
+    }).onDelete("cascade"),
+    unique("performed_sets_exercise_position_uq").on(
+      table.performedExerciseId,
+      table.position
+    ),
+    check(
+      "performed_sets_values",
+      sql`${table.position} > 0
+          AND (${table.weightKg} IS NULL OR ${table.weightKg} >= 0)
+          AND ${table.reps} > 0
+          AND (${table.rir} IS NULL OR ${table.rir} >= 0)`
+    )
+  ]
+);
+
 /** Persisted SourceReference row returned by Drizzle queries. */
 export type SourceReferenceRow = typeof sourceReferences.$inferSelect;
 /** Insertable SourceReference row accepted by Drizzle mutations. */
@@ -1116,3 +1601,28 @@ export type NutritionFoodOverlayRow =
 export type MealRow = typeof meals.$inferSelect;
 /** Persisted immutable Meal snapshot item. */
 export type MealItemRow = typeof mealItems.$inferSelect;
+/** Persisted shared or Person-private Exercise identity. */
+export type TrainingExerciseRow = typeof trainingExercises.$inferSelect;
+/** Persisted immutable Exercise revision. */
+export type TrainingExerciseVersionRow =
+  typeof trainingExerciseVersions.$inferSelect;
+/** Persisted Person-owned Exercise overlay. */
+export type TrainingExerciseOverlayRow =
+  typeof trainingExerciseOverlays.$inferSelect;
+/** Persisted Person-owned TrainingProgram root. */
+export type TrainingProgramRow = typeof trainingPrograms.$inferSelect;
+/** Persisted immutable TrainingProgram version. */
+export type TrainingProgramVersionRow =
+  typeof trainingProgramVersions.$inferSelect;
+/** Persisted ordered workout in one program version. */
+export type TrainingProgramWorkoutRow =
+  typeof trainingProgramWorkouts.$inferSelect;
+/** Persisted exercise prescription in one program workout. */
+export type TrainingProgramPrescriptionRow =
+  typeof trainingProgramPrescriptions.$inferSelect;
+/** Persisted immutable WorkoutSession fact. */
+export type WorkoutSessionRow = typeof workoutSessions.$inferSelect;
+/** Persisted immutable performed exercise snapshot. */
+export type PerformedExerciseRow = typeof performedExercises.$inferSelect;
+/** Persisted immutable individual performed set. */
+export type PerformedSetRow = typeof performedSets.$inferSelect;

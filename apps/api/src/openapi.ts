@@ -1,12 +1,15 @@
 import {
+  AcceptProgressionCandidateSchema,
+  ActivateTrainingProgramVersionSchema,
   BodyMeasurementSessionHistorySchema,
   BodyMeasurementSessionIdParamsSchema,
   BodyMeasurementSessionListSchema,
   BodyMeasurementSessionSchema,
   BrandSchema,
   CatalogIdParamsSchema,
-  CorrectMealSchema,
   CorrectBodyMeasurementSessionSchema,
+  CorrectMealSchema,
+  CorrectWorkoutSessionSchema,
   CreateBodyMeasurementSessionSchema,
   CreateBrandSchema,
   CreateBrandVersionSchema,
@@ -19,6 +22,11 @@ import {
   CreatePhysicalGoalVersionSchema,
   CorrectWeightMeasurementSchema,
   CreateWeightMeasurementSchema,
+  CreateExerciseSchema,
+  CreateExerciseVersionSchema,
+  CreateTrainingProgramSchema,
+  CreateTrainingProgramVersionSchema,
+  CreateWorkoutSessionSchema,
   ErrorResponseSchema,
   FoodOverlaySchema,
   FoodSchema,
@@ -28,6 +36,7 @@ import {
   ListPhysicalGoalsQuerySchema,
   ListMealsQuerySchema,
   ListWeightMeasurementsQuerySchema,
+  ListWorkoutSessionsQuerySchema,
   PhysicalGoalHistorySchema,
   PhysicalGoalIdParamsSchema,
   PhysicalGoalListSchema,
@@ -41,10 +50,21 @@ import {
   MealListSchema,
   MealSchema,
   ReadinessResponseSchema,
+  ExerciseOverlaySchema,
+  ExerciseSchema,
+  PersonalRecordListSchema,
+  ProgressionCandidateListSchema,
+  TrainingIdParamsSchema,
+  TrainingProgramSchema,
+  TrainingVersionParamsSchema,
+  UpsertExerciseOverlaySchema,
   WeightMeasurementHistorySchema,
   WeightMeasurementIdParamsSchema,
   WeightMeasurementListSchema,
   WeightMeasurementSchema,
+  WorkoutSessionHistorySchema,
+  WorkoutSessionListSchema,
+  WorkoutSessionSchema,
   UpsertFoodOverlaySchema
 } from "@shape-of-you/contracts";
 
@@ -650,6 +670,228 @@ function mealPaths(): Record<string, object> {
   };
 }
 
+function trainingPaths(): Record<string, object> {
+  const idParameter = schemaParameter(
+    "id",
+    "path",
+    true,
+    TrainingIdParamsSchema.properties.id
+  );
+  const versionIdParameter = schemaParameter(
+    "versionId",
+    "path",
+    true,
+    TrainingVersionParamsSchema.properties.versionId
+  );
+  const response = (schema: object, description: string): object => ({
+    description,
+    content: { "application/json": { schema } }
+  });
+  const request = (schema: object): object => ({
+    required: true,
+    content: { "application/json": { schema } }
+  });
+
+  return {
+    "/v1/training/catalog/exercises": {
+      post: {
+        tags: ["training-catalog"],
+        summary: "Create an Exercise and its first immutable revision",
+        requestBody: request(CreateExerciseSchema),
+        responses: {
+          "201": response(ExerciseSchema, "Exercise created"),
+          "400": response(ErrorResponseSchema, "Invalid request")
+        }
+      }
+    },
+    "/v1/training/catalog/exercises/{id}": {
+      get: {
+        tags: ["training-catalog"],
+        summary: "Read an accessible Exercise",
+        parameters: [idParameter],
+        responses: {
+          "200": response(ExerciseSchema, "Exercise found"),
+          "404": response(ErrorResponseSchema, "Exercise not found")
+        }
+      }
+    },
+    "/v1/training/catalog/exercises/{id}/versions": {
+      post: {
+        tags: ["training-catalog"],
+        summary: "Append and select an immutable Exercise revision",
+        parameters: [idParameter],
+        requestBody: request(CreateExerciseVersionSchema),
+        responses: {
+          "200": response(ExerciseSchema, "Exercise revision appended"),
+          "409": response(ErrorResponseSchema, "Optimistic-lock conflict")
+        }
+      }
+    },
+    "/v1/training/catalog/exercises/{id}/overlay": {
+      put: {
+        tags: ["training-catalog"],
+        summary: "Replace a Person-owned Exercise overlay",
+        parameters: [idParameter],
+        requestBody: request(UpsertExerciseOverlaySchema),
+        responses: {
+          "200": response(ExerciseOverlaySchema, "Overlay replaced")
+        }
+      }
+    },
+    "/v1/training/programs": {
+      post: {
+        tags: ["training-programs"],
+        summary: "Create a program with its first inactive version",
+        requestBody: request(CreateTrainingProgramSchema),
+        responses: {
+          "201": response(TrainingProgramSchema, "Program created")
+        }
+      }
+    },
+    "/v1/training/programs/active": {
+      get: {
+        tags: ["training-programs"],
+        summary: "Read the single explicitly active program",
+        responses: {
+          "200": response(TrainingProgramSchema, "Active program"),
+          "404": response(ErrorResponseSchema, "No active program")
+        }
+      }
+    },
+    "/v1/training/programs/{id}": {
+      get: {
+        tags: ["training-programs"],
+        summary: "Read one Person-owned program",
+        parameters: [idParameter],
+        responses: {
+          "200": response(TrainingProgramSchema, "Program found")
+        }
+      }
+    },
+    "/v1/training/programs/{id}/versions": {
+      post: {
+        tags: ["training-programs"],
+        summary: "Append one immutable inactive program version",
+        parameters: [idParameter],
+        requestBody: request(CreateTrainingProgramVersionSchema),
+        responses: {
+          "200": response(TrainingProgramSchema, "Program version appended")
+        }
+      }
+    },
+    "/v1/training/programs/{id}/versions/{versionId}/activate": {
+      post: {
+        tags: ["training-programs"],
+        summary: "Explicitly activate one program version",
+        parameters: [idParameter, versionIdParameter],
+        requestBody: request(ActivateTrainingProgramVersionSchema),
+        responses: {
+          "200": response(TrainingProgramSchema, "Program version activated"),
+          "409": response(ErrorResponseSchema, "Optimistic-lock conflict")
+        }
+      }
+    },
+    "/v1/training/programs/{id}/progression-candidates/accept": {
+      post: {
+        tags: ["training-progression"],
+        summary: "Accept a still-valid suggestion as an inactive version",
+        parameters: [idParameter],
+        requestBody: request(AcceptProgressionCandidateSchema),
+        responses: {
+          "200": response(TrainingProgramSchema, "Draft version created"),
+          "409": response(ErrorResponseSchema, "Candidate is stale")
+        }
+      }
+    },
+    "/v1/training/sessions": {
+      post: {
+        tags: ["training-sessions"],
+        summary: "Create an immutable WorkoutSession",
+        requestBody: request(CreateWorkoutSessionSchema),
+        responses: {
+          "200": response(WorkoutSessionSchema, "Existing idempotent session"),
+          "201": response(WorkoutSessionSchema, "Session created")
+        }
+      },
+      get: {
+        tags: ["training-sessions"],
+        summary: "List bounded current WorkoutSessions",
+        parameters: [
+          schemaParameter(
+            "limit",
+            "query",
+            false,
+            ListWorkoutSessionsQuerySchema.properties.limit
+          ),
+          schemaParameter(
+            "localDate",
+            "query",
+            false,
+            ListWorkoutSessionsQuerySchema.properties.localDate
+          )
+        ],
+        responses: {
+          "200": response(WorkoutSessionListSchema, "Current sessions")
+        }
+      }
+    },
+    "/v1/training/sessions/{id}": {
+      get: {
+        tags: ["training-sessions"],
+        summary: "Read one immutable WorkoutSession",
+        parameters: [idParameter],
+        responses: {
+          "200": response(WorkoutSessionSchema, "Session found")
+        }
+      }
+    },
+    "/v1/training/sessions/{id}/corrections": {
+      post: {
+        tags: ["training-sessions"],
+        summary: "Append a full immutable session replacement",
+        parameters: [idParameter],
+        requestBody: request(CorrectWorkoutSessionSchema),
+        responses: {
+          "200": response(WorkoutSessionSchema, "Existing correction"),
+          "201": response(WorkoutSessionSchema, "Correction appended"),
+          "409": response(ErrorResponseSchema, "Session already superseded")
+        }
+      }
+    },
+    "/v1/training/sessions/{id}/history": {
+      get: {
+        tags: ["training-sessions"],
+        summary: "Read a complete session correction chain",
+        parameters: [idParameter],
+        responses: {
+          "200": response(WorkoutSessionHistorySchema, "Correction chain")
+        }
+      }
+    },
+    "/v1/training/personal-records": {
+      get: {
+        tags: ["training-projections"],
+        summary: "Calculate current strength records",
+        responses: {
+          "200": response(PersonalRecordListSchema, "Current records")
+        }
+      }
+    },
+    "/v1/training/progression-candidates": {
+      get: {
+        tags: ["training-progression"],
+        summary: "Calculate eligible progression suggestions",
+        responses: {
+          "200": response(
+            ProgressionCandidateListSchema,
+            "Current progression candidates"
+          )
+        }
+      }
+    }
+  };
+}
+
 /**
  * Builds the public OpenAPI document from the shared runtime schemas.
  *
@@ -877,7 +1119,8 @@ export function createOpenApiDocument(): object {
       ...bodyMeasurementPaths(),
       ...physicalGoalPaths(),
       ...nutritionCatalogPaths(),
-      ...mealPaths()
+      ...mealPaths(),
+      ...trainingPaths()
     }
   };
 }

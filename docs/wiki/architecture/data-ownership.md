@@ -116,3 +116,4 @@ identity, ownership, lifecycle и object metadata. Знание object key не 
 - `../../adr/20260730-use-typed-provenance-and-append-only-supersession.md`
 - `../../adr/20260731-use-layered-versioned-nutrition-catalog.md`
 - `../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md`
+- `../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md`

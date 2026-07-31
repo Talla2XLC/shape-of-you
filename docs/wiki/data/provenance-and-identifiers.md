@@ -53,6 +53,9 @@ provenance и могут ссылаться на точную catalog revision.
 
 - Назначать долговечные ID для MealEntry, WeightMeasurement, observations и
   ProgramVersion, сохраняя legacy source references.
+- Назначать отдельные долговечные ID для `Exercise`, `ExerciseVersion`,
+  `TrainingProgramVersion`, `WorkoutSession` и `PerformedSet`. Legacy
+  `Exercise_ID` и `Session_ID` остаются source references, а не domain ID.
 - Не использовать номера строк листа как ID.
 - Использовать `Person` как владельца facts и append-only supersession для
   corrections.
@@ -62,8 +65,10 @@ provenance и могут ссылаться на точную catalog revision.
 
 ## Открытые вопросы
 
-- Управляется ли `Exercise_ID` вне этого workbook?
-- Может ли `Session_ID` охватывать несколько дат?
+- Управляется ли `Exercise_ID` вне этого workbook и потребуется ли отдельное
+  сопоставление при миграции?
+- Может ли legacy `Session_ID` охватывать несколько дат, и как такие строки
+  разделять при миграции?
 - Являются ли `Food_ID` и `Ingredient_ID` глобально уникальными или только локальными для workbook?
 - Какой timezone применяется к timestamps внешних устройств до нормализации?
 - Какая retention policy применяется к private raw snapshots разных sources?
@@ -76,3 +81,4 @@ provenance и могут ссылаться на точную catalog revision.
 - [User, Person и права доступа](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
 - [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
+- [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)

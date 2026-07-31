@@ -17,3 +17,6 @@ export const PHYSICAL_GOAL_STORE = Symbol("PHYSICAL_GOAL_STORE");
 
 /** Injection token for the Nutrition catalog and Meal persistence boundary. */
 export const NUTRITION_STORE = Symbol("NUTRITION_STORE");
+
+/** Injection token for Training catalog, plans, facts, and projections. */
+export const TRAINING_STORE = Symbol("TRAINING_STORE");

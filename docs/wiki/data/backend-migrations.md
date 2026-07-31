@@ -51,6 +51,13 @@ records, `Meal` snapshots и append-only corrections. Checks разделяют 
 version своему root, а короткие explicit constraint names не превышают предел
 PostgreSQL identifier.
 
+Шестая migration добавляет shared/private справочник упражнений, его
+неизменяемые версии и персональные настройки, source-neutral staging внешних
+записей, person-owned версии программ, тренировочные сессии, выполненные
+упражнения и отдельные подходы. Composite foreign keys закрепляют версии за
+своими корнями и `Person`, partial unique index допускает не более одной
+активной программы, а append-only constraints защищают историю corrections.
+
 Все траектории проверяются integration tests: применение на чистой БД и upgrade
 с исходной schema и существующим synthetic fact. Миграция не импортирует Google
 Sheets, не выполняет backfill рабочих данных и не меняет authority.
@@ -65,6 +72,7 @@ Sheets, не выполняет backfill рабочих данных и не м�
 - `apps/api/drizzle/20260730185405_physical_state_goals.sql`.
 - `apps/api/drizzle/20260730191405_enforce_goal_ownership.sql`.
 - `apps/api/drizzle/20260731090108_rare_zarda.sql`.
+- `apps/api/drizzle/20260731125414_fixed_pete_wisdom.sql`.
 - `apps/api/src/database/migrate.ts`.
 - Drizzle schema и integration test чистой БД.
 
@@ -90,5 +98,6 @@ Sheets, не выполняет backfill рабочих данных и не м�
 - [PhysicalGoal](../domain/physical-goal.md)
 - [Nutrition catalog](../domain/nutrition-catalog.md)
 - [Meal](../domain/meal.md)
+- [Training and Performance](../domain/training-and-performance.md)
 - [Временный deployment](../operations/temporary-vm-deployment.md)
 - [Rollback](../operations/temporary-vm-rollback.md)

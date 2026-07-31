@@ -23,6 +23,7 @@ import type {
 import type {
   NutritionStore
 } from "../src/storage/nutrition-repository.js";
+import type { TrainingStore } from "../src/storage/training-repository.js";
 import type {
   CreateWeightMeasurementResult,
   WeightMeasurementStore
@@ -183,10 +184,32 @@ const nutritionStore: NutritionStore = {
   dailyTotals: unreachable
 };
 
+const trainingStore: TrainingStore = {
+  createExercise: unreachable,
+  appendExerciseVersion: unreachable,
+  findExercise: unreachable,
+  upsertExerciseOverlay: unreachable,
+  stageExerciseSourceRecord: unreachable,
+  createProgram: unreachable,
+  appendProgramVersion: unreachable,
+  activateProgramVersion: unreachable,
+  findProgram: unreachable,
+  findActiveProgram: unreachable,
+  createWorkoutSession: unreachable,
+  correctWorkoutSession: unreachable,
+  findWorkoutSession: unreachable,
+  listWorkoutSessions: unreachable,
+  workoutSessionHistory: unreachable,
+  personalRecords: unreachable,
+  progressionCandidates: unreachable,
+  acceptProgressionCandidate: unreachable
+};
+
 const physicalStateStores = {
   bodyMeasurementSessionStore,
   physicalGoalStore,
-  nutritionStore
+  nutritionStore,
+  trainingStore
 };
 
 describe("API bootstrap", () => {

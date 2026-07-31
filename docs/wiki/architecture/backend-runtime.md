@@ -16,8 +16,8 @@ tags:
 Текущий реализованный runtime — один NestJS API в `apps/api`, использующий
 `FastifyAdapter`, PostgreSQL и Drizzle ORM. Он предоставляет system endpoints
 предметные вертикали `WeightMeasurement`, `BodyMeasurementSession` и
-`PhysicalGoal`, а также Nutrition catalog и `Meal`, сохраняя один deployable
-modular backend.
+`PhysicalGoal`, а также Nutrition catalog, `Meal` и Training and Performance,
+сохраняя один deployable modular backend.
 
 ## Содержание
 
@@ -55,12 +55,19 @@ overlays, immutable Meal snapshots/corrections и query-only daily totals.
 Source-neutral catalog ingestion ограничен staged database records: network
 adapter, scheduler и отдельный deployable отсутствуют.
 
+Модуль Training предоставляет shared/private версионируемый справочник
+упражнений, person-owned версии программ с явным включением, неизменяемые
+тренировочные сессии с отдельными подходами и полными corrections. Личные
+рекорды и предложения прогрессии вычисляются запросами; принятие предложения
+создаёт новую неактивную версию программы.
+
 ## Основания
 
 - Реализация в `apps/api/src/`.
 - Unit tests в `apps/api/test/app.unit.test.ts`.
 - Integration tests в `apps/api/test/weight-measurements.integration.test.ts`.
 - Integration tests в `apps/api/test/nutrition.integration.test.ts`.
+- Integration tests в `apps/api/test/training.integration.test.ts`.
 
 ## Решения
 
@@ -86,3 +93,4 @@ adapter, scheduler и отдельный deployable отсутствуют.
 - [API PhysicalGoal](../api/physical-goals.md)
 - [API Nutrition catalog](../api/nutrition-catalog.md)
 - [API Meal](../api/meals.md)
+- [API тренировок](../api/training.md)

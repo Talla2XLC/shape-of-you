@@ -27,6 +27,13 @@ Candidate consistency boundaries узки и принадлежат соотве
 самому факту intake. Shared catalog и personal overlay не образуют один
 aggregate: персональная ссылка не копирует и не изменяет canonical content.
 
+В Training `Exercise` является стабильной catalog identity с immutable
+`ExerciseVersion`. `TrainingProgramVersion` является неизменяемым
+person-owned plan, а `WorkoutSession` — отдельным неизменяемым фактом с
+выполненными упражнениями и подходами. Correction заменяет сессию целиком.
+Personal records и progression candidates не образуют aggregates и
+вычисляются над текущими фактами и действующей program version.
+
 ### Кандидат lifecycle по дате
 
 `DayClosure` или `JournalDay` остаётся узким draft-кандидатом. Он может владеть календарной датой и timezone пользователя, lifecycle open/closed, временем закрытия, explicit corrections, ссылками на подтверждённые факты и созданием дневной projection. Имя и точные invariants ещё не утверждены.
@@ -49,7 +56,6 @@ aggregate: персональная ссылка не копирует и не �
 ## Открытые вопросы
 
 - Проверяет ли закрытие дня только ссылки или также создаёт immutable snapshot?
-- Могут ли исторические prescriptions Program изменяться или каждое изменение создаёт версию?
 - Какой минимальный controlled vocabulary units нужен для catalog composition
   и meal quantities без неявных conversion rules?
 - Допустимы ли несколько измерений веса за одну дату?

@@ -60,8 +60,9 @@ Coaching потребляет опубликованные свидетельс�
   остаются person-owned. `Meal` является person-owned immutable fact и
   сохраняет nutrient snapshot, закреплённый за временем intake.
 - В Training определения exercises являются shared versioned reference data,
-  а programs, sessions, performed sets, personal records и progression
-  decisions принадлежат `Person`.
+  а overlays, private exercises, program versions, sessions и performed sets
+  принадлежат `Person`. Personal records и progression candidates являются
+  projections; принятие progression создаёт новую program version.
 - В Recovery provider/device model и capabilities являются shared reference
   data, а connection, consent, device instance и observations принадлежат
   `Person`.
@@ -87,4 +88,6 @@ Coaching потребляет опубликованные свидетельс�
 - [BodyMeasurementSession](body-measurement-session.md)
 - [PhysicalGoal](physical-goal.md)
 - [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
+- [Training and Performance](training-and-performance.md)
+- [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
 - [Shared reference definitions и person-owned state](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
