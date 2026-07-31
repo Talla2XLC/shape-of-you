@@ -41,6 +41,10 @@ import {
   TrainingRepository,
   type TrainingStore
 } from "./storage/training-repository.js";
+import {
+  RecoveryRepository,
+  type RecoveryStore
+} from "./storage/recovery-repository.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -60,6 +64,8 @@ export interface BuildAppOptions {
   readonly nutritionStore?: NutritionStore;
   /** Optional Training persistence used for isolated application tests. */
   readonly trainingStore?: TrainingStore;
+  /** Optional Recovery persistence used for isolated application tests. */
+  readonly recoveryStore?: RecoveryStore;
   /** Optional Person resolution boundary, primarily for isolated tests. */
   readonly personContext?: PersonContext;
 }
@@ -115,13 +121,17 @@ export async function buildApp(
   const trainingStore =
     options.trainingStore ??
     (database ? new TrainingRepository(database) : undefined);
+  const recoveryStore =
+    options.recoveryStore ??
+    (database ? new RecoveryRepository(database) : undefined);
 
   if (
     !store ||
     !bodyMeasurementSessionStore ||
     !physicalGoalStore ||
     !nutritionStore ||
-    !trainingStore
+    !trainingStore ||
+    !recoveryStore
   ) {
     throw new Error("All application persistence stores are required");
   }
@@ -159,6 +169,7 @@ export async function buildApp(
       physicalGoalStore,
       nutritionStore,
       trainingStore,
+      recoveryStore,
       personContext,
       readinessProbe,
       database,

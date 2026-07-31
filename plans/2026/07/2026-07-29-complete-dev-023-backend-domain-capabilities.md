@@ -68,10 +68,10 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 
 | Область | Наблюдаемый источник | Реализовано | Основной gap до завершения DEV-023 |
 | --- | --- | --- | --- |
-| Physical State and Goals | `Weight`, `Body`, goals, часть `Daily_Log` | Только `WeightMeasurement` create/read/list, provenance и dedupe | Body measurements, goals, correction/supersession, разрешение двойного пути `Weight`/`Daily_Log`, история и projections |
+| Physical State and Goals | `Weight`, `Body`, goals, часть `Daily_Log` | Weight и body measurements с corrections, versioned goals, reconciliation и projections | Real-data import/cutover и privacy policy для photos/notes |
 | Nutrition | `Foods`, `Ingredients`, `Brands`, `Food_Ingredients`, `Meals` | Shared/private versioned catalog, overlays, staged source records, immutable Meal snapshots/corrections и daily totals | Real-data import/cutover, external source selection и moderation/write authorization |
-| Training and Performance | `Training`, `Program`, `Personal Records` | Нет | Authoritative exercise identity, versioned program prescriptions, sessions, sets, completed work, derived PR и progression policies |
-| Recovery and Readiness | wearable/recovery evidence, `Load_Risk` inputs | Нет | Observation contract, provenance устройств, timezone, readiness policy, многодневное окно и safety gates |
+| Training and Performance | `Training`, `Program`, `Personal Records` | Shared/private versioned exercises, immutable program versions and sessions, personal records и progression candidates | Real-data import/cutover, provider selection и moderation/write authorization |
+| Recovery and Readiness | wearable/recovery evidence, `Load_Risk` inputs | Реализованы typed observations, consent/retention gate и policy-pinned readiness/load-risk assessments | Real-data import/cutover, provider adapter, production policy activation и authenticated erasure |
 | Coaching and Decision Support | `AI_Insights`, `Load_Risk`, `Weight_Autopilot`, `Coach_Planner` | Нет | Versioned policies, evidence references, recommendation lifecycle, acceptance/rejection и запрет превращать recommendations в выполненные facts |
 | Intake and audit | `NL_Engine`, `AI_Inbox`, `AI_Timeline` | Только локальная идемпотентность веса | Parsing boundary, clarification/confirmation, routing в owning modules, общий idempotency contract и append-only chronology |
 | Integrity and correction | `Self_Healing`, validation и read-back contracts | Нет | Revision/supersession model, allowlisted deterministic repairs, before/after evidence, read-back и запрет скрытого overwrite |
@@ -89,13 +89,12 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
    утверждено ADR от 2026-07-30.
 3. Семантику локального дня, `DayClosure`/`JournalDay` и correction closed day.
 4. Shared identity упражнений и person-owned training state — ownership
-   утверждён ADR от 2026-07-31; exact schema и versioning программы остаются
-   решением Training vertical.
+   и exact schema/versioning утверждены ADR от 2026-07-31.
 5. Identity catalog питания и обязательность nutrition snapshot —
    утверждено ADR от 2026-07-31.
 6. Shared provider/device definitions и person-owned connections, consents и
-   observations — ownership утверждён ADR от 2026-07-31; exact observation,
-   timezone и privacy/retention contract остаются решением Recovery vertical.
+   observations — ownership, typed observation, timezone, consent и assessment
+   boundary утверждены ADR от 2026-07-31; production erasure остаётся gate.
 7. Lifecycle recommendation: proposed, accepted, rejected и executed.
 8. Shared policy definitions/versions и person-owned targets/overrides —
    ownership утверждён ADR от 2026-07-31; exact thresholds и effective dates
@@ -250,8 +249,10 @@ governance rules Managed Wiki. Поэтому `Rules` нельзя перено�
 
 ### 6. Recovery and Readiness
 
-- Реализовать observations с provenance и нормализацией времени.
-- Реализовать versioned readiness и load-risk policies с safety tests.
+- Реализованы typed observations, consent/retention boundary, versioned
+  readiness и load-risk assessments с safety gates.
+- Выполнен отдельный план
+  `completed/2026-07-31-recovery-and-readiness.md`.
 
 ### 7. Coaching and Decision Support
 

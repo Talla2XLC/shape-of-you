@@ -35,7 +35,8 @@ export const personAccessGrantStatus = pgEnum(
 export const sourceChannel = pgEnum("source_channel", [
   "manual",
   "google_sheets",
-  "import"
+  "import",
+  "device"
 ]);
 export const bodyMeasurementMetric = pgEnum("body_measurement_metric", [
   "waist",
@@ -103,6 +104,43 @@ export const trainingLoadBasis = pgEnum("training_load_basis", [
   "body_weight",
   "assisted"
 ]);
+export const recoveryObservationKind = pgEnum("recovery_observation_kind", [
+  "sleep",
+  "metric",
+  "subjective"
+]);
+export const recoveryObservationQuality = pgEnum("recovery_observation_quality", [
+  "reliable",
+  "estimated",
+  "poor"
+]);
+export const recoveryMetric = pgEnum("recovery_metric", [
+  "hrv_rmssd",
+  "resting_heart_rate"
+]);
+export const recoveryMetricUnit = pgEnum("recovery_metric_unit", ["ms", "bpm"]);
+export const recoveryConnectionStatus = pgEnum("recovery_connection_status", [
+  "active",
+  "disconnected"
+]);
+export const recoveryConsentStatus = pgEnum("recovery_consent_status", [
+  "active",
+  "revoked"
+]);
+export const recoveryRetentionMode = pgEnum("recovery_retention_mode", [
+  "indefinite",
+  "until"
+]);
+export const recoveryRiskLevel = pgEnum("recovery_risk_level", [
+  "low",
+  "moderate",
+  "high",
+  "blocked"
+]);
+export const recoveryAssessmentDataQuality = pgEnum(
+  "recovery_assessment_data_quality",
+  ["insufficient", "limited", "sufficient"]
+);
 
 function physicalGoalVersionOwnershipColumns(): [
   AnyPgColumn,
@@ -1550,6 +1588,530 @@ export const performedSets = pgTable(
   ]
 );
 
+export const recoveryProviders = pgTable(
+  "recovery_providers",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    key: varchar("key", { length: 128 }).notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [unique("recovery_providers_key_uq").on(table.key)]
+);
+
+export const recoveryDeviceModels = pgTable(
+  "recovery_device_models",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    providerId: uuid("provider_id").notNull(),
+    key: varchar("key", { length: 128 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_device_model_provider_fk",
+      columns: [table.providerId],
+      foreignColumns: [recoveryProviders.id]
+    }),
+    unique("recovery_device_models_provider_key_uq").on(
+      table.providerId,
+      table.key
+    )
+  ]
+);
+
+export const recoveryDeviceModelVersions = pgTable(
+  "recovery_device_model_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    modelId: uuid("model_id").notNull(),
+    version: integer("version").notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_device_model_version_model_fk",
+      columns: [table.modelId],
+      foreignColumns: [recoveryDeviceModels.id]
+    }).onDelete("cascade"),
+    unique("recovery_device_model_versions_model_version_uq").on(
+      table.modelId,
+      table.version
+    ),
+    unique("recovery_device_model_versions_id_model_uq").on(
+      table.id,
+      table.modelId
+    ),
+    check("recovery_device_model_versions_positive", sql`${table.version} > 0`)
+  ]
+);
+
+export const recoveryDeviceCapabilities = pgTable(
+  "recovery_device_capabilities",
+  {
+    modelVersionId: uuid("model_version_id").notNull(),
+    kind: recoveryObservationKind("kind").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_device_capability_version_fk",
+      columns: [table.modelVersionId],
+      foreignColumns: [recoveryDeviceModelVersions.id]
+    }).onDelete("cascade"),
+    unique("recovery_device_capabilities_version_kind_uq").on(
+      table.modelVersionId,
+      table.kind
+    )
+  ]
+);
+
+export const recoveryConnections = pgTable(
+  "recovery_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    providerId: uuid("provider_id").notNull(),
+    status: recoveryConnectionStatus("status").default("active").notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true, mode: "date" })
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_connection_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "recovery_connection_provider_fk",
+      columns: [table.providerId],
+      foreignColumns: [recoveryProviders.id]
+    }),
+    unique("recovery_connections_id_person_uq").on(table.id, table.personId),
+    unique("recovery_connections_person_dedupe_uq").on(
+      table.personId,
+      table.dedupeKey
+    ),
+    check(
+      "recovery_connections_status_shape",
+      sql`(${table.status} = 'active' AND ${table.disconnectedAt} IS NULL)
+          OR (${table.status} = 'disconnected' AND ${table.disconnectedAt} IS NOT NULL)`
+    )
+  ]
+);
+
+export const recoveryDevices = pgTable(
+  "recovery_devices",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    modelVersionId: uuid("model_version_id").notNull(),
+    label: varchar("label", { length: 256 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_device_connection_person_fk",
+      columns: [table.connectionId, table.personId],
+      foreignColumns: [recoveryConnections.id, recoveryConnections.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "recovery_device_model_version_fk",
+      columns: [table.modelVersionId],
+      foreignColumns: [recoveryDeviceModelVersions.id]
+    }),
+    unique("recovery_devices_id_person_uq").on(table.id, table.personId),
+    unique("recovery_devices_connection_uq").on(table.connectionId)
+  ]
+);
+
+export const recoveryConsents = pgTable(
+  "recovery_consents",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    purpose: varchar("purpose", { length: 512 }).notNull(),
+    retentionMode: recoveryRetentionMode("retention_mode").notNull(),
+    retainUntil: timestamp("retain_until", { withTimezone: true, mode: "date" }),
+    status: recoveryConsentStatus("status").default("active").notNull(),
+    grantedAt: timestamp("granted_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" }),
+    revocationReason: varchar("revocation_reason", { length: 512 })
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_consent_connection_person_fk",
+      columns: [table.connectionId, table.personId],
+      foreignColumns: [recoveryConnections.id, recoveryConnections.personId]
+    }).onDelete("cascade"),
+    unique("recovery_consents_id_connection_person_uq").on(
+      table.id,
+      table.connectionId,
+      table.personId
+    ),
+    check(
+      "recovery_consents_retention_shape",
+      sql`(${table.retentionMode} = 'indefinite' AND ${table.retainUntil} IS NULL)
+          OR (${table.retentionMode} = 'until' AND ${table.retainUntil} IS NOT NULL)`
+    ),
+    check(
+      "recovery_consents_status_shape",
+      sql`(${table.status} = 'active' AND ${table.revokedAt} IS NULL AND ${table.revocationReason} IS NULL)
+          OR (${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL AND ${table.revocationReason} IS NOT NULL)`
+    )
+  ]
+);
+
+export const recoveryConsentKinds = pgTable(
+  "recovery_consent_kinds",
+  {
+    consentId: uuid("consent_id").notNull(),
+    kind: recoveryObservationKind("kind").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_consent_kind_consent_fk",
+      columns: [table.consentId],
+      foreignColumns: [recoveryConsents.id]
+    }).onDelete("cascade"),
+    unique("recovery_consent_kinds_consent_kind_uq").on(
+      table.consentId,
+      table.kind
+    )
+  ]
+);
+
+export const recoveryObservations = pgTable(
+  "recovery_observations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    kind: recoveryObservationKind("kind").notNull(),
+    observedFrom: timestamp("observed_from", { withTimezone: true, mode: "date" }).notNull(),
+    observedUntil: timestamp("observed_until", { withTimezone: true, mode: "date" }).notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    quality: recoveryObservationQuality("quality").notNull(),
+    source: sourceChannel("source").notNull(),
+    sourceReferenceId: uuid("source_reference_id").notNull(),
+    connectionId: uuid("connection_id"),
+    consentId: uuid("consent_id"),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    supersedesId: uuid("supersedes_id"),
+    correctionReason: varchar("correction_reason", { length: 512 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("recovery_observations_id_person_uq").on(table.id, table.personId),
+    foreignKey({
+      name: "recovery_observation_source_person_fk",
+      columns: [table.sourceReferenceId, table.personId],
+      foreignColumns: [sourceReferences.id, sourceReferences.personId]
+    }),
+    foreignKey({
+      name: "recovery_observation_consent_connection_fk",
+      columns: [table.consentId, table.connectionId, table.personId],
+      foreignColumns: [recoveryConsents.id, recoveryConsents.connectionId, recoveryConsents.personId]
+    }),
+    foreignKey({
+      name: "recovery_observation_supersedes_person_fk",
+      columns: [table.supersedesId, table.personId],
+      foreignColumns: [table.id, table.personId]
+    }),
+    uniqueIndex("recovery_observations_person_source_dedupe_uq").on(
+      table.personId,
+      table.source,
+      table.dedupeKey
+    ),
+    uniqueIndex("recovery_observations_supersedes_uq")
+      .on(table.supersedesId)
+      .where(sql`${table.supersedesId} IS NOT NULL`),
+    check("recovery_observations_time_order", sql`${table.observedUntil} >= ${table.observedFrom}`),
+    check(
+      "recovery_observations_device_shape",
+      sql`(${table.source} = 'device' AND ${table.connectionId} IS NOT NULL AND ${table.consentId} IS NOT NULL)
+          OR (${table.source} <> 'device' AND ${table.connectionId} IS NULL AND ${table.consentId} IS NULL)`
+    ),
+    check(
+      "recovery_observations_correction_shape",
+      sql`(${table.supersedesId} IS NULL AND ${table.correctionReason} IS NULL)
+          OR (${table.supersedesId} IS NOT NULL AND ${table.correctionReason} IS NOT NULL)`
+    ),
+    check(
+      "recovery_observations_no_self_supersession",
+      sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
+    )
+  ]
+);
+
+export const recoverySleepDetails = pgTable(
+  "recovery_sleep_details",
+  {
+    observationId: uuid("observation_id").primaryKey(),
+    totalSleepMinutes: smallint("total_sleep_minutes").notNull(),
+    sleepQuality: smallint("sleep_quality")
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_sleep_detail_observation_fk",
+      columns: [table.observationId],
+      foreignColumns: [recoveryObservations.id]
+    }).onDelete("cascade"),
+    check(
+      "recovery_sleep_details_values",
+      sql`${table.totalSleepMinutes} >= 0 AND ${table.totalSleepMinutes} <= 1440
+          AND (${table.sleepQuality} IS NULL OR (${table.sleepQuality} >= 1 AND ${table.sleepQuality} <= 5))`
+    )
+  ]
+);
+
+export const recoveryMetricDetails = pgTable(
+  "recovery_metric_details",
+  {
+    observationId: uuid("observation_id").primaryKey(),
+    metric: recoveryMetric("metric").notNull(),
+    value: numeric("value", { precision: 10, scale: 3 }).notNull(),
+    unit: recoveryMetricUnit("unit").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_metric_detail_observation_fk",
+      columns: [table.observationId],
+      foreignColumns: [recoveryObservations.id]
+    }).onDelete("cascade"),
+    check(
+      "recovery_metric_details_shape",
+      sql`${table.value} > 0 AND ${table.value} <= 1000
+          AND ((${table.metric} = 'hrv_rmssd' AND ${table.unit} = 'ms')
+            OR (${table.metric} = 'resting_heart_rate' AND ${table.unit} = 'bpm'))`
+    )
+  ]
+);
+
+export const recoverySubjectiveDetails = pgTable(
+  "recovery_subjective_details",
+  {
+    observationId: uuid("observation_id").primaryKey(),
+    energy: smallint("energy").notNull(),
+    fatigue: smallint("fatigue").notNull(),
+    muscleSoreness: smallint("muscle_soreness").notNull(),
+    stress: smallint("stress").notNull(),
+    sleepQuality: smallint("sleep_quality").notNull(),
+    acuteIllness: boolean("acute_illness").notNull(),
+    injuryConcern: boolean("injury_concern").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_subjective_detail_observation_fk",
+      columns: [table.observationId],
+      foreignColumns: [recoveryObservations.id]
+    }).onDelete("cascade"),
+    check(
+      "recovery_subjective_details_scales",
+      sql`${table.energy} BETWEEN 1 AND 5
+          AND ${table.fatigue} BETWEEN 1 AND 5
+          AND ${table.muscleSoreness} BETWEEN 1 AND 5
+          AND ${table.stress} BETWEEN 1 AND 5
+          AND ${table.sleepQuality} BETWEEN 1 AND 5`
+    )
+  ]
+);
+
+export const recoveryAssessmentPolicies = pgTable(
+  "recovery_assessment_policies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    key: varchar("key", { length: 128 }).notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [unique("recovery_assessment_policies_key_uq").on(table.key)]
+);
+
+export const recoveryAssessmentPolicyVersions = pgTable(
+  "recovery_assessment_policy_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    policyId: uuid("policy_id").notNull(),
+    version: integer("version").notNull(),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true, mode: "date" }).notNull(),
+    effectiveUntil: timestamp("effective_until", { withTimezone: true, mode: "date" }),
+    analysisWindowDays: smallint("analysis_window_days").notNull(),
+    minimumObservations: smallint("minimum_observations").notNull(),
+    sufficientObservations: smallint("sufficient_observations").notNull(),
+    insufficientConfidenceCap: numeric("insufficient_confidence_cap", { precision: 4, scale: 3 }).notNull(),
+    poorQualityConfidenceCap: numeric("poor_quality_confidence_cap", { precision: 4, scale: 3 }).notNull(),
+    targetSleepMinutes: smallint("target_sleep_minutes").notNull(),
+    fatigueWeight: numeric("fatigue_weight", { precision: 6, scale: 3 }).notNull(),
+    sorenessWeight: numeric("soreness_weight", { precision: 6, scale: 3 }).notNull(),
+    stressWeight: numeric("stress_weight", { precision: 6, scale: 3 }).notNull(),
+    lowEnergyWeight: numeric("low_energy_weight", { precision: 6, scale: 3 }).notNull(),
+    lowSleepQualityWeight: numeric("low_sleep_quality_weight", { precision: 6, scale: 3 }).notNull(),
+    sleepDeficitWeight: numeric("sleep_deficit_weight", { precision: 6, scale: 3 }).notNull(),
+    externalSetWeight: numeric("external_set_weight", { precision: 6, scale: 3 }).notNull(),
+    bodyweightSetWeight: numeric("bodyweight_set_weight", { precision: 6, scale: 3 }).notNull(),
+    assistedSetWeight: numeric("assisted_set_weight", { precision: 6, scale: 3 }).notNull(),
+    moderateRiskThreshold: numeric("moderate_risk_threshold", { precision: 6, scale: 3 }).notNull(),
+    highRiskThreshold: numeric("high_risk_threshold", { precision: 6, scale: 3 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_assessment_policy_version_policy_fk",
+      columns: [table.policyId],
+      foreignColumns: [recoveryAssessmentPolicies.id]
+    }).onDelete("cascade"),
+    unique("recovery_assessment_policy_versions_policy_version_uq").on(
+      table.policyId,
+      table.version
+    ),
+    check(
+      "recovery_assessment_policy_versions_values",
+      sql`${table.version} > 0
+          AND ${table.analysisWindowDays} > 0
+          AND ${table.minimumObservations} > 0
+          AND ${table.sufficientObservations} >= ${table.minimumObservations}
+          AND ${table.insufficientConfidenceCap} BETWEEN 0 AND 1
+          AND ${table.poorQualityConfidenceCap} BETWEEN 0 AND 1
+          AND ${table.targetSleepMinutes} > 0
+          AND ${table.fatigueWeight} >= 0
+          AND ${table.sorenessWeight} >= 0
+          AND ${table.stressWeight} >= 0
+          AND ${table.lowEnergyWeight} >= 0
+          AND ${table.lowSleepQualityWeight} >= 0
+          AND ${table.sleepDeficitWeight} >= 0
+          AND ${table.externalSetWeight} >= 0
+          AND ${table.bodyweightSetWeight} >= 0
+          AND ${table.assistedSetWeight} >= 0
+          AND ${table.moderateRiskThreshold} >= 0
+          AND ${table.highRiskThreshold} > ${table.moderateRiskThreshold}
+          AND (${table.effectiveUntil} IS NULL OR ${table.effectiveUntil} > ${table.effectiveFrom})`
+    )
+  ]
+);
+
+export const recoveryAssessments = pgTable(
+  "recovery_assessments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    asOf: timestamp("as_of", { withTimezone: true, mode: "date" }).notNull(),
+    windowStart: timestamp("window_start", { withTimezone: true, mode: "date" }).notNull(),
+    windowEnd: timestamp("window_end", { withTimezone: true, mode: "date" }).notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    readinessScore: numeric("readiness_score", { precision: 6, scale: 3 }).notNull(),
+    riskLevel: recoveryRiskLevel("risk_level").notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull(),
+    dataQuality: recoveryAssessmentDataQuality("data_quality").notNull(),
+    hardStop: boolean("hard_stop").notNull(),
+    evidenceChecksum: varchar("evidence_checksum", { length: 128 }).notNull(),
+    calculationSnapshot: jsonb("calculation_snapshot").$type<Record<string, unknown>>().notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_assessment_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "recovery_assessment_policy_version_fk",
+      columns: [table.policyVersionId],
+      foreignColumns: [recoveryAssessmentPolicyVersions.id]
+    }),
+    unique("recovery_assessments_id_person_uq").on(table.id, table.personId),
+    unique("recovery_assessments_person_dedupe_uq").on(table.personId, table.dedupeKey),
+    unique("recovery_assessments_person_evidence_uq").on(
+      table.personId,
+      table.policyVersionId,
+      table.evidenceChecksum
+    ),
+    check(
+      "recovery_assessments_values",
+      sql`${table.windowEnd} >= ${table.windowStart}
+          AND ${table.readinessScore} BETWEEN 0 AND 100
+          AND ${table.confidence} BETWEEN 0 AND 1
+          AND (NOT ${table.hardStop} OR ${table.riskLevel} = 'blocked')`
+    )
+  ]
+);
+
+export const recoveryAssessmentObservationEvidence = pgTable(
+  "recovery_assessment_observation_evidence",
+  {
+    assessmentId: uuid("assessment_id").notNull(),
+    observationId: uuid("observation_id").notNull(),
+    personId: uuid("person_id").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_assessment_observation_assessment_fk",
+      columns: [table.assessmentId, table.personId],
+      foreignColumns: [recoveryAssessments.id, recoveryAssessments.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "recovery_assessment_observation_observation_fk",
+      columns: [table.observationId, table.personId],
+      foreignColumns: [recoveryObservations.id, recoveryObservations.personId]
+    }),
+    unique("recovery_assessment_observation_evidence_uq").on(
+      table.assessmentId,
+      table.observationId
+    )
+  ]
+);
+
+export const recoveryAssessmentTrainingEvidence = pgTable(
+  "recovery_assessment_training_evidence",
+  {
+    assessmentId: uuid("assessment_id").notNull(),
+    workoutSessionId: uuid("workout_session_id").notNull(),
+    personId: uuid("person_id").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_assessment_training_assessment_fk",
+      columns: [table.assessmentId, table.personId],
+      foreignColumns: [recoveryAssessments.id, recoveryAssessments.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "recovery_assessment_training_session_fk",
+      columns: [table.workoutSessionId, table.personId],
+      foreignColumns: [workoutSessions.id, workoutSessions.personId]
+    }),
+    unique("recovery_assessment_training_evidence_uq").on(
+      table.assessmentId,
+      table.workoutSessionId
+    )
+  ]
+);
+
 /** Persisted SourceReference row returned by Drizzle queries. */
 export type SourceReferenceRow = typeof sourceReferences.$inferSelect;
 /** Insertable SourceReference row accepted by Drizzle mutations. */
@@ -1575,6 +2137,10 @@ export type PhysicalGoalVersionRow =
 /** Persisted typed criterion owned by a PhysicalGoal version. */
 export type PhysicalGoalCriterionRow =
   typeof physicalGoalCriteria.$inferSelect;
+/** Persisted immutable Recovery observation root. */
+export type RecoveryObservationRow = typeof recoveryObservations.$inferSelect;
+/** Persisted immutable Recovery assessment. */
+export type RecoveryAssessmentRow = typeof recoveryAssessments.$inferSelect;
 /** Persisted shared or private Nutrition Brand identity. */
 export type NutritionBrandRow = typeof nutritionBrands.$inferSelect;
 /** Persisted immutable Nutrition Brand version. */

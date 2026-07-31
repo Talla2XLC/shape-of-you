@@ -56,6 +56,10 @@ provenance и могут ссылаться на точную catalog revision.
 - Назначать отдельные долговечные ID для `Exercise`, `ExerciseVersion`,
   `TrainingProgramVersion`, `WorkoutSession` и `PerformedSet`. Legacy
   `Exercise_ID` и `Session_ID` остаются source references, а не domain ID.
+- Назначать отдельные ID для shared provider/device definitions,
+  person-owned connection, consent, `RecoveryObservation`, policy version и
+  assessment. Наблюдение хранит UTC interval, observation-time IANA timezone и
+  local date; correction заменяет весь typed observation.
 - Не использовать номера строк листа как ID.
 - Использовать `Person` как владельца facts и append-only supersession для
   corrections.
@@ -70,8 +74,9 @@ provenance и могут ссылаться на точную catalog revision.
 - Может ли legacy `Session_ID` охватывать несколько дат, и как такие строки
   разделять при миграции?
 - Являются ли `Food_ID` и `Ingredient_ID` глобально уникальными или только локальными для workbook?
-- Какой timezone применяется к timestamps внешних устройств до нормализации?
 - Какая retention policy применяется к private raw snapshots разных sources?
+- Как authenticated erasure удаляет raw snapshot, observations и зависимые
+  assessments до допуска production wearable data?
 
 ## Связанные материалы
 
@@ -82,3 +87,4 @@ provenance и могут ссылаться на точную catalog revision.
 - [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
 - [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
 - [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
+- [Наблюдения и оценки восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md)

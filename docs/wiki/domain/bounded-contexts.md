@@ -66,6 +66,10 @@ Coaching потребляет опубликованные свидетельс�
 - В Recovery provider/device model и capabilities являются shared reference
   data, а connection, consent, device instance и observations принадлежат
   `Person`.
+- В Recovery observation root неизменяем и имеет типизированную detail для
+  сна, числового показателя или субъективной отметки. Readiness и load-risk
+  assessments закрепляются за policy version и evidence; Coaching владеет
+  последующей рекомендацией, а не самой оценкой состояния.
 - В Coaching policy definitions и versions являются shared, а targets,
   разрешённые overrides и decisions принадлежат `Person` и закрепляются за
   точной policy version.
@@ -74,10 +78,10 @@ Coaching потребляет опубликованные свидетельс�
 
 ## Открытые вопросы
 
-- Принадлежит ли wearable ingestion контексту Recovery или integration boundary.
-- Принадлежит ли Load Risk контексту Recovery или Coaching.
 - Какой контекст владеет policy закрытия дня и разрешением corrections.
 - Оправдают ли вспомогательные capabilities независимые bounded contexts.
+- Какой provider adapter и authenticated erasure workflow будут утверждены до
+  работы с реальными wearable data.
 
 ## Связанные материалы
 
@@ -87,6 +91,7 @@ Coaching потребляет опубликованные свидетельс�
 - [Границы продукта](../product/scope.md)
 - [BodyMeasurementSession](body-measurement-session.md)
 - [PhysicalGoal](physical-goal.md)
+- [Recovery and Readiness](recovery-and-readiness.md)
 - [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
 - [Training and Performance](training-and-performance.md)
 - [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)

@@ -65,7 +65,23 @@ import {
   WorkoutSessionHistorySchema,
   WorkoutSessionListSchema,
   WorkoutSessionSchema,
-  UpsertFoodOverlaySchema
+  UpsertFoodOverlaySchema,
+  CorrectRecoveryObservationSchema,
+  CreateRecoveryAssessmentSchema,
+  CreateRecoveryConnectionSchema,
+  CreateRecoveryObservationSchema,
+  GrantRecoveryConsentSchema,
+  ListRecoveryAssessmentsQuerySchema,
+  ListRecoveryObservationsQuerySchema,
+  RecoveryAssessmentListSchema,
+  RecoveryAssessmentSchema,
+  RecoveryConnectionSchema,
+  RecoveryConsentSchema,
+  RecoveryIdParamsSchema,
+  RecoveryObservationHistorySchema,
+  RecoveryObservationListSchema,
+  RecoveryObservationSchema,
+  RevokeRecoveryConsentSchema
 } from "@shape-of-you/contracts";
 
 function schemaParameter(
@@ -892,6 +908,120 @@ function trainingPaths(): Record<string, object> {
   };
 }
 
+function recoveryPaths(): Record<string, object> {
+  const idParameter = schemaParameter("id", "path", true, RecoveryIdParamsSchema.properties.id);
+  const response = (schema: object, description: string): object => ({
+    description,
+    content: { "application/json": { schema } }
+  });
+  const request = (schema: object): object => ({
+    required: true,
+    content: { "application/json": { schema } }
+  });
+  return {
+    "/v1/recovery/connections": {
+      post: {
+        tags: ["recovery-consent"],
+        summary: "Create a Person-owned logical device connection",
+        requestBody: request(CreateRecoveryConnectionSchema),
+        responses: { "201": response(RecoveryConnectionSchema, "Connection created") }
+      }
+    },
+    "/v1/recovery/connections/{id}/consents": {
+      post: {
+        tags: ["recovery-consent"],
+        summary: "Grant explicit typed device-data consent",
+        parameters: [idParameter],
+        requestBody: request(GrantRecoveryConsentSchema),
+        responses: { "201": response(RecoveryConsentSchema, "Consent granted") }
+      }
+    },
+    "/v1/recovery/consents/{id}/revoke": {
+      post: {
+        tags: ["recovery-consent"],
+        summary: "Revoke future device ingestion",
+        parameters: [idParameter],
+        requestBody: request(RevokeRecoveryConsentSchema),
+        responses: { "200": response(RecoveryConsentSchema, "Consent revoked") }
+      }
+    },
+    "/v1/recovery/observations": {
+      post: {
+        tags: ["recovery-observations"],
+        summary: "Create an immutable typed Recovery observation",
+        requestBody: request(CreateRecoveryObservationSchema),
+        responses: {
+          "200": response(RecoveryObservationSchema, "Existing idempotent observation"),
+          "201": response(RecoveryObservationSchema, "Observation created")
+        }
+      },
+      get: {
+        tags: ["recovery-observations"],
+        summary: "List current Recovery observations",
+        parameters: [
+          schemaParameter("limit", "query", false, ListRecoveryObservationsQuerySchema.properties.limit),
+          schemaParameter("kind", "query", false, ListRecoveryObservationsQuerySchema.properties.kind),
+          schemaParameter("localDate", "query", false, ListRecoveryObservationsQuerySchema.properties.localDate)
+        ],
+        responses: { "200": response(RecoveryObservationListSchema, "Current observations") }
+      }
+    },
+    "/v1/recovery/observations/{id}": {
+      get: {
+        tags: ["recovery-observations"],
+        summary: "Read one immutable Recovery observation",
+        parameters: [idParameter],
+        responses: { "200": response(RecoveryObservationSchema, "Observation found") }
+      }
+    },
+    "/v1/recovery/observations/{id}/corrections": {
+      post: {
+        tags: ["recovery-observations"],
+        summary: "Append a full immutable observation replacement",
+        parameters: [idParameter],
+        requestBody: request(CorrectRecoveryObservationSchema),
+        responses: {
+          "200": response(RecoveryObservationSchema, "Existing correction"),
+          "201": response(RecoveryObservationSchema, "Correction appended")
+        }
+      }
+    },
+    "/v1/recovery/observations/{id}/history": {
+      get: {
+        tags: ["recovery-observations"],
+        summary: "Read the observation correction chain",
+        parameters: [idParameter],
+        responses: { "200": response(RecoveryObservationHistorySchema, "Correction chain") }
+      }
+    },
+    "/v1/recovery/assessments": {
+      post: {
+        tags: ["recovery-assessments"],
+        summary: "Create a deterministic policy-pinned assessment",
+        requestBody: request(CreateRecoveryAssessmentSchema),
+        responses: {
+          "200": response(RecoveryAssessmentSchema, "Existing idempotent assessment"),
+          "201": response(RecoveryAssessmentSchema, "Assessment created")
+        }
+      },
+      get: {
+        tags: ["recovery-assessments"],
+        summary: "List immutable Recovery assessments",
+        parameters: [schemaParameter("limit", "query", false, ListRecoveryAssessmentsQuerySchema.properties.limit)],
+        responses: { "200": response(RecoveryAssessmentListSchema, "Assessments") }
+      }
+    },
+    "/v1/recovery/assessments/{id}": {
+      get: {
+        tags: ["recovery-assessments"],
+        summary: "Read one immutable Recovery assessment",
+        parameters: [idParameter],
+        responses: { "200": response(RecoveryAssessmentSchema, "Assessment found") }
+      }
+    }
+  };
+}
+
 /**
  * Builds the public OpenAPI document from the shared runtime schemas.
  *
@@ -1120,7 +1250,8 @@ export function createOpenApiDocument(): object {
       ...physicalGoalPaths(),
       ...nutritionCatalogPaths(),
       ...mealPaths(),
-      ...trainingPaths()
+      ...trainingPaths(),
+      ...recoveryPaths()
     }
   };
 }

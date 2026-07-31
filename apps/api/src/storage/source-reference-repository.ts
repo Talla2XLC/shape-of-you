@@ -1,6 +1,9 @@
 import { and, eq } from "drizzle-orm";
 
-import type { SourceReferenceInput } from "@shape-of-you/contracts";
+import type {
+  RecoverySourceReferenceInput,
+  SourceReferenceInput
+} from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
 import {
@@ -29,7 +32,7 @@ export interface EnsuredSourceReference {
 export async function ensureSourceReference(
   transaction: DatabaseTransaction,
   personId: string,
-  input: SourceReferenceInput
+  input: SourceReferenceInput | RecoverySourceReferenceInput
 ): Promise<EnsuredSourceReference> {
   const inserted = await transaction
     .insert(sourceReferences)

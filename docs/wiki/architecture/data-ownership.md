@@ -61,6 +61,12 @@ shared version и собственным immutable snapshot. В Nutrition `Meal`
 nutrient snapshot; в Training program и performed work не становятся частью
 `ExerciseCatalog`; в Recovery provider model не владеет наблюдениями человека.
 
+В Recovery согласие разрешает только будущий приём указанных видов данных от
+конкретного person-owned connection. Его отзыв не выдаётся за удаление уже
+сохранённых значений. Retention expiry и authenticated erasure являются
+отдельным privacy lifecycle; до его реализации реальные wearable data в
+backend запрещены.
+
 Provenance общей catalog record отделён от person-scoped `SourceReference`
 fitness-факта. Внешние catalog records имеют source-specific identity,
 checksum, parser version и review lifecycle; импорт не предоставляет доступ к
@@ -117,3 +123,4 @@ identity, ownership, lifecycle и object metadata. Знание object key не 
 - `../../adr/20260731-use-layered-versioned-nutrition-catalog.md`
 - `../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md`
 - `../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md`
+- `../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md`

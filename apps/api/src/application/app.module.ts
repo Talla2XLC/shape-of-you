@@ -10,17 +10,20 @@ import type { BodyMeasurementSessionStore } from "../storage/body-measurement-se
 import type { PhysicalGoalStore } from "../storage/physical-goal-repository.js";
 import type { NutritionStore } from "../storage/nutrition-repository.js";
 import type { TrainingStore } from "../storage/training-repository.js";
+import type { RecoveryStore } from "../storage/recovery-repository.js";
 import { BodyMeasurementSessionModule } from "../body-measurement-sessions/body-measurement-session.module.js";
 import { PhysicalGoalModule } from "../physical-goals/physical-goal.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
 import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { TrainingModule } from "../training/training.module.js";
+import { RecoveryModule } from "../recovery/recovery.module.js";
 import {
   PERSON_CONTEXT,
   BODY_MEASUREMENT_SESSION_STORE,
   PHYSICAL_GOAL_STORE,
   NUTRITION_STORE,
   TRAINING_STORE,
+  RECOVERY_STORE,
   READINESS_PROBE,
   WEIGHT_MEASUREMENT_STORE
 } from "./tokens.js";
@@ -39,6 +42,8 @@ export interface AppModuleOptions {
   readonly nutritionStore: NutritionStore;
   /** Persistence boundary used by the Training module. */
   readonly trainingStore: TrainingStore;
+  /** Persistence boundary used by the Recovery module. */
+  readonly recoveryStore: RecoveryStore;
   /** Probe that resolves only when required dependencies are ready. */
   readonly readinessProbe: ReadinessProbe;
   /** Database context available to the application, when configured. */
@@ -79,6 +84,10 @@ class RuntimeDependenciesModule {
           useValue: options.trainingStore
         },
         {
+          provide: RECOVERY_STORE,
+          useValue: options.recoveryStore
+        },
+        {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
@@ -96,6 +105,7 @@ class RuntimeDependenciesModule {
         PHYSICAL_GOAL_STORE,
         NUTRITION_STORE,
         TRAINING_STORE,
+        RECOVERY_STORE,
         WEIGHT_MEASUREMENT_STORE,
         READINESS_PROBE,
         DatabaseLifecycle
@@ -123,7 +133,8 @@ export class AppModule {
         BodyMeasurementSessionModule,
         PhysicalGoalModule,
         NutritionModule,
-        TrainingModule
+        TrainingModule,
+        RecoveryModule
       ]
     };
   }

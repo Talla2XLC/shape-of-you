@@ -34,6 +34,12 @@ person-owned plan, а `WorkoutSession` — отдельным неизменяе
 Personal records и progression candidates не образуют aggregates и
 вычисляются над текущими фактами и действующей program version.
 
+В Recovery `RecoveryObservation` является неизменяемым person-owned fact с
+одной типизированной detail. Общие provider/device definitions не входят в
+этот aggregate. Readiness и load-risk assessments являются отдельными
+неизменяемыми решениями над текущими observations и явными Training evidence;
+они не владеют исходными фактами и не являются coaching recommendations.
+
 ### Кандидат lifecycle по дате
 
 `DayClosure` или `JournalDay` остаётся узким draft-кандидатом. Он может владеть календарной датой и timezone пользователя, lifecycle open/closed, временем закрытия, explicit corrections, ссылками на подтверждённые факты и созданием дневной projection. Имя и точные invariants ещё не утверждены.
@@ -51,7 +57,7 @@ Personal records и progression candidates не образуют aggregates и
 Не создавать агрегат на каждый лист или широкий `DayRecord`. Предпочитать
 независимые факты и projections по дате. Shared reference catalog не смешивать
 с person-owned facts. См. [ADR о независимых фактах](../../adr/20260728-prefer-independent-facts-over-broad-day-record.md)
-и [ADR о Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md).
+и [ADR о наблюдениях восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md).
 
 ## Открытые вопросы
 

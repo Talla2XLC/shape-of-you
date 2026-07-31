@@ -20,3 +20,6 @@ export const NUTRITION_STORE = Symbol("NUTRITION_STORE");
 
 /** Injection token for Training catalog, plans, facts, and projections. */
 export const TRAINING_STORE = Symbol("TRAINING_STORE");
+
+/** Injection token for Recovery observations, consent, and assessments. */
+export const RECOVERY_STORE = Symbol("RECOVERY_STORE");

@@ -20,14 +20,14 @@ tags:
 ### Высокая стоимость изменения
 
 - Окончательное имя, владение и invariants `DayClosure` или `JournalDay`.
-- Границы privacy, consent, retention и deletion для wearable и health evidence.
+- Конкретные сроки retention и authenticated erasure protocol для wearable и
+  health evidence до production ingestion.
 
 ### Недостаток свидетельств
 
 - Privacy, retention и deletion body photo и notes до real-data import.
 - Выбор внешнего Exercise catalog source, его license/attribution, quality и
   moderation policy.
-- Нормализация timezone для timestamps устройств и пользовательского ввода.
 - Conflict policy для независимых будущих channels за пределами подтверждённого
   зеркала `Weight`/`Daily_Log.Weight`.
 - Выбор внешних Nutrition catalog sources, их license/attribution, quality,
@@ -54,8 +54,10 @@ snapshots и external ingestion boundary также разрешены отде�
 Cross-context ownership shared reference definitions, person overlays,
 person-owned state и external source records разрешён отдельным ADR; exact
 schema Training, versioning программы, whole-session correction и record
-ordering разрешены отдельным ADR. Exact schemas Recovery и Coaching остаются
-решениями соответствующих verticals.
+ordering разрешены отдельным ADR. Typed Recovery observations, UTC interval,
+observation-time IANA timezone, consent boundary, policy-pinned readiness и
+load-risk assessments также разрешены отдельным ADR. Exact Coaching schema,
+production policy parameters и erasure workflow остаются открытыми.
 
 ## Открытые вопросы
 
@@ -73,3 +75,4 @@ ordering разрешены отдельным ADR. Exact schemas Recovery и Co
 - [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
 - [Shared reference definitions и person-owned state](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
 - [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
+- [Наблюдения и оценки восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md)

@@ -24,6 +24,7 @@ import type {
   NutritionStore
 } from "../src/storage/nutrition-repository.js";
 import type { TrainingStore } from "../src/storage/training-repository.js";
+import type { RecoveryStore } from "../src/storage/recovery-repository.js";
 import type {
   CreateWeightMeasurementResult,
   WeightMeasurementStore
@@ -205,11 +206,28 @@ const trainingStore: TrainingStore = {
   acceptProgressionCandidate: unreachable
 };
 
+const recoveryStore: RecoveryStore = {
+  registerDeviceModel: unreachable,
+  createConnection: unreachable,
+  grantConsent: unreachable,
+  revokeConsent: unreachable,
+  createObservation: unreachable,
+  correctObservation: unreachable,
+  findObservation: unreachable,
+  listObservations: unreachable,
+  observationHistory: unreachable,
+  registerPolicyVersion: unreachable,
+  createAssessment: unreachable,
+  findAssessment: unreachable,
+  listAssessments: unreachable
+};
+
 const physicalStateStores = {
   bodyMeasurementSessionStore,
   physicalGoalStore,
   nutritionStore,
-  trainingStore
+  trainingStore,
+  recoveryStore
 };
 
 describe("API bootstrap", () => {
@@ -249,6 +267,8 @@ describe("API bootstrap", () => {
       "/v1/nutrition/catalog/foods"
     );
     expect(openapi.json().paths).toHaveProperty("/v1/nutrition/meals");
+    expect(openapi.json().paths).toHaveProperty("/v1/recovery/observations");
+    expect(openapi.json().paths).toHaveProperty("/v1/recovery/assessments");
 
     await app.close();
   });

@@ -5,6 +5,11 @@ export const SourceChannelSchema = {
   enum: ["manual", "google_sheets", "import"]
 } as const;
 
+export const PersistedSourceChannelSchema = {
+  type: "string",
+  enum: ["manual", "google_sheets", "import", "device"]
+} as const;
+
 export const SourceReferenceInputSchema = {
   $id: "SourceReferenceInput",
   type: "object",
@@ -76,6 +81,7 @@ export const EmbeddedSourceReferenceSchema = {
   properties: {
     id: { type: "string", format: "uuid" },
     ...SourceReferenceInputSchema.properties,
+    channel: PersistedSourceChannelSchema,
     ingestedAt: { type: "string", format: "date-time" }
   }
 } as const;
@@ -86,4 +92,11 @@ export const SourceReferenceSchema = {
 } as const;
 
 /** Persisted public provenance without a private raw source snapshot. */
-export type SourceReference = FromSchema<typeof SourceReferenceSchema>;
+export interface SourceReference {
+  readonly id: string;
+  readonly channel: "manual" | "google_sheets" | "import" | "device";
+  readonly externalSystem: string | null;
+  readonly externalRecordId: string | null;
+  readonly occurredAt: string | null;
+  readonly ingestedAt: string;
+}
