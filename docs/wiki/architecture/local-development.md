@@ -48,7 +48,7 @@ pnpm lint
 pnpm typecheck
 pnpm build
 pnpm test
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-docs.ps1
+node scripts/validate-docs.mjs
 ```
 
 `pnpm test` включает integration suite и требует working container runtime.

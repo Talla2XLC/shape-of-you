@@ -13,6 +13,8 @@
     "test": "pnpm --filter @shape-of-you/api test",
     "test:unit": "pnpm --filter @shape-of-you/api test:unit",
     "test:integration": "pnpm --filter @shape-of-you/api test:integration",
+    "test:docs": "node --test scripts/validate-docs.test.mjs",
+    "docs:validate": "node scripts/validate-docs.mjs",
     "typecheck": "pnpm --filter @shape-of-you/contracts build && pnpm --filter @shape-of-you/config build && pnpm -r --sort typecheck",
     "db:generate": "pnpm --filter @shape-of-you/api db:generate",
     "db:migrate": "pnpm --filter @shape-of-you/api db:migrate"

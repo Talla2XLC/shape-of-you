@@ -51,7 +51,7 @@ Managed Wiki в 4DreamTeam v0.5.8 хранит авторитетное соде
 
 ## Проверка
 
-- Каждая canonical page проходит `scripts/validate-docs.ps1`.
+- Каждая canonical page проходит `node scripts/validate-docs.mjs`.
 - Board, memory и sources остаются работоспособны.
 - Discovery, чтение и запись проектных знаний направлены только в `docs/wiki` и `docs/adr`.
 - `docs/` не зарегистрирован в `4dt-sources`.

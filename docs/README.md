@@ -18,12 +18,9 @@ Git. Сгенерированных копий Wiki нет.
 4. Планы описывают выполнение, но не становятся источником архитектурной истины.
 5. Перед завершением крупной задачи запускается:
 
-   ```powershell
-   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-docs.ps1
+   ```shell
+   node scripts/validate-docs.mjs
    ```
-
-   В PowerShell 7 допустим эквивалент:
-   `pwsh -NoProfile -File .\scripts\validate-docs.ps1`.
 
 6. Изменения Wiki и ADR должны быть видны в Git diff.
 

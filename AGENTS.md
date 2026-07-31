@@ -20,7 +20,7 @@ At the start of a session, use the installed 4DreamTeam wrappers to:
 1. run `4dt-memory doctor` and load contract defaults;
 2. restore pending wake context without dumping all memory;
 3. check `4dt-board`, `4dt-sources`, and the local 4DreamTeam storage;
-4. run `scripts/validate-docs.ps1` before using canonical documentation;
+4. run `node scripts/validate-docs.mjs` before using canonical documentation;
 5. report degraded state instead of inventing missing context.
 
 The board, source registry, memory, and workflow state are managed by tools.
@@ -48,9 +48,7 @@ Do not edit their internal storage directly.
   statuses, and sections.
 - Before a commit, release, or completion of a major task, run:
 
-  `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate-docs.ps1`
-
-  In PowerShell 7, `pwsh -NoProfile -File` may be used.
+  `node scripts/validate-docs.mjs`
 - Architecture changes must be visible in the Git diff: update an ADR and only
   the affected current-state Wiki pages.
 - Wiki pages describe the current state concisely and link to ADRs without
