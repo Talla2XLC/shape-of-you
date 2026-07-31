@@ -47,7 +47,7 @@ if [ "$RUN_WRITE_SMOKE" = "true" ]; then
     "$BASE_URL/api/v1/weight-measurements"
 
   measurement_id=$(
-    sed -n 's/.*"id":"\([^"]*\)".*/\1/p' "$response_file" | head -n 1
+    sed -n 's/^[^"]*"id":"\([^"]*\)".*/\1/p' "$response_file" | head -n 1
   )
 
   if [ -z "$measurement_id" ]; then

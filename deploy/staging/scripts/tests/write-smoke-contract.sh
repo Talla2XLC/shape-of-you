@@ -21,6 +21,7 @@ output=/dev/null
 data=
 method=GET
 write_out=false
+url=
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -39,6 +40,9 @@ while [ "$#" -gt 0 ]; do
     --write-out)
       shift
       write_out=true
+      ;;
+    http://*|https://*)
+      url=$1
       ;;
   esac
   shift
@@ -60,8 +64,19 @@ if [ "$method" = "POST" ]; then
     exit 1
   fi
 
-  printf '%s' '{"id":"00000000-0000-4000-8000-000000000001"}' > "$output"
+  printf '%s' \
+    '{"id":"00000000-0000-4000-8000-000000000001","sourceReference":{"id":"00000000-0000-4000-8000-000000000002"}}' \
+    > "$output"
 fi
+
+case "$url" in
+  */api/v1/weight-measurements/*)
+    case "$url" in
+      *00000000-0000-4000-8000-000000000001) ;;
+      *) exit 1 ;;
+    esac
+    ;;
+esac
 EOF
 
 chmod 0755 "$TEST_ROOT/fake-bin/curl"
