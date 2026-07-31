@@ -18,6 +18,9 @@ jobs:
       - name: Test staging rollback readiness
         run: sh deploy/staging/scripts/tests/rollback-readiness.sh
 
+      - name: Test staging write smoke contract
+        run: sh deploy/staging/scripts/tests/write-smoke-contract.sh
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:

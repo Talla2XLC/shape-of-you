@@ -43,7 +43,7 @@ if [ "$RUN_WRITE_SMOKE" = "true" ]; then
     --request POST \
     --header 'Content-Type: application/json' \
     --data \
-    "{\"measuredAt\":\"$measured_at\",\"timezone\":\"UTC\",\"weightKg\":70,\"source\":\"manual\",\"dedupeKey\":\"$dedupe_key\",\"provenance\":{\"kind\":\"deployment-smoke\",\"releaseId\":\"$RELEASE_ID\"}}" \
+    "{\"measuredAt\":\"$measured_at\",\"timezone\":\"UTC\",\"weightKg\":70,\"dedupeKey\":\"$dedupe_key\",\"sourceReference\":{\"channel\":\"manual\",\"externalSystem\":null,\"externalRecordId\":null,\"occurredAt\":\"$measured_at\"}}" \
     "$BASE_URL/api/v1/weight-measurements"
 
   measurement_id=$(
