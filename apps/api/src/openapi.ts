@@ -81,7 +81,14 @@ import {
   RecoveryObservationHistorySchema,
   RecoveryObservationListSchema,
   RecoveryObservationSchema,
-  RevokeRecoveryConsentSchema
+  RevokeRecoveryConsentSchema,
+  CoachingRecommendationHistorySchema,
+  CoachingRecommendationIdParamsSchema,
+  CoachingRecommendationListSchema,
+  CoachingRecommendationSchema,
+  CreateCoachingRecommendationDecisionSchema,
+  CreateTrainingAdjustmentRecommendationSchema,
+  ListCoachingRecommendationsQuerySchema
 } from "@shape-of-you/contracts";
 
 function schemaParameter(
@@ -1022,6 +1029,76 @@ function recoveryPaths(): Record<string, object> {
   };
 }
 
+function coachingPaths(): Record<string, object> {
+  const idParameter = schemaParameter(
+    "id",
+    "path",
+    true,
+    CoachingRecommendationIdParamsSchema.properties.id
+  );
+  const response = (schema: object, description: string): object => ({
+    description,
+    content: { "application/json": { schema } }
+  });
+  const request = (schema: object): object => ({
+    required: true,
+    content: { "application/json": { schema } }
+  });
+  return {
+    "/v1/coaching/recommendations/training-adjustments": {
+      post: {
+        tags: ["coaching-recommendations"],
+        summary: "Evaluate one typed Training adjustment recommendation",
+        requestBody: request(CreateTrainingAdjustmentRecommendationSchema),
+        responses: {
+          "200": response(CoachingRecommendationSchema, "Existing idempotent recommendation"),
+          "201": response(CoachingRecommendationSchema, "Recommendation created")
+        }
+      }
+    },
+    "/v1/coaching/recommendations": {
+      get: {
+        tags: ["coaching-recommendations"],
+        summary: "List recommendation projections",
+        parameters: [
+          schemaParameter("limit", "query", false, ListCoachingRecommendationsQuerySchema.properties.limit),
+          schemaParameter("state", "query", false, ListCoachingRecommendationsQuerySchema.properties.state)
+        ],
+        responses: { "200": response(CoachingRecommendationListSchema, "Recommendations") }
+      }
+    },
+    "/v1/coaching/recommendations/{id}": {
+      get: {
+        tags: ["coaching-recommendations"],
+        summary: "Read one recommendation projection",
+        parameters: [idParameter],
+        responses: { "200": response(CoachingRecommendationSchema, "Recommendation found") }
+      }
+    },
+    "/v1/coaching/recommendations/{id}/history": {
+      get: {
+        tags: ["coaching-recommendations"],
+        summary: "Read immutable recommendation and decision history",
+        parameters: [idParameter],
+        responses: { "200": response(CoachingRecommendationHistorySchema, "Recommendation history") }
+      }
+    },
+    "/v1/coaching/recommendations/{id}/decisions": {
+      post: {
+        tags: ["coaching-decisions"],
+        summary: "Record one explicit terminal recommendation decision",
+        parameters: [idParameter],
+        requestBody: request(CreateCoachingRecommendationDecisionSchema),
+        responses: {
+          "200": response(CoachingRecommendationSchema, "Existing idempotent decision"),
+          "201": response(CoachingRecommendationSchema, "Decision recorded"),
+          "409": response(ErrorResponseSchema, "Decision conflicts or recommendation expired")
+        }
+      }
+    }
+  };
+}
+
 /**
  * Builds the public OpenAPI document from the shared runtime schemas.
  *
@@ -1251,7 +1328,8 @@ export function createOpenApiDocument(): object {
       ...nutritionCatalogPaths(),
       ...mealPaths(),
       ...trainingPaths(),
-      ...recoveryPaths()
+      ...recoveryPaths(),
+      ...coachingPaths()
     }
   };
 }

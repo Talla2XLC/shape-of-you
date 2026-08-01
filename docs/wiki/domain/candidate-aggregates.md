@@ -40,6 +40,12 @@ Personal records и progression candidates не образуют aggregates и
 неизменяемыми решениями над текущими observations и явными Training evidence;
 они не владеют исходными фактами и не являются coaching recommendations.
 
+В Coaching `CoachingRecommendation` является неизменяемым person-owned
+решением с общей identity и отдельной типизированной detail. Shared policy
+version и evidence не входят в aggregate recommendation. Терминальный
+`RecommendationDecision` является отдельным неизменяемым фактом пользователя,
+а выполнение остаётся фактом owning context.
+
 ### Кандидат lifecycle по дате
 
 `DayClosure` или `JournalDay` остаётся узким draft-кандидатом. Он может владеть календарной датой и timezone пользователя, lifecycle open/closed, временем закрытия, explicit corrections, ссылками на подтверждённые факты и созданием дневной projection. Имя и точные invariants ещё не утверждены.
@@ -58,6 +64,8 @@ Personal records и progression candidates не образуют aggregates и
 независимые факты и projections по дате. Shared reference catalog не смешивать
 с person-owned facts. См. [ADR о независимых фактах](../../adr/20260728-prefer-independent-facts-over-broad-day-record.md)
 и [ADR о наблюдениях восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md).
+Lifecycle Coaching зафиксирован в
+[ADR о рекомендациях и решениях пользователя](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md).
 
 ## Открытые вопросы
 

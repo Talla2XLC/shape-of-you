@@ -73,6 +73,9 @@ Coaching потребляет опубликованные свидетельс�
 - В Coaching policy definitions и versions являются shared, а targets,
   разрешённые overrides и decisions принадлежат `Person` и закрепляются за
   точной policy version.
+- В Coaching recommendation является неизменяемым person-owned решением с
+  типизированной detail и evidence links. Accepted/rejected decision хранится
+  отдельно; expiration вычисляется, а execution принадлежит owning context.
 - На этом этапе не объединять Physical State and Goals с Recovery and Readiness в контекст `Observations`.
 - Распределение по сервисам или базам данных не утверждено.
 
@@ -92,6 +95,7 @@ Coaching потребляет опубликованные свидетельс�
 - [BodyMeasurementSession](body-measurement-session.md)
 - [PhysicalGoal](physical-goal.md)
 - [Recovery and Readiness](recovery-and-readiness.md)
+- [Coaching and Decision Support](coaching-and-decision-support.md)
 - [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
 - [Training and Performance](training-and-performance.md)
 - [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)

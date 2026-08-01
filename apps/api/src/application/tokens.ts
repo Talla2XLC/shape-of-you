@@ -23,3 +23,6 @@ export const TRAINING_STORE = Symbol("TRAINING_STORE");
 
 /** Injection token for Recovery observations, consent, and assessments. */
 export const RECOVERY_STORE = Symbol("RECOVERY_STORE");
+
+/** Injection token for Coaching recommendations and decisions. */
+export const COACHING_STORE = Symbol("COACHING_STORE");

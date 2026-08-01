@@ -141,6 +141,22 @@ export const recoveryAssessmentDataQuality = pgEnum(
   "recovery_assessment_data_quality",
   ["insufficient", "limited", "sufficient"]
 );
+export const coachingRecommendationKind = pgEnum(
+  "coaching_recommendation_kind",
+  ["training_adjustment"]
+);
+export const coachingTrainingAdjustmentAction = pgEnum(
+  "coaching_training_adjustment_action",
+  ["hold", "target_weight", "repetition_range"]
+);
+export const coachingTrainingAdjustmentReason = pgEnum(
+  "coaching_training_adjustment_reason",
+  ["hard_stop", "low_confidence", "high_risk", "moderate_risk", "maintain"]
+);
+export const coachingDecisionOutcome = pgEnum("coaching_decision_outcome", [
+  "accepted",
+  "rejected"
+]);
 
 function physicalGoalVersionOwnershipColumns(): [
   AnyPgColumn,
@@ -2109,6 +2125,235 @@ export const recoveryAssessmentTrainingEvidence = pgTable(
       table.assessmentId,
       table.workoutSessionId
     )
+  ]
+);
+
+export const coachingPolicies = pgTable(
+  "coaching_policies",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    key: varchar("key", { length: 128 }).notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [unique("coaching_policies_key_uq").on(table.key)]
+);
+
+export const coachingPolicyVersions = pgTable(
+  "coaching_policy_versions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    policyId: uuid("policy_id").notNull(),
+    version: integer("version").notNull(),
+    effectiveFrom: timestamp("effective_from", { withTimezone: true, mode: "date" }).notNull(),
+    effectiveUntil: timestamp("effective_until", { withTimezone: true, mode: "date" }),
+    recommendationTtlMinutes: integer("recommendation_ttl_minutes").notNull(),
+    minimumConfidence: numeric("minimum_confidence", { precision: 4, scale: 3 }).notNull(),
+    highRiskLoadFactor: numeric("high_risk_load_factor", { precision: 4, scale: 3 }).notNull(),
+    repetitionReduction: smallint("repetition_reduction").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coaching_policy_version_policy_fk",
+      columns: [table.policyId],
+      foreignColumns: [coachingPolicies.id]
+    }).onDelete("cascade"),
+    unique("coaching_policy_versions_policy_version_uq").on(table.policyId, table.version),
+    check(
+      "coaching_policy_versions_values",
+      sql`${table.version} > 0
+          AND ${table.recommendationTtlMinutes} > 0
+          AND ${table.minimumConfidence} BETWEEN 0 AND 1
+          AND ${table.highRiskLoadFactor} > 0
+          AND ${table.highRiskLoadFactor} < 1
+          AND ${table.repetitionReduction} > 0
+          AND (${table.effectiveUntil} IS NULL OR ${table.effectiveUntil} > ${table.effectiveFrom})`
+    )
+  ]
+);
+
+export const coachingRecommendations = pgTable(
+  "coaching_recommendations",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    kind: coachingRecommendationKind("kind").notNull(),
+    policyVersionId: uuid("policy_version_id").notNull(),
+    asOf: timestamp("as_of", { withTimezone: true, mode: "date" }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    evidenceChecksum: varchar("evidence_checksum", { length: 128 }).notNull(),
+    explanation: varchar("explanation", { length: 2048 }).notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coaching_recommendation_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "coaching_recommendation_policy_version_fk",
+      columns: [table.policyVersionId],
+      foreignColumns: [coachingPolicyVersions.id]
+    }),
+    unique("coaching_recommendations_id_person_uq").on(table.id, table.personId),
+    unique("coaching_recommendations_person_dedupe_uq").on(table.personId, table.dedupeKey),
+    unique("coaching_recommendations_person_evidence_uq").on(
+      table.personId,
+      table.policyVersionId,
+      table.evidenceChecksum
+    ),
+    check("coaching_recommendations_expiry", sql`${table.expiresAt} > ${table.asOf}`)
+  ]
+);
+
+export const coachingTrainingAdjustmentDetails = pgTable(
+  "coaching_training_adjustment_details",
+  {
+    recommendationId: uuid("recommendation_id").primaryKey(),
+    personId: uuid("person_id").notNull(),
+    programId: uuid("program_id").notNull(),
+    programVersionId: uuid("program_version_id").notNull(),
+    prescriptionId: uuid("prescription_id").notNull(),
+    workoutPosition: smallint("workout_position").notNull(),
+    prescriptionPosition: smallint("prescription_position").notNull(),
+    exerciseId: uuid("exercise_id").notNull(),
+    exerciseVersionId: uuid("exercise_version_id").notNull(),
+    action: coachingTrainingAdjustmentAction("action").notNull(),
+    reasonCode: coachingTrainingAdjustmentReason("reason_code").notNull(),
+    currentTargetWeightKg: numeric("current_target_weight_kg", { precision: 12, scale: 3 }),
+    suggestedTargetWeightKg: numeric("suggested_target_weight_kg", { precision: 12, scale: 3 }),
+    currentRepsMin: integer("current_reps_min").notNull(),
+    currentRepsMax: integer("current_reps_max").notNull(),
+    suggestedRepsMin: integer("suggested_reps_min"),
+    suggestedRepsMax: integer("suggested_reps_max")
+  },
+  (table) => [
+    foreignKey({
+      name: "coaching_training_adjustment_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coaching_training_adjustment_program_version_fk",
+      columns: [table.programVersionId, table.programId, table.personId],
+      foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.programId, trainingProgramVersions.personId]
+    }),
+    foreignKey({
+      name: "coaching_training_adjustment_prescription_fk",
+      columns: [table.prescriptionId],
+      foreignColumns: [trainingProgramPrescriptions.id]
+    }),
+    check(
+      "coaching_training_adjustment_values",
+      sql`${table.workoutPosition} > 0
+          AND ${table.prescriptionPosition} > 0
+          AND ${table.currentRepsMin} > 0
+          AND ${table.currentRepsMax} >= ${table.currentRepsMin}
+          AND (${table.currentTargetWeightKg} IS NULL OR ${table.currentTargetWeightKg} >= 0)
+          AND (
+            (${table.action} = 'hold'
+              AND ${table.suggestedTargetWeightKg} IS NULL
+              AND ${table.suggestedRepsMin} IS NULL
+              AND ${table.suggestedRepsMax} IS NULL)
+            OR (${table.action} = 'target_weight'
+              AND ${table.currentTargetWeightKg} IS NOT NULL
+              AND ${table.suggestedTargetWeightKg} IS NOT NULL
+              AND ${table.suggestedTargetWeightKg} >= 0
+              AND ${table.suggestedTargetWeightKg} <> ${table.currentTargetWeightKg}
+              AND ${table.suggestedRepsMin} IS NULL
+              AND ${table.suggestedRepsMax} IS NULL)
+            OR (${table.action} = 'repetition_range'
+              AND ${table.suggestedTargetWeightKg} IS NULL
+              AND ${table.suggestedRepsMin} > 0
+              AND ${table.suggestedRepsMax} >= ${table.suggestedRepsMin}
+              AND (${table.suggestedRepsMin} <> ${table.currentRepsMin}
+                OR ${table.suggestedRepsMax} <> ${table.currentRepsMax}))
+          )`
+    )
+  ]
+);
+
+export const coachingRecommendationRecoveryEvidence = pgTable(
+  "coaching_recommendation_recovery_evidence",
+  {
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    recoveryAssessmentId: uuid("recovery_assessment_id").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coaching_recovery_evidence_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coaching_recovery_evidence_assessment_fk",
+      columns: [table.recoveryAssessmentId, table.personId],
+      foreignColumns: [recoveryAssessments.id, recoveryAssessments.personId]
+    }),
+    unique("coaching_recovery_evidence_recommendation_uq").on(table.recommendationId)
+  ]
+);
+
+export const coachingRecommendationTrainingSessionEvidence = pgTable(
+  "coaching_recommendation_training_session_evidence",
+  {
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    workoutSessionId: uuid("workout_session_id").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coaching_training_evidence_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coaching_training_evidence_session_fk",
+      columns: [table.workoutSessionId, table.personId],
+      foreignColumns: [workoutSessions.id, workoutSessions.personId]
+    }),
+    unique("coaching_training_evidence_uq").on(table.recommendationId, table.workoutSessionId)
+  ]
+);
+
+export const coachingRecommendationDecisions = pgTable(
+  "coaching_recommendation_decisions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    actorPersonId: uuid("actor_person_id").notNull(),
+    outcome: coachingDecisionOutcome("outcome").notNull(),
+    reason: varchar("reason", { length: 512 }).notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    decidedAt: timestamp("decided_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coaching_decision_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coaching_decision_actor_fk",
+      columns: [table.actorPersonId],
+      foreignColumns: [persons.id]
+    }),
+    unique("coaching_decisions_recommendation_uq").on(table.recommendationId),
+    unique("coaching_decisions_person_dedupe_uq").on(table.personId, table.dedupeKey),
+    check("coaching_decisions_actor_is_owner", sql`${table.actorPersonId} = ${table.personId}`)
   ]
 );
 

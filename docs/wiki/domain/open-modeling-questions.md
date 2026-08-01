@@ -57,7 +57,9 @@ schema Training, versioning программы, whole-session correction и reco
 ordering разрешены отдельным ADR. Typed Recovery observations, UTC interval,
 observation-time IANA timezone, consent boundary, policy-pinned readiness и
 load-risk assessments также разрешены отдельным ADR. Exact Coaching schema,
-production policy parameters и erasure workflow остаются открытыми.
+immutable recommendation/decision lifecycle, typed evidence и derived
+expiration разрешены отдельным ADR. Production Coaching policy parameters,
+typed difficulty/exercise replacement и erasure workflow остаются открытыми.
 
 ## Открытые вопросы
 
@@ -76,3 +78,4 @@ production policy parameters и erasure workflow остаются открыты
 - [Shared reference definitions и person-owned state](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
 - [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
 - [Наблюдения и оценки восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md)
+- [Рекомендации Coaching и решения пользователя](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md)

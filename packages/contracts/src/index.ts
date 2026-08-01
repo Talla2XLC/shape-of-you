@@ -1,4 +1,5 @@
 export * from "./common.js";
+export * from "./coaching.js";
 export * from "./body-measurement-session.js";
 export * from "./person.js";
 export * from "./physical-goal.js";
