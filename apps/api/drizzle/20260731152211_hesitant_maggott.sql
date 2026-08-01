@@ -206,8 +206,8 @@ CREATE TABLE "recovery_observations" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "recovery_observations_id_person_uq" UNIQUE("id","person_id"),
 	CONSTRAINT "recovery_observations_time_order" CHECK ("recovery_observations"."observed_until" >= "recovery_observations"."observed_from"),
-	CONSTRAINT "recovery_observations_device_shape" CHECK (("recovery_observations"."source" = 'device' AND "recovery_observations"."connection_id" IS NOT NULL AND "recovery_observations"."consent_id" IS NOT NULL)
-          OR ("recovery_observations"."source" <> 'device' AND "recovery_observations"."connection_id" IS NULL AND "recovery_observations"."consent_id" IS NULL)),
+	CONSTRAINT "recovery_observations_device_shape" CHECK (("recovery_observations"."source"::text = 'device' AND "recovery_observations"."connection_id" IS NOT NULL AND "recovery_observations"."consent_id" IS NOT NULL)
+          OR ("recovery_observations"."source"::text <> 'device' AND "recovery_observations"."connection_id" IS NULL AND "recovery_observations"."consent_id" IS NULL)),
 	CONSTRAINT "recovery_observations_correction_shape" CHECK (("recovery_observations"."supersedes_id" IS NULL AND "recovery_observations"."correction_reason" IS NULL)
           OR ("recovery_observations"."supersedes_id" IS NOT NULL AND "recovery_observations"."correction_reason" IS NOT NULL)),
 	CONSTRAINT "recovery_observations_no_self_supersession" CHECK ("recovery_observations"."supersedes_id" IS NULL OR "recovery_observations"."supersedes_id" <> "recovery_observations"."id")

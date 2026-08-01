@@ -1862,8 +1862,8 @@ export const recoveryObservations = pgTable(
     check("recovery_observations_time_order", sql`${table.observedUntil} >= ${table.observedFrom}`),
     check(
       "recovery_observations_device_shape",
-      sql`(${table.source} = 'device' AND ${table.connectionId} IS NOT NULL AND ${table.consentId} IS NOT NULL)
-          OR (${table.source} <> 'device' AND ${table.connectionId} IS NULL AND ${table.consentId} IS NULL)`
+      sql`(${table.source}::text = 'device' AND ${table.connectionId} IS NOT NULL AND ${table.consentId} IS NOT NULL)
+          OR (${table.source}::text <> 'device' AND ${table.connectionId} IS NULL AND ${table.consentId} IS NULL)`
     ),
     check(
       "recovery_observations_correction_shape",

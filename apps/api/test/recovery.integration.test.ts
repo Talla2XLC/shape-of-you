@@ -1,14 +1,16 @@
-import { readFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
-import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 import { buildApp, getFastifyInstance } from "../src/app.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
@@ -74,33 +76,59 @@ describe("Recovery PostgreSQL vertical", () => {
     await database.pool.query("create database shape_of_you_recovery_upgrade");
     const upgradeUrl = new URL(container.getConnectionUri());
     upgradeUrl.pathname = "/shape_of_you_recovery_upgrade";
-    const pool = new Pool({ connectionString: upgradeUrl.toString() });
-    const migrations = [
-      "20260728183725_real_vermin.sql",
-      "20260730131840_person_identity_provenance_corrections.sql",
-      "20260730185405_physical_state_goals.sql",
-      "20260730191405_enforce_goal_ownership.sql",
-      "20260731090108_rare_zarda.sql",
-      "20260731125414_fixed_pete_wisdom.sql",
-      "20260731152211_hesitant_maggott.sql"
-    ];
+    const priorMigrationsFolder = await mkdtemp(
+      path.join(tmpdir(), "shape-of-you-recovery-prior-")
+    );
+    const migrationsFolder = new URL("../drizzle/", import.meta.url);
+    const journal = JSON.parse(
+      await readFile(new URL("meta/_journal.json", migrationsFolder), "utf8")
+    ) as { entries: Array<{ idx: number; tag: string }> };
+    const priorEntries = journal.entries.filter((entry) => entry.idx <= 5);
+    const upgradeDatabase = createDatabase({
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      PORT: 3_000,
+      DATABASE_URL: upgradeUrl.toString(),
+      LOG_LEVEL: "silent",
+      PERSON_CONTEXT_MODE: "synthetic",
+      SYNTHETIC_PERSON_ID: personA,
+      SHUTDOWN_TIMEOUT_MS: 1_000
+    });
     try {
-      for (const file of migrations) {
-        const sql = await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8");
-        for (const statement of sql.split("--> statement-breakpoint")) {
-          if (statement.trim()) await pool.query(statement);
-        }
+      await mkdir(path.join(priorMigrationsFolder, "meta"));
+      await writeFile(
+        path.join(priorMigrationsFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: priorEntries })
+      );
+      for (const entry of priorEntries) {
+        await cp(
+          new URL(`${entry.tag}.sql`, migrationsFolder),
+          path.join(priorMigrationsFolder, `${entry.tag}.sql`)
+        );
       }
-      const upgraded = await pool.query<{ recovery: string | null; training: string | null }>(
+
+      await migrate(upgradeDatabase.db, {
+        migrationsFolder: priorMigrationsFolder
+      });
+      await runMigrations(upgradeUrl.toString());
+
+      const upgraded = await upgradeDatabase.pool.query<{
+        coaching: string | null;
+        recovery: string | null;
+        training: string | null;
+      }>(
         `select to_regclass('public.recovery_observations')::text as recovery,
-                to_regclass('public.workout_sessions')::text as training`
+                to_regclass('public.workout_sessions')::text as training,
+                to_regclass('public.coaching_recommendations')::text as coaching`
       );
       expect(upgraded.rows[0]).toEqual({
+        coaching: "coaching_recommendations",
         recovery: "recovery_observations",
         training: "workout_sessions"
       });
     } finally {
-      await pool.end();
+      await upgradeDatabase.pool.end();
+      await rm(priorMigrationsFolder, { force: true, recursive: true });
     }
   });
 

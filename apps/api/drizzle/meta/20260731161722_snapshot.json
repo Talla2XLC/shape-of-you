@@ -4605,7 +4605,7 @@
         },
         "recovery_observations_device_shape": {
           "name": "recovery_observations_device_shape",
-          "value": "(\"recovery_observations\".\"source\" = 'device' AND \"recovery_observations\".\"connection_id\" IS NOT NULL AND \"recovery_observations\".\"consent_id\" IS NOT NULL)\n          OR (\"recovery_observations\".\"source\" <> 'device' AND \"recovery_observations\".\"connection_id\" IS NULL AND \"recovery_observations\".\"consent_id\" IS NULL)"
+          "value": "(\"recovery_observations\".\"source\"::text = 'device' AND \"recovery_observations\".\"connection_id\" IS NOT NULL AND \"recovery_observations\".\"consent_id\" IS NOT NULL)\n          OR (\"recovery_observations\".\"source\"::text <> 'device' AND \"recovery_observations\".\"connection_id\" IS NULL AND \"recovery_observations\".\"consent_id\" IS NULL)"
         },
         "recovery_observations_correction_shape": {
           "name": "recovery_observations_correction_shape",
