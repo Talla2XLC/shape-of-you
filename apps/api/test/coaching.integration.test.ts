@@ -1,11 +1,8 @@
-import { readFile } from "node:fs/promises";
-
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
-import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
@@ -173,7 +170,7 @@ afterAll(async () => {
 });
 
 describe("Coaching PostgreSQL vertical", () => {
-  it("applies the additive migration on clean and previous schemas", async () => {
+  it("applies the additive migration on a clean schema", async () => {
     const clean = await database.pool.query<{ name: string | null }>(
       `select to_regclass('public.coaching_recommendations')::text as name
        union all select to_regclass('public.coaching_training_adjustment_details')::text
@@ -184,39 +181,6 @@ describe("Coaching PostgreSQL vertical", () => {
       "coaching_training_adjustment_details",
       "coaching_recommendation_decisions"
     ]);
-
-    await database.pool.query("create database shape_of_you_coaching_upgrade");
-    const upgradeUrl = new URL(container.getConnectionUri());
-    upgradeUrl.pathname = "/shape_of_you_coaching_upgrade";
-    const pool = new Pool({ connectionString: upgradeUrl.toString() });
-    const migrations = [
-      "20260728183725_real_vermin.sql",
-      "20260730131840_person_identity_provenance_corrections.sql",
-      "20260730185405_physical_state_goals.sql",
-      "20260730191405_enforce_goal_ownership.sql",
-      "20260731090108_rare_zarda.sql",
-      "20260731125414_fixed_pete_wisdom.sql",
-      "20260731152211_hesitant_maggott.sql",
-      "20260731161722_useful_molten_man.sql"
-    ];
-    try {
-      for (const file of migrations) {
-        const contents = await readFile(new URL(`../drizzle/${file}`, import.meta.url), "utf8");
-        for (const statement of contents.split("--> statement-breakpoint")) {
-          if (statement.trim()) await pool.query(statement);
-        }
-      }
-      const upgraded = await pool.query<{ coaching: string | null; recovery: string | null }>(
-        `select to_regclass('public.coaching_recommendations')::text as coaching,
-                to_regclass('public.recovery_assessments')::text as recovery`
-      );
-      expect(upgraded.rows[0]).toEqual({
-        coaching: "coaching_recommendations",
-        recovery: "recovery_assessments"
-      });
-    } finally {
-      await pool.end();
-    }
   });
 
   it("creates an idempotent typed recommendation with exact evidence and Person isolation", async () => {

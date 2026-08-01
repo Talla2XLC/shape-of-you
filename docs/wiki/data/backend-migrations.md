@@ -58,9 +58,20 @@ PostgreSQL identifier.
 своими корнями и `Person`, partial unique index допускает не более одной
 активной программы, а append-only constraints защищают историю corrections.
 
-Все траектории проверяются integration tests: применение на чистой БД и upgrade
-с исходной schema и существующим synthetic fact. Миграция не импортирует Google
-Sheets, не выполняет backfill рабочих данных и не меняет authority.
+Седьмая migration добавляет Recovery and Readiness: providers, connections,
+consents, devices, typed observations, versioned assessment policies и
+assessments с evidence. Восьмая migration добавляет Coaching: versioned
+policies, person-owned recommendations, решения пользователя, training
+adjustment details и evidence из Recovery и Training.
+
+Центральный migration integration test проверяет применение полного journal на
+чистой БД, повторный idempotent запуск и upgrade каждого зафиксированного
+непустого префикса journal до текущего состояния через реальный Drizzle
+migrator. После каждого шага проверяются порядок, `created_at` и SHA-256 SQL
+files в `drizzle.__drizzle_migrations`. Отдельный WeightMeasurement test
+сохраняет проверку переноса synthetic legacy fact. Migration chain не
+импортирует Google Sheets, не выполняет backfill рабочих данных и не меняет
+authority.
 
 Изменение существующей принятой migration после её применения запрещено.
 Следующее изменение schema создаёт новый migration file.
@@ -73,8 +84,11 @@ Sheets, не выполняет backfill рабочих данных и не м�
 - `apps/api/drizzle/20260730191405_enforce_goal_ownership.sql`.
 - `apps/api/drizzle/20260731090108_rare_zarda.sql`.
 - `apps/api/drizzle/20260731125414_fixed_pete_wisdom.sql`.
+- `apps/api/drizzle/20260731152211_hesitant_maggott.sql`.
+- `apps/api/drizzle/20260731161722_useful_molten_man.sql`.
 - `apps/api/src/database/migrate.ts`.
-- Drizzle schema и integration test чистой БД.
+- `apps/api/test/migrations.integration.test.ts`.
+- Drizzle schema и domain integration tests.
 
 ## Решения
 
@@ -84,9 +98,8 @@ Sheets, не выполняет backfill рабочих данных и не м�
 
 ## Открытые вопросы
 
-- Первая staging migration на отдельной `shape_of_you_api` проверена 2026-07-29.
-  Применение второй migration на VM требует отдельного deployment approval;
-  локальные clean/upgrade integration tests пройдены.
+- Staging migration chain до Coaching включительно применена через
+  автоматизированный migration service и проверена smoke tests 2026-08-01.
 - Согласованная с владельцем общего cluster retention policy.
 
 ## Связанные материалы

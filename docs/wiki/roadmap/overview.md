@@ -24,7 +24,7 @@ tags:
    преждевременного переноса authority данных. Завершены backend bootstrap,
    person/access/provenance foundation и первая вертикаль `WeightMeasurement`
    с corrections, Physical State/Goals, Nutrition catalog/Meals, Training and
-   Performance и Recovery and Readiness; Coaching, Intake и общий day
+   Performance, Recovery and Readiness и Coaching; Intake и общий day
    lifecycle ещё не реализованы.
 3. **DEV-024 — PostgreSQL migration and dual-run**: inventory, mapping, backfill, reconciliation, контролируемое сосуществование, критерии cutover и rollback.
 4. **DEV-025 — Web MVP**: выпустить первый web-клиент, использующий стабильный backend-контракт.

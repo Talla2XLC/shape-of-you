@@ -3,8 +3,6 @@ import {
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { readFile } from "node:fs/promises";
-import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
@@ -76,49 +74,6 @@ describe("Training PostgreSQL vertical", () => {
       "workout_sessions",
       "performed_sets"
     ]);
-  });
-
-  it("upgrades the previous Nutrition schema additively", async () => {
-    await database.pool.query("create database shape_of_you_training_upgrade");
-    const upgradeUrl = new URL(container.getConnectionUri());
-    upgradeUrl.pathname = "/shape_of_you_training_upgrade";
-    const upgradePool = new Pool({ connectionString: upgradeUrl.toString() });
-    const migrationFiles = [
-      "20260728183725_real_vermin.sql",
-      "20260730131840_person_identity_provenance_corrections.sql",
-      "20260730185405_physical_state_goals.sql",
-      "20260730191405_enforce_goal_ownership.sql",
-      "20260731090108_rare_zarda.sql",
-      "20260731125414_fixed_pete_wisdom.sql"
-    ];
-
-    try {
-      for (const migrationFile of migrationFiles) {
-        const migration = await readFile(
-          new URL(`../drizzle/${migrationFile}`, import.meta.url),
-          "utf8"
-        );
-        for (const statement of migration.split("--> statement-breakpoint")) {
-          if (statement.trim()) {
-            await upgradePool.query(statement);
-          }
-        }
-      }
-      const relations = await upgradePool.query<{
-        nutrition: string | null;
-        training: string | null;
-      }>(
-        `select
-           to_regclass('public.nutrition_foods')::text as nutrition,
-           to_regclass('public.training_exercises')::text as training`
-      );
-      expect(relations.rows[0]).toEqual({
-        nutrition: "nutrition_foods",
-        training: "training_exercises"
-      });
-    } finally {
-      await upgradePool.end();
-    }
   });
 
   it("reuses shared exercises, isolates private ones, and stages sources idempotently", async () => {

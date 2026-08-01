@@ -1,7 +1,3 @@
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import {
   PostgreSqlContainer,
@@ -10,8 +6,6 @@ import {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
-import { migrate } from "drizzle-orm/node-postgres/migrator";
-
 import { buildApp, getFastifyInstance } from "../src/app.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
@@ -61,7 +55,7 @@ afterAll(async () => {
 });
 
 describe("Recovery PostgreSQL vertical", () => {
-  it("applies the additive Recovery migration on a clean and prior schema", async () => {
+  it("applies the additive Recovery migration on a clean schema", async () => {
     const clean = await database.pool.query<{ name: string | null }>(
       `select to_regclass('public.recovery_observations')::text as name
        union all select to_regclass('public.recovery_assessments')::text
@@ -72,64 +66,6 @@ describe("Recovery PostgreSQL vertical", () => {
       "recovery_assessments",
       "recovery_consents"
     ]);
-
-    await database.pool.query("create database shape_of_you_recovery_upgrade");
-    const upgradeUrl = new URL(container.getConnectionUri());
-    upgradeUrl.pathname = "/shape_of_you_recovery_upgrade";
-    const priorMigrationsFolder = await mkdtemp(
-      path.join(tmpdir(), "shape-of-you-recovery-prior-")
-    );
-    const migrationsFolder = new URL("../drizzle/", import.meta.url);
-    const journal = JSON.parse(
-      await readFile(new URL("meta/_journal.json", migrationsFolder), "utf8")
-    ) as { entries: Array<{ idx: number; tag: string }> };
-    const priorEntries = journal.entries.filter((entry) => entry.idx <= 5);
-    const upgradeDatabase = createDatabase({
-      NODE_ENV: "test",
-      HOST: "127.0.0.1",
-      PORT: 3_000,
-      DATABASE_URL: upgradeUrl.toString(),
-      LOG_LEVEL: "silent",
-      PERSON_CONTEXT_MODE: "synthetic",
-      SYNTHETIC_PERSON_ID: personA,
-      SHUTDOWN_TIMEOUT_MS: 1_000
-    });
-    try {
-      await mkdir(path.join(priorMigrationsFolder, "meta"));
-      await writeFile(
-        path.join(priorMigrationsFolder, "meta", "_journal.json"),
-        JSON.stringify({ ...journal, entries: priorEntries })
-      );
-      for (const entry of priorEntries) {
-        await cp(
-          new URL(`${entry.tag}.sql`, migrationsFolder),
-          path.join(priorMigrationsFolder, `${entry.tag}.sql`)
-        );
-      }
-
-      await migrate(upgradeDatabase.db, {
-        migrationsFolder: priorMigrationsFolder
-      });
-      await runMigrations(upgradeUrl.toString());
-
-      const upgraded = await upgradeDatabase.pool.query<{
-        coaching: string | null;
-        recovery: string | null;
-        training: string | null;
-      }>(
-        `select to_regclass('public.recovery_observations')::text as recovery,
-                to_regclass('public.workout_sessions')::text as training,
-                to_regclass('public.coaching_recommendations')::text as coaching`
-      );
-      expect(upgraded.rows[0]).toEqual({
-        coaching: "coaching_recommendations",
-        recovery: "recovery_observations",
-        training: "workout_sessions"
-      });
-    } finally {
-      await upgradeDatabase.pool.end();
-      await rm(priorMigrationsFolder, { force: true, recursive: true });
-    }
   });
 
   it("reuses shared device knowledge while isolating Person-owned connections", async () => {
