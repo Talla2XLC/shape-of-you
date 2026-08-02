@@ -26,6 +26,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      artifact-metadata: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
 
@@ -54,8 +55,31 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Wait for API image manifest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-api
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          if docker buildx imagetools inspect "$IMAGE@$DIGEST" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          for delay in 1 2 4 8 16; do
+            sleep "$delay"
+
+            if docker buildx imagetools inspect "$IMAGE@$DIGEST" >/dev/null 2>&1; then
+              exit 0
+            fi
+          done
+
+          printf 'Image manifest did not become readable: %s@%s\n' "$IMAGE" "$DIGEST" >&2
+          exit 1
+
       - name: Attest API image
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest@v4
         with:
           subject-name: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-api
           subject-digest: ${{ steps.build.outputs.digest }}
@@ -79,6 +103,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      artifact-metadata: write
     outputs:
       digest: ${{ steps.build.outputs.digest }}
 
@@ -107,8 +132,31 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Wait for edge image manifest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-edge
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          if docker buildx imagetools inspect "$IMAGE@$DIGEST" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          for delay in 1 2 4 8 16; do
+            sleep "$delay"
+
+            if docker buildx imagetools inspect "$IMAGE@$DIGEST" >/dev/null 2>&1; then
+              exit 0
+            fi
+          done
+
+          printf 'Image manifest did not become readable: %s@%s\n' "$IMAGE" "$DIGEST" >&2
+          exit 1
+
       - name: Attest edge image
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest@v4
         with:
           subject-name: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-edge
           subject-digest: ${{ steps.build.outputs.digest }}
