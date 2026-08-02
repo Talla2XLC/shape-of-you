@@ -88,7 +88,13 @@ import {
   CoachingRecommendationSchema,
   CreateCoachingRecommendationDecisionSchema,
   CreateTrainingAdjustmentRecommendationSchema,
-  ListCoachingRecommendationsQuerySchema
+  ListCoachingRecommendationsQuerySchema,
+  ClarifyIntakeItemSchema,
+  CreateIntakeRequestSchema,
+  DecideIntakeItemSchema,
+  IntakeItemParamsSchema,
+  IntakeRequestIdParamsSchema,
+  IntakeRequestSchema
 } from "@shape-of-you/contracts";
 
 function schemaParameter(
@@ -1099,6 +1105,76 @@ function coachingPaths(): Record<string, object> {
   };
 }
 
+function intakePaths(): Record<string, object> {
+  const response = (schema: object, description: string): object => ({
+    description,
+    content: { "application/json": { schema } }
+  });
+  const request = (schema: object): object => ({
+    required: true,
+    content: { "application/json": { schema } }
+  });
+  const requestId = schemaParameter(
+    "id",
+    "path",
+    true,
+    IntakeRequestIdParamsSchema.properties.id
+  );
+  const itemId = schemaParameter(
+    "itemId",
+    "path",
+    true,
+    IntakeItemParamsSchema.properties.itemId
+  );
+  return {
+    "/v1/intake/requests": {
+      post: {
+        tags: ["intake"],
+        summary: "Durably accept one natural-language message",
+        requestBody: request(CreateIntakeRequestSchema),
+        responses: {
+          "202": response(IntakeRequestSchema, "Message queued for parsing")
+        }
+      }
+    },
+    "/v1/intake/requests/{id}": {
+      get: {
+        tags: ["intake"],
+        summary: "Read current Intake progress",
+        parameters: [requestId],
+        responses: {
+          "200": response(IntakeRequestSchema, "Current Intake projection"),
+          "404": response(ErrorResponseSchema, "Request not found")
+        }
+      }
+    },
+    "/v1/intake/requests/{id}/items/{itemId}/clarification": {
+      post: {
+        tags: ["intake"],
+        summary: "Submit one clarification answer",
+        parameters: [requestId, itemId],
+        requestBody: request(ClarifyIntakeItemSchema),
+        responses: {
+          "202": response(IntakeRequestSchema, "Clarification queued"),
+          "409": response(ErrorResponseSchema, "Item state conflicts")
+        }
+      }
+    },
+    "/v1/intake/requests/{id}/items/{itemId}/decision": {
+      post: {
+        tags: ["intake"],
+        summary: "Confirm or reject one parsed item",
+        parameters: [requestId, itemId],
+        requestBody: request(DecideIntakeItemSchema),
+        responses: {
+          "202": response(IntakeRequestSchema, "Decision accepted"),
+          "409": response(ErrorResponseSchema, "Item state conflicts")
+        }
+      }
+    }
+  };
+}
+
 /**
  * Builds the public OpenAPI document from the shared runtime schemas.
  *
@@ -1329,7 +1405,8 @@ export function createOpenApiDocument(): object {
       ...mealPaths(),
       ...trainingPaths(),
       ...recoveryPaths(),
-      ...coachingPaths()
+      ...coachingPaths(),
+      ...intakePaths()
     }
   };
 }

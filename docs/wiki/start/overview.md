@@ -10,7 +10,10 @@ tags: []
 
 ## Кратко
 
-Shape of You — персональная AI-платформа для обоснованных решений о физическом развитии. Baseline репозитория завершён, а backend находится на этапе DEV-023: реализованы основные возможности физического состояния, питания и тренировок; оставшиеся предметные области ещё проектируются.
+Shape of You — персональная AI-платформа для обоснованных решений о физическом
+развитии. Baseline репозитория завершён, а backend находится на этапе DEV-023:
+реализованы основные возможности физического состояния, питания, тренировок,
+восстановления и coaching, а также основа асинхронного Intake.
 
 ## Содержание
 
@@ -30,7 +33,9 @@ DEV-027 завершил workspace, продуктовый и доменный b
 NestJS API с `FastifyAdapter`, PostgreSQL persistence и person-scoped вертикаль
 `WeightMeasurement` с typed provenance и append-only corrections, Physical
 State/Goals, Nutrition catalog/Meals и Training and Performance. Восстановление,
-coaching, intake и общий lifecycle ещё не реализованы. Google Sheets остаётся
+Coaching и основа Intake с PostgreSQL-очередью и первым маршрутом веса также
+реализованы. Production parser, остальные маршруты Intake и общий lifecycle
+ещё не реализованы. Google Sheets остаётся
 authoritative source рабочих fitness-данных до проверенного dual-run с
 PostgreSQL и утверждённого cutover.
 

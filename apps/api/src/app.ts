@@ -49,6 +49,11 @@ import {
   CoachingRepository,
   type CoachingStore
 } from "./storage/coaching-repository.js";
+import {
+  IntakeRepository,
+  type IntakeStore
+} from "./storage/intake-repository.js";
+import type { IntakeParser } from "./domain/intake.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -72,6 +77,10 @@ export interface BuildAppOptions {
   readonly recoveryStore?: RecoveryStore;
   /** Optional Coaching persistence used for isolated application tests. */
   readonly coachingStore?: CoachingStore;
+  /** Optional Intake persistence used for isolated application tests. */
+  readonly intakeStore?: IntakeStore;
+  /** Optional provider-neutral parser that enables the background worker. */
+  readonly intakeParser?: IntakeParser;
   /** Optional Person resolution boundary, primarily for isolated tests. */
   readonly personContext?: PersonContext;
 }
@@ -95,7 +104,7 @@ export function getFastifyInstance(
  *
  * @param options - Validated configuration and optional injected dependencies.
  * @returns An initialized Nest application ready to listen or inject requests.
- * @throws Error when no WeightMeasurement store can be constructed.
+ * @throws Error when the complete set of application stores cannot be constructed.
  */
 export async function buildApp(
   options: BuildAppOptions
@@ -133,6 +142,9 @@ export async function buildApp(
   const coachingStore =
     options.coachingStore ??
     (database ? new CoachingRepository(database) : undefined);
+  const intakeStore =
+    options.intakeStore ??
+    (database ? new IntakeRepository(database) : undefined);
 
   if (
     !store ||
@@ -141,7 +153,8 @@ export async function buildApp(
     !nutritionStore ||
     !trainingStore ||
     !recoveryStore ||
-    !coachingStore
+    !coachingStore ||
+    !intakeStore
   ) {
     throw new Error("All application persistence stores are required");
   }
@@ -181,6 +194,8 @@ export async function buildApp(
       trainingStore,
       recoveryStore,
       coachingStore,
+      intakeStore,
+      intakeParser: options.intakeParser ?? null,
       personContext,
       readinessProbe,
       database,

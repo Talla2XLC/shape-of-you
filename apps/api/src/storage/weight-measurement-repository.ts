@@ -39,7 +39,9 @@ import {
 } from "../domain/weight-measurement.js";
 import {
   discardUnusedSourceReference,
-  ensureSourceReference
+  ensureSourceReference,
+  type DatabaseTransaction,
+  type EnsuredSourceReference
 } from "./source-reference-repository.js";
 
 interface JoinedMeasurement {
@@ -128,6 +130,88 @@ function serializeJoined(row: JoinedMeasurement): WeightMeasurement {
   return toWeightMeasurement(row.measurement, row.sourceReference);
 }
 
+/**
+ * Creates a WeightMeasurement inside a caller-owned database transaction.
+ *
+ * @param transaction - Active transaction that also owns surrounding workflow state.
+ * @param personId - Authorized data-owner UUID.
+ * @param input - Validated immutable fact command.
+ * @param existingSourceReference - Optional provenance already owned by the transaction.
+ * @returns Idempotent insert outcome.
+ */
+export async function createWeightMeasurementInTransaction(
+  transaction: DatabaseTransaction,
+  personId: string,
+  input: CreateWeightMeasurement,
+  existingSourceReference?: SourceReferenceRow
+): Promise<CreateWeightMeasurementResult> {
+  if (
+    existingSourceReference &&
+    existingSourceReference.channel !== input.sourceReference.channel
+  ) {
+    throw new Error("WeightMeasurement source channel does not match provenance");
+  }
+  const sourceReference: EnsuredSourceReference = existingSourceReference
+    ? { row: existingSourceReference, inserted: false }
+    : await ensureSourceReference(
+        transaction,
+        personId,
+        input.sourceReference
+      );
+  const inserted = await transaction
+    .insert(weightMeasurements)
+    .values(
+      toNewWeightMeasurement(
+        personId,
+        sourceReference.row.id,
+        input
+      )
+    )
+    .onConflictDoNothing()
+    .returning();
+
+  if (inserted[0]) {
+    return {
+      created: true,
+      measurement: toWeightMeasurement(inserted[0], sourceReference.row)
+    };
+  }
+
+  await discardUnusedSourceReference(transaction, sourceReference);
+  const existing = await transaction
+    .select({
+      measurement: weightMeasurements,
+      sourceReference: sourceReferences
+    })
+    .from(weightMeasurements)
+    .innerJoin(
+      sourceReferences,
+      eq(weightMeasurements.sourceReferenceId, sourceReferences.id)
+    )
+    .where(
+      and(
+        eq(weightMeasurements.personId, personId),
+        eq(
+          weightMeasurements.source,
+          input.sourceReference.channel
+        ),
+        eq(weightMeasurements.dedupeKey, input.dedupeKey)
+      )
+    )
+    .limit(1);
+
+  if (!existing[0]) {
+    throw new Error(
+      "WeightMeasurement conflict did not resolve to a deduplicated fact"
+    );
+  }
+
+  return {
+    created: false,
+    measurement: serializeJoined(existing[0])
+  };
+}
+
 /** PostgreSQL implementation of the WeightMeasurement persistence contract. */
 export class WeightMeasurementRepository
   implements WeightMeasurementStore
@@ -139,68 +223,9 @@ export class WeightMeasurementRepository
     personId: string,
     input: CreateWeightMeasurement
   ): Promise<CreateWeightMeasurementResult> {
-    return this.database.db.transaction(async (transaction) => {
-      const sourceReference = await ensureSourceReference(
-        transaction,
-        personId,
-        input.sourceReference
-      );
-      const inserted = await transaction
-        .insert(weightMeasurements)
-        .values(
-          toNewWeightMeasurement(
-            personId,
-            sourceReference.row.id,
-            input
-          )
-        )
-        .onConflictDoNothing()
-        .returning();
-
-      if (inserted[0]) {
-        return {
-          created: true,
-          measurement: toWeightMeasurement(
-            inserted[0],
-            sourceReference.row
-          )
-        };
-      }
-
-      await discardUnusedSourceReference(transaction, sourceReference);
-      const existing = await transaction
-        .select({
-          measurement: weightMeasurements,
-          sourceReference: sourceReferences
-        })
-        .from(weightMeasurements)
-        .innerJoin(
-          sourceReferences,
-          eq(weightMeasurements.sourceReferenceId, sourceReferences.id)
-        )
-        .where(
-          and(
-            eq(weightMeasurements.personId, personId),
-            eq(
-              weightMeasurements.source,
-              input.sourceReference.channel
-            ),
-            eq(weightMeasurements.dedupeKey, input.dedupeKey)
-          )
-        )
-        .limit(1);
-
-      if (!existing[0]) {
-        throw new Error(
-          "WeightMeasurement conflict did not resolve to a deduplicated fact"
-        );
-      }
-
-      return {
-        created: false,
-        measurement: serializeJoined(existing[0])
-      };
-    });
+    return this.database.db.transaction((transaction) =>
+      createWeightMeasurementInTransaction(transaction, personId, input)
+    );
   }
 
   /** {@inheritDoc WeightMeasurementStore.correct} */

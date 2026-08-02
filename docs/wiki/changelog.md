@@ -10,11 +10,29 @@ tags: []
 
 ## Кратко
 
-Базовый набор проектных знаний создан 2026-07-28. Реализованы backend
-вертикали веса, замеров тела и версионируемых физических целей; перенос
-реальных данных Google Sheets остаётся отдельным этапом после завершения API.
+Базовый набор проектных знаний создан 2026-07-28. Реализованы основные backend
+verticals DEV-023 и основа асинхронного Intake; production parser, общий day
+lifecycle и перенос реальных данных Google Sheets остаются отдельными этапами.
 
 ## Содержание
+
+### 2026-08-02 — Intake requests, очередь и маршрут WeightMeasurement
+
+- Реализован асинхронный `IntakeRequest`: API принимает исходный текст с
+  `202 Accepted`, обеспечивает person/source-scoped idempotency и возвращает
+  вычисляемое состояние обработки.
+- Добавлены независимые typed items, item-level clarification и confirmation,
+  отдельная реляционная detail table для веса и append-only audit timeline без
+  универсальных JSON/JSONB payload.
+- PostgreSQL-очередь использует lease, `SKIP LOCKED`, ограниченные повторы,
+  backoff и terminal state без Kafka, внешнего broker или нового service.
+- Первый маршрут atomically создаёт или находит `WeightMeasurement`, завершает
+  item и сохраняет типизированную ссылку на доменный факт.
+- Полный набор из 64 tests прошёл, включая concurrent dedupe, lease reclaim,
+  terminal failure и каждый migration journal prefix; также прошли typecheck,
+  build, lint и canonical docs validation.
+- Production AI parser и остальные typed routes явно оставлены следующими
+  срезами; без parser задания сохраняются и не нарушают readiness API.
 
 ### 2026-07-31 — Nutrition catalog, Meal snapshots и daily totals
 

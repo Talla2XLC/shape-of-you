@@ -4,6 +4,7 @@ import {
   check,
   date,
   foreignKey,
+  index,
   integer,
   jsonb,
   numeric,
@@ -156,6 +157,48 @@ export const coachingTrainingAdjustmentReason = pgEnum(
 export const coachingDecisionOutcome = pgEnum("coaching_decision_outcome", [
   "accepted",
   "rejected"
+]);
+export const intakeParsingStatus = pgEnum("intake_parsing_status", [
+  "queued",
+  "processing",
+  "parsed",
+  "failed"
+]);
+export const intakeItemKind = pgEnum("intake_item_kind", [
+  "weight_measurement"
+]);
+export const intakeItemStatus = pgEnum("intake_item_status", [
+  "needs_clarification",
+  "awaiting_confirmation",
+  "queued",
+  "processing",
+  "completed",
+  "rejected",
+  "failed"
+]);
+export const intakeJobKind = pgEnum("intake_job_kind", [
+  "parse_request",
+  "parse_clarification",
+  "route_item"
+]);
+export const intakeJobStatus = pgEnum("intake_job_status", [
+  "available",
+  "leased",
+  "completed",
+  "dead"
+]);
+export const intakeTimelineEvent = pgEnum("intake_timeline_event", [
+  "received",
+  "parsing_started",
+  "items_parsed",
+  "clarification_requested",
+  "clarification_submitted",
+  "confirmed",
+  "rejected",
+  "routing_started",
+  "completed",
+  "retry_scheduled",
+  "failed"
 ]);
 
 function physicalGoalVersionOwnershipColumns(): [
@@ -2357,6 +2400,254 @@ export const coachingRecommendationDecisions = pgTable(
   ]
 );
 
+export const intakeRequests = pgTable(
+  "intake_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id),
+    source: sourceChannel("source").notNull(),
+    sourceReferenceId: uuid("source_reference_id").notNull(),
+    originalText: text("original_text").notNull(),
+    locale: varchar("locale", { length: 35 }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 256 }).notNull(),
+    parsingStatus: intakeParsingStatus("parsing_status")
+      .default("queued")
+      .notNull(),
+    failureCode: varchar("failure_code", { length: 128 }),
+    receivedAt: timestamp("received_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("intake_requests_id_person_uq").on(table.id, table.personId),
+    foreignKey({
+      name: "intake_requests_source_person_fk",
+      columns: [table.sourceReferenceId, table.personId],
+      foreignColumns: [sourceReferences.id, sourceReferences.personId]
+    }),
+    unique("intake_requests_person_source_dedupe_uq").on(
+      table.personId,
+      table.source,
+      table.idempotencyKey
+    ),
+    check(
+      "intake_requests_failure_state",
+      sql`(${table.parsingStatus} = 'failed') = (${table.failureCode} IS NOT NULL)`
+    )
+  ]
+);
+
+export const intakeItems = pgTable(
+  "intake_items",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    requestId: uuid("request_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    position: smallint("position").notNull(),
+    kind: intakeItemKind("kind").notNull(),
+    status: intakeItemStatus("status").notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    clarificationQuestion: varchar("clarification_question", { length: 2_000 }),
+    clarificationAnswer: varchar("clarification_answer", { length: 2_000 }),
+    clarificationIdempotencyKey: varchar("clarification_idempotency_key", {
+      length: 256
+    }),
+    decisionIdempotencyKey: varchar("decision_idempotency_key", { length: 256 }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("intake_items_id_person_uq").on(table.id, table.personId),
+    foreignKey({
+      name: "intake_items_request_person_fk",
+      columns: [table.requestId, table.personId],
+      foreignColumns: [intakeRequests.id, intakeRequests.personId]
+    }).onDelete("cascade"),
+    unique("intake_items_request_position_uq").on(
+      table.requestId,
+      table.position
+    ),
+    index("intake_items_request_status_idx").on(
+      table.requestId,
+      table.status
+    ),
+    check("intake_items_position_nonnegative", sql`${table.position} >= 0`),
+    check(
+      "intake_items_confidence_range",
+      sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`
+    ),
+    check(
+      "intake_items_clarification_shape",
+      sql`(${table.status} = 'needs_clarification') = (${table.clarificationQuestion} IS NOT NULL)`
+    )
+  ]
+);
+
+export const intakeWeightDetails = pgTable(
+  "intake_weight_details",
+  {
+    itemId: uuid("item_id").primaryKey(),
+    personId: uuid("person_id").notNull(),
+    measuredAt: timestamp("measured_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    weightKg: numeric("weight_kg", { precision: 6, scale: 3 }).notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    measurementId: uuid("measurement_id")
+  },
+  (table) => [
+    foreignKey({
+      name: "intake_weight_detail_item_person_fk",
+      columns: [table.itemId, table.personId],
+      foreignColumns: [intakeItems.id, intakeItems.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "intake_weight_detail_measurement_person_fk",
+      columns: [table.measurementId, table.personId],
+      foreignColumns: [weightMeasurements.id, weightMeasurements.personId]
+    }),
+    check(
+      "intake_weight_details_weight_range",
+      sql`${table.weightKg} >= 0.500 AND ${table.weightKg} <= 700.000`
+    )
+  ]
+);
+
+export const intakeJobs = pgTable(
+  "intake_jobs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    itemId: uuid("item_id"),
+    kind: intakeJobKind("kind").notNull(),
+    jobKey: varchar("job_key", { length: 256 }).notNull(),
+    status: intakeJobStatus("status").default("available").notNull(),
+    availableAt: timestamp("available_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull(),
+    leasedUntil: timestamp("leased_until", {
+      withTimezone: true,
+      mode: "date"
+    }),
+    leaseToken: uuid("lease_token"),
+    attempts: smallint("attempts").default(0).notNull(),
+    maxAttempts: smallint("max_attempts").default(5).notNull(),
+    errorCode: varchar("error_code", { length: 128 }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull(),
+    completedAt: timestamp("completed_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+  },
+  (table) => [
+    foreignKey({
+      name: "intake_jobs_request_person_fk",
+      columns: [table.requestId, table.personId],
+      foreignColumns: [intakeRequests.id, intakeRequests.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "intake_jobs_item_person_fk",
+      columns: [table.itemId, table.personId],
+      foreignColumns: [intakeItems.id, intakeItems.personId]
+    }).onDelete("cascade"),
+    unique("intake_jobs_person_key_uq").on(table.personId, table.jobKey),
+    index("intake_jobs_available_idx").on(
+      table.status,
+      table.availableAt,
+      table.createdAt
+    ),
+    check(
+      "intake_jobs_attempt_limits",
+      sql`${table.attempts} >= 0 AND ${table.maxAttempts} > 0 AND ${table.attempts} <= ${table.maxAttempts}`
+    ),
+    check(
+      "intake_jobs_lease_shape",
+      sql`(${table.status} = 'leased') = (${table.leasedUntil} IS NOT NULL AND ${table.leaseToken} IS NOT NULL)`
+    ),
+    check(
+      "intake_jobs_completion_shape",
+      sql`(${table.status} = 'completed') = (${table.completedAt} IS NOT NULL)`
+    ),
+    check(
+      "intake_jobs_item_shape",
+      sql`(${table.kind} = 'parse_request' AND ${table.itemId} IS NULL) OR (${table.kind} <> 'parse_request' AND ${table.itemId} IS NOT NULL)`
+    )
+  ]
+);
+
+export const intakeTimelineEntries = pgTable(
+  "intake_timeline_entries",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    itemId: uuid("item_id"),
+    event: intakeTimelineEvent("event").notNull(),
+    detailCode: varchar("detail_code", { length: 128 }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    index("intake_timeline_request_created_idx").on(
+      table.requestId,
+      table.createdAt
+    ),
+    foreignKey({
+      name: "intake_timeline_request_person_fk",
+      columns: [table.requestId, table.personId],
+      foreignColumns: [intakeRequests.id, intakeRequests.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "intake_timeline_item_person_fk",
+      columns: [table.itemId, table.personId],
+      foreignColumns: [intakeItems.id, intakeItems.personId]
+    }).onDelete("cascade")
+  ]
+);
+
 /** Persisted SourceReference row returned by Drizzle queries. */
 export type SourceReferenceRow = typeof sourceReferences.$inferSelect;
 /** Insertable SourceReference row accepted by Drizzle mutations. */
@@ -2365,6 +2656,14 @@ export type NewSourceReferenceRow = typeof sourceReferences.$inferInsert;
 export type WeightMeasurementRow = typeof weightMeasurements.$inferSelect;
 /** Insertable WeightMeasurement row accepted by Drizzle mutations. */
 export type NewWeightMeasurementRow = typeof weightMeasurements.$inferInsert;
+/** Persisted person-owned natural-language intake request. */
+export type IntakeRequestRow = typeof intakeRequests.$inferSelect;
+/** Persisted independently actionable intake item. */
+export type IntakeItemRow = typeof intakeItems.$inferSelect;
+/** Persisted typed proposed WeightMeasurement command. */
+export type IntakeWeightDetailRow = typeof intakeWeightDetails.$inferSelect;
+/** Persisted durable Intake work item. */
+export type IntakeJobRow = typeof intakeJobs.$inferSelect;
 /** Persisted BodyMeasurementSession root returned by Drizzle queries. */
 export type BodyMeasurementSessionRow =
   typeof bodyMeasurementSessions.$inferSelect;

@@ -17,7 +17,8 @@ tags:
 `FastifyAdapter`, PostgreSQL и Drizzle ORM. Он предоставляет system endpoints
 предметные вертикали `WeightMeasurement`, `BodyMeasurementSession` и
 `PhysicalGoal`, а также Nutrition catalog, `Meal` и Training and Performance,
-сохраняя один deployable modular backend.
+Recovery, Coaching и асинхронный Intake, сохраняя один deployable modular
+backend.
 
 ## Содержание
 
@@ -41,9 +42,18 @@ OpenAPI shapes. PostgreSQL connection pool закрывается Nest lifecycle
 если application создал его сам.
 
 Runtime остаётся одним deployable modular backend. Nest modules задают
-application boundaries, но не становятся microservices. PostgreSQL
-transactional outbox будет добавлен только вместе с первым подтверждённым
-асинхронным workflow; Kafka в текущую topology не входит.
+application boundaries, но не становятся microservices. Первый асинхронный
+workflow Intake использует очередь в той же PostgreSQL: worker забирает задания
+через lease и `SKIP LOCKED`, повторяет временные ошибки с задержкой и завершает
+исчерпанные задания безопасным кодом. Kafka, внешний broker, отдельный worker
+service и новая database в текущую topology не входят.
+
+Модуль Intake принимает исходный текст с `202 Accepted`, сохраняет request и
+первое задание atomically, а затем обрабатывает независимые typed items.
+Clarification и confirmation выполняются по одному item. Первый маршрут одной
+transaction создаёт `WeightMeasurement`, завершает item и дописывает audit
+timeline. Production parser adapter пока отсутствует; в таком режиме durable
+jobs остаются в базе и не влияют на API readiness.
 
 Модули Physical State предоставляют append-only body corrections, stable
 current/history queries, versioned goals и optimistic lifecycle transitions.
@@ -68,11 +78,13 @@ adapter, scheduler и отдельный deployable отсутствуют.
 - Integration tests в `apps/api/test/weight-measurements.integration.test.ts`.
 - Integration tests в `apps/api/test/nutrition.integration.test.ts`.
 - Integration tests в `apps/api/test/training.integration.test.ts`.
+- Integration tests в `apps/api/test/intake.integration.test.ts`.
 
 ## Решения
 
 - [NestJS с FastifyAdapter и Nuxt](../../adr/20260729-use-nestjs-with-fastify-and-nuxt.md).
 - [PostgreSQL outbox до Kafka](../../adr/20260729-use-postgresql-outbox-before-kafka.md).
+- [PostgreSQL-очередь и типизированные элементы Intake](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md).
 - [Superseded ADR Fastify](../../adr/20260728-use-fastify-for-initial-http-api.md).
 - [Node.js, TypeScript и pnpm workspaces](../../adr/20260728-use-nodejs-typescript-and-pnpm-workspaces.md).
 - [PostgreSQL с Drizzle](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md).
@@ -94,3 +106,4 @@ adapter, scheduler и отдельный deployable отсутствуют.
 - [API Nutrition catalog](../api/nutrition-catalog.md)
 - [API Meal](../api/meals.md)
 - [API тренировок](../api/training.md)
+- [API Intake](../api/intake.md)

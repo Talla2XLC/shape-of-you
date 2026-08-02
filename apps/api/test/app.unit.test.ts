@@ -26,6 +26,7 @@ import type {
 import type { TrainingStore } from "../src/storage/training-repository.js";
 import type { RecoveryStore } from "../src/storage/recovery-repository.js";
 import type { CoachingStore } from "../src/storage/coaching-repository.js";
+import type { IntakeStore } from "../src/storage/intake-repository.js";
 import type {
   CreateWeightMeasurementResult,
   WeightMeasurementStore
@@ -232,13 +233,28 @@ const coachingStore: CoachingStore = {
   history: unreachable
 };
 
+const intakeStore: IntakeStore = {
+  create: unreachable,
+  find: unreachable,
+  clarify: unreachable,
+  decide: unreachable,
+  loadParseRequest: unreachable,
+  loadClarificationRequest: unreachable,
+  claimNextJob: unreachable,
+  completeParse: unreachable,
+  completeClarification: unreachable,
+  routeWeight: unreachable,
+  failJob: unreachable
+};
+
 const physicalStateStores = {
   bodyMeasurementSessionStore,
   physicalGoalStore,
   nutritionStore,
   trainingStore,
   recoveryStore,
-  coachingStore
+  coachingStore,
+  intakeStore
 };
 
 describe("API bootstrap", () => {
@@ -283,6 +299,7 @@ describe("API bootstrap", () => {
     expect(openapi.json().paths).toHaveProperty(
       "/v1/coaching/recommendations/training-adjustments"
     );
+    expect(openapi.json().paths).toHaveProperty("/v1/intake/requests");
 
     await app.close();
   });

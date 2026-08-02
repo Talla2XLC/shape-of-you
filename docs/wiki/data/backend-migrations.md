@@ -64,6 +64,13 @@ assessments с evidence. Восьмая migration добавляет Coaching: v
 policies, person-owned recommendations, решения пользователя, training
 adjustment details и evidence из Recovery и Training.
 
+Девятая migration добавляет Intake: person-owned requests, независимые typed
+items, отдельную detail table для WeightMeasurement, lease queue и append-only
+timeline. Composite foreign keys закрепляют items и jobs за request, а
+созданное измерение веса связано типизированным foreign key. Идемпотентность
+request, clarification и decision обеспечивается relational constraints;
+универсальных JSON/JSONB payload нет.
+
 Центральный migration integration test проверяет применение полного journal на
 чистой БД, повторный idempotent запуск и upgrade каждого зафиксированного
 непустого префикса journal до текущего состояния через реальный Drizzle
@@ -86,6 +93,7 @@ authority.
 - `apps/api/drizzle/20260731125414_fixed_pete_wisdom.sql`.
 - `apps/api/drizzle/20260731152211_hesitant_maggott.sql`.
 - `apps/api/drizzle/20260731161722_useful_molten_man.sql`.
+- `apps/api/drizzle/20260802112616_uneven_ben_grimm.sql`.
 - `apps/api/src/database/migrate.ts`.
 - `apps/api/test/migrations.integration.test.ts`.
 - Drizzle schema и domain integration tests.
@@ -112,5 +120,6 @@ authority.
 - [Nutrition catalog](../domain/nutrition-catalog.md)
 - [Meal](../domain/meal.md)
 - [Training and Performance](../domain/training-and-performance.md)
+- [Intake запросы и типизированные элементы](../domain/intake.md)
 - [Временный deployment](../operations/temporary-vm-deployment.md)
 - [Rollback](../operations/temporary-vm-rollback.md)

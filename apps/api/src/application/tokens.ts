@@ -26,3 +26,9 @@ export const RECOVERY_STORE = Symbol("RECOVERY_STORE");
 
 /** Injection token for Coaching recommendations and decisions. */
 export const COACHING_STORE = Symbol("COACHING_STORE");
+
+/** Injection token for durable Intake orchestration persistence. */
+export const INTAKE_STORE = Symbol("INTAKE_STORE");
+
+/** Injection token for the optional provider-neutral Intake parser. */
+export const INTAKE_PARSER = Symbol("INTAKE_PARSER");

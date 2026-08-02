@@ -30,7 +30,11 @@ tags:
 
 ### Вспомогательные capabilities, а не contexts
 
-- **Observation Intake and Timeline** — parsing естественного языка, clarification/rejection, validation, idempotent routing, provenance и append-only chronology.
+- **Observation Intake and Timeline** — реализованная orchestration-capability
+  существующего API: приём естественного языка, независимые clarification и
+  confirmation, типизированная валидация, идемпотентная маршрутизация,
+  PostgreSQL-очередь и append-only chronology. Первый маршрут создаёт
+  `WeightMeasurement`; production parser и остальные типы ещё не подключены.
 - **Data Integrity and Migration** — reconciliation, детерминированный self-healing, backfill, evidence dual-run, integrity reports, cutover и rollback.
 
 Такое представление не превращает технические workflows в DDD-границы до того, как инвентаризация источника выявит их язык, владение и consistency needs. Позднее они могут стать контекстами через review и ADR.
@@ -96,6 +100,7 @@ Coaching потребляет опубликованные свидетельс�
 - [PhysicalGoal](physical-goal.md)
 - [Recovery and Readiness](recovery-and-readiness.md)
 - [Coaching and Decision Support](coaching-and-decision-support.md)
+- [Intake запросы и типизированные элементы](intake.md)
 - [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
 - [Training and Performance](training-and-performance.md)
 - [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
