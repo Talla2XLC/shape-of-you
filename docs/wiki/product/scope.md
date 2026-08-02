@@ -1,75 +1,77 @@
 ---
 id: "product-scope"
 kind: product
-title: "Границы продукта"
+title: "Product scope"
 status: draft
 tags:
   - "product"
   - "scope"
 ---
 
-# Границы продукта
+# Product scope
 
-## Кратко
+## Summary
 
-Baseline разделяет подтверждённые capabilities, предлагаемый первый полезный срез продукта, последующий scope и явные non-goals.
+The baseline separates confirmed capabilities, the proposed first useful
+product slice, later scope, and explicit non-goals.
 
-## Содержание
+## Content
 
-### Возможности продукта
+### Capabilities
 
-- Нормализовать сведения о питании, тренировках, теле, восстановлении и wearable devices.
-- Сохранять историю, provenance, corrections и объяснимую хронологию.
-- Анализировать тренды за дни и недели.
-- Формировать конкретные ежедневные рекомендации по питанию, тренировкам и восстановлению.
-- Разбирать ввод на естественном языке в атомарные события, требующие подтверждения.
-- Оценивать риск нагрузки и прогрессию на уровне упражнения.
-- Создавать insights со ссылками на свидетельства, не заявляя причинность.
-- Выполнять reconciliation данных и только безопасные детерминированные self-healing actions.
-- Поддерживать web- и mobile-клиенты через единый backend-контракт.
+- Normalize nutrition, training, body, recovery, and wearable evidence.
+- Preserve history, provenance, corrections, and explainable chronology.
+- Analyze trends across days and weeks.
+- Produce concrete daily nutrition, training, and recovery recommendations.
+- Parse natural-language input into atomic confirmable events.
+- Assess load risk and exercise-level progression.
+- Create evidence-linked insights without claiming causality.
+- Reconcile data and perform only deterministic safe self-healing.
+- Support web and mobile clients through one backend contract.
 
-### Предлагаемый MVP
+### Proposed MVP
 
-Первый полезный срез — web-facing capability после DEV-023 и DEV-024: стабильный backend-контракт, контролируемое сосуществование с Google Sheets, единая история и тренды, ввод с подтверждением и безопасный дневной план на основе существующей программы тренировок, сведений о восстановлении, риска нагрузки и правил прогрессии по упражнениям.
+After DEV-023 and DEV-024, provide a web-facing stable backend, controlled
+Google Sheets coexistence, unified history/trends, confirmed input, and a safe
+daily plan based on the existing training program, recovery, load risk, and
+exercise progression rules.
 
-### Позднее
+### Later
 
-- Mobile client в DEV-026.
-- Окончательный cutover с Google Sheets после выполнения проверенных критериев dual-run.
-- Дополнительные wearable sources помимо подтверждённых данных Garmin.
-- Более широкая автоматизация и глубокая longitudinal analytics при достаточных свидетельствах.
-- Расширение аудитории и коммерческого scope после отдельного product discovery.
+- DEV-026 mobile client.
+- Final Google Sheets cutover after verified dual-run criteria.
+- Additional wearable sources beyond confirmed Garmin data.
+- Broader automation/analytics after sufficient evidence.
+- Audience and commercial expansion after product discovery.
 
-### Явные non-goals
+### Explicit non-goals
 
-- Медицинская диагностика или заявления о лечении.
-- Использование LLM output как авторитетных фактов.
-- Запись неоднозначных фактов или выполненных действий без подтверждения.
-- Создание новой программы тренировок без явного запроса.
-- Наказательное голодание, двойные тренировки или избыточное кардио после переедания или алкоголя.
-- Независимые реализации бизнес-правил в web- или mobile-клиентах.
-- Преждевременная декомпозиция на microservices или deployable services.
-- Немедленное отключение Google Sheets до reconciliation и cutover.
+- Medical diagnosis or treatment claims.
+- LLM output as authoritative fact.
+- Persisting ambiguous facts or executed actions without confirmation.
+- Creating a new training program without explicit request.
+- Punitive fasting, double sessions, or excessive cardio.
+- Independent business-rule implementations in clients.
+- Premature microservices or deployable decomposition.
+- Immediate Google Sheets shutdown before reconciliation and cutover.
 
-## Основания
+## Evidence
 
-- Capabilities и roadmap взяты из baseline, предоставленного оператором.
-- Граница MVP — предлагаемая интерпретация указанного roadmap и capabilities.
+- Capabilities and roadmap from the operator baseline.
+- MVP boundary is a proposed interpretation, not implementation authority.
 
-## Решения
+## Decisions
 
-- MVP предложен для review и не является разрешением на реализацию.
+- MVP remains subject to review and approved plans.
 
-## Открытые вопросы
+## Open questions
 
-- Точные UI workflows и acceptance metrics для MVP.
-- Какие возможности Google Sheets обязательны в первом web-релизе.
-- Требования к authentication, privacy, retention и export.
-- Целевые availability и latency.
+- Exact UX and acceptance metrics, mandatory first-release Sheets behavior,
+  authentication/privacy/retention/export, and target availability/latency.
 
-## Связанные материалы
+## Related material
 
-- `overview.md`
-- `../roadmap/overview.md`
-- `../architecture/migration-strategy.md`
-- `../domain/bounded-contexts.md`
+- [Product overview](overview.md)
+- [Roadmap](../roadmap/overview.md)
+- [Migration strategy](../architecture/migration-strategy.md)
+- [Bounded contexts](../domain/bounded-contexts.md)

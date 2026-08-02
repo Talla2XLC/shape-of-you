@@ -1,53 +1,58 @@
 ---
 id: "product-overview"
 kind: product
-title: "Обзор продукта"
+title: "Product overview"
 status: draft
 tags: []
 ---
 
-# Обзор продукта
+# Product overview
 
-## Кратко
+## Summary
 
-Продукт объединяет свидетельства о физическом развитии и формирует безопасные, объяснимые рекомендации, сохраняя контроль пользователя над фактами и значимыми действиями.
+The product combines physical-development evidence into safe, explainable
+recommendations while keeping the user in control of facts and meaningful
+actions.
 
-## Содержание
+## Content
 
-### Проблема
+Nutrition, training, body, recovery, and wearable evidence is fragmented. A
+spreadsheet can store and calculate data but is not a durable platform for
+traceable reasoning, safe automation, shared web/mobile access, and controlled
+AI assistance.
 
-Значимые сведения разрознены между записями о питании, тренировках, теле, восстановлении и wearable devices. Таблица умеет хранить данные и выполнять вычисления, но не подходит как долгосрочная платформа для прослеживаемого reasoning, безопасной автоматизации, единого доступа из web/mobile и контролируемой AI-помощи.
+The confirmed target user is the operator. Broader audience assumptions are
+intentionally deferred.
 
-### Целевой пользователь
+The system should answer: what happened, what the evidence may mean, what
+action is safe today, why it is recommended, and what still needs confirmation.
 
-Подтверждённый scope — персональная платформа для оператора. Предположения о более широкой аудитории намеренно отложены.
+Safety position:
 
-### Основная ценность
+- analyze trends rather than isolated measurements;
+- preserve the existing training program unless a new program is explicitly
+  requested;
+- never recommend fasting, double sessions, or excessive cardio as punishment
+  after overeating or alcohol;
+- high load risk may block progression but cannot create a new program.
 
-Система превращает longitudinal evidence в единый контекст ежедневного решения: что произошло, что это может означать, какое действие сегодня допустимо, почему оно рекомендовано и что ещё требует подтверждения.
+## Evidence
 
-### Позиция по безопасности
+- Operator baseline supplied on 2026-07-28.
+- Current Google Sheets behavior is the operational reference.
 
-Анализировать тренды, а не отдельные измерения. Сохранять существующую программу тренировок, если новая программа не запрошена явно. После переедания или алкоголя не рекомендовать голодание, двойную тренировку или избыточное кардио. Высокий риск нагрузки может заблокировать прогрессию, но не создаёт новую программу.
+## Decisions
 
-## Основания
+- Product-first and domain-first discovery precede service design.
 
-- Baseline, предоставленный оператором 2026-07-28.
-- Существующие механизмы Google Sheets являются текущим operational reference.
+## Open questions
 
-## Решения
+- Additional personas, supported languages/regions, and the formal boundary
+  between medicine, coaching, and wellness.
 
-- Product-first и domain-first discovery предшествуют проектированию конкретных сервисов.
+## Related material
 
-## Открытые вопросы
-
-- User personas помимо оператора.
-- Поддерживаемые языки и регионы.
-- Формальная граница между медициной, coaching и wellness.
-
-## Связанные материалы
-
-- `../vision/overview.md`
-- `scope.md`
-- `../domain/overview.md`
-- `../architecture/drivers.md`
+- [Vision](../vision/overview.md)
+- [Scope](scope.md)
+- [Domain overview](../domain/overview.md)
+- [Architecture drivers](../architecture/drivers.md)

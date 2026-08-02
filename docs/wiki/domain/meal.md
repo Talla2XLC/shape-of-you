@@ -12,53 +12,37 @@ tags:
 
 # Meal
 
-## Кратко
+## Summary
 
-`Meal` — принадлежащий `Person` immutable fact питания. Он может ссылаться на
-точную `FoodVersion`, но всегда хранит собственный nutrient snapshot, поэтому
-история не зависит от последующих редакций catalog.
+`Meal` is an immutable Person-owned nutrition fact. It may reference an exact
+FoodVersion but always owns a nutrient snapshot so later catalog revisions do
+not rewrite history.
 
-## Содержание
+## Content
 
-Meal фиксирует `occurredAt`, вычисленную `localDate`, IANA timezone, kind,
-optional description/note/photo reference, typed `SourceReference`,
-person/source-scoped `dedupeKey` и один или несколько items.
+Meal stores time/local date/timezone, source/dedupe/confidence, meal type, note,
+and typed items. Each item stores quantity, controlled unit, calories, protein,
+fat, and carbs; numeric constraints prevent negative values and invalid totals.
 
-Каждый item хранит label, quantity, unit, calories, protein, fat и carbs.
-Ссылка на `FoodVersion` optional: migration или manual intake может сохранить
-полный snapshot без catalog identity. Totals вычисляются из item snapshots и
-не читают current catalog state.
+Correction creates a complete replacement with `supersedes_id`. Current/history
+queries follow the same append-only semantics as other facts. Daily totals are
+a query projection over current Meals for Person and local date, not a
+`DayRecord` or authority table.
 
-Correction не обновляет исходный Meal. Она создаёт полный replacement с
-`supersedesId` и обязательной причиной. Current list и daily totals исключают
-superseded facts, а history возвращает всю цепочку от оригинала до текущей
-редакции.
+## Evidence
 
-Daily nutrition totals — query projection по `Person` и `localDate`.
-Отдельная authority table и широкий `DayRecord` не создаются.
+- Nutrition schema, contracts, and integration tests.
 
-## Основания
+## Decisions
 
-- Лист `Meals` хранит calories и macros как значения конкретного intake.
-- [ADR о слоистом Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md).
-- [ADR о typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md).
+- Snapshot duplication is intentional for reproducibility.
 
-## Решения
+## Open questions
 
-- Snapshot является намеренной исторической фиксацией, а не второй catalog
-  authority.
-- Dedupe действует в scope `(Person, source channel, dedupeKey)`.
-- Daily totals суммируют только current facts выбранной локальной даты.
-- Correction chain остаётся append-only.
+- Final unit/conversion vocabulary and media attachment lifecycle.
 
-## Открытые вопросы
+## Related material
 
-- Nutrition targets и remaining macros.
-- Media ownership и lifecycle для `photoMediaId`.
-- Правила закрытого дня после проектирования `DayClosure`.
-
-## Связанные материалы
-
+- [Meal API](../api/meals.md)
 - [Nutrition catalog](nutrition-catalog.md)
-- [API Meal](../api/meals.md)
-- [Provenance и identifiers](../data/provenance-and-identifiers.md)
+- [Layered Nutrition ADR](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)

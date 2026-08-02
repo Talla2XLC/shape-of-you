@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-use-docker-compose-for-local-development"
 kind: adr
-title: "Docker Compose для локальной разработки"
+title: "Use Docker Compose for local development"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,33 +11,37 @@ tags:
   - "infrastructure"
 ---
 
-# Docker Compose для локальной разработки
+# Use Docker Compose for local development
 
-## Контекст
+## Context
 
-В будущем локальной разработке понадобится воспроизводимая координация приложения и инфраструктурных зависимостей без преждевременного определения production topology.
+Local development needs reproducible coordination of applications and
+infrastructure dependencies without prematurely defining production topology.
 
-## Решение
+## Decision
 
-Использовать Docker Compose только для оркестрации локальной разработки после появления утверждённых runtime components.
+Use Docker Compose only for local development orchestration after approved
+runtime components exist. This decision does not select production
+orchestration or authorize empty infrastructure scaffolding.
 
-Это решение не выбирает production orchestration и не разрешает создавать пустой инфраструктурный каркас. На текущем baseline Compose-файл не создаётся.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- Install dependencies directly on the host: initially simpler but less
+  reproducible across environments.
+- Use local Kubernetes: closer to some production topologies but unjustified
+  before deployment requirements exist.
 
-- Устанавливать зависимости непосредственно на host: проще вначале, но хуже воспроизводится между окружениями.
-- Использовать локальный Kubernetes: ближе к некоторым production topologies, но создаёт неоправданную сложность до появления требований к deployment.
+## Consequences
 
-## Последствия
+Compose configuration is introduced only with approved runtime components.
+Production hosting and orchestration remain separate decisions.
 
-Создание Compose-конфигурации отложено до появления утверждённых runtime components. Production hosting и orchestration пока не определены.
+## Verification
 
-## Проверка
+- The operator explicitly accepted the decision on 2026-07-28.
+- Baseline work does not create speculative Compose services.
 
-- Решение явно принято оператором 2026-07-28.
-- Docker Compose-файлы в рамках baseline не создаются.
-
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/repository-and-runtime.md`
 - `../wiki/architecture/quality-attributes.md`

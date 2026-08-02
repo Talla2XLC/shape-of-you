@@ -11,64 +11,43 @@ tags:
 
 # WeightMeasurement
 
-## Кратко
+## Summary
 
-`WeightMeasurement` — принадлежащий `Person` неизменяемый факт измерения веса с
-абсолютным временем, локальной датой, typed provenance и стабильной
-deduplication identity.
+`WeightMeasurement` is an immutable Person-owned weight fact with absolute
+time, local date, typed provenance, and stable dedupe identity.
 
-## Содержание
+## Content
 
-Поля факта: UUID `id`, `personId`, `measuredAt`, derived `localDate`, IANA
-`timezone`, `weightKg`, typed `sourceReference`, `dedupeKey`, nullable
-`confidence`, nullable `supersedesId`/`correctionReason` и `createdAt`.
+Fields include UUID, Person, measured time, derived local date, IANA timezone,
+`weightKg`, SourceReference, dedupe key, nullable confidence, optional
+supersession/correction reason, and creation time.
 
-Инварианты первой вертикали:
+Invariants:
 
-- `weightKg` находится в диапазоне `0.500..700.000` kg и хранится как
-  `numeric(6,3)`; диапазон является защитой качества данных, не медицинской
-  нормой;
-- `confidence` при наличии находится в диапазоне `0..1`;
-- `measuredAt` хранится как `timestamptz`;
-- сервер вычисляет `localDate` из `measuredAt` в проверенной IANA `timezone`;
-- unique `(person_id, source, dedupe_key)` делает create idempotent в границе
-  владельца и source channel;
-- `SourceReference` содержит typed channel, optional external identity,
-  source timestamp и ingestion timestamp; private raw snapshot не входит в
-  публичный контракт;
-- correction создаёт новый факт с новым UUID, `supersedes_id`, причиной и
-  собственной provenance, не изменяя исходную запись;
-- один факт не может иметь две конкурирующие замены, а cross-person
-  supersession запрещён database constraints;
-- current-state query исключает заменённые факты, history возвращает полную
-  линейную цепочку.
+- weight is `0.500..700.000` kg in `numeric(6,3)`;
+- confidence is null or `0..1`;
+- time is `timestamptz`; server derives local date from verified timezone;
+- `(person_id, source, dedupe_key)` makes creation idempotent;
+- correction creates a new fact and never mutates the original;
+- only same-Person facts may supersede, with one replacement per fact;
+- current queries omit superseded facts and history returns the full chain.
 
-## Основания
+## Evidence
 
-- `apps/api/src/database/schema.ts`.
-- `apps/api/src/domain/weight-measurement.ts`.
-- Условия DEV-023 и integration tests.
+- Drizzle schema, domain code, and integration tests.
 
-## Решения
+## Decisions
 
-- Google Sheets остаётся authoritative source; API не выполняет dual-write,
-  backfill или cutover.
-- Внутри workbook лист `Weight` является authoritative журналом веса, а
-  `Daily_Log.Weight` — legacy projection и reconciliation evidence. Зеркало не
-  создаёт второй domain fact.
-- Несколько настоящих измерений одного `Person` за локальный день разрешены;
-  unique constraint по `localDate` отсутствует.
-- Проекции не заменяют исходный факт.
-- Временный synthetic `Person` используется только для test/staging до
-  реализации authentication и не является authorization precedent.
+- Google Sheets remains authoritative. `Weight` is the migration journal;
+  `Daily_Log.Weight` is reconciliation evidence and creates no second fact.
+- Multiple real measurements per local day are allowed.
 
-## Открытые вопросы
+## Open questions
 
-- Точная idempotency identity multi-event Google Sheets importer.
+- Final multi-event importer idempotency identity.
 
-## Связанные материалы
+## Related material
 
-- [API WeightMeasurement](../api/weight-measurements.md)
-- [Provenance и identifiers](../data/provenance-and-identifiers.md)
-- [Source of truth и authority](../data/source-of-truth-and-authority.md)
-- [Сеансы замеров тела и физические цели](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md)
+- [Weight API](../api/weight-measurements.md)
+- [Provenance](../data/provenance-and-identifiers.md)
+- [Authority](../data/source-of-truth-and-authority.md)

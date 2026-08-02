@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260731-model-versioned-training-programs-and-immutable-workout-sessions"
 kind: adr
-title: "Версионируемые программы тренировок и неизменяемые факты выполнения"
+title: "Model versioned training programs and immutable workout sessions"
 status: accepted
 date: 2026-07-31
 supersedes: []
@@ -13,112 +13,91 @@ tags:
   - "versioning"
 ---
 
-# Версионируемые программы тренировок и неизменяемые факты выполнения
+# Model versioned training programs and immutable workout sessions
 
-## Контекст
+## Context
 
-Лист `Training` хранит выполненную работу и группирует строки через
-`Session_ID`. Лист `Program` смешивает назначенные параметры с вычисленными
-полями последней тренировки и следующей прогрессии. `Personal Records`
-содержит производный лучший результат по упражнению.
+`Training` stores performed work grouped by `Session_ID`. `Program` mixes
+prescribed parameters with computed last-workout and next-progression fields.
+`Personal Records` contains a derived best result per exercise.
 
-Прямой перенос этой структуры сделал бы изменяемую программу источником
-истории, позволил бы расчётной рекомендации незаметно менять назначение и
-создал бы копии одинаковых упражнений для каждого `Person`. Универсальный
-движок событий или правил, напротив, преждевременно скрыл бы типизированные
-ограничения домена.
+Direct migration would make a mutable program own history, allow computed
+recommendations to change prescriptions silently, and duplicate exercises per
+Person. A generic event/rules engine would instead hide typed constraints too
+early.
 
-## Решение
+## Decision
 
-Training and Performance остаётся типизированным модулем существующего API и
-разделяет справочные сведения, планы, выполненные факты и вычисляемые
-представления.
+Keep Training and Performance as a typed module and separate reference data,
+plans, performed facts, and projections:
 
-1. `Exercise` является стабильным определением упражнения, а
-   `ExerciseVersion` — его неизменяемой редакцией. Общие определения не
-   копируются для каждого `Person`. Персональные названия и доступное
-   оборудование хранятся как overlays; частное упражнение имеет явного
-   владельца и не публикуется автоматически.
-2. `TrainingProgram` принадлежит `Person`. Его содержимое хранится в
-   неизменяемых `TrainingProgramVersion`. Версия содержит упорядоченные
-   тренировки и назначения, ссылающиеся на точную `ExerciseVersion`, а также
-   целевые вес, подходы, повторения и RIR. У одного `Person` одновременно
-   действует не более одной явно активированной версии программы.
-3. Поля последнего выполнения, автоматическое решение и рекомендуемая
-   следующая нагрузка не входят в содержимое версии программы. Это
-   вычисляемые представления над фактической историей и правилами прогрессии.
-4. `WorkoutSession` является неизменяемым person-owned fact. Он содержит
-   `PerformedExercise` со snapshot названия и версии упражнения и отдельные
-   `PerformedSet` с фактическими весом, повторениями и RIR. Заметки и
-   самочувствие относятся к выполнению, а не к справочнику упражнения.
-5. Исправление заменяет всю `WorkoutSession`: создаётся новый полный факт с
-   `supersedes_id`, а исходная сессия сохраняется. Частичное изменение подхода
-   на месте запрещено.
-6. `PersonalRecord` является query projection. Для силового результата
-   выбирается выполненный подход с максимальным весом; при равном весе
-   выбирается большее число повторений. Проекция возвращает ссылку на
-   исходную сессию и подход и не становится отдельной authority table.
-7. Кандидат прогрессии вычисляется отдельно от программы. Его принятие
-   является явным решением и создаёт новую `TrainingProgramVersion`; отклонение
-   или отсутствие ответа не меняет действующую программу.
-8. Внешние справочники используют отдельные source-neutral записи с identity
-   источника, checksum, parser version и review state. Конкретный provider,
-   scraper, scheduler и автоматическое объединение по названию не входят в
-   решение.
+1. `Exercise` is stable identity; `ExerciseVersion` is immutable content.
+   Shared definitions are reused. Personal names/equipment are overlays;
+   private exercises have an owner and are not published automatically.
+2. `TrainingProgram` belongs to Person and contains immutable
+   `TrainingProgramVersion`. Versions define ordered workouts and assignments
+   pinned to exact ExerciseVersions with target weight, sets, reps, and RIR.
+   A Person has at most one explicitly active version.
+3. Last performance, automatic decision, and suggested next load are
+   projections, not program-version content.
+4. Immutable Person-owned `WorkoutSession` contains `PerformedExercise` with a
+   name/version snapshot and separate `PerformedSet` facts for actual weight,
+   reps, and RIR. Notes and feeling belong to performance, not the catalog.
+5. Correction replaces the full WorkoutSession with `supersedes_id`; in-place
+   set edits are forbidden.
+6. `PersonalRecord` is a query projection: maximum performed weight, then more
+   repetitions on ties, with links to the source session and set. It is not an
+   authority table.
+7. A progression candidate is computed separately. Explicit acceptance creates
+   a new TrainingProgramVersion; rejection or no action changes nothing.
+8. External catalogs use source-neutral records with identity, checksum, parser
+   version, and review state. Provider, scraper, scheduler, and name merge are
+   outside this decision.
 
-Program versions и workout facts закрепляются за точными версиями упражнений,
-поэтому последующее исправление общего справочника не переписывает историю.
+Program versions and workout facts pin exact exercise versions, so later
+catalog corrections never rewrite history.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Повторить изменяемые листы `Training`, `Program` и `Personal Records`:
-  проще перенести, но планы, факты и вычисления сохранят конфликтующее
-  владение. Отклонено.
-- Хранить только текущую программу и журнал агрегированных строк: меньше
-  таблиц, но невозможно надёжно воспроизвести назначения и отдельные подходы.
-  Отклонено.
-- Создать универсальный event store и rules engine: расширяемо, но избыточно
-  для текущего модульного монолита и ослабляет типизированные constraints.
-  Отклонено.
-- Разделить версионируемый справочник, программы, выполненные факты и
-  вычисляемые представления: сохраняет authority и историю без нового
-  deployable service. Выбрано.
+- Copy mutable `Training`, `Program`, and `Personal Records` sheets: easy
+  migration but preserves conflicting ownership.
+- Store only the current program and aggregate log rows: fewer tables but
+  cannot reproduce prescriptions or individual sets.
+- Universal event store/rules engine: extensible but excessive and weakly
+  typed for the modular monolith.
+- Separate versioned catalog, programs, performed facts, and projections:
+  preserves authority/history without another service. Selected.
 
-## Последствия
+## Consequences
 
-- Одинаковое упражнение используется несколькими `Person` без копирования
-  общего содержимого.
-- Любое изменение действующей программы создаёт новую версию и требует явной
-  активации.
-- Исправление одной ошибки требует передать полную замену сессии, зато история
-  и её внутренние ограничения остаются однозначными.
-- Сохранение отдельных подходов подробнее legacy-строки, но необходимо для
-  корректных рекордов и будущих правил прогрессии.
-- `PersonalRecord` и кандидаты прогрессии можно сначала вычислять запросом;
-  сохраняемая проекция допускается только после измерения нагрузки.
-- Реальный импорт внешнего справочника остаётся отдельной задачей и не требует
-  отдельного сервиса заранее.
+- Multiple People reuse one exercise definition.
+- Program changes create a new version and require explicit activation.
+- Session correction requires a full replacement but preserves unambiguous
+  history and internal constraints.
+- Separate sets add detail beyond legacy rows but are required for records and
+  progression.
+- Records and candidates may remain query projections until load justifies
+  persistence.
+- Real external catalog import remains separate work without a new service.
 
-## Проверка
+## Verification
 
-- Два `Person` могут ссылаться на одну shared `ExerciseVersion` без копирования
-  определения.
-- Private exercise и overlay недоступны другому `Person` без разрешения.
-- Одновременная активация второй версии не оставляет две активные программы.
-- Изменение справочника не меняет существующие программы и тренировки.
-- Correction создаёт полный replacement сессии и исключает прежний факт из
-  текущих запросов.
-- Рекорд выбирается только по текущим, не заменённым подходам выбранного
-  `Person`: сначала по весу, затем по повторениям.
-- Принятие кандидата прогрессии создаёт новую версию программы; сам расчёт
-  программу не изменяет.
-- В schema не появляется универсальная polymorphic таблица facts или rules.
+- Two People reference one shared ExerciseVersion without copied content.
+- Private exercises/overlays require authorization.
+- Concurrent activation cannot leave two active programs.
+- Catalog revisions do not change existing programs or sessions.
+- Correction creates a full replacement and hides the old fact from current
+  queries.
+- Records use only current Person sets, ordered by weight then repetitions.
+- Candidate acceptance creates a new program version; calculation alone does
+  not mutate the program.
+- No universal polymorphic facts/rules table appears.
 
-## Связанные материалы
+## Related material
 
 - [Training and Performance](../wiki/domain/training-and-performance.md)
-- [Кандидаты в агрегаты](../wiki/domain/candidate-aggregates.md)
-- [Shared reference definitions и person-owned state](20260731-separate-shared-reference-definitions-from-person-owned-state.md)
-- [Typed provenance и supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
-- [Независимые факты вместо DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
-- [План реализации](../../plans/2026/07/completed/2026-07-31-training-and-performance.md)
+- [Candidate aggregates](../wiki/domain/candidate-aggregates.md)
+- [Shared definitions and Person state](20260731-separate-shared-reference-definitions-from-person-owned-state.md)
+- [Typed provenance and supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
+- [Independent facts over DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
+- [Implementation plan](../../plans/2026/07/completed/2026-07-31-training-and-performance.md)

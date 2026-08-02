@@ -1,66 +1,65 @@
 ---
 id: "domain-glossary"
 kind: domain
-title: "Доменный глоссарий"
+title: "Domain glossary"
 status: draft
 tags:
   - "domain"
   - "ubiquitous-language"
 ---
 
-# Доменный глоссарий
+# Domain glossary
 
-## Кратко
+## Summary
 
-Начальный словарь ubiquitous language выведен из подтверждённого baseline. Термины, требующие проверки источника, оставлены явно открытыми.
+Initial ubiquitous language derived from the accepted baseline.
 
-## Содержание
+## Content
 
-### Термины
+- **User:** authentication identity that signs in and performs actions.
+- **Person:** domain identity that owns fitness data.
+- **Person access grant:** explicit User authority for a Person as `owner`,
+  `editor`, `viewer`, or `coach`.
+- **Authoritative source:** system treated as operational truth for a data set;
+  currently Google Sheets for operational fitness data.
+- **Atomic event:** one normalized independently validated observation/action
+  extracted from input.
+- **Closed day:** day protected from ambiguous automatic mutation; exact rules
+  remain open.
+- **Provenance:** typed origin evidence: channel, reference, timestamps,
+  confidence.
+- **Dedupe key:** stable retry identity within Person and source channel.
+- **Supersession:** append-only replacement of an immutable fact while keeping
+  original and correction reason.
+- **AI Timeline:** append-only source-linked chronology with related corrections
+  and reversals.
+- **Readiness:** current recovery/capacity evidence; never authorizes
+  progression alone.
+- **Load Risk:** multi-day risk assessment that may block progression.
+- **Progression:** minimal exercise-specific load increase after repeated
+  successful evidence.
+- **Deload:** controlled load-reduction state.
+- **Calibration:** selecting appropriate working load when evidence is missing
+  or stale.
+- **RIR:** repetitions in reserve as effort evidence.
+- **Daily plan:** coordinated daily nutrition/training/recovery actions.
+- **Dual-run:** controlled old/new data coexistence with reconciliation.
+- **Cutover:** approved authority transfer after integrity criteria pass.
 
-- **User** — authentication identity аккаунта, который входит в систему и
-  выполняет действия.
-- **Person** — domain identity человека, которому принадлежат fitness-данные.
-- **Person access grant** — явное право `User` работать с выбранным `Person` в
-  роли `owner`, `editor`, `viewer` или `coach`.
-- **Authoritative source** — система, значение которой считается operational truth для определённого набора данных. Сейчас эту роль для рабочих fitness-данных выполняет Google Sheets.
-- **Atomic event** — одно нормализованное и независимо валидируемое observation или action, извлечённое из пользовательского ввода.
-- **Closed day** — день, защищённый от автоматического неоднозначного изменения; точные правила закрытия пока открыты.
-- **Provenance** — типизированные свидетельства происхождения факта, включая
-  source channel, source reference, timestamps и confidence.
-- **Dedupe key** — стабильная identity повторяемой операции внутри `Person` и
-  source channel.
-- **Supersession** — append-only замена ошибочного факта новым immutable fact с
-  сохранением исходной записи и причины correction.
-- **AI Timeline** — append-only chronology событий с источниками; corrections и reversals являются связанными событиями.
-- **Readiness** — сведения о текущем восстановлении и способности переносить нагрузку; высокая readiness сама по себе не разрешает progression.
-- **Load Risk** — оценка риска за несколько дней, способная ограничить progression.
-- **Progression** — минимальное увеличение нагрузки для конкретного упражнения после повторного подтверждения успешного выполнения.
-- **Deload** — состояние контролируемого снижения нагрузки.
-- **Calibration** — настройка подходящей рабочей нагрузки при недостаточных или устаревших свидетельствах.
-- **RIR** — число повторений в запасе, используемое как свидетельство тренировочного усилия.
-- **Daily plan** — единый согласованный набор действий по питанию, тренировкам и восстановлению на день.
-- **Dual-run** — контролируемый период совместной работы старого и нового путей данных с reconciliation до cutover.
-- **Cutover** — утверждённая передача authority от Google Sheets новой платформе после выполнения критериев целостности.
+## Evidence
 
-## Основания
+- Operator baseline.
 
-- Термины выведены из baseline, предоставленного оператором.
+## Decisions
 
-## Решения
+- Glossary defines language, not schemas. `User` and `Person` are not synonyms.
 
-- Глоссарий определяет язык, а не схемы данных.
-- `User` и `Person` не являются взаимозаменяемыми терминами.
+## Open questions
 
-## Открытые вопросы
+- Exact closed-day and successful-performance semantics.
 
-- Канонические определения workout, exercise, set, meal, ingredient, product, измерения состава тела, recovery observation и wearable sample.
-- Точная семантика closed day и успешного выполнения.
+## Related material
 
-## Связанные материалы
-
-- `overview.md`
-- `bounded-contexts.md`
-- `../architecture/migration-strategy.md`
-- `../../adr/20260730-separate-user-access-from-person-data-ownership.md`
-- `../../adr/20260730-use-typed-provenance-and-append-only-supersession.md`
+- [Overview](overview.md)
+- [Bounded contexts](bounded-contexts.md)
+- [Migration](../architecture/migration-strategy.md)

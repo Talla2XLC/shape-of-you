@@ -1,119 +1,101 @@
 ---
 id: "changelog"
 kind: roadmap
-title: "Журнал изменений"
+title: "Change log"
 status: draft
 tags: []
 ---
 
-# Журнал изменений
+# Change log
 
-## Кратко
+## Summary
 
-Базовый набор проектных знаний создан 2026-07-28. Реализованы основные backend
-verticals DEV-023 и основа асинхронного Intake; production parser, общий day
-lifecycle и перенос реальных данных Google Sheets остаются отдельными этапами.
+The project knowledge baseline was created on 2026-07-28. Core DEV-023 backend
+verticals and asynchronous Intake foundations are implemented. Production
+parsing, shared day lifecycle, and real-data migration remain separate stages.
 
-## Содержание
+## Content
 
-### 2026-08-02 — Intake requests, очередь и маршрут WeightMeasurement
+### 2026-08-02 — English canonical documentation
 
-- Реализован асинхронный `IntakeRequest`: API принимает исходный текст с
-  `202 Accepted`, обеспечивает person/source-scoped idempotency и возвращает
-  вычисляемое состояние обработки.
-- Добавлены независимые typed items, item-level clarification и confirmation,
-  отдельная реляционная detail table для веса и append-only audit timeline без
-  универсальных JSON/JSONB payload.
-- PostgreSQL-очередь использует lease, `SKIP LOCKED`, ограниченные повторы,
-  backoff и terminal state без Kafka, внешнего broker или нового service.
-- Первый маршрут atomically создаёт или находит `WeightMeasurement`, завершает
-  item и сохраняет типизированную ссылку на доменный факт.
-- Полный набор из 64 tests прошёл, включая concurrent dedupe, lease reclaim,
-  terminal failure и каждый migration journal prefix; также прошли typecheck,
-  build, lint и canonical docs validation.
-- Production AI parser и остальные typed routes явно оставлены следующими
-  срезами; без parser задания сохраняются и не нарушают readiness API.
+- Changed repository language policy: plans remain Russian; Wiki, ADRs,
+  READMEs, guides, templates, and agent-facing documentation use English.
+- Translated all canonical Wiki and ADR pages without changing stable IDs,
+  statuses, links, technical contracts, or architecture authority.
+- Updated the documentation validator and fixtures to require English section
+  names and return English diagnostics.
+- Added an ADR that rejects both duplicate bilingual documentation and English
+  operator plans.
 
-### 2026-07-31 — Nutrition catalog, Meal snapshots и daily totals
+### 2026-08-02 — Intake queue and WeightMeasurement routing
 
-- Реализован layered catalog: shared immutable brands, ingredients и foods,
-  private items и Person-owned food overlays без копирования canonical content.
-- `FoodVersion` фиксирует composition по точным Ingredient revisions; shared
-  version не может зависеть от private definition.
-- Реализованы immutable `Meal` snapshots, idempotent create, append-only
-  corrections, current/history reads и query-only daily totals.
-- Добавлена source-neutral staging schema для будущих external catalogs без
-  network adapter, scraper, scheduler или автоматического merge.
-- Clean и upgrade migrations проверены на PostgreSQL 17; пройдены 16 unit и
-  16 integration tests, typecheck, build, lint и canonical docs validation.
-- Реальные строки Google Sheets, production/staging database и внешние
-  источники не изменялись.
+- Added asynchronous idempotent IntakeRequest API with `202 Accepted`.
+- Added independent typed items, clarification/confirmation, relational Weight
+  detail, and append-only audit timeline without generic JSON/JSONB payloads.
+- Added PostgreSQL lease queue with `SKIP LOCKED`, retry/backoff, and terminal
+  failure without Kafka, broker, or a new service.
+- Added atomic WeightMeasurement routing and passed 64 tests, migration-prefix
+  upgrades, typecheck, build, lint, and docs validation.
+- Production parser and other typed routes remain future slices.
 
-### 2026-07-30 — Physical State measurements and versioned goals
+### 2026-07-31 — Nutrition, Training, Recovery, and Coaching
 
-- Реализован `BodyMeasurementSession` с typed values, person-scoped
-  idempotency, append-only corrections, current list и полной history chain.
-- Реализован `PhysicalGoal`: narrative/dynamic criteria, immutable versions,
-  optimistic activation и terminal lifecycle.
-- Общий PostgreSQL enum переименован в `source_channel`; composite foreign keys
-  защищают goal/person ownership.
-- Добавлена pure reconciliation policy для `Weight` и `Daily_Log.Weight`,
-  которая сообщает mismatch и не создаёт второй domain fact.
-- Локально пройдены lint, typecheck, build, 12 unit tests, 11 PostgreSQL 17
-  integration tests и проверка canonical documentation.
-- Реальные строки Google Sheets не читались тестами и не переносились в БД;
-  staging deployment и VM migration не выполнялись.
+- Added layered shared/private Nutrition catalog, immutable Meal snapshots,
+  corrections, and daily totals.
+- Added versioned exercise catalog/programs, immutable WorkoutSessions and
+  sets, records, and progression projections.
+- Added typed Recovery observations, consent/device ownership, versioned
+  assessment policies, and evidence-linked assessments.
+- Added immutable typed Coaching recommendations, policy pinning, evidence,
+  and separate user decisions.
+- Added source-neutral staging records for future external catalogs without
+  connectors, scrapers, schedulers, or automatic name merge.
 
-### 2026-07-30 — Person identity, provenance and corrections
+### 2026-07-30 — Physical State, identity, provenance, and corrections
 
-- Разделены authentication `User`, владелец fitness-данных `Person` и
-  many-to-many `PersonAccessGrant`.
-- `WeightMeasurement` переведён на person-scoped dedupe и typed
-  `SourceReference`; произвольный публичный JSONB `provenance` удалён.
-- Реализованы append-only corrections, current-state list и полная history
-  chain без перезаписи исходных фактов.
-- Добавлена data-preserving migration; clean и legacy-upgrade траектории
-  проверены PostgreSQL integration tests.
-- Google Sheets остаётся authoritative source; рабочие данные не переносились,
-  VM migration и deployment не выполнялись.
+- Separated authentication `User`, fitness-data `Person`, and many-to-many
+  `PersonAccessGrant`.
+- Replaced public arbitrary provenance with typed `SourceReference` and
+  Person/source-scoped dedupe.
+- Added append-only corrections and history for WeightMeasurement.
+- Added BodyMeasurementSession with typed values and versioned PhysicalGoal.
+- Defined `Weight` as migration authority and `Daily_Log.Weight` as a
+  reconciliation projection.
 
-### 2026-07-29 — Backend Bootstrap and Staging Delivery
+### 2026-07-29 — Backend and staging foundation
 
-- Создан modular monorepo на Node.js, TypeScript и pnpm с одним deployable API.
-- Реализован первый `WeightMeasurement` vertical: контракты, HTTP API, доменная модель, PostgreSQL schema и Drizzle migrations.
-- Добавлены локальные Dockerfile и Compose topology с отдельным one-shot migration service.
-- Подготовлены repository-local staging-артефакты: production Compose, nginx routing, smoke/rollback scripts и GitHub Actions для quality, GHCR и ручного deployment.
-- Зафиксировано подключение API к отдельной базе и credentials в существующем PostgreSQL-контейнере без cross-service SQL.
-- Локально прошли `lint`, `typecheck`, `build`, unit tests и проверка канонической документации.
-- Bootstrap принят с известным ограничением: PostgreSQL integration tests, clean-database migration, Compose runtime, VM deployment и GitHub Actions ещё не подтверждены live-evidence.
+- Created the Node.js/TypeScript/pnpm modular monorepo and first deployable API.
+- Added WeightMeasurement contracts, PostgreSQL/Drizzle, Docker/Compose,
+  migration service, staging edge, smoke/rollback scripts, and GitHub Actions.
+- Established isolated API database/credentials and no cross-service SQL.
 
-### 2026-07-28 — Discovery and Architecture Baseline
+### 2026-07-28 — Discovery and architecture baseline
 
-- Инициализирован единый Git-репозиторий и workspace 4DreamTeam.
-- Зафиксированы решения по modular monorepo, автономности сервисов, межсервисному взаимодействию и обязательному Architecture Review.
-- Добавлены vision, product scope, доменный язык, draft bounded contexts, архитектурные drivers, quality attributes, владение данными, ограничения репозитория и runtime, стратегия миграции и roadmap.
-- Google Sheets сохранён как authoritative operational source до проверенного dual-run и cutover.
-- Каноническими источниками Wiki и ADR стали Markdown-файлы в `docs/wiki/` и `docs/adr/`; 4DreamTeam сохранён для board, memory, sources и workflow.
-- Сохранены пять draft bounded contexts; широкий `DayRecord` отклонён в пользу независимо принадлежащих фактов и projections.
-- Документация для людей переведена на русский язык с сохранением технических имён, путей и стабильных идентификаторов.
-- Бизнес-сервисы, application code, manifests, базы данных и runtime configuration не создавались.
+- Initialized the Git repository and 4DreamTeam workspace.
+- Accepted modular-monorepo, service-autonomy, communication, and Architecture
+  Review decisions.
+- Added Vision/Product/Domain/Architecture knowledge and five draft contexts.
+- Kept Google Sheets authoritative until verified dual-run and cutover.
+- Selected canonical Markdown Wiki and ADR in Git; managed Wiki became frozen
+  legacy state.
+- Rejected broad `DayRecord` ownership in favor of independent facts and
+  projections.
 
-## Основания
+## Evidence
 
-- Каноническое состояние Wiki и ADR в этом репозитории.
-- [Завершённый план discovery](../../plans/2026/07/completed/2026-07-28-discovery-and-architecture-baseline.md).
+- Canonical Wiki/ADR state and completed plans in this repository.
 
-## Решения
+## Decisions
 
-- Этот журнал кратко описывает состояние документации и не заменяет обоснование в ADR или отчёты о выполнении планов.
+- This log summarizes delivery and never replaces ADR rationale or task
+  evidence.
 
-## Открытые вопросы
+## Open questions
 
-- Получить live-evidence для PostgreSQL integration tests, clean-database migration и Docker Compose.
-- Проверить staging topology, migrations, smoke checks и rollback на временной VM после отдельных операционных approvals.
+- Remaining DEV-023 scope and approved DEV-024 real-data migration sequence.
 
-## Связанные материалы
+## Related material
 
-- [Начало работы](start/overview.md)
+- [Getting started](start/overview.md)
 - [Roadmap](roadmap/overview.md)
-- [Обзор архитектуры](architecture/overview.md)
+- [Architecture overview](architecture/overview.md)

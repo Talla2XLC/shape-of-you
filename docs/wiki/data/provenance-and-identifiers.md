@@ -1,7 +1,7 @@
 ---
 id: "data-provenance-and-identifiers"
 kind: data
-title: "Provenance и identifiers"
+title: "Provenance and identifiers"
 status: draft
 tags:
   - "data"
@@ -9,82 +9,53 @@ tags:
   - "provenance"
 ---
 
-# Provenance и identifiers
+# Provenance and identifiers
 
-## Кратко
+## Summary
 
-Инвентаризация наблюдаемых identifiers и provenance. В нескольких справочных и AI workflow-листах есть стабильные ID, но основные журналы фактов всё ещё частично зависят от дат, текста, session IDs и координат ячеек.
+Reference/workflow sheets contain stable IDs, while fact journals still partly
+depend on dates, text, session IDs, rows, and cell coordinates.
 
-## Содержание
+## Content
 
-Справочные и workflow-листы уже предоставляют identifiers для food, ingredient, brand, event, request и session. В журналах фактов меньше единообразия: даты, текстовые labels, строки листа и координаты ячеек иногда выступают неявной identity.
+Migration assigns durable domain IDs and preserves immutable legacy references
+to workbook/sheet/row/cell when needed, source channel/timestamps, ingestion
+time, and correction history. Row number is never domain identity.
 
-Кандидатам на миграцию нужны долговечные domain identifiers и неизменяемые
-legacy references на workbook, sheet, строку или ячейку, где это применимо,
-source channel, source timestamp, ingestion timestamp и историю
-correction/supersession. Номер строки нестабилен и не должен становиться domain
-identity.
+Fitness facts are Person-scoped. Typed provenance fields remain indexed
+columns. Private raw JSONB snapshot is allowed only for import,
+reconciliation, or reproducibility and is excluded from public contracts.
 
-Утверждённая модель разделяет `User` и `Person`. Все fitness facts являются
-person-scoped. Типизированные provenance-поля остаются индексируемыми columns;
-private raw snapshot допускается в JSONB только для import, reconciliation и
-воспроизводимости и не входит в обычный публичный contract.
+Correction creates a new immutable typed fact with UUID/`supersedes_id`; it
+cannot cross Person or fact type. Current queries omit superseded facts.
+Idempotency includes at least Person and source channel.
 
-Correction создаёт новый immutable typed fact с новым UUID и `supersedes_id`.
-Исходная запись сохраняется. Supersession не пересекает `Person` или fact type,
-а default current-state queries исключают superseded facts.
+Shared catalog definitions use separate external-source identity: provider,
+external record, retrieval time, checksum, parser version, and review state.
+Similar names do not authorize merge. Person fact SourceReference is not
+catalog-source identity.
 
-Idempotency key ограничивается как минимум `person_id` и source channel.
-Глобальный `dedupe_key` существующего первого vertical является временным
-техническим долгом.
+Durable identities include Meal, WeightMeasurement, Exercise/Version,
+TrainingProgramVersion, WorkoutSession, PerformedSet, provider/device version,
+connection, consent, RecoveryObservation, policy version, and assessment.
 
-Общие catalog definitions не являются person-owned facts. Для них используется
-отдельная source identity: provider/source key, external record id, fetched
-timestamp, checksum, parser version и review state. Один source record может
-быть сопоставлен с canonical revision, но похожее имя не является достаточным
-основанием для merge. Person-owned meals используют обычный typed fact
-provenance и могут ссылаться на точную catalog revision.
+## Evidence
 
-## Основания
+- Observed sheet headers and implemented typed schemas.
 
-Заголовки из Foods, Ingredients, Brands, Food_Ingredients, Training, Body, NL_Engine, AI_Inbox, Self_Healing, AI_Timeline, AI_Insights, Load_Risk, Weight_Autopilot и Coach_Planner.
+## Decisions
 
-## Решения
+- No row-number IDs, universal facts table, polymorphic revision store, or
+  reuse of Person SourceReference for shared catalog identity.
 
-- Назначать долговечные ID для MealEntry, WeightMeasurement, observations и
-  ProgramVersion, сохраняя legacy source references.
-- Назначать отдельные долговечные ID для `Exercise`, `ExerciseVersion`,
-  `TrainingProgramVersion`, `WorkoutSession` и `PerformedSet`. Legacy
-  `Exercise_ID` и `Session_ID` остаются source references, а не domain ID.
-- Назначать отдельные ID для shared provider/device definitions,
-  person-owned connection, consent, `RecoveryObservation`, policy version и
-  assessment. Наблюдение хранит UTC interval, observation-time IANA timezone и
-  local date; correction заменяет весь typed observation.
-- Не использовать номера строк листа как ID.
-- Использовать `Person` как владельца facts и append-only supersession для
-  corrections.
-- Не создавать универсальную таблицу `facts` или polymorphic revision store.
-- Не переиспользовать person-scoped `SourceReference` как identity общей
-  catalog record.
+## Open questions
 
-## Открытые вопросы
+- External Exercise_ID ownership, cross-date Session_ID, Food/Ingredient ID
+  scope, raw-snapshot retention, and authenticated erasure dependencies.
 
-- Управляется ли `Exercise_ID` вне этого workbook и потребуется ли отдельное
-  сопоставление при миграции?
-- Может ли legacy `Session_ID` охватывать несколько дат, и как такие строки
-  разделять при миграции?
-- Являются ли `Food_ID` и `Ingredient_ID` глобально уникальными или только локальными для workbook?
-- Какая retention policy применяется к private raw snapshots разных sources?
-- Как authenticated erasure удаляет raw snapshot, observations и зависимые
-  assessments до допуска production wearable data?
+## Related material
 
-## Связанные материалы
-
-- [Инвентаризация Google Sheets](google-sheets-inventory.md)
-- [Целостность и lifecycle](integrity-and-lifecycle.md)
-- [Кандидаты в агрегаты](../domain/candidate-aggregates.md)
-- [User, Person и права доступа](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
-- [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
-- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
-- [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
-- [Наблюдения и оценки восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md)
+- [Sheets inventory](google-sheets-inventory.md)
+- [Integrity](integrity-and-lifecycle.md)
+- [Identity ADR](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
+- [Provenance ADR](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)

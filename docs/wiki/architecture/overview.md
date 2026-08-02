@@ -1,74 +1,65 @@
 ---
 id: "architecture-overview"
 kind: architecture
-title: "Обзор архитектуры"
+title: "Architecture overview"
 status: draft
 tags: []
 ---
 
-# Обзор архитектуры
+# Architecture overview
 
-## Кратко
+## Summary
 
-Shape of You — долгосрочная production-платформа, развиваемая по принципу
-architecture-first и организованная как modular monorepo. Текущий runtime
-представлен одним deployable NestJS API с `FastifyAdapter`, PostgreSQL и первой
-вертикалью `WeightMeasurement`. Будущий web-клиент использует Nuxt и тот же
-backend contract.
+Shape of You is an architecture-first production platform in a modular
+monorepo. Current runtime is one NestJS API with `FastifyAdapter`, PostgreSQL,
+Drizzle, and typed domain modules. A future Nuxt client uses the same backend
+contract.
 
-## Содержание
+## Content
 
-### Текущее состояние
+Current foundation:
 
-Репозиторий содержит workspace 4DreamTeam, canonical Markdown, версионируемые планы, pnpm workspace и один deployable backend в `apps/api`. PostgreSQL хранит факты, созданные новым API, но Google Sheets остаётся authoritative source fitness-данных до отдельного dual-run и cutover.
+- one repository and 4DreamTeam workspace;
+- Node.js, TypeScript, and pnpm workspaces;
+- PostgreSQL with Drizzle ORM/Kit;
+- Docker Compose for local development;
+- one backend authority for web/mobile business rules;
+- NestJS with FastifyAdapter; future Nuxt without duplicated domain logic;
+- PostgreSQL queues/outbox before measured Kafka need;
+- PostgreSQL revocable sessions without mandatory Redis;
+- private S3-compatible storage for future user media;
+- strict deployable/data ownership when new deployables are justified;
+- no cross-service SQL; integration through APIs, events, or published read
+  models.
 
-### Принятый фундамент
+Bounded contexts are logical modeling boundaries, not services. Current
+implementation remains one modular backend. Transport schemas, domain
+validation, and repositories are separated without generic CRUD abstractions.
+New deployables or Kafka require a confirmed driver and ADR.
 
-- Modular monorepo с единым корнем репозитория и workspace.
-- Node.js, TypeScript и pnpm workspaces.
-- PostgreSQL с Drizzle ORM и Drizzle Kit.
-- Docker Compose для локальной разработки.
-- Единый backend как authority бизнес-правил для web- и mobile-клиентов.
-- NestJS с FastifyAdapter как текущий backend runtime.
-- Nuxt как framework будущего web-клиента без дублирования backend logic.
-- PostgreSQL transactional outbox до появления измеримых оснований для Kafka.
-- PostgreSQL для revocable authentication sessions без обязательного Redis.
-- Private S3-compatible object storage для будущих пользовательских media.
-- Строгие границы deployable service и владения данными, когда появление deployables обосновано.
-- Запрет межсервисного SQL; взаимодействие через API, события или опубликованные read model.
+PostgreSQL stores API-created data, but Google Sheets remains authoritative for
+operational fitness data until dual-run and cutover.
 
-### Текущая позиция
+## Evidence
 
-Bounded contexts — логические границы, а не deployable services. Текущая
-реализация — один modular backend; Nest modules сохраняют единую deployable
-topology. Внутри backend transport schemas, domain validation и PostgreSQL
-repositories разделены без generic CRUD abstraction. Новая deployable boundary
-или Kafka требуют отдельного подтверждённого driver и ADR.
+- Operator baseline, accepted ADRs, implemented runtime, integration tests, and
+  production image verification.
 
-## Основания
+## Decisions
 
-- Baseline, предоставленный оператором 2026-07-28.
-- Принятые ADR.
-- Проверка фактического NestJS runtime, PostgreSQL integration tests и
-  production Docker image.
+- Major tasks require Architecture Review under root `AGENTS.md`.
 
-## Решения
+## Open questions
 
-- Подробные решения и обоснования находятся в связанных ADR.
-- Крупные задачи проходят Architecture Review по правилам корневого `AGENTS.md`.
+- Remaining module boundaries, future APIs/events, production hosting,
+  security, observability, data policy, and measurable SLOs.
 
-## Открытые вопросы
+## Related material
 
-- Модульные границы следующих предметных вертикалей внутри одного backend.
-- Контракты будущих API и событий за пределами `WeightMeasurement`.
-- Production hosting, security, observability, data policy и измеримые SLO.
-
-## Связанные материалы
-
-- `drivers.md`
-- `quality-attributes.md`
-- `data-ownership.md`
-- `repository-and-runtime.md`
-- `stateful-infrastructure.md`
-- `migration-strategy.md`
-- `../domain/bounded-contexts.md`
+- [Drivers](drivers.md)
+- [Quality attributes](quality-attributes.md)
+- [Data ownership](data-ownership.md)
+- [Repository and runtime](repository-and-runtime.md)
+- [Stateful infrastructure](stateful-infrastructure.md)
+- [Migration strategy](migration-strategy.md)
+- [Bounded contexts](../domain/bounded-contexts.md)

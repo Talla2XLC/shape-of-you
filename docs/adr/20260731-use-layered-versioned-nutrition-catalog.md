@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260731-use-layered-versioned-nutrition-catalog"
 kind: adr
-title: "Слоистый версионируемый каталог Nutrition и неизменяемые snapshots питания"
+title: "Use a layered versioned Nutrition catalog and immutable meal snapshots"
 status: accepted
 date: 2026-07-31
 supersedes: []
@@ -14,103 +14,86 @@ tags:
   - "versioning"
 ---
 
-# Слоистый версионируемый каталог Nutrition и неизменяемые snapshots питания
+# Use a layered versioned Nutrition catalog and immutable meal snapshots
 
-## Контекст
+## Context
 
-Листы `Foods`, `Ingredients`, `Brands` и `Food_Ingredients` описывают
-переиспользуемые справочные сведения, а `Meals` — принадлежащие `Person` факты
-питания с зафиксированными calories и macros. Если сделать весь каталог
-`Person`-scoped, одинаковые ингредиенты, бренды и продукты будут копироваться
-для каждого человека, а подключение внешних справочников потребует повторной
-нормализации в каждом персональном наборе.
+`Foods`, `Ingredients`, `Brands`, and `Food_Ingredients` contain reusable
+reference knowledge, while `Meals` contains Person-owned nutrition facts with
+captured calories and macros. A fully Person-scoped catalog duplicates common
+content and external normalization work. A globally mutable catalog would
+rewrite historical meaning and improperly publish personal aliases, portions,
+and private recipes.
 
-Полностью глобальный изменяемый каталог создаёт обратную проблему: изменение
-одной записи не должно переписывать историю питания всех пользователей,
-персональные aliases и portions, а также private recipes не должны
-автоматически становиться общими.
+## Decision
 
-## Решение
+Keep Nutrition inside the single API and use three ownership layers:
 
-Nutrition остаётся модулем одного deployable API и использует три разных слоя
-владения:
+1. A shared canonical catalog with stable `Brand`, `Ingredient`, and `Food`
+   identities and immutable revisions. `FoodVersion` pins nutrition basis,
+   composition, and exact Ingredient revisions.
+2. A personal layer containing references and overlays only: saved item,
+   alias, favorite/hidden state, and preferred serving. User-created foods and
+   recipes have an explicit owner and private visibility.
+3. Immutable Person-owned `Meal` facts. Items may reference an accessible exact
+   `FoodVersion`, but always store typed snapshots of quantity, unit, calories,
+   protein, fat, and carbs. Correction creates a full replacement Meal with
+   `supersedes_id`.
 
-1. Общий canonical catalog содержит стабильные `Brand`, `Ingredient` и `Food`
-   identity и их immutable revisions. `FoodVersion` фиксирует nutrition basis,
-   состав и ссылки на точные revisions ингредиентов.
-2. Персональный слой хранит только ссылки и overlays: сохранение продукта в
-   каталоге `Person`, alias, favorite/hidden state и preferred serving.
-   Пользовательские продукты и recipes имеют явного владельца и private
-   visibility; публикация не происходит автоматически.
-3. `Meal` является неизменяемым person-owned fact. Его items могут ссылаться
-   на доступную точную `FoodVersion`, но всегда сохраняют собственный typed
-   snapshot количества, unit, calories, protein, fat и carbs. Correction
-   создаёт новый полный `Meal` с `supersedes_id`.
+Daily nutrition totals are query projections over current Meal snapshots by
+Person and `local_date`, not a broad `DayRecord` or authority table.
 
-Дневные nutrition totals строятся как query projection над текущими `Meal`
-snapshots по `Person` и `local_date`. Они не становятся широким `DayRecord` и
-на первом этапе не сохраняются как отдельная authority table.
+Use a source-neutral ingestion boundary for external catalogs.
+`CatalogSourceRecord` stores provider key, external record ID, retrieval time,
+checksum, parser version, provenance, license/terms, and a private raw payload
+only when required. `(source, external_record_id)` is unique. A source record
+first becomes a staged candidate; canonical link/merge is explicit and
+reviewable. Normalized name alone never authorizes merge.
 
-Для внешних справочников вводится source-neutral ingestion boundary.
-`CatalogSourceRecord` сохраняет provider key, external record id, время
-получения, checksum, parser version, provenance, сведения о license/terms и
-при необходимости private raw payload. Пара `(source, external_record_id)`
-уникальна. Внешняя запись сначала становится staged candidate; связывание или
-merge с canonical entity выполняется явно и проверяемо. Совпадение
-нормализованного имени само по себе не разрешает автоматический merge.
+No provider, API, dataset, or scraper is approved by this ADR. Prefer official
+APIs and open/licensed datasets. Scraping requires separate terms, rate-limit,
+attribution, and quality review. Meal creation never scrapes remotely.
 
-Конкретный внешний API, dataset или scraper не утверждён. Предпочтение
-отдаётся официальным API и открытым либо лицензированным datasets. Scraping
-конкретного сайта требует отдельного review условий использования, rate
-limits, attribution и качества данных. Создание `Meal` никогда не выполняет
-синхронный remote scraping.
+Person-scoped `SourceReference` is not catalog-source identity; fact provenance
+and catalog ingestion have different ownership and lifecycle.
 
-Person-scoped `SourceReference`, утверждённый для fitness facts, не
-переиспользуется как identity общей catalog record. Fact provenance и catalog
-ingestion provenance имеют разные ownership и lifecycle.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- Fully Person-scoped catalog: simple permissions but duplicate content and
+  weak external normalization.
+- Globally mutable catalog: few copies but rewrites history and mixes private
+  and shared definitions.
+- Shared immutable catalog without personal overlays: preserves history but
+  cannot express aliases, servings, favorites, or private recipes.
+- Layered catalog, overlays, and immutable snapshots: separates reusable
+  knowledge, preferences, and facts. Selected.
 
-- Полностью person-scoped каталог: простые permissions, но дублирование
-  одинаковых справочников и слабая основа для внешней нормализации. Отклонено.
-- Полностью глобальный изменяемый каталог: минимум копий, но изменения
-  переписывают смысл исторических ссылок и смешивают private data с общими
-  definitions. Отклонено.
-- Общий immutable catalog без персонального слоя: сохраняет историю, но не
-  выражает aliases, portions, favorites и private recipes. Отклонено.
-- Слоистый catalog, personal overlays и immutable meal snapshots: разделяет
-  reference knowledge, персональные настройки и факты. Выбрано.
+## Consequences
 
-## Последствия
+- Shared ingredients, brands, and foods are not duplicated per Person.
+- Catalog edits create revisions and do not change old Meals.
+- Meal snapshots intentionally duplicate a small nutrient set for historical
+  reproducibility.
+- Private recipes require authorization regardless of UUID knowledge.
+- Cross-source matching is explicit; automatic name dedupe is forbidden.
+- Real connectors, schedulers, and network access remain separate work and do
+  not require a new deployable service.
 
-- Одинаковые общие ингредиенты, бренды и продукты не копируются для каждого
-  `Person`.
-- Изменение canonical catalog создаёт revision и не меняет старые meals.
-- Meal snapshot намеренно дублирует небольшой набор nutrient values ради
-  воспроизводимости истории.
-- Private recipes требуют явной authorization независимо от UUID.
-- Matching разных источников становится отдельным проверяемым workflow; полная
-  автоматическая дедупликация по названию запрещена.
-- Реальный внешний connector, scheduler и network access остаются отдельными
-  задачами и не требуют нового deployable service заранее.
+## Verification
 
-## Проверка
+- Two People reference one shared Ingredient/FoodVersion without copied
+  canonical content.
+- New FoodVersion does not change an existing Meal snapshot.
+- Private items remain inaccessible without a future sharing contract.
+- Reimport by external ID is idempotent within the source.
+- Similar names from different sources do not merge without explicit match.
+- Daily totals use only current Meals for the selected Person/local date.
 
-- Два `Person` могут ссылаться на одну shared `Ingredient` или `FoodVersion`
-  без копирования canonical content.
-- Изменение `FoodVersion` не изменяет snapshot существующего `Meal`.
-- Private item недоступен другому `Person` без отдельного будущего sharing
-  contract.
-- Повторный import одного external id идемпотентен внутри `CatalogSource`.
-- Два похожих имени из разных sources не объединяются без explicit match.
-- Daily totals используют только current meal facts выбранного `Person` и
-  `local_date`.
+## Related material
 
-## Связанные материалы
-
-- [Владение данными](../wiki/architecture/data-ownership.md)
-- [Source of truth и authority](../wiki/data/source-of-truth-and-authority.md)
-- [Карта извлечения домена](../wiki/domain/domain-extraction-map.md)
-- [Независимые факты вместо DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
-- [Typed provenance и supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
-- [План Nutrition vertical](../../plans/2026/07/completed/2026-07-31-nutrition-catalog-meals-and-projections.md)
+- [Data ownership](../wiki/architecture/data-ownership.md)
+- [Source of truth and authority](../wiki/data/source-of-truth-and-authority.md)
+- [Domain extraction map](../wiki/domain/domain-extraction-map.md)
+- [Independent facts over DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
+- [Typed provenance and supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
+- [Nutrition plan](../../plans/2026/07/completed/2026-07-31-nutrition-catalog-meals-and-projections.md)

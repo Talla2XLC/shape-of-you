@@ -1,7 +1,7 @@
 ---
 id: "operations-postgresql-ssh-tunnel"
 kind: architecture
-title: "SSH tunnel к PostgreSQL staging"
+title: "SSH tunnel to staging PostgreSQL"
 status: draft
 tags:
   - "postgresql"
@@ -9,23 +9,23 @@ tags:
   - "staging"
 ---
 
-# SSH tunnel к PostgreSQL staging
+# SSH tunnel to staging PostgreSQL
 
-## Кратко
+## Summary
 
-PostgreSQL доступен на внешнем port `5431` без SSL. Для IDE рекомендуется SSH
-tunnel, чтобы database traffic не передавался открыто через публичную сеть.
+PostgreSQL is externally reachable on port `5431` without SSL. IDE access
+should use an SSH tunnel so database traffic is not plaintext on the public
+network.
 
-## Содержание
+## Content
 
-После отдельного approval на SSH access локальный tunnel создаётся без вывода
-credentials:
+After separate SSH approval:
 
 ```sh
 ssh -N -L 15431:127.0.0.1:5431 <ssh-user>@2.58.15.24
 ```
 
-IDE подключается к:
+IDE connection:
 
 ```text
 host: 127.0.0.1
@@ -35,28 +35,24 @@ user: shape_of_you_api
 SSL: disabled
 ```
 
-SSH host key должен быть проверен через доверенный канал. Private key не
-копируется в repository, документацию или task timeline.
+Verify host key through a trusted channel. Never copy private keys into the
+repository, documentation, or task timeline. Direct port exposure belongs to
+the existing PostgreSQL deployment and is not Shape of You security topology.
 
-Текущий прямой доступ к `2.58.15.24:5431` остаётся свойством чужого
-PostgreSQL deployment. Shape of You его не создаёт и не считает частью своей
-security topology.
+## Evidence
 
-## Основания
+- Confirmed PostgreSQL 17.4 access without SSL and throwaway-staging gate.
 
-- Подтверждённый прямой доступ к PostgreSQL 17.4 без SSL.
-- Security gate throwaway staging.
+## Decisions
 
-## Решения
+- Tunnel is recommended for IDE only; API uses
+  `host.docker.internal:5431`.
 
-- Tunnel рекомендуется для IDE, но не используется API container.
-- API подключается через `host.docker.internal:5431`.
+## Open questions
 
-## Открытые вопросы
+- External-port firewall policy belongs to the VM owner.
 
-- Firewall policy внешнего port `5431` контролируется владельцем VM.
-
-## Связанные материалы
+## Related material
 
 - [Deployment topology](../architecture/deployment.md)
-- [Временный deployment](temporary-vm-deployment.md)
+- [Deployment runbook](temporary-vm-deployment.md)

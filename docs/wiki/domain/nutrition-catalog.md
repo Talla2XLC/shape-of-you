@@ -12,64 +12,42 @@ tags:
 
 # Nutrition catalog
 
-## Кратко
+## Summary
 
-Nutrition catalog хранит переиспользуемые `Brand`, `Ingredient` и `Food`
-без копирования одинакового содержания для каждого `Person`. Общие и private
-identity имеют immutable versions, а персональные предпочтения хранятся
-отдельным overlay.
+The Nutrition catalog reuses Brands, Ingredients, and Foods without copying
+canonical content per Person. Definitions use immutable versions; preferences
+use separate overlays.
 
-## Содержание
+## Content
 
-`Brand`, `Ingredient` и `Food` состоят из stable identity и current immutable
-version. Новая редакция добавляет version и переключает root через optimistic
-`lockVersion`; прежняя version не обновляется. `FoodVersion` фиксирует
-nutrition basis и ordered composition со ссылками на точные
-`IngredientVersion`.
+Shared and private definitions have stable identity plus immutable revisions.
+`FoodVersion` pins nutrition basis and exact Ingredient revisions. Shared
+versions cannot depend on private content.
 
-Identity имеет visibility:
+Person overlays store alias, favorite/hidden state, and preferred serving as
+references, not copied definitions. Private foods/recipes have an owner and are
+not published automatically.
 
-- `shared` не имеет `ownerPersonId` и доступна разным `Person`;
-- `private` имеет обязательного владельца и доступна только ему.
+External `CatalogSourceRecord` is source-neutral staging with provider key,
+external ID, checksum, parser version, license/terms, and review state. Import
+is idempotent within source. Canonical match/merge is explicit; name alone is
+never sufficient. No provider, scraper, scheduler, or network adapter is yet
+approved.
 
-Shared `FoodVersion` может ссылаться только на shared `BrandVersion` и
-`IngredientVersion`. Это не позволяет общей definition скрыто зависеть от
-private content. Private food может использовать доступные shared definitions
-и private definitions того же владельца.
+## Evidence
 
-`FoodOverlay` принадлежит `Person` и хранит alias, favorite/hidden и optional
-preferred quantity/unit. Overlay не копирует canonical name, composition или
-nutrients и не изменяет shared version.
+- Schema, Nutrition contracts, and integration tests.
 
-External ingestion подготовлен через `CatalogSource` и
-`CatalogSourceRecord`. Пара `(source, externalRecordId)` уникальна, raw
-snapshot остаётся private ingestion evidence, а status принимает `staged`,
-`matched` или `rejected`. Конкретный adapter, scraper, scheduler и автоматический
-merge не реализованы.
+## Decisions
 
-## Основания
+- [Layered Nutrition ADR](../../adr/20260731-use-layered-versioned-nutrition-catalog.md).
 
-- Листы `Brands`, `Ingredients`, `Foods` и `Food_Ingredients`.
-- [ADR о слоистом Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md).
-- [ADR о shared reference definitions](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md).
+## Open questions
 
-## Решения
+- Approved external sources and multi-user catalog write/moderation roles.
 
-- Не создавать персональную копию shared catalog content.
-- Не менять version скрытым overwrite.
-- Не объединять external records только по совпавшему имени.
-- Не создавать отдельный catalog service до появления независимого lifecycle
-  и измеримого operational driver.
+## Related material
 
-## Открытые вопросы
-
-- Moderation и write authorization shared catalog до multi-user runtime.
-- Выбор внешних sources, лицензий, attribution и matching workflow.
-- Conversion rules между `g`, `ml`, `serving` и `piece`.
-
-## Связанные материалы
-
+- [Nutrition API](../api/nutrition-catalog.md)
 - [Meal](meal.md)
-- [API Nutrition catalog](../api/nutrition-catalog.md)
-- [Владение данными](../architecture/data-ownership.md)
-- [Source of truth и authority](../data/source-of-truth-and-authority.md)
+- [Data ownership](../architecture/data-ownership.md)

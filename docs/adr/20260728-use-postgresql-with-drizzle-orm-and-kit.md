@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-use-postgresql-with-drizzle-orm-and-kit"
 kind: adr
-title: "PostgreSQL с Drizzle ORM и Drizzle Kit"
+title: "Use PostgreSQL with Drizzle ORM and Drizzle Kit"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,35 +11,42 @@ tags:
   - "technology"
 ---
 
-# PostgreSQL с Drizzle ORM и Drizzle Kit
+# Use PostgreSQL with Drizzle ORM and Drizzle Kit
 
-## Контекст
+## Context
 
-Будущей платформе нужны реляционная целостность, прозрачный SQL, контролируемые миграции, специфичные возможности PostgreSQL и локальное владение схемой.
+The platform needs relational integrity, transparent SQL, controlled
+migrations, PostgreSQL-specific capabilities, and local schema ownership.
 
-## Решение
+## Decision
 
-После контролируемой миграции использовать PostgreSQL с Drizzle ORM и Drizzle Kit для persistence приложения.
+Use PostgreSQL with Drizzle ORM and Drizzle Kit for application persistence
+after controlled migration. Raw SQL remains allowed for CTEs, window
+functions, materialized views, specialized indexes, JSONB where explicitly
+approved, PostgreSQL extensions, backfills, and complex migrations.
 
-Raw SQL разрешён для CTE, window functions, materialized views, специализированных индексов, JSONB, PostgreSQL extensions, backfill и сложных миграций.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- Prisma: stronger abstraction and ecosystem convenience, but less direct SQL
+  control for this project's migration and analytical needs.
+- SQL only: maximum transparency but more repetitive mapping and type-safety
+  work.
 
-- Prisma: более сильная абстракция и удобства экосистемы, но меньше прямого контроля SQL для миграционных и аналитических потребностей проекта.
-- Только SQL: максимальная прозрачность, но больше повторяющегося mapping и работы с type safety.
+## Consequences
 
-## Последствия
+Each future data owner maintains its own Drizzle schema and ordinary SQL
+migrations. The ORM must not hide ownership or prevent required PostgreSQL
+features. Replacing it requires a superseding ADR with technical evidence.
 
-Каждый будущий владелец данных поддерживает собственные схемы Drizzle и обычные SQL-миграции. ORM не должен скрывать владение или препятствовать применению необходимых возможностей PostgreSQL. Смена ORM требует заменяющего ADR с техническими доказательствами.
+This ADR does not make PostgreSQL authoritative by itself. Version, hosting,
+extensions, backup, and connection management remain operational decisions.
 
-PostgreSQL пока не является authoritative source и этим ADR не создаётся. Версия PostgreSQL, hosting, extensions, backup и управление соединениями пока не определены.
+## Verification
 
-## Проверка
+- The operator explicitly accepted the decision and rationale on 2026-07-28.
+- Authority remains in Google Sheets until an approved cutover.
 
-- Решение и обоснование явно приняты оператором 2026-07-28.
-- До утверждённой миграции authority остаётся в Google Sheets.
-
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/data-ownership.md`
 - `../wiki/architecture/migration-strategy.md`

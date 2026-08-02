@@ -1,61 +1,63 @@
 ---
 id: "start-overview"
 kind: start
-title: "Начало работы"
+title: "Getting started"
 status: draft
 tags: []
 ---
 
-# Начало работы
+# Getting started
 
-## Кратко
+## Summary
 
-Shape of You — персональная AI-платформа для обоснованных решений о физическом
-развитии. Baseline репозитория завершён, а backend находится на этапе DEV-023:
-реализованы основные возможности физического состояния, питания, тренировок,
-восстановления и coaching, а также основа асинхронного Intake.
+Shape of You is a personal AI platform for evidence-based physical-development
+decisions. Repository baseline is complete. DEV-023 has implemented core
+Physical State, Nutrition, Training, Recovery, Coaching, and asynchronous
+Intake foundations.
 
-## Содержание
+## Content
 
-### Навигация
+### Navigation
 
 - Vision: `vision/overview.md`
-- Продукт: `product/overview.md` и `product/scope.md`
-- Домен: `domain/overview.md`, `domain/glossary.md` и `domain/bounded-contexts.md`
-- Архитектура: `architecture/overview.md` и связанные архитектурные страницы
+- Product: `product/overview.md` and `product/scope.md`
+- Domain: `domain/overview.md`, `domain/glossary.md`, and
+  `domain/bounded-contexts.md`
+- Architecture: `architecture/overview.md`
 - Roadmap: `roadmap/overview.md`
-- Решения: ADR в `../adr/`
+- Decisions: ADRs in `../adr/`
 
-### Текущий этап
+### Current stage
 
-DEV-027 завершил workspace, продуктовый и доменный baseline, архитектурную
-документацию, набор ADR и версионируемые планы. В DEV-023 реализованы один
-NestJS API с `FastifyAdapter`, PostgreSQL persistence и person-scoped вертикаль
-`WeightMeasurement` с typed provenance и append-only corrections, Physical
-State/Goals, Nutrition catalog/Meals и Training and Performance. Восстановление,
-Coaching и основа Intake с PostgreSQL-очередью и первым маршрутом веса также
-реализованы. Production parser, остальные маршруты Intake и общий lifecycle
-ещё не реализованы. Google Sheets остаётся
-authoritative source рабочих fitness-данных до проверенного dual-run с
-PostgreSQL и утверждённого cutover.
+DEV-027 completed the workspace, product/domain baseline, architecture
+documentation, ADRs, and versioned plans. DEV-023 currently provides one NestJS
+API with `FastifyAdapter`, PostgreSQL, typed provenance and append-only
+corrections, Physical State and Goals, Nutrition, Training, Recovery, Coaching,
+and a durable Intake queue with the first Weight route.
 
-## Основания
+A production Intake parser, remaining Intake routes, and the shared day
+lifecycle are not implemented. Google Sheets remains authoritative for
+operational fitness data until verified dual-run and approved cutover.
 
-- Baseline, предоставленный оператором 2026-07-28.
-- Фактический runtime и accepted staging evidence вертикали `WeightMeasurement`.
+## Evidence
 
-## Решения
+- Operator baseline supplied on 2026-07-28.
+- Implemented runtime, integration tests, and accepted staging evidence.
 
-- Эта страница отвечает за навигацию и состояние этапа; подробные правила и решения находятся на соответствующих канонических страницах.
+## Decisions
 
-## Открытые вопросы
+- This page is a navigation/current-stage summary. Detailed authority lives in
+  the linked Wiki pages and ADRs.
 
-- Полный behavior catalog Google Sheets и порядок оставшихся вертикалей DEV-023.
+## Open questions
 
-## Связанные материалы
+- Remaining DEV-023 ordering and completion of the Google Sheets behavior
+  catalog.
 
-- `../vision/overview.md`
-- `../product/overview.md`
-- `../domain/overview.md`
-- `../architecture/overview.md`
-- `../roadmap/overview.md`
+## Related material
+
+- [Vision](../vision/overview.md)
+- [Product](../product/overview.md)
+- [Domain](../domain/overview.md)
+- [Architecture](../architecture/overview.md)
+- [Roadmap](../roadmap/overview.md)

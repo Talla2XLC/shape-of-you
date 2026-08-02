@@ -1,43 +1,47 @@
-# Документация Shape of You
+# Shape of You documentation
 
-## Источники истины
+## Sources of truth
 
-- `wiki/` содержит каноническое текущее проектное знание.
-- `adr/` содержит канонические архитектурные решения.
-- `templates/` задаёт минимальную форму новых страниц.
+- `wiki/` contains canonical current project knowledge.
+- `adr/` contains canonical architecture decisions.
+- `templates/` defines the minimum shape of new pages.
 
-Эти Markdown-файлы редактируются напрямую и проходят обычную проверку через
-Git. Сгенерированных копий Wiki нет.
+These Markdown files are edited directly and reviewed through Git. There are
+no generated Wiki mirrors.
 
-## Правила изменения
+## Change rules
 
-1. Архитектурное решение сначала обсуждается и сравнивается с альтернативами.
-2. После принятия создаётся или обновляется ADR.
-3. Wiki отражает последствия решения и ссылается на ADR, не копируя его полный
-   текст.
-4. Планы описывают выполнение, но не становятся источником архитектурной истины.
-5. Перед завершением крупной задачи запускается:
+1. Discuss an architecture decision and compare alternatives first.
+2. Create or update an ADR after the decision is accepted.
+3. Update the Wiki with the current consequences and link to the ADR without
+   copying its full decision history.
+4. Use plans to describe execution, not as architecture authority.
+5. Before completing a major task, run:
 
    ```shell
    node scripts/validate-docs.mjs
    ```
 
-6. Изменения Wiki и ADR должны быть видны в Git diff.
+6. Wiki and ADR changes must be visible in the Git diff.
 
-## Поиск
+## Search
 
-При текущем объёме отдельный индекс не нужен:
+The current documentation volume does not need a separate index:
 
 ```powershell
 rg "DayClosure" docs
 rg --files docs/wiki docs/adr
 ```
 
-`docs/` не регистрируется в `4dt-sources`: Git, IDE и `rg` дают достаточный
-поиск без дублирующего состояния индекса.
+Do not register `docs/` in `4dt-sources`. Git, the IDE, and `rg` provide search
+without duplicating index state.
 
-## Язык
+## Language
 
-Планы, Wiki, ADR и руководства ведутся на русском. Пути, идентификаторы,
-YAML-ключи, служебные значения `kind` и `status`, команды, API и другие
-технические контракты сохраняются без перевода.
+Plans under `plans/**/*.md` are written in Russian. Wiki pages, ADRs, guides,
+READMEs, templates, and other agent-facing repository documentation are written
+in English. Paths, identifiers, YAML keys, controlled `kind` and `status`
+values, commands, APIs, and other technical contracts are preserved exactly.
+
+Operator-facing collaboration follows the operator's language. Localized
+application strings and realistic test fixtures are not documentation.

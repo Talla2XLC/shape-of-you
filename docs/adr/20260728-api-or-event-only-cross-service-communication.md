@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-api-or-event-only-cross-service-communication"
 kind: adr
-title: "Межсервисное взаимодействие только через API или события"
+title: "Allow cross-service communication only through APIs or events"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,35 +11,44 @@ tags:
   - "service-boundaries"
 ---
 
-# Межсервисное взаимодействие только через API или события
+# Allow cross-service communication only through APIs or events
 
-## Контекст
+## Context
 
-Независимое владение данными сервиса нарушается, если другой сервис напрямую читает его базу данных или записывает в неё.
+Service data ownership is broken when another service reads or writes its
+database directly.
 
-## Решение
+## Decision
 
-Межсервисный SQL запрещён. Сервис может обращаться только к принадлежащей ему границе базы данных. Для взаимодействия между сервисами используются явные HTTP API, события или явно опубликованные read model.
+Cross-service SQL is forbidden. A service accesses only its own database
+boundary. Services communicate through explicit HTTP APIs, events, or
+published read models. Every published read model has an owner and a contract
+and does not expose direct database access.
 
-У опубликованной read model должны быть определены владелец и контракт. Она не должна предоставлять прямой доступ к базе данных другого сервиса.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- Direct cross-service SQL: simplifies individual queries and reports but
+  destroys ownership, increases coupling, and makes independent schema changes
+  unsafe.
+- One shared database: lowers initial infrastructure cost but prematurely
+  couples future deployable lifecycles.
 
-- Прямой SQL-доступ между сервисами упростил бы отдельные запросы и отчёты, но разрушил бы владение данными, усилил связанность и сделал независимые изменения схем небезопасными.
-- Общая база данных могла бы снизить начальные инфраструктурные затраты, но преждевременно связала бы жизненные циклы будущих deployable services.
+## Consequences
 
-## Последствия
+Data contracts become service contracts. Cross-service reporting,
+transactions, consistency, and replication are designed explicitly rather
+than implemented as joins across service databases.
 
-Контракты данных становятся сервисными контрактами. Межсервисные отчёты, транзакции, согласованность и репликация проектируются явно, а не реализуются соединениями таблиц из разных сервисов.
+Sync/async selection, event infrastructure, delivery guarantees, contract
+versioning, schema evolution, freshness, consistency, and observability remain
+open until needed.
 
-Пока не определены критерии выбора синхронного или асинхронного взаимодействия, событийная инфраструктура, гарантии доставки, версионирование контрактов, эволюция схем, требования к актуальности данных, согласованности и наблюдаемости.
+## Verification
 
-## Проверка
+- The operator explicitly accepted the decision on 2026-07-28.
+- No existing integration needs migration.
 
-- Решение явно принято оператором 2026-07-28.
-- Межсервисных интеграций пока нет, поэтому решение не требует миграции существующего кода.
-
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/overview.md`
 - `20260728-modular-monorepo.md`

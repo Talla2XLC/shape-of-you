@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260729-use-postgresql-outbox-before-kafka"
 kind: adr
-title: "PostgreSQL transactional outbox до появления оснований для Kafka"
+title: "Use a PostgreSQL transactional outbox before Kafka is justified"
 status: accepted
 date: 2026-07-29
 supersedes: []
@@ -13,88 +13,75 @@ tags:
   - "runtime"
 ---
 
-# PostgreSQL transactional outbox до появления оснований для Kafka
+# Use a PostgreSQL transactional outbox before Kafka is justified
 
-## Контекст
+## Context
 
-Будущие intake, projections, audit и coaching workflows требуют надёжной
-асинхронной обработки и typed domain events. При этом текущая topology содержит
-один deployable backend, одну принадлежащую ему PostgreSQL database и не имеет
-независимо развёртываемых consumers.
+Future Intake, projection, audit, and coaching workflows need reliable
+asynchronous processing and typed domain events. The current topology has one
+backend, one owned PostgreSQL database, and no independently deployed
+consumers.
 
-Немедленное добавление Kafka потребовало бы broker operations, topics,
-partitions, retention, schema compatibility, consumer groups, retries, DLQ,
-lag monitoring и решения dual-write между PostgreSQL и Kafka. Kafka сама по
-себе не устраняет необходимость idempotency.
+Kafka now would require broker operations, topics, partitions, retention,
+schema compatibility, consumer groups, retries, DLQ, lag monitoring, and a
+PostgreSQL/Kafka dual-write solution. Kafka does not remove idempotency needs.
 
-## Решение
+## Decision
 
-Не вводить Kafka в текущую topology.
+Do not introduce Kafka now. When the first confirmed asynchronous command
+boundary needs durable processing, use a PostgreSQL transactional outbox:
 
-Когда первая подтверждённая asynchronous command boundary потребует durable
-processing, использовать PostgreSQL transactional outbox:
+- create domain mutation and outbox record in one transaction;
+- give each event a stable type, version, aggregate/source reference,
+  occurrence time, payload, and dedupe identity;
+- claim records safely across multiple workers;
+- make handlers idempotent;
+- persist retry state and safe failure diagnostics;
+- never turn the outbox into domain authority.
 
-- domain mutation и outbox record создаются одной database transaction;
-- event имеет stable type, version, aggregate/source reference, occurred time,
-  payload и dedupe identity;
-- worker забирает записи безопасно для нескольких instances;
-- handlers являются idempotent;
-- retry state и failure diagnostics сохраняются явно;
-- успешная обработка не превращает outbox в domain authority.
+Do not create speculative outbox tables before a real asynchronous workflow.
+Domain code publishes typed events through a transport-neutral application
+boundary.
 
-Не создавать outbox tables заранее без первого реального asynchronous
-workflow. Domain code публикует typed events через application boundary, не
-зависящую от будущего transport.
+Reconsider Kafka only when a measured driver exists: independently deployable
+consumers, mass replay or long-lived log requirements, PostgreSQL throughput
+limits, independent consumer scaling/failure isolation, streaming analytics,
+or operational readiness for a broker. The outbox remains the atomic
+publication source and a relay changes transport to Kafka.
 
-Kafka рассматривается повторно, когда существует хотя бы один подтверждённый
-driver:
+## Considered alternatives
 
-- несколько независимо deployable consumers одного event stream;
-- требование массового replay или длительного durable log;
-- throughput, который PostgreSQL worker не выдерживает по измерениям;
-- независимое масштабирование и failure isolation consumers;
-- интеграция с streaming analytics или внешней event platform;
-- операционная готовность сопровождать broker cluster.
+- Synchronous calls only: simplest, but cannot provide durable retries and
+  eventual projections for long-running workflows.
+- Kafka immediately: durable replayable stream but unjustified operational
+  complexity without consumers or load.
+- Redis queue: good for jobs but adds a second stateful store and does not make
+  PostgreSQL mutation atomic without an outbox.
+- PostgreSQL outbox and worker: atomic in one database and evolvable to Kafka.
+  Selected.
+- Full event sourcing: replayable model but excessive; domain tables remain
+  authoritative.
 
-При принятии Kafka transactional outbox остаётся источником атомарной
-публикации, а relay меняет transport на Kafka.
+## Consequences
 
-## Рассмотренные альтернативы
+- Staging receives no new stateful component.
+- Asynchronous handlers assume at-least-once delivery.
+- Event contracts version independently of internal entities.
+- Retention, cleanup, retry limits, and observability are defined with the
+  first workflow.
+- Audit timeline and outbox remain separate concerns and authorities.
+- Kafka can be introduced later without rewriting domain policies.
 
-- Только синхронные вызовы: максимально просто, но не покрывает durable retries
-  и eventual projections при появлении длительных workflows.
-- Kafka сейчас: даёт durable stream и replay, но не имеет оправдывающих
-  consumers или load и создаёт существенную operational complexity.
-- Redis queue: удобна для jobs, но добавляет второй stateful datastore и не
-  решает атомарность PostgreSQL mutation без outbox.
-- PostgreSQL outbox и worker: сохраняет атомарность в одной database и даёт
-  эволюционный путь к Kafka. Выбрано.
-- Полный event sourcing: обеспечивает replay всей модели, но для текущих
-  требований избыточен; domain tables остаются authority.
+## Verification
 
-## Последствия
+- Integration tests prove mutation/outbox atomicity, idempotent redelivery,
+  exclusive concurrent claims, and durable retry state.
+- Architecture Review before Kafka verifies drivers, load, consumers,
+  ownership, and operational readiness.
 
-- Текущая staging topology не получает новый stateful component.
-- Асинхронные handlers обязаны учитывать at-least-once delivery.
-- Event contracts versioned независимо от внутренней формы domain entities.
-- Outbox retention, cleanup, retry limits и observability должны быть
-  определены вместе с первым использующим workflow.
-- Append-only audit timeline и outbox имеют разное назначение и не должны
-  объединяться в одну authority table.
-- Переход на Kafka остаётся возможным без переписывания domain policies.
+## Related material
 
-## Проверка
-
-- Integration test подтверждает атомарность domain mutation и outbox insert.
-- Повторная доставка не создаёт duplicate effect.
-- Concurrent workers не обрабатывают одну запись одновременно.
-- Failure сохраняет retry state и не теряет событие.
-- Architecture Review перед Kafka проверяет drivers, нагрузку, consumers,
-  ownership и операционную готовность.
-
-## Связанные материалы
-
-- [API- или event-only cross-service communication](20260728-api-or-event-only-cross-service-communication.md)
-- [PostgreSQL с Drizzle](20260728-use-postgresql-with-drizzle-orm-and-kit.md)
-- [Целостность и lifecycle](../wiki/data/integrity-and-lifecycle.md)
-- [План завершения DEV-023](../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)
+- [API- or event-only communication](20260728-api-or-event-only-cross-service-communication.md)
+- [PostgreSQL with Drizzle](20260728-use-postgresql-with-drizzle-orm-and-kit.md)
+- [Integrity and lifecycle](../wiki/data/integrity-and-lifecycle.md)
+- [DEV-023 completion plan](../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)

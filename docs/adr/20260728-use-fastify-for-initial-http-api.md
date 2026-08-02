@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-use-fastify-for-initial-http-api"
 kind: adr
-title: "Fastify для начального HTTP API"
+title: "Use Fastify for the initial HTTP API"
 status: superseded
 date: 2026-07-28
 supersedes: []
@@ -12,64 +12,54 @@ tags:
   - "technology"
 ---
 
-# Fastify для начального HTTP API
+# Use Fastify for the initial HTTP API
 
-## Контекст
+## Context
 
-DEV-023 требует один минимальный зрелый HTTP runtime с runtime validation,
-structured logging, единым error handler, graceful shutdown и OpenAPI из тех
-же schemas, которые проверяют запросы и ответы. Отдельный framework spike не
-оправдан, а собственный framework layer увеличил бы стоимость первой
-вертикали.
+DEV-023 required one mature minimal HTTP runtime with runtime validation,
+structured logging, one error handler, graceful shutdown, and OpenAPI from the
+same schemas that validate requests and responses. A framework spike or custom
+HTTP layer would distract from the first vertical slice.
 
-## Решение
+## Decision
 
-Использовать Fastify для начального deployable API в `apps/api`.
+Use Fastify for the initial deployable API in `apps/api`.
 
-Route schemas задаются как JSON Schema в `packages/contracts`. Fastify
-использует их для runtime validation и serialization, Type Provider — для
-TypeScript inference, а Swagger plugin — для построения OpenAPI. Встроенный
-Pino logger используется для JSON structured logging. `fastify.close()`
-является границей graceful shutdown.
+Define route JSON Schemas in `packages/contracts`. Fastify uses them for
+validation and serialization, a Type Provider infers TypeScript types, and the
+Swagger plugin builds OpenAPI. Use built-in Pino structured logging and
+`fastify.close()` as the graceful-shutdown boundary.
 
-Решение относится к одному начальному modular backend и не создаёт
-обязательство использовать Fastify во всех будущих deployables.
+This decision applied only to the initial modular backend. It completed that
+slice and was later superseded by NestJS as the application framework while
+retaining Fastify through `FastifyAdapter`.
 
-Решение выполнило задачу начального среза и затем было superseded выбором
-NestJS как application framework с сохранением Fastify через FastifyAdapter.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- Express: mature ecosystem, but validation, typed schemas, logging, and
+  OpenAPI require more separate composition and synchronization points.
+- Hono: compact and portable, but the task benefited more from mature server
+  plugins and direct JSON Schema, Pino, and PostgreSQL lifecycle integration.
+- Custom Node.js HTTP: fewer dependencies but unjustified implementation of
+  routing, validation, errors, and shutdown.
 
-- Express: зрелая и широко известная экосистема, но validation, typed schemas,
-  logging и OpenAPI потребовали бы больше самостоятельной композиции и
-  дополнительных точек рассинхронизации.
-- Hono: компактный и современный runtime с хорошей переносимостью, но текущей
-  задаче важнее зрелая server-side plugin model и прямой путь к JSON Schema,
-  Pino и lifecycle PostgreSQL API.
-- Собственный Node.js HTTP layer: минимальное число dependencies, но
-  неоправданная реализация routing, validation, errors и shutdown вместо
-  продуктовой вертикали.
+## Consequences
 
-## Последствия
+- API receives one validation, error, logging, and lifecycle model.
+- Contracts remain transport schemas and contain no domain implementation.
+- Fastify plugins must be upgraded as a compatible set.
+- A replacement HTTP stack requires another ADR.
 
-- API получает единый validation/error/logging lifecycle без собственного
-  framework abstraction.
-- Contracts должны оставаться transport schemas и не содержать domain
-  implementation.
-- Fastify и его plugins являются runtime dependencies deployable API и должны
-  обновляться совместимым набором.
-- Замена framework или добавление второго HTTP stack требует нового ADR.
+## Verification
 
-## Проверка
+- Build and typecheck verify Type Provider integration.
+- Tests verify validation, error shape, OpenAPI, and PostgreSQL routes.
+- Docker smoke verifies startup and graceful lifecycle when Docker is
+  available.
 
-- Build и typecheck подтверждают Type Provider integration.
-- Tests проверяют validation, единый error shape и OpenAPI.
-- Integration tests проверяют HTTP routes с PostgreSQL.
-- Docker smoke проверяет запуск и graceful lifecycle при доступном Docker.
+## Related material
 
-## Связанные материалы
-
-- [План DEV-023](../../plans/2026/07/completed/2026-07-28-backend-bootstrap-and-weight-vertical.md)
-- [Репозиторий и runtime](../wiki/architecture/repository-and-runtime.md)
-- [Node.js, TypeScript и pnpm workspaces](20260728-use-nodejs-typescript-and-pnpm-workspaces.md)
-- [NestJS с FastifyAdapter и Nuxt](20260729-use-nestjs-with-fastify-and-nuxt.md)
+- [DEV-023 plan](../../plans/2026/07/completed/2026-07-28-backend-bootstrap-and-weight-vertical.md)
+- [Repository and runtime](../wiki/architecture/repository-and-runtime.md)
+- [Node.js, TypeScript, and pnpm](20260728-use-nodejs-typescript-and-pnpm-workspaces.md)
+- [NestJS with FastifyAdapter and Nuxt](20260729-use-nestjs-with-fastify-and-nuxt.md)

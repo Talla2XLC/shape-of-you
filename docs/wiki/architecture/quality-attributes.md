@@ -1,64 +1,56 @@
 ---
 id: "architecture-quality-attributes"
 kind: architecture
-title: "Атрибуты качества"
+title: "Quality attributes"
 status: draft
 tags:
   - "architecture"
   - "quality"
 ---
 
-# Атрибуты качества
+# Quality attributes
 
-## Кратко
+## Summary
 
-Baseline отдаёт приоритет безопасности, целостности, объяснимости, проверяемости, способности к развитию и управляемости. Численные цели пока не определены.
+Safety, integrity, explainability, verifiability, evolvability, and operability
+have priority. Numeric targets remain to be defined.
 
-## Содержание
+## Content
 
-### Безопасность
+- **Safety:** deterministic domain rules block dangerous compensation; AI
+  cannot invent confirmed facts or bypass safety rules.
+- **Integrity:** writes use validation, relevant idempotency, confirmed
+  persistence, and critical read-back. Migration requires reconciliation and
+  rollback evidence.
+- **Explainability:** recommendations link evidence; corrections and reversals
+  remain traceable; correlation is not presented as causation.
+- **Evolvability:** domain modules/contracts evolve without client rule forks or
+  cross-service database coupling; decisions are recorded in ADRs.
+- **Operability:** failures are observable and safely retryable. Stateful
+  components require owners, backup, retention, restore, and observability.
+- **Scalability:** use clear ownership, appropriate stateless interfaces,
+  PostgreSQL capabilities, and measured bottlenecks. Do not distribute without
+  evidence.
 
-Опасные компенсаторные рекомендации блокируются. AI output не может обходить детерминированные доменные правила или выдумывать подтверждённые факты.
+PostgreSQL and object-storage recovery must be coordinated for media metadata.
+Redis remains non-authoritative.
 
-### Целостность данных
+## Evidence
 
-Запись требует валидации, idempotency там, где она применима, подтверждённого persistence и read-back для критичных потоков. Для миграции обязательны reconciliation и доказательства готовности rollback.
+- Confirmed safety, migration, and service-boundary constraints.
 
-### Объяснимость и проверяемость
+## Decisions
 
-Рекомендации и insights ссылаются на свидетельства. Исправления и отмены в timeline остаются прослеживаемыми. Корреляция не выдаётся за причинность.
+- Priority order is accepted; measurable scenarios remain open.
 
-### Способность к развитию
+## Open questions
 
-Доменные модули и контракты развиваются без fork бизнес-правил на клиентах и без межсервисной связанности через базы данных. Архитектурные решения явно фиксируются в ADR.
+- SLO, RPO/RTO, growth, peak load, backups, audit retention, privacy, and
+  security targets.
 
-### Управляемость
+## Related material
 
-Сбои наблюдаемы и допускают повторную обработку без тихой потери данных. При наличии deployable boundaries runtime artifacts минимальны и собираются независимо.
-
-Stateful components вводятся только с определёнными ownership, backup,
-retention, restore и observability. PostgreSQL и object storage требуют
-согласованного recovery для media metadata; Redis не становится authority.
-
-### Масштабируемость
-
-Масштабирование опирается на ясное владение, stateless interfaces там, где они уместны, возможности PostgreSQL и измеренные bottlenecks. Распределённые системы не вводятся без подтверждённой необходимости.
-
-## Основания
-
-- Свойства выведены непосредственно из подтверждённых ограничений безопасности, механизмов, миграции и сервисных границ.
-
-## Решения
-
-- Приоритет атрибутов принят; измеримые сценарии ещё предстоит определить.
-
-## Открытые вопросы
-
-- SLO, RPO/RTO, ожидаемый рост данных, peak load, backup policy, audit retention, privacy и security targets.
-
-## Связанные материалы
-
-- `drivers.md`
-- `../domain/overview.md`
-- `migration-strategy.md`
-- `stateful-infrastructure.md`
+- [Drivers](drivers.md)
+- [Domain](../domain/overview.md)
+- [Migration](migration-strategy.md)
+- [Stateful infrastructure](stateful-infrastructure.md)

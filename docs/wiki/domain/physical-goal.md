@@ -12,51 +12,37 @@ tags:
 
 # PhysicalGoal
 
-## Кратко
+## Summary
 
-`PhysicalGoal` — принадлежащий `Person` versioned plan. Stable goal root
-управляет lifecycle и current version, immutable versions сохраняют intent и
-criteria, а progress остаётся query projection над physical facts.
+`PhysicalGoal` is a versioned Person-owned plan. The stable root owns lifecycle;
+immutable versions preserve intent/criteria; progress is a query projection.
 
-## Содержание
+## Content
 
-Goal root имеет lifecycle `draft`, `active`, `completed` или `cancelled` и
-optimistic lock. `PhysicalGoalVersion` хранит последовательный version number,
-narrative intent, optional effective/target dates и structured criteria.
+`PhysicalGoalVersion` stores version number, narrative intent/title, optional
+effective/target dates, and typed criteria. Criteria support controlled metric,
+direction or target mode, optional exact/range values, and canonical unit.
+Narrative goals without numeric targets are valid.
 
-Criterion ограничен Physical State metric vocabulary и поддерживает modes
-`directional`, `exact`, `range` и `dynamic`. Narrative или dynamic goal не
-обязан содержать фиктивный target value. Это сохраняет смысл текущей цели:
-изменение состава тела с сохранением мышечной массы и динамически
-пересматриваемым весом.
+Editing creates a draft version. Activation atomically selects current version
+with optimistic conflict handling; old versions never change. Completion and
+cancellation update root lifecycle, not measurements/history. Terminal goals
+cannot be reactivated.
 
-Новая редакция создаётся как immutable draft version. Activation одной
-transaction переключает current version с optimistic concurrency check.
-Completion и cancellation изменяют lifecycle root, но не исторические versions.
+## Evidence
 
-## Основания
+- Schema/domain code and Physical State integration tests.
 
-- `Settings` содержит primary goal как narrative intent и target weight как
-  динамически пересматриваемое значение.
-- [ADR о сеансах замеров и физических целях](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md).
+## Decisions
 
-## Решения
+- Goals are plans, not measurements, policies, or mutable settings.
+- No separate current-state authority table is created.
 
-- Не хранить goal как mutable configuration row.
-- Не требовать точного numeric target для directional/dynamic intent.
-- Не объединять goal criteria с product safety policies или universal rules
-  engine.
-- Не хранить отдельную authority-копию current goal или progress.
+## Open questions
 
-## Открытые вопросы
+- Future progress policies and UI interpretation for narrative goals.
 
-- Controlled metric vocabulary за пределами weight и текущих body metrics.
-- Нужна ли отдельная primary-goal cardinality после появления нескольких goals.
-- Кто и при каких условиях сможет автоматически предлагать новую goal version.
+## Related material
 
-## Связанные материалы
-
-- [BodyMeasurementSession](body-measurement-session.md)
-- [API PhysicalGoal](../api/physical-goals.md)
-- [Кандидаты в агрегаты](candidate-aggregates.md)
-- [План Physical State and Goals](../../../plans/2026/07/completed/2026-07-30-physical-state-measurements-and-goals.md)
+- [Physical Goal API](../api/physical-goals.md)
+- [Physical State ADR](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md)

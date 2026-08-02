@@ -22,20 +22,20 @@ const ADR_STATUSES = new Set([
   "rejected",
 ]);
 const WIKI_SECTIONS = [
-  "Кратко",
-  "Содержание",
-  "Основания",
-  "Решения",
-  "Открытые вопросы",
-  "Связанные материалы",
+  "Summary",
+  "Content",
+  "Evidence",
+  "Decisions",
+  "Open questions",
+  "Related material",
 ];
 const ADR_SECTIONS = [
-  "Контекст",
-  "Решение",
-  "Рассмотренные альтернативы",
-  "Последствия",
-  "Проверка",
-  "Связанные материалы",
+  "Context",
+  "Decision",
+  "Considered alternatives",
+  "Consequences",
+  "Verification",
+  "Related material",
 ];
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
@@ -74,7 +74,7 @@ function readUtf8File(file, addViolation) {
   try {
     return decoder.decode(fs.readFileSync(file)).replace(/^\uFEFF/, "");
   } catch {
-    addViolation(file, "файл не является корректным UTF-8");
+    addViolation(file, "file is not valid UTF-8");
     return null;
   }
 }
@@ -82,13 +82,13 @@ function readUtf8File(file, addViolation) {
 function readFrontmatter(file, text, addViolation) {
   const lines = text.split(/\r?\n/);
   if (lines.length < 3 || lines[0] !== "---") {
-    addViolation(file, "отсутствует YAML frontmatter");
+    addViolation(file, "YAML frontmatter is missing");
     return null;
   }
 
   const closing = lines.indexOf("---", 1);
   if (closing < 0) {
-    addViolation(file, "YAML frontmatter не закрыт");
+    addViolation(file, "YAML frontmatter is not closed");
     return null;
   }
 
@@ -118,7 +118,7 @@ function testRequiredMetadata(file, metadata, keys, addViolation) {
     if (missing) {
       addViolation(
         file,
-        `отсутствует обязательное поле frontmatter '${key}'`,
+        `required frontmatter field '${key}' is missing`,
       );
     }
   }
@@ -136,11 +136,11 @@ function testSections(file, text, sections, addViolation) {
     );
     const match = text.match(expression);
     if (!match) {
-      addViolation(file, `отсутствует обязательный раздел '## ${section}'`);
+      addViolation(file, `required section '## ${section}' is missing`);
     } else if (match[1].trim() === "") {
       addViolation(
         file,
-        `раздел '## ${section}' пуст; добавьте содержимое или явное указание «Не применимо»`,
+        `section '## ${section}' is empty; add content or explicitly write 'Not applicable'`,
       );
     }
   }
@@ -166,7 +166,7 @@ function testLinks(repositoryRoot, file, text, addViolation) {
       target.startsWith("/") ||
       target.startsWith("\\")
     ) {
-      addViolation(file, `локальная ссылка должна быть относительной: ${target}`);
+      addViolation(file, `local link must be relative: ${target}`);
       continue;
     }
 
@@ -179,7 +179,7 @@ function testLinks(repositoryRoot, file, text, addViolation) {
     try {
       decoded = decodeURIComponent(pathPart);
     } catch {
-      addViolation(file, `локальная ссылка содержит некорректное кодирование: ${target}`);
+      addViolation(file, `local link has invalid encoding: ${target}`);
       continue;
     }
 
@@ -187,12 +187,12 @@ function testLinks(repositoryRoot, file, text, addViolation) {
     if (!isWithin(repositoryRoot, resolved)) {
       addViolation(
         file,
-        `относительная ссылка выходит за пределы репозитория: ${target}`,
+        `relative link escapes the repository: ${target}`,
       );
       continue;
     }
     if (!fs.existsSync(resolved)) {
-      addViolation(file, `цель относительной ссылки не существует: ${target}`);
+      addViolation(file, `relative link target does not exist: ${target}`);
     }
     if (
       /(?:^|[\\/])\.env(?:$|[./\\])|\.pem$|\.key$|\.pfx$|\.p12$|\.sql(?:ite3?)?$|\.dump$/i.test(
@@ -201,7 +201,7 @@ function testLinks(repositoryRoot, file, text, addViolation) {
     ) {
       addViolation(
         file,
-        `ссылка ведёт на запрещённый чувствительный файл: ${target}`,
+        `link points to a forbidden sensitive file: ${target}`,
       );
     }
   }
@@ -209,17 +209,17 @@ function testLinks(repositoryRoot, file, text, addViolation) {
 
 function testContentSafety(file, text, addViolation) {
   if (/^(?:<<<<<<<|=======|>>>>>>>)/m.test(text)) {
-    addViolation(file, "обнаружен неразрешённый marker конфликта слияния");
+    addViolation(file, "unresolved merge conflict marker found");
   }
   if (/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(text)) {
-    addViolation(file, "обнаружен блок private key");
+    addViolation(file, "private key block found");
   }
   if (
     /^\s*(?:password|passwd|secret|api[_-]?key|access[_-]?token)\s*[:=]\s*[`"']?[A-Za-z0-9_\-+/=]{12,}/im.test(
       text,
     )
   ) {
-    addViolation(file, "обнаружено значение, похожее на credentials");
+    addViolation(file, "credential-like value found");
   }
 }
 
@@ -245,17 +245,17 @@ export function validateDocumentation(repositoryRoot) {
 
   for (const directory of [wikiRoot, adrRoot, templateRoot]) {
     if (!fs.existsSync(directory) || !fs.statSync(directory).isDirectory()) {
-      addViolation(directory, "отсутствует обязательный каталог");
+      addViolation(directory, "required directory is missing");
     }
   }
 
   const wikiFiles = listMarkdownFiles(wikiRoot);
   const adrFiles = listMarkdownFiles(adrRoot);
   if (wikiFiles.length === 0) {
-    addViolation(wikiRoot, "страницы Wiki не найдены");
+    addViolation(wikiRoot, "Wiki pages were not found");
   }
   if (adrFiles.length === 0) {
-    addViolation(adrRoot, "файлы ADR не найдены");
+    addViolation(adrRoot, "ADR files were not found");
   }
 
   for (const file of [...wikiFiles, ...adrFiles]) {
@@ -282,7 +282,7 @@ export function validateDocumentation(repositoryRoot) {
       if (ids.has(id)) {
         addViolation(
           file,
-          `identifier '${id}' уже используется в ${ids.get(id)}`,
+          `identifier '${id}' is already used in ${ids.get(id)}`,
         );
       } else {
         ids.set(id, displayPath(file));
@@ -298,7 +298,7 @@ export function validateDocumentation(repositoryRoot) {
         addViolation,
       );
       if (metadata.has("kind") && metadata.get("kind") !== "adr") {
-        addViolation(file, "ADR должен иметь kind: adr");
+        addViolation(file, "ADR must have kind: adr");
       }
       if (
         metadata.has("status") &&
@@ -306,7 +306,7 @@ export function validateDocumentation(repositoryRoot) {
       ) {
         addViolation(
           file,
-          `недопустимый status ADR: ${metadata.get("status")}`,
+          `invalid ADR status: ${metadata.get("status")}`,
         );
       }
 
@@ -316,7 +316,7 @@ export function validateDocumentation(repositoryRoot) {
       if (!nameMatch) {
         addViolation(
           file,
-          "имя файла ADR должно соответствовать YYYYMMDD-kebab-case.md",
+          "ADR filename must match YYYYMMDD-kebab-case.md",
         );
       } else if (metadata.has("date")) {
         const datePrefix = nameMatch[1];
@@ -324,7 +324,7 @@ export function validateDocumentation(repositoryRoot) {
         if (metadata.get("date") !== expectedDate) {
           addViolation(
             file,
-            `date '${metadata.get("date")}' не соответствует префиксу имени файла`,
+            `date '${metadata.get("date")}' does not match the filename prefix`,
           );
         }
       }
@@ -336,7 +336,7 @@ export function validateDocumentation(repositoryRoot) {
       ) {
         addViolation(
           file,
-          `недопустимый kind Wiki: ${metadata.get("kind")}`,
+          `invalid Wiki kind: ${metadata.get("kind")}`,
         );
       }
       if (
@@ -345,7 +345,7 @@ export function validateDocumentation(repositoryRoot) {
       ) {
         addViolation(
           file,
-          `недопустимый status Wiki: ${metadata.get("status")}`,
+          `invalid Wiki status: ${metadata.get("status")}`,
         );
       }
       testSections(file, text, WIKI_SECTIONS, addViolation);
@@ -356,7 +356,7 @@ export function validateDocumentation(repositoryRoot) {
   for (const file of listMarkdownFiles(managedExportRoot)) {
     addViolation(
       file,
-      "обнаружен Markdown managed Wiki вне канонических путей",
+      "managed Wiki Markdown found outside canonical paths",
     );
   }
 
@@ -375,7 +375,7 @@ export function validateDocumentation(repositoryRoot) {
     ) {
       addViolation(
         file,
-        "обнаружен frontmatter managed Wiki вне канонических путей",
+        "managed Wiki frontmatter found outside canonical paths",
       );
     }
   }
@@ -392,7 +392,7 @@ function parseRootArgument(argv) {
   const rootIndex = argv.indexOf("--root");
   if (rootIndex >= 0) {
     if (!argv[rootIndex + 1]) {
-      throw new Error("Для --root требуется путь.");
+      throw new Error("--root requires a path.");
     }
     return path.resolve(argv[rootIndex + 1]);
   }
@@ -407,14 +407,14 @@ if (isMain) {
   try {
     result = validateDocumentation(parseRootArgument(process.argv.slice(2)));
   } catch (error) {
-    console.error(`Проверка документации не запущена: ${error.message}`);
+    console.error(`Documentation validation did not start: ${error.message}`);
     process.exitCode = 1;
   }
 
   if (result) {
     if (result.errors.length > 0) {
       console.error(
-        `Проверка документации завершилась ошибкой: нарушений — ${result.errors.length}.`,
+        `Documentation validation failed with ${result.errors.length} violation(s).`,
       );
       for (const violation of result.errors) {
         console.error(`- ${violation}`);
@@ -422,7 +422,7 @@ if (isMain) {
       process.exitCode = 1;
     } else {
       console.log(
-        `Проверка документации пройдена: страниц Wiki — ${result.wikiCount}, ADR — ${result.adrCount}, уникальных id — ${result.idCount}.`,
+        `Documentation validation passed: ${result.wikiCount} Wiki page(s), ${result.adrCount} ADR(s), ${result.idCount} unique id(s).`,
       );
     }
   }

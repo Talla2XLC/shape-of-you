@@ -1,7 +1,7 @@
 ---
 id: "data-google-sheets-behavior-catalog"
 kind: data
-title: "Каталог поведения Google Sheets"
+title: "Google Sheets behavior catalog"
 status: draft
 tags:
   - "behavior"
@@ -10,208 +10,129 @@ tags:
   - "google-sheets"
 ---
 
-# Каталог поведения Google Sheets
+# Google Sheets behavior catalog
 
-## Кратко
+## Summary
 
-Read-only каталог значимого поведения workbook `Fitness Tracker` для
-завершения DEV-023. Он отделяет исходные факты, business policy, workflow
-state, projections и project governance. Персональные значения и исторические
-fitness-данные в каталог не переносятся.
+Read-only catalog of meaningful `Fitness Tracker` behavior for DEV-023. It
+separates source facts, policy, workflow state, projections, and governance
+without copying personal values or prescribing PostgreSQL schema.
 
-Каталог описывает наблюдаемую систему, но не предписывает будущую PostgreSQL
-schema. Архитектурные предложения остаются в proposed-плане и требуют
-отдельного утверждения.
+## Content
 
-## Содержание
+### Facts and reference data
 
-### Наблюдаемые факты и справочники
-
-| Листы | Наблюдаемая ответственность | Классификация |
+| Sheets | Observed responsibility | Classification |
 | --- | --- | --- |
-| `Weight`, `Body` | Измерения веса и тела по времени | Исходные facts Physical State; строка `Body` является одним measurement session |
-| `Foods`, `Ingredients`, `Brands`, `Food_Ingredients` | Каталог питания и состав продуктов | Справочники Nutrition |
-| `Meals` | Факты приёмов пищи с зафиксированными calories и macros | Исходные факты Nutrition с catalog reference и snapshot |
-| `Training` | Выполненные тренировки, упражнения и session grouping | Исходные факты Training |
-| `Program` | Текущие prescriptions и вычисленная следующая progression | Изменяемый plan и projection, не выполненный факт |
-| `Personal Records` | Лучшие результаты по упражнению | Производная projection над Training |
+| Weight, Body | Timed weight/body measurements | Physical State facts; Body row is one session |
+| Foods, Ingredients, Brands, Food_Ingredients | Nutrition catalog/composition | Nutrition reference data |
+| Meals | Intake facts with captured calories/macros | Nutrition facts with catalog link and snapshot |
+| Training | Performed sessions/exercises | Training facts |
+| Program | Prescriptions plus computed next progression | Mutable plan plus projection |
+| Personal Records | Best exercise performance | Derived Training projection |
 
-Номер строки не является устойчивым identifier. Наблюдаемые `Food_ID`,
-`Ingredient_ID`, `Brand_ID`, `Exercise_ID`, `Session_ID` и `Measurement_ID`
-являются migration references, но их долговечность и uniqueness должны
-проверяться отдельно.
+Observed Food/Ingredient/Brand/Exercise/Session/Measurement IDs are migration
+references; row numbers are not durable identifiers.
 
-### Configuration и policies
+### Configuration and policy
 
-`Settings` содержит одновременно профиль пользователя, цели, ограничения,
-параметры питания, правила тренировочной progression и safety guidance.
-Численные цели и thresholds являются изменяемыми policy parameters, а не
-вечными invariants.
+`Settings` mixes profile, goals, constraints, nutrition parameters,
+progression, and safety guidance. Numeric targets/thresholds are versioned
+policy candidates, not eternal invariants.
 
-`Rules` смешивает несколько разных классов:
-
-- business и safety policy;
-- правила неоднозначного natural-language intake;
-- state machines очереди и repairs;
-- правила построения insights и coaching;
-- spreadsheet operations;
-- project governance и устаревшие правила Managed Wiki.
-
-Лист нельзя импортировать в runtime как готовый rules engine. В нём наблюдаются
-как минимум duplicate rule identifier, одна строка со сдвинутыми полями,
-несоответствие action ожидаемому смыслу и правила документации, конфликтующие
-с текущим canonical Markdown workflow. Перед переносом каждое правило требует
-классификации, стабильного identifier, owner и test vector.
+`Rules` mixes business/safety policy, Intake ambiguity, queue/repair state,
+insights/coaching, spreadsheet operations, and project governance. It contains
+at least a duplicate ID, shifted fields, a semantically mismatched action, and
+obsolete managed-Wiki rules. It cannot be imported as a runtime rules engine;
+each rule needs classification, stable ID, owner, and test vector.
 
 ### Daily projections
 
-`Daily_Log` смешивает независимо принадлежащие факты и вычисляемые поля:
+`Daily_Log` combines independent facts and computed fields:
 
-- `Weight` является authoritative журналом веса, а `Daily_Log.Weight` —
-  проверяемым legacy mirror, не вторым fact channel;
-- nutrition totals агрегируются из `Meals` по локальной дате;
-- оставшиеся protein и calories вычисляются относительно текущей policy;
-- calories target выбирается по типу дня;
-- recovery status учитывает AI status и device evidence;
-- next workout выводится из последней выполненной тренировки;
-- progression permission зависит от recovery;
-- readiness использует доступные objective indicators и AI modifier;
-- readiness status, data quality и alert выводятся из score, полноты данных и
-  safety signals;
-- lifecycle ограничен controlled values open, closed и partial.
+- `Weight` is authority; `Daily_Log.Weight` is a verified mirror;
+- Meal totals aggregate by local date;
+- remaining calories/protein and day target derive from policy;
+- recovery combines AI/device evidence;
+- next workout derives from last completed training;
+- progression permission depends on recovery;
+- readiness combines available objective indicators, modifier, data quality,
+  alerts, and safety signals;
+- day lifecycle uses `open`, `closed`, `partial`.
 
-`Dashboard` вычисляет rolling trends веса, nutrition, recovery и training,
-показывает последние derived statuses, следующую тренировку и narrative
-recommendations, а также выполняет integrity comparison с `Meals`.
+`Dashboard` provides rolling trends, latest statuses, next workout,
+recommendations, and Meal integrity comparison. Both are cross-module read
+models, not evidence for a broad `DayRecord`.
 
-Следствие: `Daily_Log` и `Dashboard` являются cross-module read models. Они не
-доказывают необходимость широкой таблицы или aggregate root `DayRecord`.
+### Intake and execution
 
-### Intake и execution workflow
+- **NL_Engine:** splits one text into atomic events with ID/type/local date,
+  source text, typed payload intent, confidence, validation/ambiguity, and
+  dedupe. Unknown entities require clarification; closed days block hidden
+  writes. Spreadsheet target/operation are legacy routing details.
+- **AI_Inbox:** transitions through received, validated, processing, written,
+  and blocked/duplicate/failed states. Completion requires result and integrity
+  verification.
+- **Self_Healing:** allowlisted eligibility, dry-run, snapshot, minimal apply,
+  read-back, rollback, and idempotency. Ambiguous/closed-day mutation is blocked.
+  In PostgreSQL this complements transactions/constraints for migration and
+  controlled repair; it does not replace them.
+- **AI_Timeline:** append-only source/parent/severity/confidence/dedupe/status
+  chronology. It is audit/read model, not full event sourcing.
 
-#### `NL_Engine`
+### Analytics and coaching
 
-Natural-language input преобразуется в atomic events. Наблюдаемый контракт
-содержит event identity, type, local date, source text, payload, confidence,
-validation status, ambiguity reason и dedupe key. Один текст с несколькими
-фактами разделяется на несколько событий. Неизвестные food или exercise и
-другая неоднозначность требуют clarification; closed day защищён от скрытой
-записи.
+- **AI_Insights:** analysis window, sample size, effect/direction/confidence,
+  evidence/confounders, recommendation, lifecycle, and expiry. One-day evidence
+  is insufficient; correlation is not causation; thresholds are versioned
+  policy.
+- **Load_Risk:** multi-day factors, hard stops, and data quality. Missing
+  objective evidence limits confidence; results pin policy/evidence.
+- **Weight_Autopilot:** despite its name, controls working-load progression:
+  hold, repetitions/load/difficulty change, reduction, or calibration. It is a
+  recommendation, changes at most one parameter, and requires repeated success
+  plus safety gates.
+- **Coach_Planner:** prioritizes safety, recovery, nutrition floor, existing
+  program, progression, and day closure. It produces one evidence-linked main
+  recommendation and never creates execution facts or rewrites the program.
 
-`target_sheet` и spreadsheet operation являются legacy routing details, а не
-кандидатами в публичный backend contract.
+### Governance and Apps Script
 
-#### `AI_Inbox`
+Changelog, Roadmap, Ideas, and project-level Decisions/Rules are project
+governance, not product database modules. Current architecture authority is
+only `docs/adr/**/*.md`.
 
-Очередь использует переходы received, validated, processing, written и
-терминальные или ожидающие состояния blocked, duplicate и failed. Запись
-считается выполненной только после проверки результата и integrity.
+No pre-existing linked Apps Script was found: the workbook opened a new empty
+default project. That accidentally created empty project was removed with
+operator approval and is not source behavior.
 
-#### `Self_Healing`
+### Parity gaps
 
-Repair workflow ограничен allowlist операций и требует eligibility check,
-dry-run, snapshot, minimal apply, read-back, rollback и idempotency key.
-Неоднозначные и closed-day изменения блокируются.
+- Limited ranges do not prove all historical validation violations.
+- Future independent-channel conflict policy remains open; the confirmed Weight
+  mirror is resolved separately.
+- Source-text/photo/wearable privacy and retention are not accepted.
+- No authoritative Exercise catalog is defined.
+- Policy parameters lack stable IDs, versions, and effective periods.
 
-В PostgreSQL этот workflow не должен заменять обычные transactions и
-constraints. Его переносимый смысл относится к reconciliation, import и
-контролируемому исправлению уже сохранённых данных.
+## Evidence
 
-#### `AI_Timeline`
+- Workbook metadata, limited reads of all 26 sheets, Daily_Log/Dashboard
+  formulas, DayStatus validation, workflow contracts, and Apps Script check.
 
-Timeline является append-only chronology с source references, causal parent,
-severity, confidence, dedupe и status. Это audit/read model, а не доказательство
-полного event sourcing.
+## Decisions
 
-### Analytics и coaching
+- DEV-023 migrates business/workflow meaning, not sheet layout, formulas, or
+  governance. Verify parity with synthetic vectors only.
 
-#### `AI_Insights`
+## Open questions
 
-Insight содержит analysis window, sample size, effect, direction, confidence,
-evidence, confounders, recommendation, lifecycle и expiration. Однодневные
-наблюдения не считаются достаточным основанием, а correlation не объявляется
-causation. Minimum sample и confidence thresholds являются versioned policy.
+- Minimum behavior required before DEV-024; user-editable versus release/expert
+  policies; whether a narrow JournalDay lifecycle is needed.
 
-#### `Load_Risk`
+## Related material
 
-Risk assessment использует многодневные окна, компонентные factors, hard stops
-и data quality. Недостаток objective evidence ограничивает допустимую
-уверенность. Результат должен быть воспроизводим по policy version и evidence.
-
-#### `Weight_Autopilot`
-
-Несмотря на имя листа, workflow относится к progression рабочей нагрузки, а
-не к массе тела. Он выбирает hold, изменение repetitions, load или difficulty,
-reduction либо calibration. По умолчанию результат является recommendation;
-изменяется только один параметр, а progression требует повторного
-подтверждения и прохождения safety gates.
-
-#### `Coach_Planner`
-
-Planner применяет порядок приоритетов: safety, recovery, nutrition floor,
-существующая training program, progression и day closure. Он формирует одну
-основную рекомендацию со ссылками на evidence, не создаёт выполненные факты и
-не переписывает программу автоматически.
-
-### Governance вне runtime
-
-`Changelog`, `Roadmap`, `Ideas` и project-level часть `Decisions` и `Rules`
-относятся к управлению проектом. Они не мигрируют в product database и не
-становятся backend modules.
-
-`Decisions` подтверждает intended capabilities и архитектурные ограничения
-workbook, но актуальная authority архитектуры находится только в
-`docs/adr/**/*.md`.
-
-### Apps Script
-
-До проверки связанный Apps Script отсутствовал: переход из workbook открыл
-создание нового пустого проекта с default `myFunction`, а не существующий
-проект с business logic. Код, triggers и deployments не обнаружены. Созданный
-Google интерфейсом пустой проект не является частью исходного behavior
-baseline; после явного разрешения оператора проект удалён без возможности
-восстановления.
-
-### Пробелы parity
-
-- Исторические нарушения requiredness и controlled vocabularies не
-  доказываются чтением ограниченных диапазонов.
-- Conflict policy независимых будущих source channels остаётся открытой;
-  подтверждённое зеркало `Weight`/`Daily_Log.Weight` разрешено отдельно.
-- Не утверждены privacy, retention и deletion для source text, photos и
-  wearable evidence.
-- Не определён authoritative exercise catalog.
-- Текущие policy parameters ещё не имеют стабильных identifiers, versions и
-  effective periods.
-
-## Основания
-
-Metadata workbook, ограниченное чтение всех 26 листов, чтение формул
-`Daily_Log` и `Dashboard`, validation `DayStatus`, явные contracts листов
-`NL_Engine`, `AI_Inbox`, `Self_Healing`, `AI_Timeline`, `AI_Insights`,
-`Load_Risk`, `Weight_Autopilot` и `Coach_Planner`, а также проверка отсутствия
-предсуществующего связанного Apps Script.
-
-## Решения
-
-Каталог остаётся draft evidence до domain review. DEV-023 должен переносить
-смысл business rules и workflows, а не sheet layout, formulas или project
-governance. Behavior parity проверяется synthetic test vectors без копирования
-персональных данных.
-
-## Открытые вопросы
-
-- Какой минимальный набор behavior должен быть реализован до DEV-024, а какой
-  можно явно deferred без потери безопасного dual-run?
-- Какие policies пользователь может менять самостоятельно, а какие требуют
-  product release или экспертного review?
-- Нужен ли отдельный explicit lifecycle `JournalDay`, если closed-day guard
-  можно выразить узкой записью блокировки даты?
-
-## Связанные материалы
-
-- [Инвентаризация Google Sheets](google-sheets-inventory.md)
-- [Source of truth и authority](source-of-truth-and-authority.md)
-- [Целостность и lifecycle](integrity-and-lifecycle.md)
-- [Карта извлечения домена](../domain/domain-extraction-map.md)
-- [План завершения DEV-023](../../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)
+- [Sheets inventory](google-sheets-inventory.md)
+- [Authority](source-of-truth-and-authority.md)
+- [Integrity](integrity-and-lifecycle.md)
+- [Domain map](../domain/domain-extraction-map.md)

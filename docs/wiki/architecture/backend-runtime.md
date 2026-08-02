@@ -11,99 +11,57 @@ tags:
 
 # Backend runtime
 
-## Кратко
+## Summary
 
-Текущий реализованный runtime — один NestJS API в `apps/api`, использующий
-`FastifyAdapter`, PostgreSQL и Drizzle ORM. Он предоставляет system endpoints
-предметные вертикали `WeightMeasurement`, `BodyMeasurementSession` и
-`PhysicalGoal`, а также Nutrition catalog, `Meal` и Training and Performance,
-Recovery, Coaching и асинхронный Intake, сохраняя один deployable modular
-backend.
+Current runtime is one NestJS API in `apps/api` using `FastifyAdapter`,
+PostgreSQL, and Drizzle. It implements Physical State, Nutrition, Training,
+Recovery, Coaching, and asynchronous Intake in one modular deployable.
 
-## Содержание
+## Content
 
-API запускается на Node.js 24 LTS и загружает конфигурацию через
-runtime-validated package `@shape-of-you/config`. NestJS задаёт modules,
-controllers, dependency injection и lifecycle, а Fastify остаётся HTTP
-provider и предоставляет structured logging на Pino. Global exception filter
-сохраняет единый публичный error contract; graceful shutdown проходит через
+Node.js 24 loads runtime-validated `@shape-of-you/config`. NestJS owns modules,
+DI, and lifecycle; Fastify provides HTTP and Pino logging. A global exception
+filter preserves one public error contract. Shutdown uses
 `NestFastifyApplication.close()`.
 
 System endpoints:
 
-- `GET /health` проверяет жизнь HTTP process и не зависит от PostgreSQL;
-- `GET /ready` выполняет `select 1` и возвращает `503`, если БД недоступна;
-- `GET /openapi.json` отдаёт OpenAPI, собранный из shared JSON Schemas.
+- `GET /health` checks the HTTP process without PostgreSQL;
+- `GET /ready` runs `select 1` and returns `503` when unavailable;
+- `GET /openapi.json` builds OpenAPI from shared JSON Schemas.
 
-Transport schemas находятся в `packages/contracts`. Domain и persistence код
-остаются в `apps/api` и не зависят от Nest decorators. Один набор JSON Schemas
-задаёт TypeScript transport types, runtime validation входов и выходов и
-OpenAPI shapes. PostgreSQL connection pool закрывается Nest lifecycle только
-если application создал его сам.
+`packages/contracts` is the single source for TypeScript transport types,
+runtime validation, and OpenAPI. Domain/persistence remain framework-neutral.
 
-Runtime остаётся одним deployable modular backend. Nest modules задают
-application boundaries, но не становятся microservices. Первый асинхронный
-workflow Intake использует очередь в той же PostgreSQL: worker забирает задания
-через lease и `SKIP LOCKED`, повторяет временные ошибки с задержкой и завершает
-исчерпанные задания безопасным кодом. Kafka, внешний broker, отдельный worker
-service и новая database в текущую topology не входят.
+Intake uses a PostgreSQL lease queue with `SKIP LOCKED`, bounded retry, and safe
+failure codes. Request creation returns `202`; item clarification/confirmation
+is independent; the first route atomically creates WeightMeasurement and audit
+state. No production parser is configured yet, so durable jobs remain queued
+without affecting readiness.
 
-Модуль Intake принимает исходный текст с `202 Accepted`, сохраняет request и
-первое задание atomically, а затем обрабатывает независимые typed items.
-Clarification и confirmation выполняются по одному item. Первый маршрут одной
-transaction создаёт `WeightMeasurement`, завершает item и дописывает audit
-timeline. Production parser adapter пока отсутствует; в таком режиме durable
-jobs остаются в базе и не влияют на API readiness.
+Physical State provides immutable corrections and versioned goals. Nutrition
+provides layered catalog, Meal snapshots, and totals. Training provides
+versioned exercises/programs, immutable sessions/sets, records, and progression
+projections. Recovery and Coaching retain typed facts, policies, evidence, and
+ownership boundaries.
 
-Модули Physical State предоставляют append-only body corrections, stable
-current/history queries, versioned goals и optimistic lifecycle transitions.
-Transport validation не преобразует типы request body или response; безопасное
-coercion включено только для URL params и query strings.
+## Evidence
 
-Модуль Nutrition предоставляет shared/private versioned catalog, Person-owned
-overlays, immutable Meal snapshots/corrections и query-only daily totals.
-Source-neutral catalog ingestion ограничен staged database records: network
-adapter, scheduler и отдельный deployable отсутствуют.
+- `apps/api/src/` and API unit/integration tests.
 
-Модуль Training предоставляет shared/private версионируемый справочник
-упражнений, person-owned версии программ с явным включением, неизменяемые
-тренировочные сессии с отдельными подходами и полными corrections. Личные
-рекорды и предложения прогрессии вычисляются запросами; принятие предложения
-создаёт новую неактивную версию программы.
+## Decisions
 
-## Основания
+- [NestJS and Nuxt](../../adr/20260729-use-nestjs-with-fastify-and-nuxt.md)
+- [PostgreSQL queue](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md)
+- [PostgreSQL with Drizzle](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md)
 
-- Реализация в `apps/api/src/`.
-- Unit tests в `apps/api/test/app.unit.test.ts`.
-- Integration tests в `apps/api/test/weight-measurements.integration.test.ts`.
-- Integration tests в `apps/api/test/nutrition.integration.test.ts`.
-- Integration tests в `apps/api/test/training.integration.test.ts`.
-- Integration tests в `apps/api/test/intake.integration.test.ts`.
+## Open questions
 
-## Решения
+- TLS, authentication, authorization, metrics, tracing, observability, and SLOs.
 
-- [NestJS с FastifyAdapter и Nuxt](../../adr/20260729-use-nestjs-with-fastify-and-nuxt.md).
-- [PostgreSQL outbox до Kafka](../../adr/20260729-use-postgresql-outbox-before-kafka.md).
-- [PostgreSQL-очередь и типизированные элементы Intake](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md).
-- [Superseded ADR Fastify](../../adr/20260728-use-fastify-for-initial-http-api.md).
-- [Node.js, TypeScript и pnpm workspaces](../../adr/20260728-use-nodejs-typescript-and-pnpm-workspaces.md).
-- [PostgreSQL с Drizzle](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md).
+## Related material
 
-## Открытые вопросы
-
-- TLS termination, authentication, authorization, metrics, tracing и
-  измеримые SLO.
-- Метрики, tracing и production observability contract.
-
-## Связанные материалы
-
-- [Локальный запуск](local-development.md)
-- [Репозиторий и runtime](repository-and-runtime.md)
-- [Deployment topology](deployment.md)
-- [API WeightMeasurement](../api/weight-measurements.md)
-- [API BodyMeasurementSession](../api/body-measurement-sessions.md)
-- [API PhysicalGoal](../api/physical-goals.md)
-- [API Nutrition catalog](../api/nutrition-catalog.md)
-- [API Meal](../api/meals.md)
-- [API тренировок](../api/training.md)
-- [API Intake](../api/intake.md)
+- [Local development](local-development.md)
+- [Repository/runtime](repository-and-runtime.md)
+- [Deployment](deployment.md)
+- [API documentation](../api/intake.md)

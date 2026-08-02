@@ -11,111 +11,71 @@ tags:
 
 # Deployment topology
 
-## Кратко
+## Summary
 
-Утверждена временная staging topology на общей VM: images собираются в GitHub
-Actions, а собственный nginx Shape of You публикует web и API через один
-внешний port. Database и GitHub Environment подготовлены; первый deployment
-остаётся отдельным operator gate. GitHub Actions использует выделенную identity
-`shape-deploy`, а не личную учётную запись оператора.
+Temporary staging runs on a shared VM. GitHub Actions builds immutable images;
+project nginx exposes web/API through one port; a dedicated `shape-deploy`
+identity invokes a constrained root-owned wrapper.
 
-## Содержание
+## Content
 
 ### Delivery
 
-GitHub Actions выполняет проверки, собирает immutable OCI images и публикует
-их в GHCR с tag по commit SHA. Каждый успешный push в `main` автоматически
-вызывает Environment `staging` deployment с конкретными image digests и
-передаёт allowlisted structured input единственному root-owned wrapper через
-stdin. VM получает готовые images, но
-не build context, toolchain, Compose file или writable deployment scripts.
+Pushes to `main` run quality, publish SHA-linked GHCR images, and automatically
+deploy exact digests to Environment `staging`. Input is an allowlisted stdin
+protocol to `/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no
+build context, toolchain, writable scripts, or Compose file from CI.
 
-На VM `shape-deploy` не состоит в группе `docker` и имеет passwordless `sudo`
-только для `/usr/local/sbin/shape-of-you-staging-deploy` без аргументов.
-Wrapper и вызываемые Compose/scripts расположены в root-owned
-`/opt/shape-of-you/staging/control`, который wrapper fetch-ит только из
-проверяемого текущего `origin/main` по `CONTROL_SHA`. Это отделяет identity CI от личной
-учётной записи оператора и не делает Docker доступом CI общего назначения.
+`shape-deploy` is outside Docker group and has passwordless sudo only for the
+wrapper without arguments. The wrapper fetches a root-owned control tree from
+verified `origin/main` at exact `CONTROL_SHA`.
 
-### Runtime boundary
+### Runtime and data
 
-Собственный nginx Shape of You публикует `http://2.58.15.24:3001/`.
-Маршрут `/` зарезервирован для будущего web и до его появления возвращает
-явный staging response, `/api/` — маршрутизирует запросы в текущий API. API и
-будущий web доступны только во внутренней Docker network. Чужой nginx и его
-Compose не изменяются.
+Project nginx exposes `http://2.58.15.24:3001/`: `/` is reserved for web and
+`/api/` routes to the internal API. It is a deployment adapter, not a domain
+service. Unrelated nginx/Compose are untouched.
 
-Nginx — временный deployment adapter без бизнес-логики и данных. Он не
-является новым domain service и не меняет границы modular backend.
+API owns `shape_of_you_api`, login, credentials, and migrations in the existing
+PostgreSQL cluster. The container reaches host port `5431` through
+`host.docker.internal`, not the unrelated Compose network. Existing external
+port exposure/no SSL is a throwaway-staging limitation; developer access should
+use SSH tunneling.
 
-### Данные
+### Security and portability
 
-На первом этапе API использует существующий PostgreSQL cluster, но владеет
-отдельной database `shape_of_you_api`, отдельной login role, credentials и
-migrations. PostgreSQL работает в соседнем container и уже опубликован
-владельцем VM на host port `5431`. API обращается к этому port через
-`host.docker.internal`, не подключаясь к network или service name чужого
-Compose.
+Without authentication, authorization, HTTPS, and a real-data gate, staging
+uses only synthetic data/test credentials with request limits and rate limits.
 
-Внешний доступ к `5431` и отсутствие SSL являются принятым ограничением
-throwaway staging, а не security baseline проекта. Shape of You не создаёт
-новую публикацию PostgreSQL и не меняет существующие firewall rules.
-Рекомендуемый доступ разработчика после deployment — SSH tunnel.
+API remains stateless with environment configuration, probes, graceful
+shutdown, and stdout/stderr logs. Migrations run as a one-shot service from the
+same image digest. `STAGING_DATABASE_URL` is delivered through protected
+Environment input into root-owned `/etc/shape-of-you/staging/api.env` mode
+`0600`. No Kubernetes assets exist yet.
 
-### Security gate
+VM resources are limited and swap is in use. Current limits (`384m` API,
+`64m` edge) require observation before adding load.
 
-Текущий API не имеет authentication и authorization. До появления domain,
-HTTPS и контроля доступа внешний endpoint разрешён только как throwaway
-staging с синтетическими данными, тестовыми credentials, rate limit и
-ограничением размера запросов. Реальные пользовательские данные запрещены.
+## Evidence
 
-### Переносимость
+- Read-only VM/container inventory, PostgreSQL 17.4 access evidence, and
+  repository workflows/manifests.
 
-API остаётся stateless, получает конфигурацию через environment, использует
-health/readiness probes, graceful shutdown и stdout/stderr logs. Migrations
-выполняются отдельным one-shot Compose service из того же API image digest.
-Обычный API process migrations не запускает. Kubernetes-артефакты не
-создаются до появления подтверждённой необходимости.
+## Decisions
 
-Runtime `DATABASE_URL` хранится в GitHub Environment secret
-`STAGING_DATABASE_URL`. Deployment job передаёт его по SSH через stdin и
-создаёт root-owned `/etc/shape-of-you/staging/api.env` с mode `0600`.
-Release manifests содержат только commit SHA и image digests.
+- [Temporary shared-VM deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
+- [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
 
-Условия выхода и процедура переноса определены в связанном ADR. Решения об
-authentication, HTTPS, secrets, backup retention, SLO и целевом cloud требуют
-отдельного проектирования.
+## Open questions
 
-## Основания
+- Shared-cluster backup/restore; domain/TLS/auth before real data; target cloud,
+  SLO, and long-term secrets policy.
 
-- Read-only проверка доступных VM и существующих контейнеров 2026-07-28.
-- Ограничения временного staging, принятые оператором 2026-07-28.
-- Подтверждённый оператором доступ к PostgreSQL 17.4 через host port `5431`
-  без SSL и возможность создать отдельные database/login role, 2026-07-29.
-- Repository manifests в `.github/workflows/` и `deploy/staging/`.
+## Related material
 
-## Решения
-
-- [Временный deployment на общей VM](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md).
-
-## Открытые вопросы
-
-- Согласованная с владельцем общего cluster backup/restore procedure.
-- Domain, TLS termination, authentication и authorization до real-data gate.
-
-Read-only inventory VM и disposable container probe подтвердили, что
-`host.docker.internal:5431` доступен из Docker container, а host port `3001`
-свободен. VM имеет ограниченный запас памяти и уже использует swap, поэтому
-limits `384m` для API и `64m` для edge требуют наблюдения перед каждым
-расширением staging нагрузки.
-
-## Связанные материалы
-
-- [Репозиторий и runtime](repository-and-runtime.md)
+- [Repository/runtime](repository-and-runtime.md)
 - [Backend runtime](backend-runtime.md)
-- [Владение данными](data-ownership.md)
-- [Backend migration notes](../data/backend-migrations.md)
-- [Временный deployment](../operations/temporary-vm-deployment.md)
+- [Data ownership](data-ownership.md)
+- [Deployment runbook](../operations/temporary-vm-deployment.md)
 - [Rollback](../operations/temporary-vm-rollback.md)
-- [Provisioning PostgreSQL](../operations/postgresql-provisioning.md)
-- [Backup и restore](../operations/postgresql-backup-and-restore.md)
+- [PostgreSQL provisioning](../operations/postgresql-provisioning.md)

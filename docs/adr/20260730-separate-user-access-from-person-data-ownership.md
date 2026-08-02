@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260730-separate-user-access-from-person-data-ownership"
 kind: adr
-title: "Разделение User, Person и прав доступа к fitness-данным"
+title: "Separate User access from Person fitness-data ownership"
 status: accepted
 date: 2026-07-30
 supersedes: []
@@ -13,95 +13,82 @@ tags:
   - "identity"
 ---
 
-# Разделение User, Person и прав доступа к fitness-данным
+# Separate User access from Person fitness-data ownership
 
-## Контекст
+## Context
 
-Fitness-данные принадлежат человеку, о котором зафиксированы измерения,
-питание, тренировки, восстановление и coaching decisions. Authentication
-account отвечает за вход и выполнение действий, но не всегда совпадает с этим
-человеком: один аккаунт может вести несколько людей, а к данным одного человека
-может быть предоставлен доступ владельцу, тренеру или наблюдателю.
+Fitness data belongs to the human described by measurements, nutrition,
+training, recovery, and coaching decisions. An authentication account performs
+actions but is not always that human: one account may manage several people,
+and one person's data may be shared with an owner, coach, or viewer.
 
-Использование `user_id` как единственного владельца упростило бы первый
-single-user сценарий, но связало бы domain identity с выбранным authentication
-protocol и потребовало бы миграции всех фактов при появлении multi-access.
-Термин `Subject` точен для privacy и integration-контекстов, но слишком общий
-для ubiquitous language продукта.
+Using `user_id` as the sole owner would simplify the first single-user case but
+couple domain identity to an authentication protocol and force migration when
+multi-access appears. `Subject` is accurate in privacy contexts but too generic
+for product language.
 
-## Решение
+## Decision
 
-Использовать три раздельных понятия:
+Use three distinct concepts:
 
-- `User` — authentication identity аккаунта;
-- `Person` — domain identity человека, о котором хранятся fitness-данные;
-- `PersonAccessGrant` — явное право `User` работать с конкретным `Person`.
+- `User` — account authentication identity;
+- `Person` — domain identity of the human whose fitness data is stored;
+- `PersonAccessGrant` — explicit authority for a `User` to work with a
+  particular `Person`.
 
-Domain facts, plans, observations, recommendations и media metadata получают
-`person_id`. Authentication sessions принадлежат `User`, а не `Person`.
-Отношение `User` и `Person` является many-to-many; минимальный controlled
-vocabulary ролей содержит `owner`, `editor`, `viewer` и `coach`. Точная матрица
-permissions и lifecycle приглашений проектируются в отдельной security-задаче.
+Domain facts, plans, observations, recommendations, and media metadata use
+`person_id`. Authentication sessions belong to `User`. `User` and `Person`
+have a many-to-many relationship; the initial role vocabulary is `owner`,
+`editor`, `viewer`, and `coach`. Permission matrix and invitation lifecycle
+belong to a separate security task.
 
-Клиент не получает доступ к данным только потому, что передал `person_id` в
-body, query или path. Application layer разрешает выбранный `Person` через
-аутентифицированный `User` и действующий `PersonAccessGrant`. Trusted import и
-background processing используют отдельный проверяемый actor context и не
-маскируются под произвольного `User`.
+The application never grants access merely because a client supplied
+`person_id`. It resolves the selected Person through the authenticated User and
+an active grant. Trusted import and background work use explicit auditable actor
+contexts, not arbitrary Users.
 
-До реализации authentication staging остаётся synthetic-only и не получает
-real fitness data. Временный synthetic person context допускается только как
-явно настроенный test/staging adapter; он не является production authorization
-механизмом и должен быть удалён до real-data gate DEV-024.
+Until authentication exists, staging remains synthetic-only. An explicitly
+configured synthetic Person adapter is allowed only in tests/staging and must
+be removed before the DEV-024 real-data gate. `Profile` is not owner identity;
+it is a mutable view or settings collection for a Person.
 
-`Profile` не используется как identity владельца: профиль может быть
-представлением или набором изменяемых настроек конкретного `Person`.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- `user_id` on all facts: smallest schema but conflates account and human.
+- `subject_id`: correct boundary but weak product language.
+- `profile_id`: UI-friendly but a mutable profile is not stable human identity.
+- `athlete_id`: too narrow for nutrition, recovery, and general health state.
+- `person_id` with access grants: preserves ownership and supports multi-access
+  without a premature identity service. Selected.
 
-- `user_id` во всех domain facts: минимальная начальная schema, но смешивает
-  аккаунт и человека и затрудняет multi-access. Отклонено.
-- `subject_id`: сохраняет правильную границу, но недостаточно выразителен для
-  product и domain language. Отклонено в пользу `person_id`.
-- `profile_id`: удобно для UI, но профиль является изменяемым представлением и
-  не должен становиться устойчивой identity человека. Отклонено.
-- `athlete_id`: понятно для тренировок, но слишком узко для питания,
-  восстановления и общего состояния. Отклонено.
-- `person_id` плюс access grants: сохраняет domain ownership и допускает
-  multi-access без преждевременного выделения identity service. Выбрано.
+## Consequences
 
-## Последствия
+- New person-owned facts, plans, observations, recommendations, targets,
+  connections, and media metadata are scoped to Person. Shared reusable
+  definitions follow a separate ADR and are not copied per Person.
+- `WeightMeasurement` gains `person_id` before real-data migration; synthetic
+  migration does not transfer authority from Google Sheets.
+- Authorization is an application concern rather than repository-local logic.
+- Account deletion, access revocation, and fitness-data erasure have distinct
+  lifecycles and need privacy/retention policy.
+- One modular backend and one API-owned database remain; no identity
+  microservice is created.
+- Security Review approves permissions, invites, and actor audit before real
+  data.
 
-- Все facts, plans, observations, recommendations, targets, connections и
-  media metadata новых domain verticals проектируются как person-scoped.
-  Переиспользуемые reference definitions следуют отдельному ADR и не
-  копируются на каждого `Person`.
-- Existing `WeightMeasurement` должен получить `person_id` до real-data
-  migration; migration synthetic данных не передаёт authority от Google Sheets.
-- Authorization становится отдельной application concern и не размазывается
-  по repositories.
-- Account deletion, отзыв доступа и удаление fitness-данных получают разные
-  lifecycle и требуют отдельной privacy/retention policy.
-- Один modular backend и одна API-owned PostgreSQL database сохраняются;
-  отдельный identity microservice не создаётся.
-- Security Review должен утвердить permission matrix, invite flow и actor audit
-  до работы с реальными данными.
+## Verification
 
-## Проверка
-
-- Integration tests доказывают many-to-many доступ и запрет доступа без
-  действующего grant.
-- Domain mutations получают `person_id` из проверенного application context, а
-  не доверяют произвольному request body.
-- Отзыв одного grant не удаляет `Person` и его facts.
-- Отзыв authentication session не изменяет domain ownership.
-- Synthetic staging adapter невозможно включить неявно и он запрещён
+- Integration tests prove many-to-many access and deny missing grants.
+- Mutations get `person_id` from verified application context, not request body.
+- Revoking a grant does not delete the Person or facts.
+- Revoking a session does not change domain ownership.
+- Synthetic context cannot activate implicitly and is forbidden at the
   real-data gate.
 
-## Связанные материалы
+## Related material
 
-- [Владение данными](../wiki/architecture/data-ownership.md)
-- [Provenance и identifiers](../wiki/data/provenance-and-identifiers.md)
-- [Отзываемые authentication sessions](20260729-store-revocable-auth-sessions-in-postgresql.md)
-- [План общих fact-контрактов](../../plans/2026/07/completed/2026-07-30-person-identity-provenance-and-corrections.md)
-- [Shared reference definitions и person-owned state](20260731-separate-shared-reference-definitions-from-person-owned-state.md)
+- [Data ownership](../wiki/architecture/data-ownership.md)
+- [Provenance and identifiers](../wiki/data/provenance-and-identifiers.md)
+- [Revocable authentication sessions](20260729-store-revocable-auth-sessions-in-postgresql.md)
+- [Shared fact contracts plan](../../plans/2026/07/completed/2026-07-30-person-identity-provenance-and-corrections.md)
+- [Shared reference definitions and person-owned state](20260731-separate-shared-reference-definitions-from-person-owned-state.md)

@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-keep-google-sheets-authoritative-until-verified-cutover"
 kind: adr
-title: "Google Sheets остаётся authoritative source до проверенного переключения"
+title: "Keep Google Sheets authoritative until verified cutover"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,32 +11,45 @@ tags:
   - "migration"
 ---
 
-# Google Sheets остаётся authoritative source до проверенного переключения
+# Keep Google Sheets authoritative until verified cutover
 
-## Контекст
+## Context
 
-Google Sheets уже содержит рабочие данные, правила, аналитику и процессы. Если объявить новый backend авторитетным до проверенной миграции, можно потерять историю, происхождение данных или существующее поведение.
+Google Sheets already contains operational data, rules, analytics, and
+workflows. Declaring a new backend authoritative before a verified migration
+could lose history, provenance, or existing behavior.
 
-## Решение
+## Decision
 
-Google Sheets остаётся единственным authoritative source рабочих fitness-данных до завершения инвентаризации, mapping, backfill, reconciliation, контролируемого dual-run, отчётности о целостности, определения критериев переключения, получения одобрения и подготовки rollback.
+Google Sheets remains the only authoritative source for operational fitness
+data until inventory, mapping, backfill, reconciliation, controlled dual-run,
+integrity reporting, cutover criteria, approval, and rollback preparation are
+complete.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Немедленное переключение: быстрее, но создаёт неприемлемый риск нарушения целостности и непрерывности.
-- Постоянно оставить authority в Google Sheets: исключает риск миграции, но блокирует целевую архитектуру платформы и контролируемое владение данными приложением.
+- Immediate cutover: faster but creates unacceptable integrity and continuity
+  risk.
+- Keep authority permanently in Google Sheets: removes migration risk but
+  blocks the target platform architecture and controlled application data
+  ownership.
 
-## Последствия
+## Consequences
 
-Во время миграции представления в PostgreSQL и backend считаются предварительными. Расхождения устраняются через явный reconciliation; отсутствующие данные не выдумываются. Authority изменяется только по утверждённому плану миграции и после переключения, подтверждённого доказательствами.
+PostgreSQL and backend representations are provisional during migration.
+Differences are resolved through explicit reconciliation; missing data is not
+invented. Authority changes only through an approved evidence-backed migration
+plan.
 
-Пока не определены полный inventory, пороги reconciliation, длительность cutover, окно rollback и владелец разрешения расхождений.
+The complete inventory, reconciliation thresholds, cutover duration, rollback
+window, and discrepancy owner remain open.
 
-## Проверка
+## Verification
 
-- Правила source of truth и миграции явно заданы оператором 2026-07-28.
+- The operator explicitly set source-of-truth and migration rules on
+  2026-07-28.
 
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/data-ownership.md`
 - `../wiki/architecture/migration-strategy.md`

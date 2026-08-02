@@ -1,7 +1,7 @@
 ---
 id: "architecture-api-body-measurement-sessions"
 kind: architecture
-title: "API BodyMeasurementSession"
+title: "BodyMeasurementSession API"
 status: draft
 tags:
   - "api"
@@ -10,57 +10,43 @@ tags:
   - "physical-state"
 ---
 
-# API BodyMeasurementSession
+# BodyMeasurementSession API
 
-## Кратко
+## Summary
 
-API управляет принадлежащими `Person` неизменяемыми сеансами замеров тела.
-Один сеанс атомарно содержит от одного до пяти типизированных значений с общей
-provenance. Исправление создаёт полный replacement snapshot и не меняет
-исходный сеанс.
+Manages immutable Person-owned body sessions. A session atomically contains
+one to five typed values with shared provenance; correction is full replacement.
 
-## Содержание
+## Content
 
-Endpoints:
-
-- `POST /v1/body-measurement-sessions` — `201` для нового сеанса и `200` для
-  idempotent retry по `(personId, source channel, dedupeKey)`;
+- `POST /v1/body-measurement-sessions` — `201` new, `200` idempotent retry.
 - `POST /v1/body-measurement-sessions/:id/corrections` — append-only
-  correction, `409`, если исходный сеанс уже заменён другой correction;
-- `GET /v1/body-measurement-sessions/:id` — чтение неизменяемого snapshot;
-- `GET /v1/body-measurement-sessions/:id/history` — полная цепочка corrections;
+  replacement; `409` on conflicting successor.
+- `GET /v1/body-measurement-sessions/:id` — immutable snapshot.
+- `GET /v1/body-measurement-sessions/:id/history` — correction chain.
 - `GET /v1/body-measurement-sessions?limit=50&cursor=...&metric=waist` —
-  только текущие сеансы, stable order `(measuredAt DESC, id DESC)`, opaque
-  cursor и optional metric filter.
+  current sessions ordered `(measuredAt DESC, id DESC)`, optional metric.
 
-Create и correction принимают `measuredAt`, IANA `timezone`, `values`,
-`dedupeKey`, typed `sourceReference` и nullable `confidence`, `photoMediaId`,
-`note`. Каждый value содержит metric `waist`, `chest`, `hips`, `thigh` или
-`biceps`, число `1.00..500.00` и unit `cm`. Duplicate metric отклоняется.
+Create/correction accept time, IANA timezone, values, dedupe key,
+SourceReference, and nullable confidence/photoMediaId/note. Values use metric
+`waist|chest|hips|thigh|biceps`, `1.00..500.00`, and `cm`; duplicate metrics are
+invalid. Server context supplies Person and generated fields.
 
-`personId`, `localDate`, UUID и server timestamps не принимаются как доверенные
-client fields. Публичный `SourceReference` не содержит private raw snapshot.
+## Evidence
 
-## Основания
+- Body contracts/module and PostgreSQL integration tests.
 
-- `packages/contracts/src/body-measurement-session.ts`.
-- `apps/api/src/body-measurement-sessions/`.
-- PostgreSQL integration tests Physical State.
+## Decisions
 
-## Решения
+- Session and values commit in one transaction; multiple sessions per local
+  day are allowed; correction replaces the aggregate.
 
-- Сеанс и его values записываются одной транзакцией.
-- В один локальный день разрешено несколько независимых сеансов.
-- Correction заменяет агрегат целиком, сохраняя исходный snapshot и provenance.
+## Open questions
 
-## Открытые вопросы
+- Private media upload, storage, retention, erasure, and note/photo privacy.
 
-- Upload, хранение, retention и удаление private media.
-- Privacy и retention policy для заметок и фотографий.
-
-## Связанные материалы
+## Related material
 
 - [BodyMeasurementSession](../domain/body-measurement-session.md)
 - [Backend runtime](../architecture/backend-runtime.md)
-- [Backend migration notes](../data/backend-migrations.md)
-
+- [Migrations](../data/backend-migrations.md)

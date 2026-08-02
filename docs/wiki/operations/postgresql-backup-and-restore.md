@@ -1,7 +1,7 @@
 ---
 id: "operations-postgresql-backup-and-restore"
 kind: architecture
-title: "Backup и restore PostgreSQL staging"
+title: "Staging PostgreSQL backup and restore"
 status: draft
 tags:
   - "postgresql"
@@ -9,68 +9,52 @@ tags:
   - "restore"
 ---
 
-# Backup и restore PostgreSQL staging
+# Staging PostgreSQL backup and restore
 
-## Кратко
+## Summary
 
-Shape of You использует database `shape_of_you_api` внутри общего PostgreSQL
-cluster. Проект не меняет общую backup policy владельца cluster.
+Shape of You owns database `shape_of_you_api` inside a shared cluster and does
+not modify the cluster owner's overall backup policy.
 
-## Содержание
+## Content
 
-До первой migration должны быть созданы отдельные:
-
-```text
-database: shape_of_you_api
-login role: shape_of_you_api
-```
-
-Текущий административный доступ применяется только для provisioning.
-Регулярные API и migration jobs используют выделенную role.
-
-Перед schema migration deployment требует согласованный backup checkpoint.
-Допустимый минимальный logical backup после одобрения владельцем cluster:
+Administrative access is only for provisioning. API and migrations use the
+dedicated role. Before schema migration, agree on a backup checkpoint. Minimal
+logical backup after cluster-owner approval:
 
 ```sh
 pg_dump --format=custom --file=<protected-path> shape_of_you_api
 ```
 
-Credentials не передаются в аргументах процесса, logs или документацию.
-Фактическая команда должна использовать одобренный владельцем cluster способ
-authentication.
+Never pass credentials in process arguments, logs, or documentation. Use the
+owner-approved authentication mechanism.
 
-Restore сначала проверяется в отдельной test database:
+Verify restore first in a separate test database:
 
 ```sh
 createdb <temporary-restore-database>
 pg_restore --exit-on-error --dbname=<temporary-restore-database> <backup-file>
 ```
 
-Затем проверяются migration journal, наличие `weight_measurements` и
-synthetic read/write. Удаление test database является destructive action и
-требует отдельного approval.
+Then verify migration journal, expected tables, and synthetic read/write.
+Deleting the test database is destructive and needs separate approval.
+Cluster owner defines retention, at-rest encryption, storage path, and deletion.
 
-Retention, encryption at rest, storage path и удаление backup определяет
-владелец общего PostgreSQL cluster.
+## Evidence
 
-## Основания
+- Shared PostgreSQL 17.4 and accepted database/credential/migration ownership.
 
-- Общий PostgreSQL 17.4 на временной VM.
-- Отдельное владение database/credentials/migrations в принятом ADR.
+## Decisions
 
-## Решения
+- Unrelated databases are outside Shape of You backup scope.
+- A backup is not a rollback path until restore is verified.
 
-- Никакие чужие databases не входят в backup/restore scope Shape of You.
-- Restore verification предшествует использованию backup как rollback path.
+## Open questions
 
-## Открытые вопросы
+- Approved storage/retention and verified owner restore procedure.
 
-- Согласованный storage path и retention.
-- Проверенная restore procedure владельца cluster.
-
-## Связанные материалы
+## Related material
 
 - [Deployment topology](../architecture/deployment.md)
-- [Provisioning PostgreSQL](postgresql-provisioning.md)
+- [Provisioning](postgresql-provisioning.md)
 - [Rollback](temporary-vm-rollback.md)
-- [Backend migration notes](../data/backend-migrations.md)

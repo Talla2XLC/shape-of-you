@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260729-use-verified-main-for-staging-deployment-control"
 kind: adr
-title: "Проверяемый main как источник staging deployment-control"
+title: "Use verified main as the staging deployment-control source"
 status: accepted
 date: 2026-07-29
 supersedes: "decisions-20260729-use-dedicated-staging-deployment-identity"
@@ -12,55 +12,55 @@ tags:
   - "github-actions"
 ---
 
-# Проверяемый main как источник staging deployment-control
+# Use verified main as the staging deployment-control source
 
-## Контекст
+## Context
 
-Static root-owned Compose/scripts исключали подмену privileged code со стороны
-GitHub Actions, но требовали ручной установки на VM после каждого исправления
-deployment-control. Для staging это создаёт ненужную операционную нагрузку.
+Static root-owned Compose files and scripts prevented GitHub Actions from
+replacing privileged code but required manual VM installation for every
+deployment-control fix. That overhead is unnecessary for staging.
 
-## Решение
+## Decision
 
-Root-owned wrapper и единственный `sudoers` rule остаются неизменяемой
-privilege boundary. При каждом approved deployment wrapper принимает
-`CONTROL_SHA`, fetch-ит только `origin/main` публичного repository, требует
-точного совпадения SHA с fetched head и checkout-ит root-owned control tree в
-`/opt/shape-of-you/staging/control`. Только из этого tree запускаются Compose
-file и deployment scripts.
+Keep the root-owned wrapper and single `sudoers` rule as the immutable
+privilege boundary. For each approved deployment, the wrapper accepts
+`CONTROL_SHA`, fetches only `origin/main` from the public repository, requires
+an exact match with the fetched head, and checks out a root-owned control tree
+at `/opt/shape-of-you/staging/control`. Compose and deployment scripts run only
+from that tree.
 
-GitHub Actions не передаёт scripts, Compose file или shell fragments. Пользователь
-`shape-deploy` по-прежнему не получает Docker group и может вызвать только
-wrapper без аргументов. Manual Environment approval становится подтверждением
-доверия к текущему `main` как к privileged deployment-control source.
+GitHub Actions does not send scripts, Compose files, or shell fragments.
+`shape-deploy` remains outside the Docker group and may call only the wrapper
+without arguments. Manual Environment approval confirms trust in the current
+`main` as privileged deployment-control source.
 
-## Последствия
+## Consequences
 
-После однократного обновления wrapper изменение deployment-control больше не
-требует SSH-copy на VM. Компрометация права push в `main` становится риском
-root-level deployment control при следующем ручном approved deployment;
-следовательно, branch protection и review для `main` обязательны до production.
+After one wrapper update, deployment-control changes no longer require SSH
+copying. Compromised push access to `main` can influence root-level deployment
+control at the next approved deployment, so branch protection and review are
+mandatory before production.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Оставить Compose/scripts static и обновлять их вручную. Отклонено: простой
-  bugfix требует SSH maintenance и тормозит staging delivery.
-- Дать GitHub Actions Docker group, shell sudo или SCP writable scripts.
-  Отклонено: это разрушает ограниченную privilege boundary.
-- Добавить self-hosted runner. Отложено: он создаёт постоянный privileged
-  agent и не нужен для текущего масштаба.
+- Keep static assets and update manually: rejected because ordinary fixes
+  require SSH maintenance.
+- Grant Docker group, shell sudo, or writable SCP scripts: rejected because it
+  breaks the narrow privilege boundary.
+- Add a self-hosted runner: deferred because it creates a persistent privileged
+  agent without a current need.
 
-## Проверка
+## Verification
 
-- Wrapper отклоняет неизвестный, повторный, некорректный или не совпадающий с
-  fetched `origin/main` `CONTROL_SHA` до Docker/migration действий.
-- Root-owned control checkout и wrapper недоступны на запись `shape-deploy`.
-- Workflow передаёт только structured input и не использует SCP или remote
-  arbitrary shell.
-- Первая установка обновлённого wrapper выполняется оператором; последующие
-  изменения Compose/scripts проверяются в обычном approved deployment.
+- The wrapper rejects unknown, duplicate, malformed, or non-matching
+  `CONTROL_SHA` before Docker or migration actions.
+- The root-owned checkout and wrapper are not writable by `shape-deploy`.
+- Workflow input is structured and contains neither SCP nor arbitrary remote
+  shell.
+- The operator installs the first wrapper revision; later Compose/script
+  changes are verified through normal approved deployment.
 
-## Связанные материалы
+## Related material
 
-- [Выделенная deployment identity](20260729-use-dedicated-staging-deployment-identity.md)
+- [Dedicated deployment identity](20260729-use-dedicated-staging-deployment-identity.md)
 - [Deployment topology](../wiki/architecture/deployment.md)

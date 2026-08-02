@@ -1,76 +1,67 @@
 ---
 id: "architecture-repository-and-runtime"
 kind: architecture
-title: "Репозиторий и runtime"
+title: "Repository and runtime"
 status: draft
 tags:
   - "architecture"
   - "runtime"
 ---
 
-# Репозиторий и runtime
+# Repository and runtime
 
-## Кратко
+## Summary
 
-Репозиторий является modular monorepo; совместное размещение не означает runtime coupling или преждевременную декомпозицию на сервисы.
+The repository is a modular monorepo. Colocation does not imply runtime
+coupling or premature service decomposition.
 
-## Содержание
+## Content
 
-### Модель репозитория
+One Git/4DreamTeam workspace contains canonical Wiki in `docs/wiki/`, ADR in
+`docs/adr/`, and Russian plans in `plans/YYYY/MM/`. The pnpm workspace contains
+the API in `apps/api` and shared transport/config packages in
+`packages/contracts` and `packages/config`.
 
-Единый корень Git-репозитория и workspace 4DreamTeam — `D:/Projects/shape-of-you`. Канонические проектные знания хранятся в `docs/wiki/`, архитектурные решения — в `docs/adr/`, планы — в `plans/YYYY/MM/`. Реализация использует pnpm workspace: deployable API находится в `apps/api`, а реально используемые transport contracts и runtime config — в `packages/contracts` и `packages/config`.
+Canonical Wiki/ADR are ordinary Git Markdown. 4DreamTeam manages board, memory,
+sources, and workflow; its managed Wiki is frozen legacy state. The repository
+validator checks canonical documents without a mirror or sync pipeline.
 
-### Хранение документации
+Deployable services cannot depend directly on one another through workspace
+packages. Approved cross-cutting reuse uses explicit shared packages with
+reviewed ownership and dependency direction.
 
-Канонические Wiki и ADR — обычный Markdown в Git. 4DreamTeam отвечает за board, memory, sources и workflow state, но managed Wiki не используется как content store этого workspace. Read-only validator репозитория проверяет форму документов; renderer, synchronization pipeline и search index не вводятся.
+Docker may use the monorepo as build context, but runtime includes only built
+API artifacts and transitive dependencies. API owns its Dockerfile,
+`package.json`, `AGENTS.md`, migrations, database, credentials, and integration
+tests.
 
-### Границы зависимостей
+Current topology is one NestJS backend and one API-owned PostgreSQL database.
+Nest modules are logical boundaries. New deployables or Kafka require measured
+drivers such as scale, independent ownership/release, isolation, replay, or
+multiple consumers.
 
-Deployable services не должны напрямую зависеть друг от друга через `package.json` или workspace dependency. Повторное использование cross-cutting кода допускается только через явные shared packages — например contracts, observability, configuration и testing — после review владения и направления зависимостей.
+Temporary staging uses GHCR images in a separate Compose project. Project nginx
+is a deployment adapter, not a domain boundary.
 
-### Артефакты runtime
+## Evidence
 
-Полная копия монорепозитория используется как Docker build context, но runtime запускает только собранный `apps/api` и его транзитивные dependencies. API имеет собственные `Dockerfile`, `package.json`, `AGENTS.md`, Drizzle migrations и integration tests.
+- Operator repository/runtime rules and accepted ADRs.
 
-### Начальная позиция по deployment
+## Decisions
 
-Modular monorepo не требует microservices. Текущий срез DEV-023 реализован как
-один NestJS backend с `FastifyAdapter`, одной PostgreSQL database и первой
-вертикалью `WeightMeasurement`. Миграция application framework не изменила
-deployable topology; Nest modules остаются логическими boundaries. Новая
-deployable boundary или Kafka требует
-конкретного driver — масштабирования, владения, изоляции, независимого release,
-stream replay или нескольких независимых consumers — и отдельного review.
+- One deployable backend remains accepted; multiple services are not.
+- Canonical Markdown is the only project-knowledge authority.
 
-Для временного staging утверждён deployment на общей VM: OCI images собираются
-в GitHub Actions, публикуются в GHCR и запускаются отдельным Compose project.
-Собственный nginx проекта является deployment adapter и даёт единую точку
-входа для web и API, не создавая новую domain boundary. Подробности и
-ограничения описаны на странице [Deployment topology](deployment.md).
+## Open questions
 
-## Основания
+- Remaining module boundaries, target cloud after temporary staging,
+  authentication/authorization/TLS, and SLOs.
 
-- Ограничения репозитория и runtime, предоставленные оператором.
-- ADR по modular monorepo и автономности сервисов.
-
-## Решения
-
-- Текущая topology утверждена как один deployable backend; декомпозиция на несколько сервисов не утверждена.
-- Canonical Markdown — единственный source of truth проектных знаний.
-
-## Открытые вопросы
-
-- Границы следующих модулей внутри текущего backend после review bounded contexts.
-- Целевая cloud topology после выхода из временного staging.
-- Authentication, authorization, TLS и измеримые SLO до реальных пользователей.
-
-## Связанные материалы
+## Related material
 
 - [Bounded contexts](../domain/bounded-contexts.md)
-- [Архитектурные drivers](drivers.md)
-- [ADR о modular monorepo](../../adr/20260728-modular-monorepo.md)
-- [ADR об автономности deployable service](../../adr/20260728-deployable-service-autonomy.md)
-- [ADR о canonical Markdown Wiki](../../adr/20260728-use-canonical-markdown-wiki-in-git.md)
-- [ADR о временном deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
-- [ADR о NestJS, FastifyAdapter и Nuxt](../../adr/20260729-use-nestjs-with-fastify-and-nuxt.md)
-- [ADR о PostgreSQL outbox до Kafka](../../adr/20260729-use-postgresql-outbox-before-kafka.md)
+- [Drivers](drivers.md)
+- [Modular monorepo ADR](../../adr/20260728-modular-monorepo.md)
+- [Service autonomy ADR](../../adr/20260728-deployable-service-autonomy.md)
+- [Canonical Wiki ADR](../../adr/20260728-use-canonical-markdown-wiki-in-git.md)
+- [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)

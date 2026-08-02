@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-use-nodejs-typescript-and-pnpm-workspaces"
 kind: adr
-title: "Node.js, TypeScript и pnpm workspaces"
+title: "Use Node.js, TypeScript, and pnpm workspaces"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,35 +11,39 @@ tags:
   - "technology"
 ---
 
-# Node.js, TypeScript и pnpm workspaces
+# Use Node.js, TypeScript, and pnpm workspaces
 
-## Контекст
+## Context
 
-Проекту нужна единая поддерживаемая языковая и workspace-модель для backend, web-facing packages, shared contracts и tooling в modular monorepo.
+The modular monorepo needs one maintainable language and workspace model for
+the backend, web-facing packages, shared contracts, and tooling.
 
-## Решение
+## Decision
 
-Использовать Node.js, TypeScript и pnpm workspaces как начальный стек разработки приложений.
+Use Node.js, TypeScript, and pnpm workspaces as the initial application stack.
+A future component may use another language when a subsequent ADR establishes
+a concrete need.
 
-Это решение не требует, чтобы каждый будущий компонент использовал Node.js, если последующее ADR обоснует конкретную другую потребность.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- Multiple application languages: enables specialization but adds operational
+  and cognitive cost before domain boundaries justify it.
+- npm or Yarn workspaces: both are viable; pnpm was selected for workspace
+  support and dependency isolation.
 
-- Несколько языков приложений: больше специализации, но выше операционная и когнитивная стоимость до появления доменных границ, оправдывающих такое решение.
-- npm или Yarn workspaces: жизнеспособны, но pnpm выбран из-за поддержки workspaces и изоляции зависимостей.
+## Consequences
 
-## Последствия
+Repository tooling and application packages share TypeScript conventions.
+Node.js and TypeScript versions and the build, lint, test, and monorepo tools
+are selected as implementation needs emerge. This ADR alone does not create
+package manifests.
 
-Repository tooling и application packages используют общие соглашения TypeScript. Версии Node.js и TypeScript, а также инструменты build, lint, test и monorepo orchestration пока не определены.
+## Verification
 
-Само ADR не создаёт package manifests.
+- The operator explicitly accepted the decision on 2026-07-28.
+- Package manifests are introduced only by approved implementation work.
 
-## Проверка
-
-- Решение явно принято оператором 2026-07-28.
-- Package manifests в рамках этого решения не создаются.
-
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/drivers.md`
 - `../wiki/architecture/repository-and-runtime.md`

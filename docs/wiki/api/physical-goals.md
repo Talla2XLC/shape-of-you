@@ -1,7 +1,7 @@
 ---
 id: "architecture-api-physical-goals"
 kind: architecture
-title: "API PhysicalGoal"
+title: "PhysicalGoal API"
 status: draft
 tags:
   - "api"
@@ -10,59 +10,42 @@ tags:
   - "physical-state"
 ---
 
-# API PhysicalGoal
+# PhysicalGoal API
 
-## Кратко
+## Summary
 
-API хранит стабильный `PhysicalGoal` root и неизменяемые версии intent и
-criteria. Lifecycle root использует optimistic concurrency, а выбранная
-current version обязана принадлежать тому же goal и `Person`.
+Stores stable PhysicalGoal roots and immutable intent/criteria versions with
+optimistic lifecycle concurrency and same-Goal/Person version ownership.
 
-## Содержание
+## Content
 
-Endpoints:
+- `POST /v1/physical-goals` — draft root and version 1.
+- `POST /v1/physical-goals/:id/versions` — immutable draft version.
+- `POST /v1/physical-goals/:id/versions/:version/activate` — select current.
+- `POST /v1/physical-goals/:id/complete` and `/cancel` — terminal lifecycle.
+- `GET /v1/physical-goals/:id` — current/latest version.
+- `GET /v1/physical-goals/:id/history` — versions ascending.
+- `GET /v1/physical-goals?status=active` — Person list ordered by creation/id.
 
-- `POST /v1/physical-goals` — создаёт draft root и version `1`;
-- `POST /v1/physical-goals/:id/versions` — добавляет immutable draft version;
-- `POST /v1/physical-goals/:id/versions/:version/activate` — атомарно выбирает
-  current version;
-- `POST /v1/physical-goals/:id/complete` — завершает active goal;
-- `POST /v1/physical-goals/:id/cancel` — отменяет draft или active goal;
-- `GET /v1/physical-goals/:id` — current и latest version;
-- `GET /v1/physical-goals/:id/history` — root и версии в порядке version ASC;
-- `GET /v1/physical-goals?status=active` — person-scoped список со stable order
-  `(createdAt DESC, id DESC)`.
+Commands accept narrative intent, optional dates, SourceReference, dedupe key,
+and `directional|exact|range|dynamic` criteria. Narrative/dynamic goals need no
+invented number. Lifecycle commands require `expectedLockVersion`; stale
+writes return `409`. `completed` and `cancelled` are terminal.
 
-Create/version command содержит обязательный narrative `intent`, nullable
-`effectiveFrom` и `targetDate`, typed `sourceReference`, `dedupeKey` и массив
-criteria. Criteria допускают `directional`, `exact`, `range` и `dynamic`.
-Narrative или dynamic goal не требует выдуманного numeric target.
+## Evidence
 
-Lifecycle commands требуют `expectedLockVersion`. Устаревшая версия lock
-возвращает `409`. `completed` и `cancelled` являются terminal states.
+- Goal contracts/module and Physical State integration tests.
 
-## Основания
+## Decisions
 
-- `packages/contracts/src/physical-goal.ts`.
-- `apps/api/src/physical-goals/`.
-- PostgreSQL integration tests Physical State.
+- Versions are append-only. Composite foreign keys protect same Goal/Person.
+- Progress derives from authoritative physical facts.
 
-## Решения
+## Open questions
 
-- Версии не обновляются и не удаляются через публичный API.
-- Current version переключается только на версию того же goal и `Person`;
-  invariant защищают application transaction и composite foreign key.
-- Progress не хранится mutable-копией внутри goal и будет вычисляться по
-  authoritative physical facts.
+- Primary-goal cardinality and automatic draft-version proposal policy.
 
-## Открытые вопросы
-
-- Primary-goal cardinality после появления нескольких параллельных целей.
-- Политика автоматического предложения новой goal version.
-
-## Связанные материалы
+## Related material
 
 - [PhysicalGoal](../domain/physical-goal.md)
 - [Backend runtime](../architecture/backend-runtime.md)
-- [Backend migration notes](../data/backend-migrations.md)
-

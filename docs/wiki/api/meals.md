@@ -1,7 +1,7 @@
 ---
 id: "architecture-api-meals"
 kind: architecture
-title: "API Meal"
+title: "Meal API"
 status: draft
 tags:
   - "api"
@@ -10,54 +10,41 @@ tags:
   - "snapshots"
 ---
 
-# API Meal
+# Meal API
 
-## Кратко
+## Summary
 
-API создаёт и читает Person-owned Meal snapshots, добавляет full-replacement
-corrections и вычисляет текущие дневные nutrition totals.
+Creates/reads Person-owned Meal snapshots, full-replacement corrections, and
+query-only daily nutrition totals.
 
-## Содержание
+## Content
 
-Endpoints:
+- `POST /v1/nutrition/meals` — idempotent create.
+- `GET /v1/nutrition/meals` — current facts with cursor/localDate.
+- `GET /v1/nutrition/meals/:id` — any immutable fact.
+- `POST /v1/nutrition/meals/:id/corrections` — append-only replacement.
+- `GET /v1/nutrition/meals/:id/history` — correction chain.
+- `GET /v1/nutrition/daily-totals?localDate=YYYY-MM-DD` — projection.
 
-- `POST /v1/nutrition/meals` — idempotent create;
-- `GET /v1/nutrition/meals` — current facts с `limit`, `cursor` и optional
-  `localDate`;
-- `GET /v1/nutrition/meals/:id` — конкретный immutable fact, включая
-  superseded;
-- `POST /v1/nutrition/meals/:id/corrections` — append-only replacement;
-- `GET /v1/nutrition/meals/:id/history` — полная correction chain;
-- `GET /v1/nutrition/daily-totals?localDate=YYYY-MM-DD` — query projection.
+Commands contain complete item snapshots. Optional accessible `foodVersionId`
+never replaces the snapshot. Existing dedupe returns `200`, new fact `201`, and
+conflicting second correction `409`. Current list uses
+`(occurredAt DESC, id DESC)`. Totals include only current Meals.
 
-Create и correction принимают complete item snapshots. Accessible
-`foodVersionId` optional и не заменяет snapshot. Повторный dedupe key
-возвращает существующий fact с `200`, новый fact — `201`. Попытка второй
-отличающейся correction одного fact возвращает `409`.
+## Evidence
 
-Current list использует keyset order `(occurredAt DESC, id DESC)`. History
-читает только строки correction chain, а не все meals `Person`. Daily totals
-суммируют item snapshots только тех Meal, у которых нет successor.
+- Nutrition contracts/controller/integration tests.
 
-## Основания
+## Decisions
 
-- `packages/contracts/src/nutrition.ts`.
-- `apps/api/src/nutrition/meal.controller.ts`.
-- PostgreSQL integration tests Nutrition vertical.
+- Responses/totals reproduce stored item snapshots; catalog revisions do not
+  change Meal; totals are not a mutable table.
 
-## Решения
+## Open questions
 
-- Response totals воспроизводятся из сохранённых item snapshots.
-- Catalog changes не меняют Meal response.
-- Query projection не хранится отдельной mutable table.
+- Nutrition targets, combined day projection, and post-DayClosure correction.
 
-## Открытые вопросы
-
-- Nutrition targets и combined day projection.
-- Policy изменения Meal после будущего `DayClosure`.
-
-## Связанные материалы
+## Related material
 
 - [Meal](../domain/meal.md)
-- [API Nutrition catalog](nutrition-catalog.md)
-- [Backend migration notes](../data/backend-migrations.md)
+- [Catalog API](nutrition-catalog.md)

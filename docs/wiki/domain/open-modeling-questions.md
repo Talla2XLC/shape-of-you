@@ -1,7 +1,7 @@
 ---
 id: "domain-open-modeling-questions"
 kind: domain
-title: "Открытые вопросы моделирования"
+title: "Open modeling questions"
 status: draft
 tags:
   - "domain"
@@ -9,73 +9,58 @@ tags:
   - "questions"
 ---
 
-# Открытые вопросы моделирования
+# Open modeling questions
 
-## Кратко
+## Summary
 
-Вопросы, которые необходимо решить до финального проектирования доменной архитектуры, schema, API или migration. Они сгруппированы по стоимости изменения и недостатку свидетельств.
+Unresolved questions that must be answered before final domain, schema, API, or
+migration design.
 
-## Содержание
+## Content
 
-### Высокая стоимость изменения
+High cost of change:
 
-- Окончательное имя, владение и invariants `DayClosure` или `JournalDay`.
-- Конкретные сроки retention и authenticated erasure protocol для wearable и
-  health evidence до production ingestion.
+- final name, ownership, and invariants for `DayClosure`/`JournalDay`;
+- wearable/health retention periods and authenticated erasure protocol before
+  production ingestion.
 
-### Недостаток свидетельств
+Insufficient evidence:
 
-- Privacy, retention и deletion body photo и notes до real-data import.
-- Выбор внешнего Exercise catalog source, его license/attribution, quality и
-  moderation policy.
-- Conflict policy для независимых будущих channels за пределами подтверждённого
-  зеркала `Weight`/`Daily_Log.Weight`.
-- Выбор внешних Nutrition catalog sources, их license/attribution, quality,
-  rate limits и moderation policy.
-- Actor roles и write authorization shared Nutrition catalog до multi-user
-  runtime; текущий synthetic context не является production moderation model.
+- privacy, retention, and deletion for body photos/notes before real import;
+- external Exercise catalog source, licensing, attribution, quality, and
+  moderation;
+- conflict policy for future channels beyond the confirmed
+  `Weight`/`Daily_Log.Weight` mirror;
+- external Nutrition sources, licensing, attribution, quality, rate limits,
+  and moderation;
+- actor roles/write authorization for shared Nutrition catalog in multi-user
+  runtime.
 
-После разрешения вопросы удаляются или переформулируются здесь. Архитектурные решения с существенной стоимостью изменения фиксируются в ADR.
+Resolved areas now live in ADRs: User/Person ownership, typed provenance and
+supersession, body sessions/goals/weight reconciliation, layered Nutrition,
+shared-reference ownership, Training versions/sessions, typed Recovery and
+policy-pinned assessments, and typed immutable Coaching lifecycle.
 
-## Основания
+Still open: production Coaching policy parameters, exercise difficulty/
+replacement contracts, and authenticated erasure.
 
-Пробелы и конфликты обнаружены во всех 26 листах и описаны на страницах inventory, authority, provenance, lifecycle, extraction, aggregates и invariants.
+## Evidence
 
-## Решения
+- Gaps found across the 26-sheet inventory and current authority/provenance/
+  lifecycle/domain pages.
 
-Identity владельца и correction semantics разрешены ADR: fitness facts
-принадлежат `Person`, доступ предоставляется `User` через grant, correction
-создаёт новый immutable fact с `supersedes_id`. Следующий domain review должен
-сфокусироваться на Day lifecycle, versioning программы, privacy и policy
-boundaries. Cardinality physical measurements, body session aggregate,
-versioned physical goals и authority зеркала веса разрешены отдельным ADR.
-Shared Nutrition catalog, person overlays, private items, immutable meal
-snapshots и external ingestion boundary также разрешены отдельным ADR.
-Cross-context ownership shared reference definitions, person overlays,
-person-owned state и external source records разрешён отдельным ADR; exact
-schema Training, versioning программы, whole-session correction и record
-ordering разрешены отдельным ADR. Typed Recovery observations, UTC interval,
-observation-time IANA timezone, consent boundary, policy-pinned readiness и
-load-risk assessments также разрешены отдельным ADR. Exact Coaching schema,
-immutable recommendation/decision lifecycle, typed evidence и derived
-expiration разрешены отдельным ADR. Production Coaching policy parameters,
-typed difficulty/exercise replacement и erasure workflow остаются открытыми.
+## Decisions
 
-## Открытые вопросы
+- Keep this as the canonical unresolved modeling list; high-cost resolutions
+  require ADRs.
 
-Эта страница — канонический список нерешённых вопросов моделирования для DEV-027. Планы должны ссылаться сюда, а не копировать полный список. Для разрешённых вопросов с высокой стоимостью изменения требуется ADR.
+## Open questions
 
-## Связанные материалы
+- The items listed in Content.
 
-- [Кандидаты в агрегаты](candidate-aggregates.md)
-- [Карта извлечения домена](domain-extraction-map.md)
-- [Инвентаризация Google Sheets](../data/google-sheets-inventory.md)
-- [Каталог ADR](../../adr/)
-- [User, Person и права доступа](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
-- [Typed provenance и supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
-- [Сеансы замеров тела и физические цели](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md)
-- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
-- [Shared reference definitions и person-owned state](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
-- [Версионируемые программы и факты тренировок](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
-- [Наблюдения и оценки восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md)
-- [Рекомендации Coaching и решения пользователя](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md)
+## Related material
+
+- [Candidate aggregates](candidate-aggregates.md)
+- [Extraction map](domain-extraction-map.md)
+- [Sheets inventory](../data/google-sheets-inventory.md)
+- [ADR catalog](../../adr/)

@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260802-use-durable-postgresql-intake-queue-and-typed-items"
 kind: adr
-title: "Надёжная PostgreSQL-очередь и типизированные элементы Intake"
+title: "Use a durable PostgreSQL queue and typed Intake items"
 status: accepted
 date: 2026-08-02
 supersedes: []
@@ -13,110 +13,95 @@ tags:
   - "queue"
 ---
 
-# Надёжная PostgreSQL-очередь и типизированные элементы Intake
+# Use a durable PostgreSQL queue and typed Intake items
 
-## Контекст
+## Context
 
-Один пользовательский текст может содержать несколько независимых фактов:
-вес, приём пищи, тренировку и наблюдение о восстановлении. Внешний parser может
-работать медленно, временно быть недоступен и требовать повторной попытки.
-Неоднозначность одного факта не должна блокировать остальные, а повтор HTTP
-request или worker retry не должен создавать дубликаты.
+One user message may contain independent facts such as weight, a meal, a
+workout, and a recovery observation. An external parser may be slow,
+unavailable, or retried. Ambiguity in one fact must not block siblings, and
+HTTP/worker retries must not create duplicates.
 
-Intake является вспомогательной orchestration-capability, а не новым владельцем
-предметных фактов. После подтверждения WeightMeasurement остаётся в Physical
-State, Meal — в Nutrition, WorkoutSession — в Training, а RecoveryObservation
-— в Recovery. Универсальный JSON payload ослабил бы типизацию, constraints и
-границы ownership.
+Intake is a supporting orchestration capability, not a domain-fact owner.
+After confirmation, WeightMeasurement remains in Physical State, Meal in
+Nutrition, WorkoutSession in Training, and RecoveryObservation in Recovery. A
+universal JSON payload would weaken typing, constraints, and ownership.
 
-## Решение
+## Decision
 
-Intake реализуется внутри существующего API modular monolith и использует его
-PostgreSQL. Новый deployable service, отдельная database и внешний message
-broker не создаются.
+Implement Intake inside the existing API modular monolith using its
+PostgreSQL. Create no new deployable, database, or external broker.
 
-`IntakeRequest` принадлежит `Person` и хранит исходный текст, locale, timezone,
-source reference, время получения и person/source-scoped idempotency key.
-Исходный текст хранится как текст, а не как универсальный domain payload.
+Person-owned `IntakeRequest` stores source text, locale, timezone, source
+reference, receipt time, and Person/source-scoped idempotency key. Source text
+is text, not a generic domain payload.
 
-Parser-neutral port преобразует request в упорядоченные `IntakeItem`. Каждый
-item имеет собственный тип и lifecycle, а его разобранные поля хранятся в
-отдельной реляционной detail table для конкретной domain command. JSON/JSONB,
-polymorphic `(type, id)` references и общая таблица произвольных facts не
-используются. Ссылка на созданный domain fact также типизирована foreign key
-соответствующей detail table.
+A parser-neutral port produces ordered `IntakeItem` records. Every item has a
+typed lifecycle and a dedicated relational detail table for its domain command.
+Do not use JSON/JSONB, polymorphic `(type, id)` references, or a universal fact
+table. The created domain fact is linked by a typed foreign key.
 
-Request сохраняется вместе с первым заданием в одной transaction. Задания
-PostgreSQL-очереди содержат только типизированные references на request или
-item, lease, число попыток, время следующей попытки и безопасный error code.
-Worker забирает доступные задания через row locking с `SKIP LOCKED`, применяет
-ограниченный retry с backoff и переводит исчерпанные задания в terminal state.
+Persist a request and its first job in one transaction. Queue jobs contain only
+typed request/item references, lease, attempts, next-attempt time, and safe
+error code. Workers claim rows with locking and `SKIP LOCKED`, apply bounded
+retry/backoff, and terminally fail exhausted jobs.
 
-Parser вызывается вне database transaction. Его результат сохраняется одной
-короткой transaction: typed items, их начальные состояния и append-only
-timeline entries. Неоднозначный item ожидает clarification; однозначный —
-confirmation. Подтверждение создаёт routing job.
+Call the parser outside database transactions. Persist parser results in one
+short transaction with typed items, initial states, and append-only timeline.
+Ambiguous items wait for clarification; ready items wait for confirmation.
+Confirmation creates a routing job.
 
-Routing выполняется независимо для каждого item. Domain mutation, ссылка на
-созданный domain fact, успешное состояние item и timeline entry фиксируются
-одной database transaction. Для этого owning modules предоставляют
-transaction-aware command ports, но не передают Intake ownership своих facts.
+Route each item independently. Domain mutation, created-fact link, successful
+item state, and timeline entry commit in one transaction through
+transaction-aware owning-module command ports. Intake receives no ownership of
+those facts.
 
-Общий status request является projection над parsing state и состояниями
-items. Он не дублируется как независимо изменяемая business authority.
-Timeline является append-only audit/read model, а не event sourcing.
+Request status is a projection over parsing/items, not a second mutable
+authority. Timeline is an append-only audit/read model, not event sourcing.
 
-Конкретный AI provider и его adapter выбираются отдельно. Domain model,
-очередь, state machine и API не зависят от provider-specific identifiers или
-payloads.
+Choose the concrete AI provider separately. Domain model, queue, state machine,
+and API remain provider-neutral.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Один синхронный HTTP request и одна transaction на весь исходный текст:
-  проще, но внешний parser удерживает request, а одна ambiguity или ошибка
-  блокирует все независимые facts. Отклонено.
-- Независимые typed items без durable queue: сохраняет частичную обработку, но
-  теряет надёжный retry и восстановление после перезапуска. Отклонено.
-- PostgreSQL-backed queue и независимые typed items: даёт durability,
-  clarification и idempotent retry без новой инфраструктуры. Выбрано.
-- Kafka, RabbitMQ или отдельный Intake service: допускает независимое
-  масштабирование, но преждевременно создаёт broker и deployable boundary.
-  Отклонено до появления подтверждённой нагрузки или независимого lifecycle.
-- Универсальный JSON/JSONB command envelope: быстро добавляет новые виды, но
-  скрывает domain contract от PostgreSQL и TypeScript. Отклонено.
+- One synchronous HTTP request/transaction: simple, but parser latency and one
+  ambiguity block every fact.
+- Independent typed items without durable queue: supports partial progress but
+  loses restart recovery and reliable retries.
+- PostgreSQL queue with typed items: durable, clarifiable, and idempotent
+  without new infrastructure. Selected.
+- Kafka, RabbitMQ, or separate Intake service: independently scalable but
+  premature before measured load or lifecycle independence.
+- Universal JSON/JSONB command envelope: fast type addition but hides contracts
+  from PostgreSQL and TypeScript.
 
-## Последствия
+## Consequences
 
-- Создание request возвращает `202 Accepted`; состояние читается отдельным
-  query endpoint.
-- Один request может быть partially completed: успешные items не откатываются
-  из-за ambiguity или terminal failure другого item.
-- Worker может безопасно работать в нескольких API replicas благодаря lease,
-  locking и idempotency constraints.
-- Добавление нового вида Intake требует typed contract, detail table, parser
-  mapping, owning-module command port и tests.
-- Очередь увеличивает число состояний и требует metrics для lag, retries,
-  terminal failures и зависших leases.
-- Вынос worker или замена transport возможны позже без изменения domain facts
-  и публичного Intake lifecycle.
+- Request creation returns `202 Accepted`; status is queried separately.
+- Successful items remain committed when a sibling is ambiguous or fails.
+- Lease, locking, and idempotency allow workers in multiple API replicas.
+- New Intake kinds require typed contract, detail table, parser mapping,
+  owning-module command, and tests.
+- Queue observability must cover lag, retries, terminal failures, and stale
+  leases.
+- Worker extraction or transport replacement remains possible without changing
+  domain facts or public Intake lifecycle.
 
-## Проверка
+## Verification
 
-- Повтор request с тем же Person, source и idempotency key возвращает тот же
-  IntakeRequest.
-- Один текст создаёт несколько independently confirmable typed items.
-- Ambiguous item не блокирует successful sibling item.
-- Concurrent workers не исполняют одно задание дважды.
-- Retry после сбоя не создаёт второй domain fact.
-- Domain fact и successful item/timeline state появляются atomically.
-- В schema отсутствуют универсальные JSON/JSONB payloads и polymorphic fact
-  references.
-- Перезапуск API не теряет доступные или leased с истёкшим сроком задания.
+- Repeated Person/source/idempotency input returns one IntakeRequest.
+- One message creates independently confirmable typed items.
+- Ambiguous items do not block successful siblings.
+- Concurrent workers do not execute one job twice.
+- Retry does not create a second domain fact.
+- Domain fact and successful item/timeline state commit atomically.
+- Schema contains no universal JSON/JSONB payload or polymorphic fact link.
+- API restart loses neither available jobs nor expired leased jobs.
 
-## Связанные материалы
+## Related material
 
-- [Типизированный provenance и append-only supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
-- [PostgreSQL outbox до Kafka](20260729-use-postgresql-outbox-before-kafka.md)
-- [Предлагаемые bounded contexts](../wiki/domain/bounded-contexts.md)
-- [Каталог поведения Google Sheets](../wiki/data/google-sheets-behavior-catalog.md)
-- [План завершения DEV-023](../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)
+- [Typed provenance and append-only supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
+- [PostgreSQL outbox before Kafka](20260729-use-postgresql-outbox-before-kafka.md)
+- [Draft bounded contexts](../wiki/domain/bounded-contexts.md)
+- [Google Sheets behavior catalog](../wiki/data/google-sheets-behavior-catalog.md)
+- [DEV-023 completion plan](../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)

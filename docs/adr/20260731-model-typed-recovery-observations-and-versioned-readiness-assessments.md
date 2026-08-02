@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260731-model-typed-recovery-observations-and-versioned-readiness-assessments"
 kind: adr
-title: "Типизированные наблюдения восстановления и версионируемые оценки готовности"
+title: "Model typed recovery observations and versioned readiness assessments"
 status: accepted
 date: 2026-07-31
 supersedes: []
@@ -13,124 +13,106 @@ tags:
   - "policies"
 ---
 
-# Типизированные наблюдения восстановления и версионируемые оценки готовности
+# Model typed recovery observations and versioned readiness assessments
 
-## Контекст
+## Context
 
-Recovery and Readiness должен принимать ручные сведения и будущие данные
-устройств, сохранять их происхождение и строить воспроизводимые оценки
-готовности и риска нагрузки. Эти данные чувствительны, зависят от времени и
-качества источника и не должны смешиваться с рекомендациями Coaching.
+Recovery and Readiness must accept manual and future device data, preserve
+provenance, and produce reproducible readiness/load-risk assessments. This data
+is sensitive, time- and quality-dependent, and must remain separate from
+Coaching recommendations.
 
-Одна универсальная таблица с произвольным JSON скрыла бы обязательные поля,
-единицы и ограничения разных видов наблюдений. Полностью независимые модели
-для каждого показателя, напротив, продублировали бы владение, время,
-идемпотентность, исправления и общую историю.
+One arbitrary JSON table would hide required fields, units, and constraints.
+Fully separate models per metric would duplicate ownership, time, idempotency,
+correction, and chronology behavior.
 
-## Решение
+## Decision
 
-Recovery and Readiness остаётся типизированным модулем существующего API.
+Keep Recovery and Readiness as a typed module of the existing API:
 
-1. Общие определения поставщика, модели устройства и её возможностей имеют
-   стабильную identity и неизменяемые версии. Они не копируются для каждого
-   `Person` и не владеют персональными данными.
-2. Логическое подключение, экземпляр устройства, согласие, состояние хранения
-   и наблюдения принадлежат `Person`. Текущая задача не хранит токены,
-   credentials и другие секреты подключения и не подключает реального
-   поставщика.
-3. `RecoveryObservation` является неизменяемым корнем с владельцем,
-   источником, интервалом в UTC, IANA timezone, локальной датой, качеством,
-   ключом идемпотентности и optional `supersedes_id`.
-4. Корень имеет ровно одну типизированную деталь: сеанс сна, числовой
-   показатель восстановления или субъективную отметку. Произвольный JSON не
-   используется вместо обязательных доменных полей и единиц.
-5. Исправление заменяет наблюдение целиком. Новая запись ссылается на исходную,
-   а текущие запросы и оценки исключают заменённую запись.
-6. Источник устройства требует действующего согласия того же `Person`,
-   разрешённого вида данных и действующего состояния хранения. Ручное
-   наблюдение не притворяется данными устройства.
-7. Отзыв согласия запрещает новое получение данных, но не изображает
-   физическое удаление старых значений. Истечение срока хранения и удаление
-   являются отдельным privacy lifecycle. Реальные данные устройств запрещены
-   до появления аутентифицированного механизма удаления; текущий runtime
-   допускает только синтетический контекст.
-8. Правила расчёта имеют стабильное определение и неизменяемые
-   `RecoveryAssessmentPolicyVersion` с явным периодом действия и
-   типизированными параметрами. Публичное изменение общих правил не
-   открывается до появления отдельного права записи.
-9. `ReadinessAssessment` и `LoadRiskAssessment` являются неизменяемыми
-   решениями, закреплёнными за точной версией правил, окном анализа,
-   контрольной суммой входов и явными ссылками на наблюдения и тренировочные
-   сессии. Несовместимые виды нагрузки не складываются в одно число неявно.
-10. Недостаток или низкое качество данных ограничивает уверенность. Любой
-    сработавший запрет безопасности имеет приоритет над итоговым баллом
-    готовности.
-11. Recovery владеет физиологической оценкой готовности и риска нагрузки.
-    Coaching позже потребляет опубликованную оценку, формирует рекомендацию и
-    не изменяет ни наблюдения, ни оценку, ни тренировочную программу.
-12. Оценка запускается явной командой. Scheduler, queue, универсальный rules
-    engine, event store, отдельный сервис и автоматическое изменение программы
-    не вводятся.
+1. Shared provider, device model, and capability definitions have stable
+   identity and immutable versions. They are not copied per Person and own no
+   personal data.
+2. Connection, device instance, consent, retention state, and observations
+   belong to Person. This slice stores no real provider credentials or tokens.
+3. Immutable `RecoveryObservation` stores owner, source, UTC interval, IANA
+   timezone, local date, quality, idempotency key, and optional
+   `supersedes_id`.
+4. The root has exactly one typed detail: sleep session, numeric recovery
+   metric, or subjective check-in. Arbitrary JSON never replaces domain fields
+   and units.
+5. Correction replaces the whole observation and current queries/assessments
+   exclude the superseded record.
+6. Device sources require active consent for the same Person, allowed data
+   kind, and active retention state. Manual data never pretends to be device
+   data.
+7. Consent revocation stops new collection but does not claim physical deletion
+   of old values. Retention expiry/erasure is a separate privacy lifecycle.
+   Real device data is forbidden until authenticated erasure exists; current
+   runtime is synthetic-only.
+8. Assessment rules use stable definitions and immutable
+   `RecoveryAssessmentPolicyVersion` with effective period and typed
+   parameters. Shared-policy writes require separate authority.
+9. Immutable `ReadinessAssessment` and `LoadRiskAssessment` pin exact policy
+   version, analysis window, input checksum, and typed observation/session
+   evidence. Incompatible load kinds are not silently summed.
+10. Missing/low-quality data limits confidence. Any hard safety stop overrides
+    the readiness score.
+11. Recovery owns physiological readiness/load-risk assessment. Coaching may
+    consume it but cannot mutate observations, assessments, or training plans.
+12. Assessment runs by explicit command. No scheduler, queue, generic rules
+    engine, event store, separate service, or automatic plan mutation is added.
 
-Для межконтекстного чтения тренировочной истории Recovery использует узкий
-read-only порт Training. Внутри одного API допустимы явные внешние ключи на
-сессии-свидетельства, но Recovery не изменяет таблицы Training.
+Recovery reads training history through a narrow read-only port. Explicit
+foreign keys to evidence sessions are allowed inside one API, but Recovery
+never mutates Training tables.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Универсальная таблица наблюдений и оценок с `kind` и JSON: проще расширять,
-  но слабые ограничения и скрытая схема создают преждевременную платформу
-  медицинских данных. Отклонено.
-- Отдельный aggregate и API для каждого показателя: максимально строго, но
-  дублирует общий lifecycle и усложняет хронологию. Отклонено.
-- Типизированный корень и отдельные детали: сохраняет общий lifecycle и строгие
-  ограничения без универсального хранилища. Выбрано.
-- Хранить данные после отзыва согласия бессрочно: просто, но не выражает
-  privacy boundary. Отклонено.
-- Считать отзыв согласия скрытым удалением истории: создаёт ложную гарантию и
-  смешивает прекращение сбора с удалением. Отклонено.
-- Отнести риск нагрузки к Coaching: уменьшает Recovery, но смешивает оценку
-  состояния с рекомендацией действия. Отклонено; Coaching получает готовую
-  оценку как evidence.
+- Universal observation/assessment `kind` plus JSON: easy extension but weak
+  constraints and a premature health-data platform.
+- Separate aggregate/API per metric: strict but duplicates lifecycle and
+  fragments chronology.
+- Typed root with typed details: shared lifecycle plus strong constraints.
+  Selected.
+- Retain data indefinitely after revocation: simple but lacks a privacy
+  boundary.
+- Treat revocation as hidden deletion: falsely conflates stopping collection
+  with erasure.
+- Put load risk in Coaching: smaller Recovery but mixes state assessment with
+  action recommendation.
 
-## Последствия
+## Consequences
 
-- Общие определения устройств переиспользуются без копирования персональных
-  наблюдений.
-- Новый вид наблюдения требует типизированного contract, detail table и
-  migration, а не только нового JSON-ключа.
-- Воспроизводимость оценки требует хранить версию правил, evidence и snapshot
-  расчёта.
-- Реальная интеграция устройства потребует отдельного решения о credentials,
-  authentication, удалении, retention enforcement и provider contract.
-- До этого решения API остаётся пригодным только для ручных и синтетических
-  сценариев без production health data.
+- Shared device definitions are reused without sharing personal observations.
+- New observation kinds require a typed contract, detail table, and migration.
+- Reproducible assessment stores policy version, evidence, and calculation
+  snapshot.
+- Real device integration needs separate credential, authentication, erasure,
+  retention, and provider-contract decisions.
+- Until then, API supports only manual/synthetic scenarios without production
+  health data.
 
-## Проверка
+## Verification
 
-- Два `Person` ссылаются на одну версию модели устройства без копирования её
-  определения, но не видят подключения, согласия и наблюдения друг друга.
-- У наблюдения существует ровно одна деталь допустимого типа.
-- Источник устройства без действующего согласия или после его отзыва
-  отклоняется.
-- UTC-интервал, IANA timezone и локальная дата согласованы, включая переходы
-  летнего времени.
-- Повтор команды с тем же ключом идемпотентности не создаёт второй факт.
-- Исправление создаёт полную замену и исключает исходное наблюдение из текущих
-  оценок.
-- Оценка воспроизводится по версии правил и контрольной сумме evidence.
-- Низкое покрытие ограничивает confidence, а hard stop нельзя перекрыть
-  высоким readiness score.
-- Расчёт не изменяет факты Training и активную программу.
-- В schema нет универсальной polymorphic таблицы observations, facts или
-  rules.
+- People may share a device-model version but cannot see each other's
+  connections, consent, or observations.
+- Every observation has exactly one allowed detail.
+- Device data without active consent is rejected.
+- UTC interval, timezone, and local date remain consistent through DST.
+- Repeated idempotency keys create one fact.
+- Correction creates a full replacement excluded from current assessments.
+- Policy version and evidence checksum reproduce the assessment.
+- Low coverage limits confidence and hard stops override readiness.
+- Calculation changes no Training facts or active program.
+- No universal polymorphic observation/fact/rules table exists.
 
-## Связанные материалы
+## Related material
 
 - [Recovery and Readiness](../wiki/domain/recovery-and-readiness.md)
 - [Bounded contexts](../wiki/domain/bounded-contexts.md)
-- [Владение данными](../wiki/architecture/data-ownership.md)
-- [Shared reference definitions и person-owned state](20260731-separate-shared-reference-definitions-from-person-owned-state.md)
-- [Typed provenance и supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
-- [Независимые факты вместо DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
-- [Завершённый план реализации](../../plans/2026/07/completed/2026-07-31-recovery-and-readiness.md)
+- [Data ownership](../wiki/architecture/data-ownership.md)
+- [Shared definitions and Person state](20260731-separate-shared-reference-definitions-from-person-owned-state.md)
+- [Typed provenance and supersession](20260730-use-typed-provenance-and-append-only-supersession.md)
+- [Independent facts over DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
+- [Completed implementation plan](../../plans/2026/07/completed/2026-07-31-recovery-and-readiness.md)

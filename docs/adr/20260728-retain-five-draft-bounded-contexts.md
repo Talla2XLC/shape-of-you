@@ -1,7 +1,7 @@
 ---
 id: decisions-20260728-retain-five-draft-bounded-contexts
 kind: adr
-title: "Сохранение пяти draft bounded contexts"
+title: "Retain five draft bounded contexts"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -12,15 +12,18 @@ tags:
   - modular-monolith
 ---
 
-# Сохранение пяти draft bounded contexts
+# Retain five draft bounded contexts
 
-## Контекст
+## Context
 
-Инвентаризация источника подтвердила различия в языке и владении для физического состояния, питания, тренировок, восстановления и coaching. Предложенный контекст `Observations` уменьшил бы число границ, но преждевременно объединил бы lifecycle физического состояния и восстановления до понимания различий в privacy, policies и consistency.
+Source inventory confirmed distinct language and ownership for physical state,
+nutrition, training, recovery, and coaching. A single `Observations` context
+would reduce boundary count but prematurely merge physical-state and recovery
+lifecycles before privacy, policy, and consistency differences are understood.
 
-## Решение
+## Decision
 
-Сохранить пять draft bounded contexts:
+Retain five draft bounded contexts:
 
 1. Physical State and Goals.
 2. Nutrition.
@@ -28,28 +31,35 @@ tags:
 4. Recovery and Readiness.
 5. Coaching and Decision Support.
 
-`Observation` можно использовать как общий conceptual pattern или value structure. Это не bounded context и не граница deployable service.
+`Observation` may be a shared conceptual pattern or value structure. It is not
+a bounded context or deployable service boundary.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Объединить Physical State and Goals и Recovery and Readiness в Observations: отложено, поскольку упрощение может скрыть различия во владении, privacy и lifecycle.
-- Создать отдельный контекст для каждой таблицы или AI engine: отклонено как проектирование от структуры таблицы и преждевременная декомпозиция.
-- Сразу преобразовать пять контекстов в сервисы: отклонено как преждевременная микросервисность.
+- Merge Physical State and Recovery into Observations: deferred because the
+  simplification may hide ownership, privacy, and lifecycle differences.
+- Create a context per table or AI engine: rejected as spreadsheet-driven and
+  prematurely decomposed.
+- Convert all five contexts directly into services: rejected as premature
+  microservices.
 
-## Последствия
+## Consequences
 
-- Логическая context map остаётся стабильной, пока уточняются агрегаты и policies.
-- Один modular backend первоначально может реализовывать несколько контекстов.
-- Общие структуры observation не должны создавать совместное владение базой данных.
-- Любое объединение, разделение или распределение по deployable units требует следующего ADR.
+- The logical context map remains stable while aggregates and policies mature.
+- One modular backend may initially implement several contexts.
+- Shared observation structures do not imply shared database ownership.
+- Context merging, splitting, or deployable distribution requires another
+  ADR.
 
-## Проверка
+## Verification
 
-- Предложения модулей должны относить ответственность к одному из пяти контекстов либо к явно вспомогательной технической capability.
-- Architecture Review должен проверять, что Observation не превратился в неявный сервис или общий агрегат.
+- Module proposals assign responsibility to one context or an explicit
+  supporting technical capability.
+- Architecture Review verifies that Observation has not become an implicit
+  service or shared aggregate.
 
-## Связанные материалы
+## Related material
 
 - [Bounded contexts](../wiki/domain/bounded-contexts.md)
-- [Обзор домена](../wiki/domain/overview.md)
-- [Репозиторий и runtime](../wiki/architecture/repository-and-runtime.md)
+- [Domain overview](../wiki/domain/overview.md)
+- [Repository and runtime](../wiki/architecture/repository-and-runtime.md)

@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260729-auto-deploy-main-to-staging"
 kind: adr
-title: "Автоматический deployment main в staging"
+title: "Automatically deploy main to staging"
 status: accepted
 date: 2026-07-29
 supersedes: null
@@ -12,46 +12,46 @@ tags:
   - "github-actions"
 ---
 
-# Автоматический deployment main в staging
+# Automatically deploy main to staging
 
-## Контекст
+## Context
 
-Staging содержит только synthetic data, а ручной запуск deployment после
-каждой успешной публикации immutable images создаёт ненужный операторский шаг.
-Нужна непрерывная доставка текущего `main` без ручного переноса digests.
+Staging contains only synthetic data. Manually starting deployment after every
+successful immutable image publication adds no useful operator gate. The
+current `main` should be delivered continuously without manually copying
+digests.
 
-## Решение
+## Decision
 
-Push в `main` запускает quality, публикует API и edge images и автоматически
-вызывает reusable `Deploy staging` с полученными digests. Deploy job остаётся
-serialized и не отменяет активную migration. Manual dispatch сохраняется для
-targeted retry и rollback. До появления отдельной ветки staging `main` является
-единственным trigger branch; смена на `staging` не меняет topology или
-privilege boundary.
+A push to `main` runs quality, publishes API and edge images, and automatically
+invokes reusable `Deploy staging` with the resulting digests. Deployment stays
+serialized and never cancels an active migration. Manual dispatch remains for
+targeted retry and rollback. Until a separate staging branch exists, `main` is
+the only trigger branch.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Оставить manual deployment. Отклонено: для throwaway staging это не даёт
-  ценного approval gate и создаёт повторяемую ручную работу.
-- Отменять активный deployment при новом push. Отклонено: прерывание migration
-  опаснее доставки устаревшего release в serial queue.
-- Trigger через отдельный `workflow_run`. Отложено: он усложняет безопасную
-  передачу immutable digests без текущей потребности.
+- Keep manual deployment: rejected because throwaway staging gains no valuable
+  approval gate and retains repetitive work.
+- Cancel an active deployment on a new push: rejected because interrupting a
+  migration is more dangerous than serially delivering a stale release.
+- Use a separate `workflow_run`: deferred because safe immutable digest
+  transfer becomes more complex without a current need.
 
-## Последствия
+## Consequences
 
-Каждый успешный `main` может изменить staging. Поэтому real data, public
-registration и production usage остаются запрещены. Environment `staging`
-продолжает хранить secrets; workflow не получает broad VM privileges.
+Every successful `main` may change staging. Real data, public registration, and
+production use therefore remain forbidden. The `staging` Environment continues
+to own secrets, and the workflow receives no broad VM privileges.
 
-## Проверка
+## Verification
 
-- Один push в `main` создаёт quality, publish и deploy в одном workflow chain.
-- Deploy получает digests только из outputs publish jobs.
-- PR запускает CI без deployment.
-- Manual dispatch `Deploy staging` доступен для recovery.
+- One `main` push creates quality, publish, and deploy in one workflow chain.
+- Deploy receives digests only from publish job outputs.
+- Pull requests run CI without deployment.
+- Manual `Deploy staging` dispatch remains available for recovery.
 
-## Связанные материалы
+## Related material
 
-- [Временный deployment на общей VM](20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
+- [Temporary deployment on a shared VM](20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Deployment topology](../wiki/architecture/deployment.md)

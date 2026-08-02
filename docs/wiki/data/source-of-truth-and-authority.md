@@ -1,7 +1,7 @@
 ---
 id: "data-source-of-truth-and-authority"
 kind: data
-title: "Source of truth и authority"
+title: "Source of truth and authority"
 status: draft
 tags:
   - "authority"
@@ -9,63 +9,55 @@ tags:
   - "migration"
 ---
 
-# Source of truth и authority
+# Source of truth and authority
 
-## Кратко
+## Summary
 
-Карта authority для текущего workbook `Fitness Tracker`. Она разделяет исходные факты, текущую configuration, производные projections, workflow state и project governance, чтобы будущая миграция не превратила каждый лист в авторитетную таблицу.
+Authority map for `Fitness Tracker`, separating facts, configuration,
+projections, workflow state, and governance so migration does not turn every
+sheet into an authoritative table.
 
-## Содержание
+## Content
 
-### Текущий operational authority
+Google Sheets remains operational authority until accepted dual-run,
+reconciliation, and cutover.
 
-Google Sheets остаётся authoritative source до прохождения принятого gate dual-run, reconciliation и cutover.
+- facts retain provenance and domain owner;
+- configuration/policy is not historical measurement;
+- workflow status describes processing, not fitness truth;
+- formulas, dashboards, Daily_Log, records, risk scores, and plans may be
+  projections or decisions;
+- explicit correction supersedes facts without erasing history.
 
-### Authority по типам информации
+Authority is assigned per information type, not per whole sheet.
 
-- исходные факты сохраняют provenance и owning domain;
-- configuration и business policy не являются историческими измерениями;
-- workflow status описывает обработку, а не fitness truth;
-- formulas, dashboards, `Daily_Log`, personal records, risk scores и plans могут быть производными projections или решениями;
-- явные пользовательские corrections заменяют факты, не стирая историю.
+For Weight, `Weight` is migration authority and `Daily_Log.Weight` is legacy
+mirror/reconciliation evidence. Equal mirror values create no second fact;
+discrepancy blocks automatic import and requires investigation.
 
-Authority назначается для каждого типа факта или артефакта. Лист, содержащий несколько типов, не становится автоматически авторитетным целиком.
+After cutover, Brand/Ingredient/FoodVersion are shared definitions; personal
+catalog stores overlays/private items. Until then, Sheets remains authority for
+current catalog/Meals. Meal snapshots never recalculate from later catalog
+versions; daily totals remain derived.
 
-Для Nutrition canonical `Brand`, `Ingredient` и `FoodVersion` являются общими
-reference definitions внутри backend после будущего cutover, а персональный
-catalog хранит overlays и private items. До cutover Google Sheets остаётся
-operational authority для текущих catalog records и meals.
+## Evidence
 
-`Meal` всегда фиксирует собственный typed nutrient snapshot. Изменение
-catalog food создаёт новую version и не пересчитывает исторический intake.
-Daily nutrition totals являются производной projection над current meals.
+- Weight mirror, Meal aggregation, Training-derived records/program fields,
+  NL_Engine/Inbox lifecycle, and Self_Healing read-back.
 
-## Основания
+## Decisions
 
-Наблюдаемый двойной путь веса в Weight и Daily_Log; агрегация Meals в Daily_Log; derivation из Training в Personal Records и Program; lifecycle source_text/event/queue/write в NL_Engine и AI_Inbox; контракт repair с read-back в Self_Healing.
+- Authority follows field/record type. The Google Sheets cutover ADR remains
+  unchanged.
 
-## Решения
+## Open questions
 
-Authority моделируется по типу поля или записи, а не назначается листу целиком.
-Для веса `Weight` является authoritative журналом будущей миграции, а
-`Daily_Log.Weight` — legacy projection и reconciliation evidence. Совпадающее
-зеркало не создаёт второй `WeightMeasurement`; расхождение блокирует
-автоматический import этой записи и требует investigation. Принятое ADR о
-cutover с Google Sheets не изменяется.
+- Explicit overrides of daily totals, Training execution linkage from accepted
+  recommendation, and conflict policy across future independent channels.
 
-## Открытые вопросы
+## Related material
 
-- Может ли пользователь намеренно переопределять вычисленные дневные итоги и как представить такой override?
-- Как отдельная команда Training применяет принятую recommendation и связывает
-  новую program version с исходным решением без объявления acceptance
-  выполненным фактом?
-- Какая conflict policy применяется к независимым будущим channels, например
-  manual API и wearable device?
-
-## Связанные материалы
-
-- [Инвентаризация Google Sheets](google-sheets-inventory.md)
-- [ADR о cutover с Google Sheets](../../adr/20260728-keep-google-sheets-authoritative-until-verified-cutover.md)
-- [Целостность и lifecycle](integrity-and-lifecycle.md)
-- [Доменные invariants](../domain/invariants.md)
-- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
+- [Sheets inventory](google-sheets-inventory.md)
+- [Cutover ADR](../../adr/20260728-keep-google-sheets-authoritative-until-verified-cutover.md)
+- [Integrity](integrity-and-lifecycle.md)
+- [Domain invariants](../domain/invariants.md)

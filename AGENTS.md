@@ -65,7 +65,8 @@ Do not edit their internal storage directly.
 - If changing a decision within a year could be expensive, present alternatives
   and trade-offs before approval.
 - Record every architecture decision as a canonical ADR in `docs/adr/`.
-- Write plans, canonical Wiki pages, ADRs, and guides in Russian.
+- Write plans in Russian. Write canonical Wiki pages, ADRs, guides, READMEs,
+  templates, and other agent-facing documentation in English.
 - Preserve technical names, API names, commands, paths, IDs, frontmatter keys,
   and controlled enum values when translation would change the contract.
 
@@ -171,11 +172,17 @@ task explicitly requires it.
 
 ## Language and Communication
 
-Write plans, canonical Wiki pages, ADRs, guides, user-facing statuses,
-comparisons, questions, and decision summaries in Russian. This includes
-implementation plans, operational guides, onboarding guides, runbooks, and
-other human-facing documentation.
+Write all plans in Russian.
 
-Write all `AGENTS.md` files in English.
+Write canonical Wiki pages, ADRs, guides, READMEs, templates, runbooks,
+onboarding material, and other agent-facing or repository documentation in
+English. Write all `AGENTS.md` files in English.
 
-Stable technical identifiers and contract terms may remain in English.
+Communicate with the operator in the operator's language. User-facing statuses,
+comparisons, questions, and decision summaries are currently written in
+Russian.
+
+Preserve stable technical identifiers, paths, commands, API names, frontmatter
+keys, controlled values, and contract terms exactly. Localized application
+strings and realistic test fixtures may use the language required by their
+product scenario; they are not documentation.

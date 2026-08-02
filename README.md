@@ -1,62 +1,64 @@
 # Shape of You
 
-Shape of You — долгосрочный production-проект персонального fitness-ассистента,
-который помогает собирать подтверждённые данные о физическом состоянии,
-питании, тренировках и восстановлении и формировать объяснимые рекомендации.
+Shape of You is a long-term production project for a personal fitness
+assistant. It collects traceable data about physical state, nutrition,
+training, and recovery and turns that evidence into explainable
+recommendations.
 
-## Текущий статус
+## Current status
 
-Проект находится на стадии discovery и архитектурного baseline. Business source
-code, приложения, сервисы, package manifests, Docker-конфигурация и схема БД
-ещё не создавались.
+The repository is a modular monorepo with one NestJS API, PostgreSQL
+persistence, Drizzle migrations, and implemented domain slices for Physical
+State and Goals, Nutrition, Training, Recovery, Coaching, and the foundation of
+asynchronous Intake.
 
-Текущий операционный источник fitness-данных — Google Sheets `Fitness Tracker`.
-Он остаётся авторитетным до проверенного dual-run и явно утверждённого cutover.
+The operational `Fitness Tracker` Google Sheet remains authoritative for real
+fitness data until a verified dual-run and explicitly approved cutover.
 
-## Архитектурная позиция
+## Architecture position
 
-- Проект начинается как modular monorepo.
-- Преждевременная микросервисность запрещена.
-- Межсервисный SQL запрещён.
-- Будущие deployable services общаются только через API или события.
-- Доменные факты моделируются независимо; широкий агрегат `DayRecord` не
-  создаётся.
-- `Daily_Log` рассматривается преимущественно как legacy read model.
-- Текущие пять bounded contexts остаются draft.
+- Start as a modular monorepo.
+- Avoid premature microservices.
+- Forbid cross-service SQL.
+- Future deployable services communicate only through APIs or events.
+- Model domain facts independently; do not create a broad `DayRecord`
+  aggregate.
+- Treat `Daily_Log` primarily as a legacy read model.
+- Retain the current five bounded contexts as a draft logical model, not a
+  service map.
 
-Принятые решения находятся в [ADR](docs/adr/), а текущее проектное знание — в
-[Wiki](docs/wiki/).
+Accepted decisions are in [ADR](docs/adr/), and current project knowledge is
+in the [Wiki](docs/wiki/).
 
-## Документация и authority
+## Documentation and authority
 
-- `docs/wiki/**/*.md` — каноническая Wiki.
-- `docs/adr/**/*.md` — канонические ADR.
-- `.4dt/db.sqlite3` хранит локальное состояние board, memory, source registry и
-  внутренних индексов.
-- Managed Wiki 4DreamTeam не используется как source of truth.
-- Существующие managed Wiki-страницы сохраняются в SQLite как frozen
-  legacy-копия и не используются для discovery, чтения, записи или
-  архитектурных решений.
-- Планы ведутся на русском в `plans/YYYY/MM/`.
-- Завершённые планы переносятся в соответствующий `completed/`.
+- `docs/wiki/**/*.md` is the canonical Wiki.
+- `docs/adr/**/*.md` is the canonical ADR collection.
+- `.4dt/db.sqlite3` stores local board, memory, source registry, and internal
+  index state.
+- The managed 4DreamTeam Wiki is a frozen legacy copy and is not a source of
+  truth.
+- Plans are written in Russian under `plans/YYYY/MM/`.
+- Completed plans move to the corresponding `completed/` directory.
+- All other repository documentation is written in English.
 
-Правила работы агентов определены в [AGENTS.md](AGENTS.md). Руководство по
-документации находится в [docs/README.md](docs/README.md).
+Agent operating rules are defined in [AGENTS.md](AGENTS.md). The documentation
+guide is in [docs/README.md](docs/README.md).
 
-## План развития
+## Delivery sequence
 
-Текущая последовательность:
+The current sequence is:
 
-1. `DEV-027` — discovery, inventory и repository/documentation baseline.
-2. `DEV-023` — следующий согласованный этап.
-3. `DEV-024`.
-4. `DEV-025`.
-5. `DEV-026`.
+1. `DEV-027` — workspace, discovery, inventory, and documentation baseline;
+2. `DEV-023` — backend API and domain extraction, currently in progress;
+3. `DEV-024` — PostgreSQL migration and verified dual-run;
+4. `DEV-025` — Web MVP;
+5. `DEV-026` — mobile client.
 
-Содержательный scope следующих этапов уточняется только через планы,
-Architecture Review и ADR.
+Detailed scope is approved through plans, Architecture Review, and ADRs.
 
-## Разработка
+## Development
 
-Кода приложения пока нет. Не создавайте implementation scaffolding до
-утверждения архитектуры и соответствующего плана.
+Use the workspace package scripts and service-specific instructions in
+`apps/*/AGENTS.md`. Do not implement architecture changes before approval and
+an authorized plan.

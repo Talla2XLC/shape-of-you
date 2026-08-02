@@ -1,7 +1,7 @@
 ---
 id: "domain-intake"
 kind: domain
-title: "Intake запросы и типизированные элементы"
+title: "Intake requests and typed items"
 status: draft
 tags:
   - "domain"
@@ -9,61 +9,43 @@ tags:
   - "queue"
 ---
 
-# Intake запросы и типизированные элементы
+# Intake requests and typed items
 
-## Кратко
+## Summary
 
-Intake принимает пользовательский текст, разбирает его на независимо
-подтверждаемые типизированные элементы и передаёт подтверждённые команды в
-модули — владельцы предметных фактов. Intake координирует обработку, но не
-становится владельцем веса, питания, тренировок или восстановления.
+Intake accepts user text, parses independently confirmable typed items, and
+routes confirmed commands to domain owners. It coordinates but does not own
+weight, nutrition, training, or recovery facts.
 
-## Содержание
+## Content
 
-`IntakeRequest` принадлежит `Person` и хранит исходный текст, locale, timezone,
-typed `SourceReference`, время получения и ключ идемпотентности. Повтор с теми
-же `Person`, source channel и ключом возвращает тот же запрос.
+Person-owned IntakeRequest stores text, locale, timezone, SourceReference,
+receipt time, and Person/source-scoped idempotency. Parser output is ordered
+IntakeItems with independent clarification, confirmation, rejection, routing,
+and terminal states. Request status is derived rather than a second authority.
 
-Parser создаёт упорядоченные `IntakeItem`. Каждый элемент уточняется,
-подтверждается, отклоняется и выполняется независимо от соседних элементов.
-Состояние всего запроса вычисляется из состояния разбора и элементов; отдельная
-изменяемая итоговая «истина» не хранится.
+Only `weight_measurement` is implemented. Proposed fields live in a typed
+relational detail. Confirmation atomically creates/finds WeightMeasurement,
+links it, completes the item, and appends timeline without copying fact fields.
 
-Сейчас реализован один тип элемента — `weight_measurement`. Предложенные поля
-веса хранятся в отдельной реляционной таблице. После подтверждения Intake одной
-транзакцией создаёт или находит `WeightMeasurement`, сохраняет типизированную
-ссылку на него, завершает элемент и добавляет запись в журнал обработки.
-Предметные поля созданного измерения в Intake не копируются.
+PostgreSQL jobs use lease, `SKIP LOCKED`, bounded retry/backoff, and terminal
+failure. Timeline is append-only audit, not event sourcing. No universal
+JSON/JSONB payload or polymorphic fact link exists.
 
-Задания разбора и маршрутизации хранятся в PostgreSQL. Worker использует lease,
-`SKIP LOCKED`, ограниченные повторы и задержку между попытками. Журнал Intake
-добавляется только в конец и служит аудитом, а не источником event-sourcing.
+## Evidence
 
-Универсальные JSON/JSONB payload, полиморфные ссылки `(type, id)` и отдельный
-владелец общих фактов не используются.
+- Intake domain/repository and PostgreSQL integration tests.
 
-## Основания
+## Decisions
 
-- `apps/api/src/domain/intake.ts`.
-- `apps/api/src/storage/intake-repository.ts`.
-- PostgreSQL integration tests в `apps/api/test/intake.integration.test.ts`.
+- [Durable Intake queue ADR](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md).
 
-## Решения
+## Open questions
 
-- [PostgreSQL-очередь и типизированные элементы Intake](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md).
-- [Типизированный provenance и append-only supersession](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md).
+- Production AI parser, remaining typed routes, and queue observability.
 
-## Открытые вопросы
+## Related material
 
-- Выбор и реализация production adapter для AI parser.
-- Последовательное добавление типизированных маршрутов Meal,
-  BodyMeasurementSession, Training и Recovery.
-- Контракт метрик задержки очереди, повторов и terminal failures.
-
-## Связанные материалы
-
-- [API Intake](../api/intake.md)
+- [Intake API](../api/intake.md)
 - [WeightMeasurement](weight-measurement.md)
-- [Предлагаемые bounded contexts](bounded-contexts.md)
 - [Backend runtime](../architecture/backend-runtime.md)
-

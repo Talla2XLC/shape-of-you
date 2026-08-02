@@ -11,115 +11,69 @@ tags:
 
 # Backend migration notes
 
-## Кратко
+## Summary
 
-Schema PostgreSQL описана Drizzle-кодом в `apps/api/src/database/schema.ts`;
-версионируемая SQL migration хранится в `apps/api/drizzle/`.
+PostgreSQL schema is defined in `apps/api/src/database/schema.ts`; versioned
+SQL migrations live in `apps/api/drizzle/`.
 
-## Содержание
-
-Migration flow:
+## Content
 
 ```powershell
 pnpm db:generate
 pnpm db:migrate
 ```
 
-Compiled migration runner входит в API image, но обычный API process его не
-запускает. В local Compose migration выполняет отдельный service `migrate`. Во
-временном staging тот же API image digest запускается как one-shot service
-перед обновлением API. Drizzle ведёт migration journal и применяет только ещё
-не выполненные SQL files.
+The API image contains the migration runner, but the normal API process never
+runs migrations. Local Compose and staging use a one-shot migration service
+from the same image digest. Drizzle journal applies only pending SQL files.
 
-Первая migration создаёт enum `weight_measurement_source` и исходную таблицу
-`weight_measurements`. Вторая migration добавляет `Person`, `User`,
-`PersonAccessGrant`, `SourceReference`, person-scoped dedupe и append-only
-supersession constraints. Существующие synthetic weight rows получают
-фиксированного synthetic `Person`, а прежний JSONB `provenance` переносится в
-private raw snapshot соответствующего `SourceReference`.
+Migration sequence:
 
-Третья migration переименовывает общий enum в `source_channel` без изменения
-значений и добавляет `BodyMeasurementSession`, typed values, `PhysicalGoal`,
-immutable goal versions и criteria. Четвёртая усиливает ownership: composite
-foreign keys запрещают связать goal с current version другого goal или
-`Person`.
+1. initial `weight_measurements` and `weight_measurement_source`;
+2. Person/User/access grants, SourceReference, Person dedupe, supersession, and
+   migration of legacy public provenance to private source snapshot;
+3. rename enum to `source_channel`; add BodyMeasurementSession values and
+   versioned PhysicalGoal;
+4. enforce Goal/Person ownership with composite foreign keys;
+5. layered Nutrition catalog, immutable versions/composition, overlays, staged
+   sources, Meal snapshots/corrections;
+6. versioned Exercise catalog, overlays/staging, programs, sessions,
+   performed exercises/sets, one-active-program and correction constraints;
+7. Recovery providers/connections/consent/devices, typed observations,
+   versioned assessment policies, assessments/evidence;
+8. Coaching policies, typed recommendations, decisions, training adjustments,
+   Recovery/Training evidence;
+9. Intake requests/items, typed Weight detail, lease queue, timeline,
+   relational idempotency, and typed fact link without JSON/JSONB payload.
 
-Пятая migration добавляет layered Nutrition catalog, immutable versions и
-composition, Person-owned food overlays, source-neutral staged catalog
-records, `Meal` snapshots и append-only corrections. Checks разделяют shared
-и private ownership, composite foreign keys фиксируют принадлежность current
-version своему root, а короткие explicit constraint names не превышают предел
-PostgreSQL identifier.
+The central PostgreSQL test applies the full journal to a clean database,
+re-runs idempotently, and upgrades every committed non-empty journal prefix.
+It verifies order, `created_at`, and SQL SHA-256 in
+`drizzle.__drizzle_migrations`. A separate test preserves synthetic legacy
+Weight migration. The chain does not import Google Sheets, backfill operational
+data, or transfer authority.
 
-Шестая migration добавляет shared/private справочник упражнений, его
-неизменяемые версии и персональные настройки, source-neutral staging внешних
-записей, person-owned версии программ, тренировочные сессии, выполненные
-упражнения и отдельные подходы. Composite foreign keys закрепляют версии за
-своими корнями и `Person`, partial unique index допускает не более одной
-активной программы, а append-only constraints защищают историю corrections.
+Never modify an accepted applied migration; generate a new file.
 
-Седьмая migration добавляет Recovery and Readiness: providers, connections,
-consents, devices, typed observations, versioned assessment policies и
-assessments с evidence. Восьмая migration добавляет Coaching: versioned
-policies, person-owned recommendations, решения пользователя, training
-adjustment details и evidence из Recovery и Training.
+## Evidence
 
-Девятая migration добавляет Intake: person-owned requests, независимые typed
-items, отдельную detail table для WeightMeasurement, lease queue и append-only
-timeline. Composite foreign keys закрепляют items и jobs за request, а
-созданное измерение веса связано типизированным foreign key. Идемпотентность
-request, clarification и decision обеспечивается relational constraints;
-универсальных JSON/JSONB payload нет.
+- All SQL files in `apps/api/drizzle/`, migration runner, Drizzle schema, and
+  migration/domain integration tests.
 
-Центральный migration integration test проверяет применение полного journal на
-чистой БД, повторный idempotent запуск и upgrade каждого зафиксированного
-непустого префикса journal до текущего состояния через реальный Drizzle
-migrator. После каждого шага проверяются порядок, `created_at` и SHA-256 SQL
-files в `drizzle.__drizzle_migrations`. Отдельный WeightMeasurement test
-сохраняет проверку переноса synthetic legacy fact. Migration chain не
-импортирует Google Sheets, не выполняет backfill рабочих данных и не меняет
-authority.
+## Decisions
 
-Изменение существующей принятой migration после её применения запрещено.
-Следующее изменение schema создаёт новый migration file.
+- Use codebase-first `drizzle-kit generate` plus `drizzle-orm` migrator.
+- `drizzle-kit push` is not a delivery path.
 
-## Основания
+## Open questions
 
-- `apps/api/drizzle/20260728183725_real_vermin.sql`.
-- `apps/api/drizzle/20260730131840_person_identity_provenance_corrections.sql`.
-- `apps/api/drizzle/20260730185405_physical_state_goals.sql`.
-- `apps/api/drizzle/20260730191405_enforce_goal_ownership.sql`.
-- `apps/api/drizzle/20260731090108_rare_zarda.sql`.
-- `apps/api/drizzle/20260731125414_fixed_pete_wisdom.sql`.
-- `apps/api/drizzle/20260731152211_hesitant_maggott.sql`.
-- `apps/api/drizzle/20260731161722_useful_molten_man.sql`.
-- `apps/api/drizzle/20260802112616_uneven_ben_grimm.sql`.
-- `apps/api/src/database/migrate.ts`.
-- `apps/api/test/migrations.integration.test.ts`.
-- Drizzle schema и domain integration tests.
+- Shared-cluster retention policy. Staging through Coaching was applied and
+  smoke-tested on 2026-08-01; later migration deployment needs its own release
+  evidence.
 
-## Решения
+## Related material
 
-- Используется codebase-first flow `drizzle-kit generate` и
-  `drizzle-orm` migrator.
-- `drizzle-kit push` не является delivery path.
-
-## Открытые вопросы
-
-- Staging migration chain до Coaching включительно применена через
-  автоматизированный migration service и проверена smoke tests 2026-08-01.
-- Согласованная с владельцем общего cluster retention policy.
-
-## Связанные материалы
-
-- [PostgreSQL с Drizzle](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md)
-- [Локальный запуск](../architecture/local-development.md)
-- [WeightMeasurement](../domain/weight-measurement.md)
-- [BodyMeasurementSession](../domain/body-measurement-session.md)
-- [PhysicalGoal](../domain/physical-goal.md)
-- [Nutrition catalog](../domain/nutrition-catalog.md)
-- [Meal](../domain/meal.md)
-- [Training and Performance](../domain/training-and-performance.md)
-- [Intake запросы и типизированные элементы](../domain/intake.md)
-- [Временный deployment](../operations/temporary-vm-deployment.md)
-- [Rollback](../operations/temporary-vm-rollback.md)
+- [PostgreSQL ADR](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md)
+- [Local development](../architecture/local-development.md)
+- [Intake](../domain/intake.md)
+- [Deployment runbook](../operations/temporary-vm-deployment.md)

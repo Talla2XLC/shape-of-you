@@ -1,58 +1,59 @@
 ---
 id: "architecture-migration-strategy"
 kind: architecture
-title: "Стратегия миграции"
+title: "Migration strategy"
 status: draft
 tags:
   - "architecture"
   - "migration"
 ---
 
-# Стратегия миграции
+# Migration strategy
 
-## Кратко
+## Summary
 
-Миграция из Google Sheets в PostgreSQL контролируема, основана на доказательствах, обратима и не передаёт authority до reconciliation и cutover.
+Google Sheets to PostgreSQL migration is controlled, evidence-based,
+reversible, and transfers no authority before reconciliation and cutover.
 
-## Содержание
+## Content
 
-### Место в roadmap
+DEV-023 extracts backend contracts and domain logic. DEV-024 performs migration
+and dual-run. Web/mobile work cannot bypass the stable-backend gate.
 
-DEV-023 извлекает backend-контракты и доменную логику из Google Sheets. DEV-024 выполняет миграцию в PostgreSQL и dual-run. Работы по web и mobile не обходят gate стабильного backend-контракта.
+Required stages:
 
-### Обязательные этапы
+1. Inventory sheets, columns, formulas, scripts, rules, identifiers, and
+   operational workflows.
+2. Map each source element to domain terminology and ownership.
+3. Preserve provenance and raw source identity.
+4. Design and test backfill.
+5. Compare old/new representations through integrity reports.
+6. Run controlled dual-write or another explicitly designed dual-run.
+7. Define measurable cutover criteria and obtain approval.
+8. Transfer authority only after criteria pass.
+9. Preserve rollback and discrepancy-recovery procedures.
 
-1. Инвентаризировать текущие sheets, columns, formulas, scripts, rules, identifiers и operational workflows.
-2. Сопоставить каждый элемент источника с доменными терминами и owning context.
-3. Сохранить provenance и raw source identity.
-4. Спроектировать и проверить backfill.
-5. Сверить старое и новое представления через integrity reports.
-6. Выполнить контролируемый dual-write или другой явно спроектированный dual-run.
-7. Определить измеримые критерии cutover и получить одобрение оператора.
-8. Передать authority только после выполнения критериев.
-9. Сохранить процедуры rollback и восстановления после расхождений.
+Never invent missing data. Ambiguous mapping remains an open question.
+Self-healing begins in dry-run, records before/after, uses an allowlist,
+verifies read-back/integrity, rolls back unverified results, and never
+automatically changes closed days or ambiguous facts.
 
-### Правила безопасности
+## Evidence
 
-Отсутствующие данные не выдумываются. Неоднозначные mappings становятся открытыми вопросами. Self-healing начинается с dry-run, записывает before/after, использует allowlist, проверяет read-back и integrity, откатывает неподтверждённый результат и не изменяет автоматически закрытые дни или неоднозначные факты.
+- Operator migration roadmap and source-of-truth rules.
 
-## Основания
+## Decisions
 
-- Roadmap миграции и правила source of truth, предоставленные оператором.
+- Baseline strategy is accepted; concrete mechanisms require plans and ADRs.
 
-## Решения
+## Open questions
 
-- Стратегия принята на уровне baseline; конкретные механизмы требуют следующих планов и ADR.
+- Complete verified formula/validation/script/workflow catalog, identifier
+  quality, dual-run mechanism, reconciliation tolerances, cutover duration, and
+  rollback window.
 
-## Открытые вопросы
+## Related material
 
-- Полный проверяемый каталог formulas, validation rules, scripts и workflow transitions Google Sheets; текущая инвентаризация сохраняет их только на уровне domain baseline.
-- Стратегия identifiers и качество исторических данных.
-- Dual-write или иной механизм dual-run.
-- Допуски reconciliation, метрики и длительность cutover, окно rollback.
-
-## Связанные материалы
-
-- `data-ownership.md`
-- `../roadmap/overview.md`
-- `../domain/glossary.md`
+- [Data ownership](data-ownership.md)
+- [Roadmap](../roadmap/overview.md)
+- [Glossary](../domain/glossary.md)

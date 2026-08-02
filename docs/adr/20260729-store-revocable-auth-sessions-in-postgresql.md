@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260729-store-revocable-auth-sessions-in-postgresql"
 kind: adr
-title: "Отзываемые authentication sessions в PostgreSQL без обязательного Redis"
+title: "Store revocable authentication sessions in PostgreSQL without mandatory Redis"
 status: accepted
 date: 2026-07-29
 supersedes: []
@@ -13,92 +13,75 @@ tags:
   - "security"
 ---
 
-# Отзываемые authentication sessions в PostgreSQL без обязательного Redis
+# Store revocable authentication sessions in PostgreSQL without mandatory Redis
 
-## Контекст
+## Context
 
-Будущие web- и mobile-клиенты требуют общий authentication lifecycle:
-несколько устройств, rotation, expiration, адресный и глобальный revoke,
-защиту от повторного использования refresh credentials и audit. Текущая
-topology содержит один backend и PostgreSQL, но не Redis.
+Future web and mobile clients need one authentication lifecycle across devices:
+rotation, expiration, targeted/global revoke, refresh-credential reuse
+protection, and audit. The current topology has one backend and PostgreSQL but
+no Redis. Redis sessions would add a second stateful component and couple
+authentication to it before horizontal scale exists.
 
-Server-side sessions в Redis дали бы быстрый ephemeral store, однако добавили
-бы второй stateful component, отдельные backup/availability concerns и
-связанность authentication с Redis до появления горизонтального
-масштабирования.
+## Decision
 
-## Решение
+Store revocable refresh sessions in the backend-owned PostgreSQL database. A
+session records stable `User` identity, refresh credential hash, device/client
+metadata, created/last-used/expiry/revocation times, and rotation lineage. Raw
+refresh credentials are never stored.
 
-Хранить отзываемые refresh sessions в принадлежащей backend PostgreSQL
-database. Session record содержит stable identity `User`, hash refresh
-credential, device/client metadata, created/last-used/expiry/revocation time и
-ссылку rotation lineage. Raw refresh credentials не сохраняются.
+`Person` does not own authentication sessions. `User` access to a `Person` is
+checked separately through `PersonAccessGrant`.
 
-`Person` не владеет authentication session. Доступ `User` к fitness-данным
-конкретного `Person` проверяется отдельно через `PersonAccessGrant`.
+Web sends refresh credentials only in `HttpOnly`, `Secure`, appropriately
+`SameSite` cookies. Mobile uses platform secure storage. A short-lived access
+credential is not long-term session authority.
 
-Web-клиент передаёт refresh credential только через `HttpOnly`, `Secure` и
-подходящую `SameSite` cookie. Mobile-клиент хранит credential в platform secure
-storage. Короткоживущий access credential не используется как долговременная
-session authority.
+Access-token format, lifetime, signing/key rotation, login, recovery, and
+internal versus external OIDC remain separate decisions. This ADR defines
+persistence and revocation, not the full protocol.
 
-Точный access-token format, срок жизни, signing/key rotation, login method,
-account recovery и выбор собственного identity provider либо внешнего OIDC
-остаются отдельным архитектурным решением. Этот ADR определяет persistence и
-revocation boundary, а не полный authentication protocol.
+Do not add Redis for sessions. Reconsider it only for measured distributed rate
+limits, realtime coordination, justified cache workloads, unmet job/outbox SLO,
+or another explicit ephemeral-state driver with an owner.
 
-Redis не добавляется ради sessions. Он рассматривается повторно при
-подтверждённом driver:
+## Considered alternatives
 
-- несколько API instances требуют общего distributed rate limit;
-- realtime connections требуют общего ephemeral coordination;
-- измеренный cache workload оправдывает отдельный cache store;
-- PostgreSQL job/outbox processing не достигает утверждённых SLO;
-- потеря соответствующего ephemeral state допустима и operational ownership
-  Redis определён.
+- Long-lived stateless JWTs: easy verification but weak targeted revocation,
+  device sessions, and safe rotation.
+- Redis sessions: suitable at distributed scale but unjustified now.
+- Encrypted cookie without server state: no datastore but limited immediate
+  revocation and cross-client lifecycle.
+- PostgreSQL refresh sessions: durable transactions, revocation, and audit.
+  Selected.
+- External identity provider: may own part of the lifecycle, but integration
+  must preserve these security properties.
 
-## Рассмотренные альтернативы
+## Consequences
 
-- Полностью stateless долгоживущие JWT: просты для проверки, но затрудняют
-  адресный revoke, device sessions и безопасную rotation.
-- Redis session store: подходит распределённым web sessions, но сейчас не имеет
-  scale driver и создаёт второй stateful dependency.
-- Зашифрованная cookie без server-side record: не требует datastore, но
-  ограничивает немедленный revoke и единый web/mobile lifecycle.
-- PostgreSQL refresh sessions: использует существующую durable transaction
-  boundary и поддерживает revoke и audit. Выбрано.
-- Внешний identity provider: может взять часть lifecycle на себя, но конкретный
-  provider ещё не выбран; его session/token integration должна сохранять
-  принятые security properties.
+- Authentication mutations use ordinary PostgreSQL transactions and backups.
+- Lookup and rotation need indexes, cleanup, and secure hash comparison.
+- Raw tokens, cookies, and credentials are forbidden in logs, audit payloads,
+  and documentation.
+- Incident response can revoke one session, all User sessions, or a rotation
+  family.
+- Redis remains an optional infrastructure adapter, not a domain contract.
+- Authentication must be implemented and reviewed before the real-data gate.
 
-## Последствия
+## Verification
 
-- Authentication mutations участвуют в обычных PostgreSQL transactions и
-  backup policy.
-- Session lookup и rotation требуют индексов, cleanup policy и защищённого
-  сравнения hashes.
-- Raw tokens, cookies и credentials запрещено писать в logs, audit payloads и
-  documentation.
-- Compromise response может отозвать одну session, все sessions `User` или
-  rotation family.
-- Redis остаётся опциональным infrastructure adapter и не проникает в domain
-  contracts.
-- Authentication должен быть реализован и проверен до real-data gate.
+- Integration tests cover creation, rotation, reuse detection, expiration, and
+  revocation.
+- Database stores only credential hashes.
+- HTTPS web smoke verifies cookie flags and trust proxy.
+- Mobile contracts do not require browser cookie semantics.
+- Concurrent rotation cannot create two active children.
+- Security Review approves the protocol before real data.
 
-## Проверка
-
-- Integration tests покрывают login/session creation, rotation, reuse
-  detection, expiration и revoke.
-- Database хранит только credential hash.
-- Web smoke подтверждает cookie flags за HTTPS и корректный trust proxy.
-- Mobile contract не требует browser cookie semantics.
-- Concurrent rotation не создаёт две действующие дочерние sessions.
-- Security Review утверждает protocol до работы с реальными данными.
-
-## Связанные материалы
+## Related material
 
 - [Stateful infrastructure](../wiki/architecture/stateful-infrastructure.md)
-- [Владение данными](../wiki/architecture/data-ownership.md)
+- [Data ownership](../wiki/architecture/data-ownership.md)
 - [Deployment topology](../wiki/architecture/deployment.md)
-- [NestJS с FastifyAdapter и Nuxt](20260729-use-nestjs-with-fastify-and-nuxt.md)
-- [User, Person и права доступа](20260730-separate-user-access-from-person-data-ownership.md)
+- [NestJS with FastifyAdapter and Nuxt](20260729-use-nestjs-with-fastify-and-nuxt.md)
+- [User, Person, and access rights](20260730-separate-user-access-from-person-data-ownership.md)

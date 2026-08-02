@@ -12,55 +12,41 @@ tags:
 
 # BodyMeasurementSession
 
-## Кратко
+## Summary
 
-`BodyMeasurementSession` — принадлежащий `Person` immutable aggregate одного
-сеанса замеров тела с общей provenance, заметкой, optional photo reference и
-набором типизированных значений.
+`BodyMeasurementSession` is an immutable Person-owned aggregate for one body
+measurement event with shared provenance, optional note/media reference, and
+typed values.
 
-## Содержание
+## Content
 
-Aggregate root хранит identity, person ownership, absolute time, derived local
-date, IANA timezone, typed provenance, dedupe, confidence и append-only
-supersession metadata.
+The root stores time, derived local date, timezone, typed source, dedupe,
+confidence, note/media reference, and correction metadata. Child
+`BodyMeasurementValue` stores controlled metric, exact value, and canonical
+unit.
 
-Дочерние `BodyMeasurementValue` принадлежат только session. Первая controlled
-vocabulary содержит `waist`, `chest`, `hips`, `thigh` и `biceps` с canonical
-unit `cm`. В session допускается не более одного значения каждого metric kind.
-Значения хранятся как exact numeric.
+Initial metrics are `waist`, `chest`, `hips`, `thigh`, and `biceps`; values are
+centimeters and use numeric, not floating point. One metric kind appears at most
+once per session.
 
-Correction создаёт полный replacement session с новым UUID и
-`supersedes_id`. Исходный session и values не изменяются. Несколько независимых
-sessions одного `Person` за локальный день разрешены.
+Correction supplies a complete replacement session with a new identity and
+`supersedes_id`. The original and full history remain. Binary media is not
+stored in PostgreSQL.
 
-Photo является nullable reference на private media metadata. Binary content,
-upload workflow и retention policy не входят в текущую вертикаль.
+## Evidence
 
-## Основания
+- Schema, domain code, and Physical State integration tests.
 
-- Заголовки листа `Body`: дата, пять окружностей, photo, notes,
-  `Measurement_ID` и source.
-- [ADR о сеансах замеров и физических целях](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md).
-- [ADR о typed provenance](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md).
+## Decisions
 
-## Решения
+- A source Body row is one aggregate, not independent metric facts or a wide
+  mutable table.
 
-- Сохранять общую provenance исходной строки на session root.
-- Нормализовать metric values в typed child rows внутри одной transaction.
-- Не создавать generic measurements/facts table.
-- Не вводить unique constraint по `localDate`.
+## Open questions
 
-## Открытые вопросы
+- Production media lifecycle before real photo import.
 
-- Нужны ли отдельные bounds для каждого metric вместо общего технического
-  диапазона `1.00..500.00 cm`.
-- Privacy, retention и deletion для notes и photo.
-- Первый operational workflow загрузки private media.
+## Related material
 
-## Связанные материалы
-
-- [PhysicalGoal](physical-goal.md)
-- [WeightMeasurement](weight-measurement.md)
-- [API BodyMeasurementSession](../api/body-measurement-sessions.md)
-- [Source of truth и authority](../data/source-of-truth-and-authority.md)
-- [План Physical State and Goals](../../../plans/2026/07/completed/2026-07-30-physical-state-measurements-and-goals.md)
+- [Body API](../api/body-measurement-sessions.md)
+- [Physical State ADR](../../adr/20260730-model-body-measurement-sessions-and-versioned-physical-goals.md)

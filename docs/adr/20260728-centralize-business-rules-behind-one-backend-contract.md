@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-centralize-business-rules-behind-one-backend-contract"
 kind: adr
-title: "Централизация бизнес-правил за единым backend-контрактом"
+title: "Centralize business rules behind one backend contract"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,32 +11,41 @@ tags:
   - "clients"
 ---
 
-# Централизация бизнес-правил за единым backend-контрактом
+# Centralize business rules behind one backend contract
 
-## Контекст
+## Context
 
-Веб- и мобильный клиенты должны одинаково применять правила безопасности, принятия решений, валидации и миграции. Независимые реализации бизнес-правил на клиентах со временем разойдутся и ухудшат проверяемость поведения.
+Web and mobile clients must apply the same safety, decision, validation, and
+migration rules. Independent client implementations would diverge over time
+and make behavior harder to verify.
 
-## Решение
+## Decision
 
-Предоставить веб- и мобильному клиентам единый backend-контракт, за которым находятся авторитетные бизнес-правила. Клиенты могут реализовывать представление и специфичное для платформы взаимодействие, но не самостоятельные доменные решения.
+Expose one backend contract to web and mobile clients and keep authoritative
+business rules behind it. Clients may own presentation and platform-specific
+interaction, but not independent domain decisions.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Дублировать правила в каждом клиенте: больше автономности в offline-режиме, но высокий риск расхождения и ошибок безопасности.
-- Создать отдельный backend для каждого клиента: специализированные контракты, но преждевременное дублирование до появления разных доменных потребностей.
+- Duplicate rules in every client: improves offline autonomy but creates a
+  high risk of divergence and safety defects.
+- Create a backend for each client: enables specialized contracts but
+  duplicates behavior before distinct domain needs exist.
 
-## Последствия
+## Consequences
 
-Стабильность backend-контракта становится условием выпуска веб- и мобильного клиентов. Offline-поведение, локальное кэширование и клиентские projection предстоит спроектировать отдельно, не создавая альтернативную доменную истину.
+Backend contract stability is a prerequisite for web and mobile releases.
+Offline behavior, local caching, and client projections require separate
+design without creating an alternative domain authority.
 
-Пока не определены стиль API, версионирование, аутентификация, offline-поведение и политика клиентского кэша.
+API style, versioning, authentication, offline behavior, and client cache
+policy remain open.
 
-## Проверка
+## Verification
 
-- Решение и roadmap явно заданы оператором 2026-07-28.
+- The operator explicitly approved the decision and roadmap on 2026-07-28.
 
-## Связанные материалы
+## Related material
 
 - `../wiki/product/scope.md`
 - `../wiki/roadmap/overview.md`

@@ -14,24 +14,24 @@ import { fileURLToPath } from "node:url";
 import { validateDocumentation } from "./validate-docs.mjs";
 
 const wikiSections = [
-  "Кратко",
-  "Содержание",
-  "Основания",
-  "Решения",
-  "Открытые вопросы",
-  "Связанные материалы",
+  "Summary",
+  "Content",
+  "Evidence",
+  "Decisions",
+  "Open questions",
+  "Related material",
 ];
 const adrSections = [
-  "Контекст",
-  "Решение",
-  "Рассмотренные альтернативы",
-  "Последствия",
-  "Проверка",
-  "Связанные материалы",
+  "Context",
+  "Decision",
+  "Considered alternatives",
+  "Consequences",
+  "Verification",
+  "Related material",
 ];
 
 function sections(names) {
-  return names.map((name) => `## ${name}\n\nПроверено.`).join("\n\n");
+  return names.map((name) => `## ${name}\n\nVerified.`).join("\n\n");
 }
 
 function createFixture() {
@@ -44,13 +44,13 @@ function createFixture() {
     `---
 id: wiki-start
 kind: start
-title: "Старт"
+title: "Start"
 status: accepted
 tags:
   - docs
 ---
 
-# Старт
+# Start
 
 ${sections(wikiSections)}
 `,
@@ -60,7 +60,7 @@ ${sections(wikiSections)}
     `---
 id: adr-test
 kind: adr
-title: "Тестовое решение"
+title: "Test decision"
 status: accepted
 date: 2026-07-31
 supersedes: []
@@ -69,7 +69,7 @@ tags:
   - docs
 ---
 
-# Тестовое решение
+# Test decision
 
 ${sections(adrSections)}
 `,
@@ -115,12 +115,12 @@ owner: wiki
       `---
 id: wiki-start
 kind: invalid
-title: "Сломанная"
+title: "Broken"
 status: unknown
 tags:
 ---
 
-# Сломанная
+# Broken
 
 [missing](missing.md)
 [absolute](/tmp/file.md)
@@ -142,47 +142,47 @@ api_key: ${"abcdefghijkl"}
       `---
 id: adr-bad
 kind: wrong
-title: "Сломанное решение"
+title: "Broken decision"
 status: unknown
 tags:
 ---
 
-# Сломанное решение
+# Broken decision
 `,
     );
     const result = validateDocumentation(root);
     assert.ok(
-      result.errors.some((error) => error.includes("уже используется")),
+      result.errors.some((error) => error.includes("is already used")),
     );
     assert.ok(
       result.errors.some((error) =>
-        error.includes("недопустимый kind Wiki"),
+        error.includes("invalid Wiki kind"),
       ),
     );
     assert.ok(
       result.errors.some((error) =>
-        error.includes("отсутствует обязательный раздел"),
+        error.includes("required section"),
       ),
     );
     assert.ok(
       result.errors.some((error) =>
-        error.includes("цель относительной ссылки не существует"),
+        error.includes("relative link target does not exist"),
       ),
     );
     for (const expected of [
-      "локальная ссылка должна быть относительной",
-      "относительная ссылка выходит за пределы репозитория",
-      "ссылка ведёт на запрещённый чувствительный файл",
-      "marker конфликта слияния",
-      "блок private key",
-      "похожее на credentials",
-      "файл не является корректным UTF-8",
-      "ADR должен иметь kind: adr",
-      "недопустимый status ADR",
-      "имя файла ADR должно соответствовать",
-      "отсутствует обязательное поле frontmatter 'date'",
-      "обнаружен Markdown managed Wiki вне канонических путей",
-      "обнаружен frontmatter managed Wiki вне канонических путей",
+      "local link must be relative",
+      "relative link escapes the repository",
+      "link points to a forbidden sensitive file",
+      "merge conflict marker",
+      "private key block",
+      "credential-like value",
+      "file is not valid UTF-8",
+      "ADR must have kind: adr",
+      "invalid ADR status",
+      "ADR filename must match",
+      "required frontmatter field 'date' is missing",
+      "managed Wiki Markdown found outside canonical paths",
+      "managed Wiki frontmatter found outside canonical paths",
     ]) {
       assert.ok(
         result.errors.some((error) => error.includes(expected)),
@@ -199,7 +199,7 @@ tags:
       { encoding: "utf8" },
     );
     assert.equal(cli.status, 1);
-    assert.match(cli.stderr, /Проверка документации завершилась ошибкой/);
+    assert.match(cli.stderr, /Documentation validation failed/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -211,14 +211,14 @@ test("reports missing canonical documentation directories", () => {
     const result = validateDocumentation(root);
     assert.ok(
       result.errors.filter((error) =>
-        error.includes("отсутствует обязательный каталог"),
+        error.includes("required directory is missing"),
       ).length === 3,
     );
     assert.ok(
-      result.errors.some((error) => error.includes("страницы Wiki не найдены")),
+      result.errors.some((error) => error.includes("Wiki pages were not found")),
     );
     assert.ok(
-      result.errors.some((error) => error.includes("файлы ADR не найдены")),
+      result.errors.some((error) => error.includes("ADR files were not found")),
     );
   } finally {
     rmSync(root, { recursive: true, force: true });

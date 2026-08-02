@@ -1,126 +1,76 @@
 ---
 id: "architecture-data-ownership"
 kind: architecture
-title: "Владение данными"
+title: "Data ownership"
 status: draft
 tags:
   - "architecture"
   - "data"
 ---
 
-# Владение данными
+# Data ownership
 
-## Кратко
+## Summary
 
-Google Sheets сейчас является authoritative source рабочих fitness-данных. Будущее владение persistence следует доменным границам и запрещает межсервисный доступ к базам данных.
+Google Sheets remains authoritative for operational fitness data. Future
+persistence follows domain boundaries and forbids cross-service database access.
 
-## Содержание
+## Content
 
-### Текущий authority
+Before verified dual-run, reconciliation, and cutover, backend/PostgreSQL
+representations are not operational authority.
 
-До завершения dual-run с PostgreSQL, reconciliation и cutover Google Sheets остаётся единственным authoritative source рабочих fitness-данных. Представления в backend или PostgreSQL нельзя объявлять авторитетными до прохождения этого gate.
+Each deployable owns its database, Drizzle schema, migrations, seed data,
+credentials, and lifecycle. A shared physical PostgreSQL cluster does not
+change logical ownership. Temporary staging gives API its own
+`shape_of_you_api` database/login but shares cluster failures and upgrades.
 
-### Ограничения будущего владения
+Authentication `User` and domain `Person` are distinct. Fitness facts belong to
+Person; User access requires an active `PersonAccessGrant` role (`owner`,
+`editor`, `viewer`, or `coach`). Client-supplied `person_id` alone grants
+nothing. Until authentication, only explicit synthetic context is allowed.
 
-Каждый deployable service владеет собственной database, схемами Drizzle,
-миграциями, seed-данными, credentials и lifecycle. Общий PostgreSQL cluster
-допустим на локальном и раннем production-этапах, но не отменяет отдельные
-database и credentials каждого владельца.
+Ownership classes:
 
-В утверждённой временной staging topology единственный API использует
-существующий физический PostgreSQL cluster, но получает database
-`shape_of_you_api` и отдельную login role. Это разделяет ownership и доступ,
-но не изолирует API от отказов и upgrades общего cluster.
+- shared immutable reference definitions (brands, ingredients, foods,
+  exercises, providers/models, policies);
+- Person overlays and private items;
+- Person-owned facts, plans, observations, consent, connections,
+  recommendations, decisions, and media metadata;
+- external source records with provider identity/checksum/parser/review
+  lifecycle.
 
-Revocable authentication sessions принадлежат тому же backend и хранятся в его
-PostgreSQL database. Raw credentials не сохраняются.
+Historical facts pin exact shared versions and relevant snapshots. Recovery
+consent governs future collection; revocation is not erasure. Real wearable
+data waits for authenticated retention/erasure.
 
-Authentication identity `User` и domain identity `Person` разделены. `Person`
-является владельцем fitness-данных, а `User` получает явный
-`PersonAccessGrant` с ролью `owner`, `editor`, `viewer` или `coach`. Отношение
-many-to-many позволяет одному аккаунту работать с несколькими людьми и
-нескольким аккаунтам получать контролируемый доступ к одному человеку.
+Media binaries live in private S3-compatible storage; PostgreSQL owns metadata
+and authorization. Object-key knowledge grants no access.
 
-Domain facts, plans, observations, recommendations и media metadata являются
-person-scoped. Переданный клиентом `person_id` сам по себе не предоставляет
-доступ: application layer проверяет authenticated `User` и действующий grant.
-До реализации authentication разрешён только явно настроенный synthetic
-staging/test context без real data.
+Forbidden: cross-service SQL/foreign keys, shared multi-service schemas or
+migrations, and shared database credentials. Cross-boundary data uses APIs,
+events, or owned published read models with explicit freshness contracts.
 
-Переиспользуемые reference definitions не являются fitness facts только из-за
-того, что на них ссылается персональный факт. Общие brands, ingredients,
-foods, exercises, provider/device models и product policy definitions
-версионируются без копирования на каждого `Person`. Person-owned overlays
-содержат только персональные aliases, preferences, availability, visibility и
-ссылки на доступные shared versions. Private custom items имеют явного
-владельца и не публикуются автоматически.
+## Evidence
 
-Facts, observations, plans, targets, connections, consents, recommendations и
-decisions остаются person-scoped и при необходимости закрепляются за точной
-shared version и собственным immutable snapshot. В Nutrition `Meal` сохраняет
-nutrient snapshot; в Training program и performed work не становятся частью
-`ExerciseCatalog`; в Recovery provider model не владеет наблюдениями человека.
+- Operator authority/boundary rules and linked ADRs.
 
-В Recovery согласие разрешает только будущий приём указанных видов данных от
-конкретного person-owned connection. Его отзыв не выдаётся за удаление уже
-сохранённых значений. Retention expiry и authenticated erasure являются
-отдельным privacy lifecycle; до его реализации реальные wearable data в
-backend запрещены.
+## Decisions
 
-Provenance общей catalog record отделён от person-scoped `SourceReference`
-fitness-факта. Внешние catalog records имеют source-specific identity,
-checksum, parser version и review lifecycle; импорт не предоставляет доступ к
-персональным данным.
+- Logical ownership matters more than physical cluster separation.
+- `User` owns authentication; `Person` owns fitness state.
+- Shared definitions, overlays, Person state, and source records have different
+  lifecycles; no universal Person-scoped model.
 
-Binary media принадлежат соответствующим domain records, но физически
-размещаются в private S3-compatible object storage. PostgreSQL хранит media
-identity, ownership, lifecycle и object metadata. Знание object key не даёт
-права доступа.
+## Open questions
 
-### Запрещённая связанность
+- Final context ownership, read-model transport/lifecycle, retention/erasure,
+  encryption/backup/access, media restore, permissions/invitations, actor audit.
 
-- Прямое чтение или запись базы данных другого сервиса.
-- Межсервисный SQL и foreign keys между базами разных владельцев.
-- Общие миграции или общая схема Drizzle, охватывающая несколько сервисов.
-- Общие database credentials.
+## Related material
 
-### Опубликованные данные
-
-Межграничные данные предоставляются через HTTP API, события или явно опубликованные read model. Для read model определяются publisher, контракт, ожидаемая актуальность и владение; она не даёт разрешения обращаться к базе другого владельца.
-
-## Основания
-
-- Правила source of truth и границ данных, предоставленные оператором.
-- ADR по автономности сервисов и межсервисному взаимодействию.
-
-## Решения
-
-- Логическое владение важнее физического разделения PostgreSQL.
-- `User` отвечает за authentication, `Person` — за domain ownership.
-- Multi-access выражается явными grants, а не копированием fitness-данных.
-- Shared reference data, personal overlays и person-owned facts имеют разные
-  ownership и lifecycle; универсальная person-scoped модель для них запрещена.
-
-## Открытые вопросы
-
-- Конкретное соответствие контекстов и владельцев данных.
-- Transport и lifecycle read model.
-- Policies retention, deletion, encryption, backup и access control.
-- Согласованный restore relational metadata и object storage.
-- Точная permission matrix, invitation lifecycle и actor audit.
-
-## Связанные материалы
-
-- `migration-strategy.md`
-- `../domain/bounded-contexts.md`
-- `../../adr/20260728-deployable-service-autonomy.md`
-- `../../adr/20260728-api-or-event-only-cross-service-communication.md`
-- `../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md`
-- `../../adr/20260729-store-revocable-auth-sessions-in-postgresql.md`
-- `../../adr/20260729-use-s3-compatible-object-storage-for-media.md`
-- `../../adr/20260730-separate-user-access-from-person-data-ownership.md`
-- `../../adr/20260730-use-typed-provenance-and-append-only-supersession.md`
-- `../../adr/20260731-use-layered-versioned-nutrition-catalog.md`
-- `../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md`
-- `../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md`
-- `../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md`
+- [Migration strategy](migration-strategy.md)
+- [Bounded contexts](../domain/bounded-contexts.md)
+- [Service autonomy ADR](../../adr/20260728-deployable-service-autonomy.md)
+- [Identity ADR](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
+- [Shared-reference ADR](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)

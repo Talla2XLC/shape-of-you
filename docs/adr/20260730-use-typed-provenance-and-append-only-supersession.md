@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260730-use-typed-provenance-and-append-only-supersession"
 kind: adr
-title: "Типизированный provenance и append-only supersession фактов"
+title: "Use typed provenance and append-only fact supersession"
 status: accepted
 date: 2026-07-30
 supersedes: []
@@ -13,93 +13,84 @@ tags:
   - "supersession"
 ---
 
-# Типизированный provenance и append-only supersession фактов
+# Use typed provenance and append-only fact supersession
 
-## Контекст
+## Context
 
-Текущий `WeightMeasurement` сохраняет `source`, `source_record_id`,
-`dedupe_key` и произвольный публичный JSONB `provenance`. Это достаточно для
-первого synthetic vertical, но не задаёт единый проверяемый контракт для
-Google Sheets import, natural-language intake, wearable observations и ручных
-corrections.
+The first `WeightMeasurement` used `source`, `source_record_id`, `dedupe_key`,
+and public arbitrary JSONB `provenance`. That was sufficient for a synthetic
+slice but not a consistent verifiable contract for Google Sheets import,
+natural-language Intake, wearable observations, and manual corrections.
 
-Живая таблица требует idempotency, source references, append-only chronology и
-явного correction path. Скрытый overwrite уничтожил бы историю, а универсальная
-таблица `facts` ослабила бы типизацию и ownership доменных модулей.
+Operational data needs idempotency, source references, append-only chronology,
+and explicit corrections. Hidden overwrite loses history, while one universal
+`facts` table weakens domain typing and ownership.
 
-## Решение
+## Decision
 
-Каждый domain fact остаётся типизированной неизменяемой записью в таблице
-своего owning module и обязательно содержит `person_id`.
+Every domain fact remains an immutable typed record in its owning module and
+contains `person_id`.
 
-Provenance разделяется на:
+Split provenance into:
 
-- типизированные и индексируемые поля факта: source channel, source reference,
-  source timestamp, ingestion timestamp, confidence и dedupe identity;
-- опциональную ссылку на `SourceReference` с внешней системой, внешним
-  identifier, import batch и checksum;
-- private raw source snapshot в JSONB только там, где он нужен для import,
-  reconciliation или воспроизводимости.
+- typed indexed fact fields: source channel/reference, source timestamp,
+  ingestion timestamp, confidence, and dedupe identity;
+- an optional `SourceReference` link with external system, external identifier,
+  import batch, and checksum;
+- a private raw JSONB source snapshot only when import, reconciliation, or
+  reproducibility requires it.
 
-Raw snapshot не входит в обычный публичный API contract. Поля, участвующие в
-constraints, joins, authorization и частых filters, не прячутся в JSONB.
+Raw snapshots are not in ordinary public API contracts. Constraint, join,
+authorization, and frequent-filter fields never hide in JSONB.
 
-Идемпотентность direct fact creation ограничивается как минимум `person_id`,
-source channel и `dedupe_key`; глобальный `dedupe_key` запрещён. Точный
-idempotency owner для сложного multi-event intake проектируется в Intake, но
-не меняет person-scoped boundary.
+Direct creation idempotency includes at least `person_id`, source channel, and
+`dedupe_key`; globally unique dedupe keys are forbidden. Complex multi-event
+Intake may define a more specific owner without changing Person scope.
 
-Correction создаёт новый immutable fact с новым UUID, `supersedes_id`, причиной
-и собственной provenance. Исходный fact сохраняется. Supersession разрешён
-только внутри одного fact type и одного `Person`; один факт не может иметь две
-конкурирующие подтверждённые замены. Default current-state queries исключают
-superseded facts, а audit/history queries возвращают всю цепочку.
+A correction creates a new immutable fact with a new UUID, `supersedes_id`, a
+reason, and its own provenance. The original remains. Supersession stays within
+one fact type and Person, and one fact cannot have two accepted replacements.
+Current queries exclude superseded facts; history returns the full chain.
 
-Это не event sourcing. Facts остаются текущей domain authority после будущего
-cutover, а timeline и history являются audit/read models.
+This is not event sourcing. Domain facts remain authority after cutover;
+timeline and history are audit/read models.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Mutable overwrite плюс `updated_at`: проще, но уничтожает значение и
-  происхождение до correction. Отклонено.
-- Database trigger и общая history table: скрывает domain semantics от API и
-  усложняет типизированное восстановление. Отклонено.
-- Stable fact ID плюс универсальная revision table: сохраняет identity, но
-  создаёт polymorphic persistence и слабые foreign keys. Отклонено.
-- Универсальная `facts` table с JSONB payload: быстро расширяется, но переносит
-  spreadsheet coupling и ослабляет domain constraints. Отклонено.
-- Новый typed fact с self-reference `supersedes_id`: явно выражает correction,
-  сохраняет историю и остаётся module-owned. Выбрано.
+- Mutable overwrite with `updated_at`: simple but destroys prior value and
+  provenance.
+- Trigger plus common history table: hides domain semantics and complicates
+  typed recovery.
+- Stable fact ID plus universal revision table: preserves identity but creates
+  polymorphic persistence and weak foreign keys.
+- Universal JSONB `facts`: extensible but copies spreadsheet coupling and
+  weakens constraints.
+- New typed fact with `supersedes_id`: explicit, historical, and module-owned.
+  Selected.
 
-## Последствия
+## Consequences
 
-- Existing `WeightMeasurement` contract и unique index требуют совместимой
-  migration до появления реальных данных.
-- Corrections являются отдельными commands/endpoints, а не `PATCH` со скрытым
-  overwrite.
-- Current и history queries имеют разную семантику и должны быть явно
-  документированы.
-- Source snapshots увеличивают storage; retention и redaction задаются по
-  source type.
-- Для evidence, связывающего несколько facts, используются references, а не
-  копирование исходных payloads.
-- Google Sheets остаётся authoritative source до отдельного dual-run и cutover.
+- Existing Weight contracts and indexes need compatible migration before real
+  data.
+- Corrections are explicit commands/endpoints, not hidden `PATCH` overwrite.
+- Current and history query semantics are documented separately.
+- Raw snapshots need source-specific retention and redaction.
+- Multi-fact evidence uses references rather than copied payloads.
+- Google Sheets remains authoritative until dual-run and cutover.
 
-## Проверка
+## Verification
 
-- Concurrent retry создаёт один fact в person/source dedupe scope.
-- Correction сохраняет исходный fact и создаёт проверяемую supersession chain.
-- Database запрещает cross-person и cross-type supersession.
-- Default list не возвращает superseded facts; history возвращает цепочку в
-  стабильном порядке.
-- Public response не раскрывает private raw snapshot.
-- Synthetic parity tests покрывают manual, Google Sheets, import и correction
-  paths без персональных данных.
+- Concurrent retry creates one fact within Person/source dedupe scope.
+- Correction preserves the original and creates a verifiable chain.
+- Database rejects cross-Person and cross-type supersession.
+- Default lists omit superseded facts; history has stable order.
+- Public responses never expose private raw snapshots.
+- Synthetic parity covers manual, Sheets, import, and correction paths.
 
-## Связанные материалы
+## Related material
 
-- [Provenance и identifiers](../wiki/data/provenance-and-identifiers.md)
-- [Целостность и lifecycle](../wiki/data/integrity-and-lifecycle.md)
-- [Независимые факты вместо DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
-- [User, Person и права доступа](20260730-separate-user-access-from-person-data-ownership.md)
-- [План общих fact-контрактов](../../plans/2026/07/completed/2026-07-30-person-identity-provenance-and-corrections.md)
+- [Provenance and identifiers](../wiki/data/provenance-and-identifiers.md)
+- [Integrity and lifecycle](../wiki/data/integrity-and-lifecycle.md)
+- [Independent facts over DayRecord](20260728-prefer-independent-facts-over-broad-day-record.md)
+- [User, Person, and access](20260730-separate-user-access-from-person-data-ownership.md)
+- [Shared fact contracts plan](../../plans/2026/07/completed/2026-07-30-person-identity-provenance-and-corrections.md)

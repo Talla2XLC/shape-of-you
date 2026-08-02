@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-modular-monorepo"
 kind: adr
-title: "Модульный монорепозиторий"
+title: "Use a modular monorepo"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,36 +11,46 @@ tags:
   - "service-boundaries"
 ---
 
-# Модульный монорепозиторий
+# Use a modular monorepo
 
-## Контекст
+## Context
 
-Shape of You — долгосрочный production-проект, начинающийся с пустого репозитория. Единый репозиторий упрощает согласованное архитектурное управление и при этом позволяет сохранять границы deployable units.
+Shape of You is a long-term production project that began with an empty
+repository. One repository simplifies coherent architecture governance while
+still allowing deployable boundaries.
 
-## Решение
+## Decision
 
-Начальная структура системы — modular monorepo. `D:/Projects/shape-of-you` является единственным корнем проекта, workspace и Git-репозитория. Создавать `sources/shape-of-you` или другой вложенный корень проекта запрещено.
+Use a modular monorepo. The current workspace directory is the only project,
+workspace, and Git root. Creating `sources/shape-of-you` or another nested
+project root is forbidden.
 
-Планируемые логические области: `apps/`, `services/`, `packages/`, `infrastructure/`, `docs/adr/` и `plans/`. Каталоги создаются только тогда, когда они нужны для утверждённой работы.
+Logical areas may include `apps/`, `services/`, `packages/`,
+`infrastructure/`, `docs/adr/`, and `plans/`. Create directories only when
+approved work needs them.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Несколько репозиториев усилили бы физическую изоляцию, но создали бы преждевременные накладные расходы на согласование и поставку ещё не определённых компонентов.
-- Неструктурированный единый репозиторий был бы проще в моменте, но не закреплял бы направление зависимостей и будущие deployable boundaries.
+- Multiple repositories: stronger physical isolation but premature delivery
+  and coordination overhead for undefined components.
+- An unstructured repository: simpler initially but does not preserve
+  dependency direction or future deployable boundaries.
 
-## Последствия
+## Consequences
 
-Совместное размещение в репозитории не означает runtime coupling, общую базу данных, общие credentials или обязательную микросервисную архитектуру. Любое будущее архитектурное изменение структуры требует сравнения вариантов и заменяющего ADR.
+Repository colocation does not imply runtime coupling, a shared database,
+shared credentials, or mandatory microservices. A future structural change
+requires alternatives and a superseding ADR.
 
-Пока не определены package manager, build orchestration, окончательная структура каталогов и декомпозиция сервисов.
+Package management, build orchestration, final directory structure, and
+service decomposition remain subject to approved work.
 
-## Проверка
+## Verification
 
-- Решение явно принято оператором 2026-07-28.
-- Бизнес-сервисы и код реализации пока отсутствуют.
-- Пустые каталоги и deployable services этим решением не разрешаются.
+- The operator explicitly accepted the decision on 2026-07-28.
+- Empty directories and speculative deployables are not authorized.
 
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/overview.md`
 - `20260728-deployable-service-autonomy.md`

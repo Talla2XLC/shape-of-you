@@ -1,7 +1,7 @@
 ---
 id: "data-integrity-and-lifecycle"
 kind: data
-title: "Целостность и lifecycle"
+title: "Integrity and lifecycle"
 status: draft
 tags:
   - "data"
@@ -9,35 +9,42 @@ tags:
   - "lifecycle"
 ---
 
-# Целостность и lifecycle
+# Integrity and lifecycle
 
-## Кратко
+## Summary
 
-Контракт lifecycle и целостности, извлечённый из наблюдаемых statuses, formulas, правил deduplication, требований read-back и append-only соглашений audit.
+Lifecycle/integrity contract derived from observed statuses, formulas,
+deduplication, read-back, and append-only audit behavior.
 
-## Содержание
+## Content
 
-Наблюдаемые workflows используют явные statuses, idempotency keys, validation, проверки read-back и append-only audit entries. Эти механизмы следует реализовывать как небольшие state machines внутри owning modules, а не как отдельные сервисы.
+Workflows use explicit states, idempotency keys, validation, read-back, and
+append-only audit entries. Implement these as small state machines in owning
+modules, not separate services.
 
-День в локальном времени пользователя может иметь lifecycle open/closed, но закрытие не должно делать объект календарной даты владельцем фактов питания, тренировок, физического состояния, восстановления или coaching. Corrections остаются явными и сохраняют provenance.
+A Person-local day may be open/closed, but closure cannot own Nutrition,
+Training, Physical State, Recovery, or Coaching facts. Corrections remain
+explicit and provenance-preserving.
 
-## Основания
+## Evidence
 
-Валидация Daily_Log; схема NL_Engine; контракт очереди AI_Inbox; контракт выполнения Self_Healing; append-only контракт AI_Timeline; примеры правил AI_Insights; hard stops Load_Risk; gates Weight_Autopilot; порядок приоритетов Coach_Planner; наблюдаемая ошибка projection в Dashboard.
+- Daily_Log validation; NL_Engine; AI_Inbox; Self_Healing; AI_Timeline;
+  AI_Insights; Load_Risk; Weight_Autopilot; Coach_Planner; Dashboard projection
+  discrepancy.
 
-## Решения
+## Decisions
 
-Draft-рекомендация: явно моделировать state machines lifecycle внутри модулей, но не выделять каждый workflow в deployable service. Критичные gates здоровья и безопасности, а также защита закрытого дня требуют отдельного утверждения до реализации.
+- Model lifecycle inside modules. Health/safety gates and closed-day protection
+  need explicit approval before implementation.
 
-## Открытые вопросы
+## Open questions
 
-- Разрешено ли повторно открывать Closed day и кто это утверждает?
-- Какова retention policy для `source_text`, фотографий и device evidence?
-- Какие ошибки требуют уведомления пользователя, а какие — retry?
-- Какая transaction boundary ожидается, когда во время работы через таблицу одно событие обновляет и Weight, и Daily_Log?
+- Reopening closed days, retention of source text/photos/device evidence,
+  user-visible versus retryable errors, and legacy multi-sheet transaction
+  semantics.
 
-## Связанные материалы
+## Related material
 
-- [Source of truth и authority](source-of-truth-and-authority.md)
-- [Доменные invariants](../domain/invariants.md)
-- [Открытые вопросы моделирования](../domain/open-modeling-questions.md)
+- [Authority](source-of-truth-and-authority.md)
+- [Domain invariants](../domain/invariants.md)
+- [Open questions](../domain/open-modeling-questions.md)

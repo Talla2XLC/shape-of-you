@@ -1,7 +1,7 @@
 ---
 id: "data-google-sheets-inventory"
 kind: data
-title: "Инвентаризация Google Sheets"
+title: "Google Sheets inventory"
 status: draft
 tags:
   - "data"
@@ -9,67 +9,60 @@ tags:
   - "google-sheets"
 ---
 
-# Инвентаризация Google Sheets
+# Google Sheets inventory
 
-## Кратко
+## Summary
 
-Инвентаризация таблицы `Fitness Tracker` на основе наблюдаемых данных для
-DEV-023. Таблица остаётся текущим operational authority до проверенного
-dual-run и cutover. Страница описывает структуру источника; значимое поведение
-детализировано в отдельном behavior catalog. Обе страницы не предписывают
-схему базы данных.
+Observed inventory of `Fitness Tracker` for DEV-023. The workbook remains
+operational authority until verified dual-run/cutover. This page describes the
+source, not a target database schema.
 
-## Содержание
+## Content
 
-Наблюдаемые 26 листов образуют пять групп свидетельств:
+The 26 observed sheets fall into five evidence groups:
 
-- configuration и projections: Settings, Dashboard, Daily_Log;
-- каталоги питания и intake: Foods, Ingredients, Brands, Food_Ingredients, Meals;
-- тренировки и физическое состояние: Training, Program, Weight, Personal Records, Body;
-- product governance: Changelog, Roadmap, Ideas, Rules, Decisions;
-- workflows ввода, audit, repair и coaching: NL_Engine, AI_Inbox, Self_Healing, AI_Timeline, AI_Insights, Load_Risk, Weight_Autopilot, Coach_Planner.
+- configuration/projections: Settings, Dashboard, Daily_Log;
+- Nutrition catalog/intake: Foods, Ingredients, Brands, Food_Ingredients,
+  Meals;
+- Training/Physical State: Training, Program, Weight, Personal Records, Body;
+- project governance: Changelog, Roadmap, Ideas, Rules, Decisions;
+- input/audit/repair/coaching workflows: NL_Engine, AI_Inbox, Self_Healing,
+  AI_Timeline, AI_Insights, Load_Risk, Weight_Autopilot, Coach_Planner.
 
-Workbook смешивает исходные факты, policy, workflow state и projections. Поэтому границы листов являются свидетельствами для discovery, но не будущими границами агрегатов, таблиц, модулей или сервисов. `Daily_Log` преимущественно является legacy projection над независимо принадлежащими фактами.
+Sheets mix facts, policies, workflow state, and projections. Sheet boundaries
+are discovery evidence, not aggregate/table/module/service boundaries.
+`Daily_Log` is primarily a legacy projection.
 
-### Operational source pointer
-
-До завершения verified dual-run и cutover authoritative operational workbook:
+Authoritative workbook pointer:
 
 - title: `Fitness Tracker`;
 - spreadsheet ID: `1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik`;
-- direct URL:
-  `https://docs.google.com/spreadsheets/d/1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik/edit`;
+- URL: `https://docs.google.com/spreadsheets/d/1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik/edit`;
 - locale: `ru_RU`;
 - timezone: `Europe/Moscow`.
 
-Для read-only Google Sheets connector calls следует использовать exact URL или
-spreadsheet ID. Поиск Drive по title может не вернуть workbook и не является
-проверкой отсутствия доступа. Metadata по прямой ссылке должна читаться до
-range reads. Workbook остаётся read-only для агентов без отдельного явного
-разрешения оператора на конкретную write operation.
+Connector reads use exact URL/ID. Failed Drive title search does not prove
+missing access. Read metadata before ranges. Workbook is read-only unless the
+operator authorizes a specific write.
 
-## Основания
+## Evidence
 
-Свидетельства собраны из metadata таблицы и ограниченного чтения всех 26 наблюдаемых листов. Заголовки прочитаны для Settings, Dashboard, Daily_Log, Foods, Ingredients, Brands, Food_Ingredients, Meals, Training, Program, Weight, Personal Records, Body, Changelog, Roadmap, Ideas, Rules, Decisions, NL_Engine, AI_Inbox, Self_Healing, AI_Timeline, AI_Insights, Load_Risk, Weight_Autopilot и Coach_Planner. Чтение формул подтвердило основные зависимости projections. Персональные fitness-значения на страницу не копировались.
+- Metadata, headers for all 26 sheets, limited range/formula reads, and no
+  copied personal values.
 
-## Решения
+## Decisions
 
-Extraction baseline остаётся draft. Workbook рассматривается как единая текущая operational system с доменными модулями и adapters, а не как один сервис или одна таблица базы данных на каждый лист. Принятые ограничения моделирования независимыми фактами и пятью контекстами зафиксированы в ADR.
+- Treat workbook as one operational system with domain modules/adapters, not a
+  service or target table per sheet.
 
-## Открытые вопросы
+## Open questions
 
-- Точные privacy и retention rules для body photo и notes до real-data import.
-- Может ли один приготовленный продукт содержать один ингредиент несколько раз для разных этапов приготовления?
-- Какие правила в `Rules` являются business policy, а какие относятся к операциям и governance таблицы?
-- Что является authoritative exercise catalog? Отдельный справочный лист упражнений не обнаружен.
-- Какие sheet-level statuses являются controlled vocabularies, а какие — свободным текстом?
-- Requiredness полных строк частично остаётся неизвестной: ограниченная проверка не доказывает все исторические состояния валидации.
+- Body-photo/note privacy; repeated recipe ingredients; Rules classification;
+  authoritative exercise catalog; status vocabularies; historical requiredness.
 
-## Связанные материалы
+## Related material
 
-- [Source of truth и authority](source-of-truth-and-authority.md)
-- [Каталог поведения Google Sheets](google-sheets-behavior-catalog.md)
-- [Provenance и identifiers](provenance-and-identifiers.md)
-- [Целостность и lifecycle](integrity-and-lifecycle.md)
-- [Карта извлечения домена](../domain/domain-extraction-map.md)
-- [ADR о cutover с Google Sheets](../../adr/20260728-keep-google-sheets-authoritative-until-verified-cutover.md)
+- [Authority](source-of-truth-and-authority.md)
+- [Behavior catalog](google-sheets-behavior-catalog.md)
+- [Provenance](provenance-and-identifiers.md)
+- [Cutover ADR](../../adr/20260728-keep-google-sheets-authoritative-until-verified-cutover.md)

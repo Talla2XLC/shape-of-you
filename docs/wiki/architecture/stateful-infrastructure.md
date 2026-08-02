@@ -11,86 +11,48 @@ tags:
 
 # Stateful infrastructure
 
-## Кратко
+## Summary
 
-Текущий backend использует PostgreSQL как единственный stateful runtime
-component. Утверждён эволюционный baseline: PostgreSQL также хранит revocable
-authentication sessions и будущий transactional outbox, пользовательские media
-хранятся в private S3-compatible object storage, а Redis и Kafka не вводятся
-без измеримого driver.
+PostgreSQL is the only current stateful runtime component. Private
+S3-compatible media storage is accepted for future media. Redis and Kafka need
+measured drivers.
 
-## Содержание
+## Content
 
-### PostgreSQL
+- **PostgreSQL:** relational domain data, policy versions, provenance,
+  revocable refresh sessions, audit metadata, and durable Intake/outbox jobs.
+  Session persistence does not choose an identity provider or token protocol.
+- **Object storage:** future meal/body media in private S3-compatible storage;
+  PostgreSQL holds identity, owner, key, checksum, lifecycle, and association.
+  No storage is deployed before a media use case; provider and MinIO are not
+  approved.
+- **Redis:** absent. Reconsider for distributed rate limiting, realtime
+  coordination, measured caching, or job throughput beyond PostgreSQL. Cache
+  and ephemeral state are never authority.
+- **Kafka:** absent. Events remain transport-neutral and atomic publication
+  begins in PostgreSQL. Reconsider for independent consumers, replay,
+  throughput, or external streaming.
+- **Not required:** Elasticsearch/OpenSearch, TimescaleDB, and full event
+  sourcing without measured gaps.
 
-PostgreSQL владеет relational domain data, policy versions, provenance,
-revocable refresh sessions, audit metadata и outbox records. Outbox tables
-создаются только вместе с первым durable asynchronous workflow.
+## Evidence
 
-Session persistence в PostgreSQL не утверждает конкретный login или identity
-provider. Access-token protocol, account recovery и OIDC остаются отдельным
-security decision.
+- Current one-API/PostgreSQL topology and behavior audit.
 
-### Object storage
+## Decisions
 
-Фотографии meals, body measurements и другие binary media размещаются в
-private S3-compatible storage. PostgreSQL хранит media identity, ownership,
-object key, checksum, lifecycle и domain association.
+- [PostgreSQL sessions](../../adr/20260729-store-revocable-auth-sessions-in-postgresql.md)
+- [S3-compatible media](../../adr/20260729-use-s3-compatible-object-storage-for-media.md)
+- [PostgreSQL outbox before Kafka](../../adr/20260729-use-postgresql-outbox-before-kafka.md)
 
-Object storage не разворачивается до первого media use case. Production vendor
-не выбран. MinIO на временной VM не входит в утверждённую topology.
+## Open questions
 
-### Redis
+- Identity provider/token protocol; object-storage provider/retention/erasure;
+  thresholds for Redis/Kafka/search; coordinated RPO/RTO.
 
-Redis отсутствует. Кандидаты для повторного review:
+## Related material
 
-- общий rate limit нескольких API instances;
-- ephemeral coordination realtime connections;
-- измеренный cache workload;
-- job throughput, превышающий проверенные возможности PostgreSQL worker.
-
-Cache и ephemeral state не являются authority. Redis не используется для
-долговременных domain facts или единственной копии sessions.
-
-### Kafka
-
-Kafka отсутствует. Domain events проектируются transport-neutral, а атомарная
-публикация начинается с PostgreSQL outbox. Kafka рассматривается при нескольких
-independent consumers, stream replay, измеренном throughput или external
-streaming integration.
-
-### Не требуются сейчас
-
-- Elasticsearch/OpenSearch: начальный search покрывается возможностями
-  PostgreSQL; отдельный engine требует измеримого gap.
-- TimescaleDB: текущий объём health и fitness observations не обосновывает
-  отдельную time-series extension.
-- Full event sourcing: domain tables остаются authority.
-
-## Основания
-
-Behavior audit Google Sheets подтвердил media references, независимо
-принадлежащие facts, audit и asynchronous workflow candidates. Текущая
-deployment topology содержит один API и PostgreSQL. Оператор утвердил
-PostgreSQL sessions, S3-compatible media storage и driver-based появление
-Redis.
-
-## Решения
-
-- [Authentication sessions в PostgreSQL](../../adr/20260729-store-revocable-auth-sessions-in-postgresql.md).
-- [S3-compatible storage для media](../../adr/20260729-use-s3-compatible-object-storage-for-media.md).
-- [PostgreSQL outbox до Kafka](../../adr/20260729-use-postgresql-outbox-before-kafka.md).
-
-## Открытые вопросы
-
-- Identity provider, login methods, access-token format и account recovery.
-- Object-storage vendor, region, encryption, retention и deletion workflow.
-- Измеримые thresholds для Redis, Kafka и search infrastructure.
-- RPO/RTO и согласованный restore PostgreSQL с object storage.
-
-## Связанные материалы
-
-- [Обзор архитектуры](overview.md)
-- [Владение данными](data-ownership.md)
-- [Атрибуты качества](quality-attributes.md)
-- [Deployment topology](deployment.md)
+- [Architecture overview](overview.md)
+- [Data ownership](data-ownership.md)
+- [Quality attributes](quality-attributes.md)
+- [Deployment](deployment.md)

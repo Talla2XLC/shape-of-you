@@ -1,7 +1,7 @@
 ---
 id: "domain-domain-extraction-map"
 kind: domain
-title: "Карта извлечения домена"
+title: "Domain extraction map"
 status: draft
 tags:
   - "domain"
@@ -9,50 +9,51 @@ tags:
   - "google-sheets"
 ---
 
-# Карта извлечения домена
+# Domain extraction map
 
-## Кратко
+## Summary
 
-Draft-карта от механизмов таблицы к доменным понятиям. Она отделяет основные fitness-факты и policies от projections, integration workflows и project governance. Это свидетельство для обсуждения архитектуры, а не утверждённая финальная модель.
+Draft mapping from spreadsheet mechanisms to domain concepts. It separates
+facts/policies from projections, integration workflows, and governance.
 
-## Содержание
+## Content
 
-| Область таблицы | Доменная интерпретация | Форма authority |
+| Spreadsheet area | Domain interpretation | Authority shape |
 | --- | --- | --- |
-| Weight, Body, goals | Physical State and Goals | Независимые измерения и факты целей |
-| Foods, Ingredients, Brands, Food_Ingredients, Meals | Nutrition | Общий версионируемый catalog, person-owned overlays, факты intake и immutable snapshots |
-| Training, Program, Personal Records | Training and Performance | Версионируемые prescriptions, sessions, выполненная работа и derived records |
-| Wearable и recovery evidence | Recovery and Readiness | Observations и readiness assessments с сохранением provenance |
-| AI Insights, Load Risk, Weight Autopilot, Coach Planner | Coaching and Decision Support | Рекомендации и решения со ссылками на свидетельства |
-| Daily_Log и Dashboard | Межконтекстные projections | Legacy read models, а не aggregate roots |
+| Weight, Body, goals | Physical State and Goals | Independent measurements and versioned goals |
+| Foods, Ingredients, Brands, Food_Ingredients, Meals | Nutrition | Shared versioned catalog, Person overlays, Meal snapshots |
+| Training, Program, Personal Records | Training and Performance | Versioned prescriptions, sessions/sets, derived records |
+| Wearable/recovery evidence | Recovery and Readiness | Typed observations and evidence-pinned assessments |
+| AI Insights, Load Risk, Weight Autopilot, Coach Planner | Coaching | Evidence-linked recommendations and decisions |
+| Daily_Log, Dashboard | Cross-context projections | Legacy read models, not aggregate roots |
 
-Intake, reconciliation, timeline и self-healing — вспомогательные технические capabilities. Они направляют или сравнивают факты, но не становятся bounded contexts только потому, что workbook выделяет для них отдельные листы.
+Intake, reconciliation, timeline, and self-healing are supporting capabilities
+that route or compare facts. They are not contexts because sheets exist for
+them.
 
-## Основания
+Use five draft contexts inside the modular backend, explicit adapters, and read
+models. Governance remains outside runtime domain.
 
-Классификация и зависимости описаны в `../data/google-sheets-inventory.md`, особенно cross-sheet formulas и контракты AI workflows.
+Nutrition catalog is shared reference knowledge, not per-Person copies or one
+provider cache. Source records stage and explicitly match before creating
+canonical revisions. Meal pins a catalog version and its own nutrient snapshot.
 
-## Решения
+## Evidence
 
-Использовать пять сохранённых draft bounded contexts внутри первоначально modular backend, а также явные adapters и read models. Governance остаётся вне runtime domain. Это логическая модель, а не решение о service topology.
+- [Google Sheets inventory](../data/google-sheets-inventory.md) and workflow
+  contracts.
 
-Nutrition catalog является общим reference knowledge, а не копией на каждого
-`Person` и не adapter cache одного provider. External source records проходят
-staging и explicit matching, после чего могут создавать новую canonical
-revision. Person-owned `Meal` ссылается на точную catalog version и сохраняет
-собственный nutrient snapshot.
+## Decisions
 
-## Открытые вопросы
+- Logical extraction does not decide service topology.
 
-- Какой точный lifecycle и invariants обосновывают узкий кандидат `DayClosure` или `JournalDay`?
-- Должен ли GoalProfile принадлежать Coaching или отдельному модулю Profile?
-- Какие конкретные внешние nutrition sources допустимы по качеству, license,
-  attribution и rate limits?
-- Требуют ли health-device observations отдельной границы Health Data из-за privacy и consent?
+## Open questions
 
-## Связанные материалы
+- Day lifecycle; remaining GoalProfile placement; approved external Nutrition
+  sources; whether health-device privacy ever requires a separate boundary.
 
-- [Кандидаты в агрегаты](candidate-aggregates.md)
+## Related material
+
+- [Candidate aggregates](candidate-aggregates.md)
 - [Invariants](invariants.md)
-- [Source of truth и authority](../data/source-of-truth-and-authority.md)
-- [Слоистый Nutrition catalog](../../adr/20260731-use-layered-versioned-nutrition-catalog.md)
+- [Source authority](../data/source-of-truth-and-authority.md)

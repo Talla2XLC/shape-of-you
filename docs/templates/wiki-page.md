@@ -1,34 +1,34 @@
 ---
 id: unique-stable-id
 kind: start
-title: "Человекочитаемый заголовок"
+title: "Human-readable title"
 status: draft
 tags:
   - example
 ---
 
-# Человекочитаемый заголовок
+# Human-readable title
 
-## Кратко
+## Summary
 
-Кратко сформулируйте назначение страницы.
+Briefly state the purpose of the page.
 
-## Содержание
+## Content
 
-Основное содержание.
+Main content.
 
-## Основания
+## Evidence
 
-- Укажите подтверждённые источники либо явно напишите «Не применимо».
+- List verified sources or explicitly write `Not applicable`.
 
-## Решения
+## Decisions
 
-- Сошлитесь на ADR либо явно напишите «Не применимо».
+- Link to an ADR or explicitly write `Not applicable`.
 
-## Открытые вопросы
+## Open questions
 
-- Перечислите открытые вопросы либо явно напишите «Нет».
+- List open questions or explicitly write `None`.
 
-## Связанные материалы
+## Related material
 
-- Добавьте относительные Markdown-ссылки либо явно напишите «Нет».
+- Add relative Markdown links or explicitly write `None`.

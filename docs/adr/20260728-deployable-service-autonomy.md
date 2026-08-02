@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-deployable-service-autonomy"
 kind: adr
-title: "Автономность каждого deployable service"
+title: "Require autonomy for every deployable service"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,37 +11,46 @@ tags:
   - "service-boundaries"
 ---
 
-# Автономность каждого deployable service
+# Require autonomy for every deployable service
 
-## Контекст
+## Context
 
-Совместное размещение в монорепозитории не должно размывать владение сервисом, направление зависимостей и операционную изоляцию.
+Monorepo colocation must not blur service ownership, dependency direction, or
+operational isolation.
 
-## Решение
+## Decision
 
-Каждый deployable service должен иметь собственные `Dockerfile`, `package.json`, `AGENTS.md`, границу базы данных, схемы Drizzle, миграции, seed-данные, credentials и integration tests.
+Every deployable service has its own `Dockerfile`, `package.json`, `AGENTS.md`,
+database boundary, Drizzle schema, migrations, seed data, credentials, and
+integration tests.
 
-Deployable service не должен импортировать другой сервис через пакет или workspace dependency. Общие зависимости допускаются только через явно выделенные shared packages.
+A deployable service must not import another service through a package or
+workspace dependency. Reuse is allowed only through explicit shared packages.
+These constraints apply when services are created and do not authorize
+premature service decomposition.
 
-Это обязательные ограничения при создании сервисов, но они не требуют создавать сервисы до завершения анализа bounded contexts.
+## Considered alternatives
 
-## Рассмотренные альтернативы
+- Shared build and persistence configuration: fewer files initially but
+  obscures ownership and independent delivery.
+- Direct package dependencies between services: convenient reuse but makes
+  service boundaries nominal.
 
-- Общие build- и persistence-настройки сократили бы начальный объём файлов, но скрыли бы границы владения и затруднили независимую поставку.
-- Прямые package dependencies между сервисами упростили бы повторное использование кода, но превратили бы сервисные границы в формальность.
+## Consequences
 
-## Последствия
+Each deployable can be built, configured, migrated, tested, and released
+within its own boundary. CI may use the monorepo as build context, but the
+runtime artifact contains only the deployable and its transitive dependencies.
 
-Каждый deployable можно собирать, настраивать, мигрировать, тестировать и выпускать в пределах его собственной границы. Полная копия монорепозитория может использоваться как build context в CI, но не является runtime artifact. Runtime artifact содержит только deployable и его транзитивные зависимости.
+The service template, required metadata, and credential mechanism require
+separate design before another service is created.
 
-До создания первого сервиса необходимо отдельно спроектировать шаблон сервиса и обязательные metadata. Конкретный механизм управления credentials также пока не определён.
+## Verification
 
-## Проверка
+- The operator explicitly set these requirements on 2026-07-28.
+- No deployable is created without satisfying them.
 
-- Требования явно заданы оператором 2026-07-28.
-- Deployable services пока не созданы.
-
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/overview.md`
 - `20260728-modular-monorepo.md`

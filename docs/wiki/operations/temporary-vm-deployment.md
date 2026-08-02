@@ -1,7 +1,7 @@
 ---
 id: "operations-temporary-vm-deployment"
 kind: architecture
-title: "Временный deployment на VM"
+title: "Temporary VM deployment"
 status: draft
 tags:
   - "deployment"
@@ -9,33 +9,28 @@ tags:
   - "staging"
 ---
 
-# Временный deployment на VM
+# Temporary VM deployment
 
-## Кратко
+## Summary
 
-Runbook описывает подготовленный, но ещё не выполненный deployment Shape of
-You на общей VM. Все команды изменения VM, PostgreSQL и GitHub выполняются
-только после отдельных approvals.
+Runbook for shared-VM Shape of You staging. VM, PostgreSQL, GitHub, migration,
+and deployment mutations always require the corresponding explicit approval.
 
-## Содержание
+## Content
 
-### Предварительные условия
+### Preconditions
 
-- В Git существует commit, прошедший workflow `CI`.
-- API и edge images опубликованы в GHCR и выбраны по полным digests.
-- GitHub Environment `staging` содержит required secrets и variables.
-- На VM установлены Docker Engine, Compose plugin и `curl`.
-- Host port `3001` свободен либо принадлежит текущему Compose project.
-- Созданы database/login role `shape_of_you_api`.
-- Создан отдельный password-locked пользователь `shape-deploy` без группы
-  `docker`; root-owned wrapper и `sudoers` policy устанавливаются оператором.
-- `/etc/shape-of-you/staging/api.env` содержит только runtime secrets и имеет
-  owner `root:root`, mode `0600`.
-- Согласован backup checkpoint общего PostgreSQL cluster.
+- Commit passed `CI`; API/edge GHCR images are selected by full digest.
+- Environment `staging` contains required secrets/variables.
+- VM has Docker Engine, Compose plugin, and `curl`; port `3001` is free or
+  owned by this Compose project.
+- Database/login `shape_of_you_api` exists.
+- Password-locked `shape-deploy` exists outside Docker group; operator installed
+  root wrapper and sudoers rule.
+- `/etc/shape-of-you/staging/api.env` is `root:root` mode `0600`.
+- Shared-cluster backup checkpoint is agreed.
 
-### GitHub Environment
-
-Secrets:
+Environment secrets:
 
 ```text
 STAGING_DATABASE_URL
@@ -52,59 +47,46 @@ STAGING_VM_PORT
 GHCR_NAMESPACE
 ```
 
-`STAGING_DATABASE_URL` имеет форму:
+Database URL shape:
 
 ```text
 postgresql://shape_of_you_api:<secret>@host.docker.internal:5431/shape_of_you_api
 ```
 
-Значение не выводится в logs и не записывается в release manifest.
+Never log or store the value in release manifests.
 
-### Publication
+### Publication and deployment
 
-`publish-staging.yml` после quality gates публикует:
+`publish-staging.yml` publishes SHA tags for API/edge and records provenance/
+SBOM; digest is deployment authority. After quality and publication for a
+`main` push, it automatically invokes `deploy-staging.yml`. Manual targeted
+retry supplies full commit SHA, API/edge digests, schema backward-compatibility
+flag, and write-smoke choice.
 
-```text
-ghcr.io/<namespace>/shape-of-you-api:sha-<commit>
-ghcr.io/<namespace>/shape-of-you-edge:sha-<commit>
-```
-
-Deployment authority — digest, а не tag. Workflow сохраняет provenance и SBOM.
-
-### Deployment
-
-`publish-staging.yml` автоматически запускает `deploy-staging.yml` после
-quality и публикации обоих images для каждого push в `main`. Ручной запуск
-`deploy-staging.yml` сохраняется для targeted retry и требует:
-
-- полный commit SHA;
-- API digest;
-- edge digest;
-- явное значение schema backward compatibility;
-- решение, выполнять ли synthetic write smoke.
-
-Job использует Environment `staging` и через SSH stdin вызывает единственный
-root-owned wrapper без аргументов:
+The Environment job invokes only:
 
 ```sh
 sudo -n /usr/local/sbin/shape-of-you-staging-deploy
 ```
 
-Wrapper принимает только allowlisted values, создаёт runtime env, выполняет
-GHCR login во временном `DOCKER_CONFIG`, проверяет `CONTROL_SHA` как текущий
-`origin/main` и запускает script из root-owned checkout
-`/opt/shape-of-you/staging/control/deploy/staging/scripts/deploy.sh`. GitHub Actions не
-передаёт на VM Compose file, scripts или произвольную shell-команду. Успешный
-release становится `current`, предыдущий — `previous`.
+Wrapper accepts allowlisted stdin, creates runtime env, uses temporary
+`DOCKER_CONFIG`, verifies `CONTROL_SHA` against current `origin/main`, and runs
+root-owned
+`/opt/shape-of-you/staging/control/deploy/staging/scripts/deploy.sh`.
+CI sends no Compose, scripts, or arbitrary shell. Successful release updates
+`current` and `previous`.
 
-Перед первым запуском и после изменения самого root wrapper оператор из проверенного checkout запускает
-`sudo sh deploy/staging/system/install-root-owned-assets.sh`. Скрипт не
-выполняется GitHub Actions и устанавливает wrapper и `sudoers` как `root:root`.
-Обычное обновление Compose/scripts после этого не требует SSH-copy на VM.
+After wrapper changes, operator installs from a verified checkout:
 
-### Остановка
+```sh
+sudo sh deploy/staging/system/install-root-owned-assets.sh
+```
 
-Остановка относится к изменению VM и требует отдельного approval:
+GitHub Actions never runs this installer.
+
+### Stop
+
+Stopping is a VM mutation and needs approval:
 
 ```sh
 docker compose \
@@ -114,31 +96,27 @@ docker compose \
   down
 ```
 
-PostgreSQL container и чужой Compose этой командой не затрагиваются.
+This does not affect unrelated Compose/PostgreSQL.
 
-## Основания
+## Evidence
 
-- `deploy/staging/compose.yaml`.
-- `.github/workflows/publish-staging.yml`.
-- `.github/workflows/deploy-staging.yml`.
-- Активный план временного deployment.
+- Staging Compose, publish/deploy workflows, and deployment scripts.
 
-## Решения
+## Decisions
 
-- [ADR о временном deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md).
-- [ADR о выделенной deployment identity](../../adr/20260729-use-dedicated-staging-deployment-identity.md).
-- [ADR об автоматическом deployment main](../../adr/20260729-auto-deploy-main-to-staging.md).
+- [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
+- [Dedicated identity ADR](../../adr/20260729-use-dedicated-staging-deployment-identity.md)
+- [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
 
-## Открытые вопросы
+## Open questions
 
-- Первый root-owned installation wrapper/assets, отдельный SSH key для
-  `shape-deploy` и их Environment configuration ещё не выполнены.
-- Первый deployment, migration/smoke и rollback drill ещё не выполнены.
+- Runbook evidence must be refreshed after each separately approved staging
+  migration/deployment/rollback drill.
 
-## Связанные материалы
+## Related material
 
-- [Deployment topology](../architecture/deployment.md)
+- [Topology](../architecture/deployment.md)
 - [Rollback](temporary-vm-rollback.md)
-- [Provisioning PostgreSQL](postgresql-provisioning.md)
-- [Backup и restore](postgresql-backup-and-restore.md)
+- [Provisioning](postgresql-provisioning.md)
+- [Backup](postgresql-backup-and-restore.md)
 - [SSH tunnel](postgresql-ssh-tunnel.md)

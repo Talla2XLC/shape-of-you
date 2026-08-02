@@ -1,7 +1,7 @@
 ---
 id: stable-decision-id
 kind: adr
-title: "Человекочитаемое название решения"
+title: "Human-readable decision title"
 status: proposed
 date: 2026-07-28
 supersedes: []
@@ -10,28 +10,28 @@ tags:
   - architecture
 ---
 
-# Человекочитаемое название решения
+# Human-readable decision title
 
-## Контекст
+## Context
 
-Опишите проблему и силы, влияющие на решение.
+Describe the problem and the forces that influence the decision.
 
-## Решение
+## Decision
 
-Зафиксируйте выбранный вариант.
+Record the selected option.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-Сравните реальные альтернативы и причины отказа.
+Compare real alternatives and explain why they were rejected.
 
-## Последствия
+## Consequences
 
-Опишите положительные, отрицательные и операционные последствия.
+Describe positive, negative, and operational consequences.
 
-## Проверка
+## Verification
 
-Укажите способ проверки решения.
+State how the decision is verified.
 
-## Связанные материалы
+## Related material
 
-- Добавьте относительные Markdown-ссылки либо явно напишите «Нет».
+- Add relative Markdown links or explicitly write `None`.

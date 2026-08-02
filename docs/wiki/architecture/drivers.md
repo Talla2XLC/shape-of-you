@@ -1,62 +1,60 @@
 ---
 id: "architecture-drivers"
 kind: architecture
-title: "Архитектурные drivers"
+title: "Architecture drivers"
 status: draft
 tags:
   - "architecture"
   - "drivers"
 ---
 
-# Архитектурные drivers
+# Architecture drivers
 
-## Кратко
+## Summary
 
-Архитектуру определяют безопасная поддержка решений, непрерывность миграции, объяснимость, развитие домена и долгосрочная сопровождаемость, а не ранняя распределённость.
+Safe decision support, migration continuity, explainability, domain evolution,
+and long-term maintainability drive architecture—not early distribution.
 
-## Содержание
+## Content
 
-### Продуктовые drivers
+Product drivers:
 
-- Сохранить и улучшить уже работающую систему Google Sheets.
-- Поддерживать единый согласованный backend-контракт для web и mobile.
-- Формировать безопасные и объяснимые ежедневные решения из longitudinal evidence.
-- Сохранять подтверждение пользователя и provenance фактов и действий.
+- preserve and improve the operational Google Sheets system;
+- expose one consistent backend contract to web and mobile;
+- create safe explainable daily decisions from longitudinal evidence;
+- preserve user confirmation and provenance of facts/actions.
 
-### Технические drivers
+Technical drivers:
 
-- Постепенная миграция через inventory, mapping, backfill, reconciliation, dual-run, cutover и rollback.
-- Строгое владение данными без межсервисного SQL.
-- Append-only evidence и idempotent processing там, где они определены.
-- Разработка в modular monorepo; независимо выпускаемые deployables — только при наличии обоснования.
-- Persistence в PostgreSQL с прозрачным доступом к SQL через Drizzle.
+- migrate through inventory, mapping, backfill, reconciliation, dual-run,
+  cutover, and rollback;
+- maintain strict ownership and forbid cross-service SQL;
+- use append-only evidence and idempotency where defined;
+- develop in a modular monorepo and create deployables only when justified;
+- use PostgreSQL with transparent SQL through Drizzle.
 
-### Ограничения
+Accepted constraints include Node.js, TypeScript, pnpm, PostgreSQL, Drizzle,
+and Docker Compose for local development. Temporary shared-VM staging is
+accepted; target cloud/production topology is not. New service boundaries,
+event infrastructure, and API capabilities require separate design.
 
-Приняты Node.js, TypeScript, pnpm workspaces, PostgreSQL, Drizzle ORM/Kit и
-Docker Compose для локальной разработки. Для throwaway staging утверждена
-временная topology на общей VM; целевые cloud hosting и production topology
-не определены. Новые сервисные границы, API capabilities и событийная
-инфраструктура требуют отдельного проектирования.
+## Evidence
 
-## Основания
+- Operator baseline from 2026-07-28 and accepted ADRs.
 
-- Технический baseline, предоставленный оператором 2026-07-28.
-- Существующие архитектурные ADR.
+## Decisions
 
-## Решения
+- Drivers constrain options but do not authorize implementation.
 
-- Drivers ограничивают будущие варианты, но не разрешают реализацию.
+## Open questions
 
-## Открытые вопросы
+- Scale, data volume, concurrency, availability, latency, recovery objectives,
+  hosting, budget, privacy, threat model, and regulation.
 
-- Предположения о масштабе, объёмы данных, concurrency, availability, latency, recovery objectives, hosting и бюджет.
-- Privacy, threat model и регуляторные требования.
+## Related material
 
-## Связанные материалы
-
-- `quality-attributes.md`
-- `data-ownership.md`
-- `deployment.md`
-- `migration-strategy.md`
-- `../domain/bounded-contexts.md`
+- [Quality attributes](quality-attributes.md)
+- [Data ownership](data-ownership.md)
+- [Deployment](deployment.md)
+- [Migration](migration-strategy.md)
+- [Bounded contexts](../domain/bounded-contexts.md)

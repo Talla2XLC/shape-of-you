@@ -1,21 +1,22 @@
-# Runtime boundary 4DreamTeam
+# 4DreamTeam runtime boundary
 
-`sources/` — встроенная локальная source boundary подсистемы `4dt-sources`.
-Она участвует в проверке source registry, построении source inventory и
-ограничении доступа агентов к локальным исходным материалам.
+`sources/` is the built-in local source boundary for `4dt-sources`. It
+participates in source registry validation, source inventory construction, and
+agent access control for local source material.
 
-Назначение каталога:
+The directory may:
 
-- принимать явно разрешённые локальные исходные материалы или ссылки на них;
-- задавать встроенную границу чтения для `4dt-sources`;
-- позволять source index и source search работать без внешних путей.
+- contain explicitly approved local source material or references to it;
+- define the built-in read boundary for `4dt-sources`;
+- allow source indexing and search without external paths.
 
-Правила:
+Rules:
 
-- каталог может оставаться пустым;
-- это не корень проекта и не место для `sources/shape-of-you`;
-- проектная документация хранится только в `docs/`;
-- внешние source paths регистрируются через `4dt-sources` только с
-  подтверждением оператора;
-- секреты, credentials, `.env`, ключи, dumps и production data запрещены;
-- постоянные Wiki exports здесь не хранятся.
+- the directory may remain empty;
+- it is not the project root and must not contain `sources/shape-of-you`;
+- project documentation belongs only in `docs/`;
+- external source paths require explicit operator approval and registration
+  through `4dt-sources`;
+- secrets, credentials, `.env` files, keys, dumps, and production data are
+  forbidden;
+- persistent Wiki exports do not belong here.

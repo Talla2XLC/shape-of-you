@@ -1,7 +1,7 @@
 ---
 id: "architecture-api-intake"
 kind: architecture
-title: "API Intake"
+title: "Intake API"
 status: draft
 tags:
   - "api"
@@ -9,66 +9,48 @@ tags:
   - "intake"
 ---
 
-# API Intake
+# Intake API
 
-## Кратко
+## Summary
 
-API асинхронно принимает пользовательский текст, возвращает текущее состояние
-разбора и позволяет независимо уточнить, подтвердить или отклонить каждый
-типизированный элемент.
+Asynchronously accepts user text, exposes parsing/item progress, and lets each
+typed item be clarified, confirmed, or rejected independently.
 
-## Содержание
+## Content
 
-Endpoints:
+- `POST /v1/intake/requests` — atomically stores request/job and returns `202`
+  without waiting for parser.
+- `GET /v1/intake/requests/:id` — current parsing, derived request status, and
+  ordered items.
+- `POST /v1/intake/requests/:id/items/:itemId/clarification` — answer and
+  queued reparse, `202`.
+- `POST /v1/intake/requests/:id/items/:itemId/decision` — `confirm|reject`,
+  `202`.
+- `GET /openapi.json` — shared-schema OpenAPI.
 
-- `POST /v1/intake/requests` — сохраняет запрос и задание в одной транзакции,
-  возвращает `202 Accepted`, не ожидая parser;
-- `GET /v1/intake/requests/:id` — возвращает состояние разбора, вычисленный
-  статус запроса и его элементы;
-- `POST /v1/intake/requests/:id/items/:itemId/clarification` — сохраняет ответ
-  на вопрос и ставит повторный разбор элемента в очередь, возвращает `202`;
-- `POST /v1/intake/requests/:id/items/:itemId/decision` — независимо
-  подтверждает или отклоняет элемент, возвращает `202`;
-- `GET /openapi.json` — актуальный OpenAPI из shared JSON Schemas.
+Create accepts text, locale, IANA timezone, SourceReference, and idempotency
+key. Clarification/decision use separate idempotency keys. Projection exposes
+`parsingStatus`, derived `status`, safe `failureCode`, and items. Only
+`weight_measurement` is implemented; completed detail links WeightMeasurement.
 
-Создание принимает `text`, `locale`, IANA `timezone`, typed
-`sourceReference` и `idempotencyKey`. Уточнение принимает `answer` и отдельный
-ключ идемпотентности. Решение принимает `confirm` или `reject` и отдельный ключ
-идемпотентности.
+All operations are Person-scoped. Source text is persisted but never logged or
+returned in diagnostics. Without a production parser, durable jobs remain
+queued and do not affect readiness; synthetic parser exists only in tests.
 
-Projection запроса показывает `parsingStatus`, вычисленный `status`, безопасный
-`failureCode` и упорядоченные элементы. В первом срезе поддерживается только
-`weight_measurement`; завершённый элемент содержит UUID созданного
-`WeightMeasurement`.
+## Evidence
 
-Все операции ограничены текущим `Person`. Повторные запросы и команды с теми же
-ключами идемпотентности безопасны. Исходный текст сохраняется в запросе, но не
-попадает в application logs или сообщения об ошибках.
+- Intake contracts/controller/integration tests.
 
-Production parser пока не подключён. Без него запрос остаётся надёжно сохранён
-в очереди и не мешает readiness API; интеграционный контракт проверяется
-synthetic parser только в тестах.
+## Decisions
 
-## Основания
+- [Durable Intake queue](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md).
 
-- `packages/contracts/src/intake.ts`.
-- `apps/api/src/intake/intake.controller.ts`.
-- `apps/api/test/intake.integration.test.ts`.
+## Open questions
 
-## Решения
+- Production parser and authenticated PersonContext before real data.
 
-- [PostgreSQL-очередь и типизированные элементы Intake](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md).
-- OpenAPI не поддерживается отдельно от runtime schemas.
+## Related material
 
-## Открытые вопросы
-
-- Production AI adapter и его операционные ограничения.
-- Аутентифицированный `PersonContext` до работы с реальными данными.
-
-## Связанные материалы
-
-- [Домен Intake](../domain/intake.md)
-- [API WeightMeasurement](weight-measurements.md)
+- [Intake domain](../domain/intake.md)
+- [Weight API](weight-measurements.md)
 - [Backend runtime](../architecture/backend-runtime.md)
-- [Migration notes](../data/backend-migrations.md)
-

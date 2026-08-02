@@ -1,57 +1,57 @@
 ---
 id: "domain-overview"
 kind: domain
-title: "Обзор домена"
+title: "Domain overview"
 status: draft
 tags:
   - "domain"
   - "fitness"
 ---
 
-# Обзор домена
+# Domain overview
 
-## Кратко
+## Summary
 
-Домен управляет свидетельствами, ограничениями и решениями в областях питания, тренировок, физического состояния, восстановления, wearable devices и coaching, сохраняя provenance и контроль пользователя.
+The domain manages evidence, constraints, and decisions across nutrition,
+training, physical state, recovery, wearables, and coaching while preserving
+provenance and user control.
 
-## Содержание
+## Content
 
-### Основная цель домена
+The core objective is sustainable physical development across competing goals:
+fat reduction, muscle preservation, gradual strength growth, recovery quality,
+and safety.
 
-Поддерживать устойчивое физическое развитие, согласуя конкурирующие цели: снижение процента жира, сохранение мышечной массы, постепенный рост силы, качество восстановления и безопасность.
+Core invariants:
 
-### Invariants
+- decisions use multi-day evidence, not one measurement;
+- the existing training program remains active until explicitly changed;
+- normal adaptation changes only one safety-allowed load parameter;
+- high readiness never increases load automatically;
+- ambiguous input is not confirmed fact;
+- executed action is not inferred from permission or plan;
+- insights require sufficient evidence and never present correlation as
+  causation.
 
-- Решения используют сведения за несколько дней, а не одно измерение.
-- Существующая программа тренировок действует, пока изменение не запрошено явно.
-- Обычная адаптация меняет только параметры нагрузки, разрешённые правилами безопасности и прогрессии.
-- Одно решение меняет только один параметр нагрузки.
-- Высокая readiness не увеличивает нагрузку автоматически.
-- Неоднозначные факты не записываются как подтверждённые.
-- Выполненное действие не выводится из разрешённого или запланированного действия.
-- Insights требуют достаточных свидетельств и не представляют корреляцию как причинность.
+Natural Language Engine, AI Inbox, Self-Healing, AI Timeline, AI Insights,
+Load Risk, Weight Autopilot, and Coach Planner are capabilities/workflows, not
+automatic bounded contexts or services.
 
-### Спроектированные механизмы
+## Evidence
 
-Natural Language Engine, AI Inbox, Self-Healing, AI Timeline, AI Insights, Load Risk, Weight Autopilot и Coach Planner — спроектированные доменные механизмы. Это capabilities и workflows, а не автоматически bounded contexts или deployable services.
+- Operator fitness principles and mechanism behavior from 2026-07-28.
 
-## Основания
+## Decisions
 
-- Fitness-принципы и поведение механизмов, предоставленные оператором 2026-07-28.
+- Context boundaries remain draft; mechanism names do not define topology.
 
-## Решения
+## Open questions
 
-- Доменные границы остаются draft до review.
-- Имена механизмов не определяют deployment topology.
+- Shared day closure/correction rules and remaining policy boundaries.
 
-## Открытые вопросы
+## Related material
 
-- Точные entities, value objects, aggregates и invariants требуют инвентаризации источника и modeling workshops.
-- Не определены units, timezones, правила закрытия дня и окна correction.
-
-## Связанные материалы
-
-- `glossary.md`
-- `bounded-contexts.md`
-- `../product/overview.md`
-- `../architecture/quality-attributes.md`
+- [Glossary](glossary.md)
+- [Bounded contexts](bounded-contexts.md)
+- [Product](../product/overview.md)
+- [Quality attributes](../architecture/quality-attributes.md)

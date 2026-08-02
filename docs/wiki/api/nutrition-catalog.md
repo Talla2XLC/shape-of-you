@@ -1,7 +1,7 @@
 ---
 id: "architecture-api-nutrition-catalog"
 kind: architecture
-title: "API Nutrition catalog"
+title: "Nutrition catalog API"
 status: draft
 tags:
   - "api"
@@ -10,57 +10,45 @@ tags:
   - "versioning"
 ---
 
-# API Nutrition catalog
+# Nutrition catalog API
 
-## Кратко
+## Summary
 
-API предоставляет typed commands и reads для shared/private `Brand`,
-`Ingredient`, `Food`, immutable versions и Person-owned `FoodOverlay`.
+Provides typed commands/reads for shared/private Brand, Ingredient, Food,
+immutable versions, and Person-owned FoodOverlay.
 
-## Содержание
+## Content
 
-Endpoints:
-
-- `POST /v1/nutrition/catalog/brands`;
-- `POST /v1/nutrition/catalog/brands/:id/versions`;
-- `GET /v1/nutrition/catalog/brands/:id`;
-- аналогичные create/version/read endpoints для `ingredients` и `foods`;
+- `POST /v1/nutrition/catalog/brands`, `/:id/versions`, and `GET /:id`;
+- equivalent endpoints for `ingredients` and `foods`;
 - `PUT /v1/nutrition/catalog/foods/:id/overlay`.
 
-Create command задаёт `visibility` и первую version. Version command требует
-`expectedLockVersion`; stale write получает `409`. Read возвращает shared
-identity либо private identity текущего `Person`; недоступный UUID выглядит
-как `404`.
+Create defines visibility and initial version. Version append requires
+`expectedLockVersion`; stale writes return `409`. Reads expose shared or
+current-Person private identity; inaccessible UUIDs return `404`.
 
-Food version содержит reference quantity/unit, nutrients, optional exact
-`BrandVersion` и immutable composition. Shared food не принимает private
-dependencies. Overlay заменяется целиком и требует либо оба preferred
-quantity/unit, либо оба `null`.
+FoodVersion stores reference quantity/unit, nutrients, optional exact
+BrandVersion, and immutable composition. Shared food cannot depend on private
+definitions. Overlay replacement requires both preferred quantity/unit or both
+null.
 
-Runtime пока работает с synthetic `Person`; production authentication,
-moderation и отдельная shared-catalog write authorization не реализованы.
-Поэтому подключение multi-user write traffic остаётся отдельным security gate.
+Synthetic Person runtime is not production authentication or shared-catalog
+moderation. External staged records are not remote scraping endpoints.
 
-## Основания
+## Evidence
 
-- `packages/contracts/src/nutrition.ts`.
-- `apps/api/src/nutrition/`.
-- `apps/api/src/storage/nutrition-repository.ts`.
+- Nutrition contracts/module/repository.
 
-## Решения
+## Decisions
 
-- Request и response проходят один JSON Schema contract.
-- Version append и root switch выполняются одной transaction.
-- Private access проверяется независимо от знания UUID.
-- External source records не публикуются как remote scraping endpoint.
+- Version append and root switch are one transaction; schemas drive runtime and
+  OpenAPI; UUID knowledge does not bypass private access.
 
-## Открытые вопросы
+## Open questions
 
-- Actor roles и moderation workflow для shared writes.
-- Search, matching и pagination catalog после выбора concrete source.
+- Shared-write roles/moderation and catalog search/matching/pagination.
 
-## Связанные материалы
+## Related material
 
 - [Nutrition catalog](../domain/nutrition-catalog.md)
-- [API Meal](meals.md)
-- [Backend runtime](../architecture/backend-runtime.md)
+- [Meal API](meals.md)

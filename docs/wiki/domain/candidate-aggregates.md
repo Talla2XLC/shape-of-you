@@ -1,7 +1,7 @@
 ---
 id: "domain-candidate-aggregates"
 kind: domain
-title: "Кандидаты в агрегаты"
+title: "Candidate aggregates"
 status: draft
 tags:
   - "aggregates"
@@ -9,75 +9,52 @@ tags:
   - "draft"
 ---
 
-# Кандидаты в агрегаты
+# Candidate aggregates
 
-## Кратко
+## Summary
 
-Draft-кандидаты в агрегаты выведены из наблюдаемых consistency boundaries. Их намеренно меньше, чем 26 листов, и они не сопоставлены с deployable services.
+Candidate aggregates follow observed consistency boundaries. They are fewer
+than the 26 sheets and are not deployable-service mappings.
 
-## Содержание
+## Content
 
-### Независимые факты
+Independent facts include WeightMeasurement, BodyMeasurementSession, Meal,
+WorkoutSession/sets, RecoveryObservation, assessments, CoachingRecommendation,
+and RecommendationDecision. Daily projections reference but do not own them.
 
-Candidate consistency boundaries узки и принадлежат соответствующим контекстам: измерения веса и тела, записи приёмов пищи, тренировочные сессии и выполненные подходы, observations восстановления и coaching decisions. Дневные projections составляют ссылки на эти факты, но не владеют ими.
+- Nutrition separates stable Food/FoodVersion, personal overlay, and immutable
+  Meal snapshot.
+- Training separates ExerciseVersion, immutable TrainingProgramVersion,
+  WorkoutSession, and query projections for records/progression.
+- RecoveryObservation has one typed detail; assessments are separate immutable
+  decisions over evidence.
+- CoachingRecommendation has typed detail; policy/evidence are references;
+  RecommendationDecision and execution remain separate facts.
 
-В Nutrition `Food` является стабильной catalog identity с immutable
-`FoodVersion`, а `Meal` — отдельным person-owned immutable fact. Meal items
-могут ссылаться на точную catalog version, но их nutrient snapshot принадлежит
-самому факту intake. Shared catalog и personal overlay не образуют один
-aggregate: персональная ссылка не копирует и не изменяет canonical content.
+`DayClosure` or `JournalDay` remains a narrow candidate for Person-local date,
+timezone, open/closed lifecycle, closure time, explicit corrections,
+fact references, and daily projection creation. Name and invariants are open.
 
-В Training `Exercise` является стабильной catalog identity с immutable
-`ExerciseVersion`. `TrainingProgramVersion` является неизменяемым
-person-owned plan, а `WorkoutSession` — отдельным неизменяемым фактом с
-выполненными упражнениями и подходами. Correction заменяет сессию целиком.
-Personal records и progression candidates не образуют aggregates и
-вычисляются над текущими фактами и действующей program version.
+`Daily_Log` is primarily a legacy read model/migration projection, not evidence
+for a broad aggregate.
 
-В Recovery `RecoveryObservation` является неизменяемым person-owned fact с
-одной типизированной detail. Общие provider/device definitions не входят в
-этот aggregate. Readiness и load-risk assessments являются отдельными
-неизменяемыми решениями над текущими observations и явными Training evidence;
-они не владеют исходными фактами и не являются coaching recommendations.
+## Evidence
 
-В Coaching `CoachingRecommendation` является неизменяемым person-owned
-решением с общей identity и отдельной типизированной detail. Shared policy
-version и evidence не входят в aggregate recommendation. Терминальный
-`RecommendationDecision` является отдельным неизменяемым фактом пользователя,
-а выполнение остаётся фактом owning context.
+- Session grouping, Program prescriptions/derived fields, Meal snapshots,
+  mixed Daily_Log projections, and append-only/recommend-only contracts.
 
-### Кандидат lifecycle по дате
+## Decisions
 
-`DayClosure` или `JournalDay` остаётся узким draft-кандидатом. Он может владеть календарной датой и timezone пользователя, lifecycle open/closed, временем закрытия, explicit corrections, ссылками на подтверждённые факты и созданием дневной projection. Имя и точные invariants ещё не утверждены.
+- Do not create one aggregate per sheet or a broad `DayRecord`.
+- Keep shared reference catalogs separate from Person facts.
 
-### Legacy-проекция
+## Open questions
 
-`Daily_Log` рассматривается преимущественно как legacy read model и migration projection. Он не доказывает необходимость единого агрегата, охватывающего питание, вес, тренировки, восстановление и coaching.
+- DayClosure snapshot semantics, initial unit vocabulary, and external matching
+  moderation. Multiple weight measurements per day are allowed.
 
-## Основания
+## Related material
 
-Наблюдаемые grouping по Session_ID; prescription Program и derived columns; Meals со ссылкой на catalog и nutrient snapshot; status Daily_Log со смешанными facts/projections; append-only и recommend-only контракты workflows.
-
-## Решения
-
-Не создавать агрегат на каждый лист или широкий `DayRecord`. Предпочитать
-независимые факты и projections по дате. Shared reference catalog не смешивать
-с person-owned facts. См. [ADR о независимых фактах](../../adr/20260728-prefer-independent-facts-over-broad-day-record.md)
-и [ADR о наблюдениях восстановления](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md).
-Lifecycle Coaching зафиксирован в
-[ADR о рекомендациях и решениях пользователя](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md).
-
-## Открытые вопросы
-
-- Проверяет ли закрытие дня только ссылки или также создаёт immutable snapshot?
-- Какой минимальный controlled vocabulary units нужен для catalog composition
-  и meal quantities без неявных conversion rules?
-- Допустимы ли несколько измерений веса за одну дату?
-- Какая moderation policy потребуется перед автоматизацией external catalog
-  matching?
-
-## Связанные материалы
-
-- [Карта извлечения домена](domain-extraction-map.md)
+- [Extraction map](domain-extraction-map.md)
 - [Invariants](invariants.md)
-- [Открытые вопросы моделирования](open-modeling-questions.md)
+- [Open questions](open-modeling-questions.md)

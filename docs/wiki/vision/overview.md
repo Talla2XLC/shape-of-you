@@ -1,54 +1,58 @@
 ---
 id: "vision-overview"
 kind: vision
-title: "Видение"
+title: "Vision"
 status: draft
 tags:
   - "product"
   - "vision"
 ---
 
-# Видение
+# Vision
 
-## Кратко
+## Summary
 
-Shape of You помогает человеку принимать безопасные, объяснимые и долгосрочные решения о физическом развитии, а не просто хранить или визуализировать fitness-данные.
+Shape of You helps a person make safe, explainable, long-term physical
+development decisions rather than merely storing or visualizing fitness data.
 
-## Содержание
+## Content
 
-### Видение продукта
+The product collects and normalizes nutrition, training, weight, body
+composition, recovery, and wearable evidence; preserves an explainable
+history; analyzes multi-day and multi-week trends; and turns evidence into
+specific daily recommendations.
 
-Создать персональную AI-платформу, которая собирает и нормализует данные о питании, тренировках, весе, составе тела, восстановлении и wearable devices; сохраняет объяснимую историю; анализирует динамику за дни и недели; превращает свидетельства в конкретные ежедневные рекомендации.
+Desired outcomes:
 
-### Желаемые результаты
+- reduce body-fat percentage while preserving muscle mass;
+- support gradual strength growth;
+- protect recovery quality and sustainable progress;
+- prevent unsafe compensation after overeating or alcohol;
+- replace Google Sheets only after safe migration and reconciliation.
 
-- Снижать процент жира с сохранением мышечной массы.
-- Поддерживать постепенный рост силы.
-- Защищать качество восстановления и устойчивый долгосрочный прогресс.
-- Предотвращать опасные компенсаторные решения после переедания или алкоголя.
-- Заменить Google Sheets как техническую платформу только после безопасной миграции и reconciliation её данных и правил.
+LLMs are interface and reasoning tools, not uncontrolled fact authorities.
+Confirmed data, provenance, deterministic safety rules, and explicit user
+confirmation constrain AI behavior.
 
-### Роль AI
+## Evidence
 
-LLM — интерфейс и reasoning layer, а не неконтролируемый источник фактов. Поведение AI ограничивают подтверждённые данные, provenance, детерминированные правила безопасности и явное подтверждение пользователя.
+- Product mission and fitness principles supplied by the operator on
+  2026-07-28.
 
-## Основания
+## Decisions
 
-- Миссия продукта и fitness-принципы, предоставленные оператором 2026-07-28.
+- Decision support, explainability, safety, and longitudinal reasoning are
+  core product qualities.
 
-## Решения
+## Open questions
 
-- Decision support, объяснимость, безопасность и longitudinal reasoning являются ключевыми качествами продукта.
+- Audience beyond the current personal use case.
+- Commercial and multi-user scope.
+- Regulatory positioning.
 
-## Открытые вопросы
+## Related material
 
-- Целевая аудитория за пределами текущего персонального use case.
-- Коммерческая модель и multi-user scope.
-- Регуляторное позиционирование.
-
-## Связанные материалы
-
-- `../product/overview.md`
-- `../product/scope.md`
-- `../domain/overview.md`
-- `../architecture/quality-attributes.md`
+- [Product overview](../product/overview.md)
+- [Product scope](../product/scope.md)
+- [Domain overview](../domain/overview.md)
+- [Quality attributes](../architecture/quality-attributes.md)

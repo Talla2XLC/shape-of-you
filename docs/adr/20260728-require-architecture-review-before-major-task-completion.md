@@ -1,7 +1,7 @@
 ---
 id: "decisions-20260728-require-architecture-review-before-major-task-completion"
 kind: adr
-title: "Обязательный Architecture Review перед завершением крупной задачи"
+title: "Require Architecture Review before major task completion"
 status: accepted
 date: 2026-07-28
 supersedes: []
@@ -11,33 +11,45 @@ tags:
   - "quality-gate"
 ---
 
-# Обязательный Architecture Review перед завершением крупной задачи
+# Require Architecture Review before major task completion
 
-## Контекст
+## Context
 
-В долгосрочном проекте случайная сложность может накапливаться через отдельные разумные задачи. Независимая проверка качества сама по себе не гарантирует, что решение остаётся простым, соответствует домену, не создаёт преждевременную распределённость и не дублирует документацию.
+In a long-term project, accidental complexity can accumulate through
+individually reasonable tasks. Independent quality review alone does not prove
+that a solution remains simple, preserves domain boundaries, avoids premature
+distribution, or prevents duplicated documentation authority.
 
-## Решение
+## Decision
 
-Перед завершением каждой крупной задачи проводить явный Architecture Review. Операционный checklist и определение крупной задачи канонически закреплены в корневом `AGENTS.md`.
+Perform an explicit Architecture Review before completing every major task.
+The canonical definition and operational checklist live in the root
+`AGENTS.md`.
 
-## Рассмотренные альтернативы
+## Considered alternatives
 
-- Проводить review только для формальных ADR: дешевле, но архитектурно значимые последствия могут появляться и в задачах, не заявленных как ADR.
-- Полагаться только на code review или QA: они проверяют другие свойства и не обеспечивают системную оценку сложности и доменных границ.
+- Review only formal ADR work: cheaper, but architecture consequences also
+  arise in tasks not initially presented as decisions.
+- Rely on code review or QA: those gates test different properties and do not
+  provide a system-level complexity and domain-boundary review.
 
-## Последствия
+## Consequences
 
-Крупную задачу нельзя отметить завершённой, пока review не проверит избыточную сложность, преждевременную микросервисность, соответствие Domain-Driven Design, дублирование документации и возможность упрощения без потери необходимой масштабируемости.
+A major task cannot complete until review covers unnecessary complexity,
+premature microservices, Domain-Driven Design alignment, duplicated authority,
+and possible simplification without losing required scalability.
 
-Более удачный архитектурный вариант сначала предлагается оператору вместе с компромиссами. Review не разрешает молча менять архитектуру и не заменяет утверждение ADR.
+A better architecture must be presented to the operator with trade-offs
+before adoption. Review cannot silently change architecture and does not
+replace an ADR.
 
-## Проверка
+## Verification
 
-- Требование явно задано оператором 2026-07-28.
-- Каноническая операционная процедура находится в разделе `Architecture Review` корневого `AGENTS.md`.
+- The operator explicitly required this gate on 2026-07-28.
+- The canonical procedure is the `Architecture Review` section of root
+  `AGENTS.md`.
 
-## Связанные материалы
+## Related material
 
 - `../wiki/architecture/overview.md`
-- Корневой `AGENTS.md`
+- Root `AGENTS.md`

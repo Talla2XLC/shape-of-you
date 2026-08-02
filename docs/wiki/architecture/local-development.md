@@ -1,7 +1,7 @@
 ---
 id: "architecture-local-development"
 kind: architecture
-title: "Локальный запуск backend"
+title: "Local backend development"
 status: draft
 tags:
   - "development"
@@ -9,22 +9,22 @@ tags:
   - "runtime"
 ---
 
-# Локальный запуск backend
+# Local backend development
 
-## Кратко
+## Summary
 
-Для полного локального запуска нужны Node.js 24, pnpm 11 и Docker с Compose.
-Compose поднимает PostgreSQL, применяет migrations и запускает API.
+Full local development uses Node.js 24, pnpm 11, and Docker Compose. Compose
+starts PostgreSQL, applies migrations, and runs the API.
 
-## Содержание
+## Content
 
-Полный containerized запуск:
+Containerized startup:
 
 ```powershell
 docker compose up --build
 ```
 
-После readiness API доступен на `http://localhost:3000`; проверки:
+After readiness, API is available at `http://localhost:3000`:
 
 ```powershell
 Invoke-RestMethod http://localhost:3000/health
@@ -51,26 +51,23 @@ pnpm test
 node scripts/validate-docs.mjs
 ```
 
-`pnpm test` включает integration suite и требует working container runtime.
-`pnpm test:unit` запускает только быстрые проверки без Docker.
+`pnpm test` includes PostgreSQL integration tests and needs a working container
+runtime. `pnpm test:unit` runs fast Docker-free checks.
 
-## Основания
+## Evidence
 
-- `package.json`, `pnpm-workspace.yaml` и `.env.example`.
-- `docker-compose.yml` и `apps/api/Dockerfile`.
-- Проверенные локально build, typecheck, lint, unit и PostgreSQL integration
-  tests, а также production Docker image.
+- Workspace manifests, `.env.example`, Compose, API Dockerfile, and verified
+  build/typecheck/lint/unit/integration/image checks.
 
-## Решения
+## Decisions
 
-- [Docker Compose для локальной разработки](../../adr/20260728-use-docker-compose-for-local-development.md).
+- [Docker Compose for local development](../../adr/20260728-use-docker-compose-for-local-development.md).
 
-## Открытые вопросы
+## Open questions
 
-- Synthetic staging smoke для новой версии выполняется только после отдельного
-  разрешения на deployment.
+- Staging smoke for a new version requires separate deployment authorization.
 
-## Связанные материалы
+## Related material
 
 - [Backend runtime](backend-runtime.md)
 - [Migration notes](../data/backend-migrations.md)
