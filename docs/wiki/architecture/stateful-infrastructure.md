@@ -35,11 +35,12 @@ measured drivers.
 - **Not required:** Elasticsearch/OpenSearch, TimescaleDB, and full event
   sourcing without measured gaps.
 
-The Identity deployable has a separate generated PostgreSQL migration for
-accounts, passkeys, hashed challenges, recovery-code hashes, and passkey
-recovery sessions. Runtime database wiring and later OAuth/signing/audit
-tables remain pending. The model uses no generic provider-artifact table or
-JSON persistence and does not alter the API database.
+The Identity deployable has a separate generated PostgreSQL migration chain
+for accounts, passkeys, hashed challenges, recovery-code hashes, passkey
+recovery sessions, and typed OAuth clients/grants/sessions/interactions,
+authorization codes, and refresh-token families. Runtime database wiring and
+later signing/audit tables remain pending. The model uses no generic provider-
+artifact table or JSON persistence and does not alter the API database.
 
 ## Evidence
 

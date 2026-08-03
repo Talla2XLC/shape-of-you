@@ -17,8 +17,9 @@ tags:
 
 The accepted project-owned Identity service centralizes authentication and
 OAuth/OIDC for ChatGPT and future clients. The API retains Person authorization
-and domain authority. The deployable scaffold and account/WebAuthn persistence
-foundation exist; authentication and OAuth flows are not implemented yet.
+and domain authority. The deployable scaffold and typed account, WebAuthn,
+recovery, and OAuth protocol persistence exist; authentication and OAuth HTTP
+flows are not implemented yet.
 
 ## Content
 
@@ -47,6 +48,13 @@ hashed challenges, recovery-code batches, grants, sessions, interactions,
 hashed authorization codes, and refresh-token families have dedicated typed
 tables. Small immutable protocol snapshots may use constrained PostgreSQL
 arrays. JWT access tokens remain stateless.
+
+The generated Identity migration chain now includes administrator-provisioned
+clients with exact redirect and scope allowlists, consent grants, hashed
+browser sessions, client authorizations, fixed-column interactions, hashed
+authorization codes bound to S256 PKCE, and rotating refresh-token families.
+Requested interaction scopes/resources use typed child rows; issued scope and
+AMR snapshots use constrained PostgreSQL arrays.
 
 The initial profile uses authorization code with S256 PKCE, OIDC discovery, a
 predefined ChatGPT public client, short-lived audience-bound JWT access tokens,

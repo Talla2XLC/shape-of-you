@@ -58,9 +58,12 @@ data, or transfer authority.
 
 The separate Identity migration test applies only the Identity journal to a
 clean PostgreSQL 17 database, re-runs it idempotently, verifies journal hashes,
-checks the approved foundation table set, and rejects JSON/JSONB columns. The
-first Identity migration contains accounts, WebAuthn credentials and hashed
-challenges, recovery-code batches and hashes, and passkey recovery sessions.
+checks the approved lifecycle table set, and rejects JSON/JSONB and plaintext
+bearer columns. The first Identity migration contains accounts, WebAuthn
+credentials and hashed challenges, recovery-code batches and hashes, and
+passkey recovery sessions. The second contains OAuth clients with exact
+redirect/scope allowlists, grants, hashed sessions, interactions, hashed
+authorization codes bound to S256 PKCE, and rotating refresh-token families.
 
 Never modify an accepted applied migration; generate a new file.
 

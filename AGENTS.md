@@ -114,6 +114,9 @@ boundaries must not be implicitly shared between deployable services.
 - Every major task receives an Architecture Review before completion.
 - Before completion, verify accepted changes against canonical Wiki and ADR
   documents.
+- Statically reject generated PostgreSQL identifiers longer than 63 UTF-8
+  bytes. PostgreSQL silently truncates overlong identifiers, so successful
+  migration execution alone is not sufficient validation.
 - Staging, commits, pushes, tags, releases, deployments, migrations,
   destructive actions, production access, and secret access require the
   corresponding explicit approvals.

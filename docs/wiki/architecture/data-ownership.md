@@ -31,8 +31,10 @@ Person; User access requires an active `PersonAccessGrant` role (`owner`,
 nothing. Until authentication, only explicit synthetic context is allowed.
 
 The Identity deployable owns its authentication and OAuth persistence boundary.
-Its separate Drizzle schema now contains the account/WebAuthn/recovery
-foundation; runtime database wiring and OAuth state are not implemented yet.
+Its separate Drizzle schema now contains account/WebAuthn/recovery state and
+typed OAuth client, grant, session, interaction, authorization-code, and
+refresh-family state. Runtime database wiring and protocol flows are not
+implemented yet.
 API-local User remains the authorization principal and maps to an Identity
 `(issuer, subject)`; Identity never owns Person grants or fitness facts.
 

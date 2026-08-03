@@ -63,7 +63,7 @@
 - [x] Отделить неизменяемый публичный `subject` от внутреннего account ID.
 - [x] Реализовать первую миграцию: accounts, passkeys, hashed challenges, recovery
   code batches/codes и passkey recovery sessions.
-- Реализовать вторую миграцию: OAuth clients/grants/sessions/interactions,
+- [x] Реализовать вторую миграцию: OAuth clients/grants/sessions/interactions,
   hashed authorization codes и refresh-token families.
 - Реализовать третью миграцию: signing-key metadata и typed security audit.
 
