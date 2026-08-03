@@ -77,13 +77,23 @@ scratch. Pin the dependency version, review its release and security policy,
 generate an SBOM, run conformance tests, and retain a documented fork/replace
 exit path.
 
-`oidc-provider` is the initial candidate because it is an OpenID Certified
-Node.js authorization-server implementation and supports discovery, PKCE,
-resource indicators, revocation, introspection, DCR, opaque tokens, JWT access
-tokens, and experimental CIMD. Adoption is conditional on an implementation
-spike proving that required behavior can be isolated and persisted in typed
-relational tables without JSON blobs. If the spike fails, return to
-architecture review; do not weaken the persistence or replaceability rules.
+Use pinned `oidc-provider` 9.11.1 for the initial authorization-server
+implementation. An isolated Node.js 24 spike verified discovery,
+Authorization Code and refresh-token grants, mandatory S256 PKCE, resource
+indicators, and signed audience-bound JWT access tokens. JWT access tokens do
+not require persistence. The provider adapter is implemented as a strict,
+model-specific translation into typed relational tables: grant resources,
+session client authorizations, and interaction state use dedicated rows or
+columns rather than JSON blobs. Unsupported provider models and features stay
+disabled, and compatibility tests fail closed on unknown adapter payload
+fields.
+
+Use pinned `@simplewebauthn/server` 13.3.2 behind a project-owned WebAuthn
+adapter. The spike verified Node.js 24 option generation for discoverable
+credentials with required user verification. The adapter owns origin and RP
+ID policy, challenge lifecycle, credential persistence, counter handling, and
+the replaceability seam; application code does not depend directly on library
+response shapes.
 
 Initial protocol profile:
 
@@ -184,6 +194,12 @@ spike before adoption.
   gates pass.
 - Users must protect more than one passkey or their recovery codes. Losing all
   factors does not silently downgrade authentication to email or password.
+- The typed `oidc-provider` adapter deliberately supports only the enabled
+  protocol profile. Library upgrades require adapter compatibility tests and a
+  schema review before the version pin changes.
+- End-to-end conformance testing requires the implemented HTTP authorization
+  and interaction flow. It remains a mandatory pre-production gate rather than
+  a pre-scaffold spike activity.
 
 ## Verification
 
@@ -211,6 +227,7 @@ spike before adoption.
 - [OpenAI plugin authentication](https://developers.openai.com/plugins/build/auth)
 - [OAuth 2.0 Security Best Current Practice](https://www.rfc-editor.org/rfc/rfc9700.html)
 - [oidc-provider](https://github.com/panva/node-oidc-provider)
+- [SimpleWebAuthn](https://simplewebauthn.dev/docs/packages/server)
 - [Revocable authentication sessions](20260729-store-revocable-auth-sessions-in-postgresql.md)
 - [User and Person separation](20260730-separate-user-access-from-person-data-ownership.md)
 - [Deployable service autonomy](20260728-deployable-service-autonomy.md)

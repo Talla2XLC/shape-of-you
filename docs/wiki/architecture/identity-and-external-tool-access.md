@@ -35,21 +35,22 @@ Cross-service SQL and shared credentials remain forbidden.
 
 ### Accepted protocol boundary
 
-The service uses a replaceable, pinned, standards-focused OAuth/OIDC protocol
-library behind project-owned adapters. `oidc-provider` is the initial candidate
-subject to a conformance and typed-persistence spike. OAuth state must use
-typed relational tables; JSON blobs are not accepted as authoritative
-persistence.
+The service uses pinned `oidc-provider` 9.11.1 behind a project-owned, strict
+protocol adapter. The accepted adapter supports only the enabled protocol
+profile and translates provider state into typed relational tables. Unknown
+payload fields fail compatibility tests. OAuth state does not use JSON blobs.
 
 The initial profile uses authorization code with S256 PKCE, OIDC discovery, a
 predefined ChatGPT public client, short-lived audience-bound JWT access tokens,
 hashed rotating refresh credentials, and public JWKS. Open DCR and experimental
 CIMD are deferred.
 
-Login is passkey-first through WebAuthn. Accounts can register multiple
-passkeys. Single-use recovery codes are stored only as hashes and can authorize
-a narrowly scoped replacement-passkey enrollment with session revocation. No
-password, email-only, or security-question fallback is allowed.
+Login is passkey-first through WebAuthn, initially implemented with pinned
+`@simplewebauthn/server` 13.3.2 behind a project-owned adapter. Accounts can
+register multiple passkeys. Single-use recovery codes are stored only as
+hashes and can authorize a narrowly scoped replacement-passkey enrollment with
+session revocation. No password, email-only, or security-question fallback is
+allowed.
 
 Initial scopes are `person:read`, `weight:write`,
 `body-measurement:write`, `meal:write`, and `workout:write`.
@@ -71,6 +72,8 @@ OAuth signing keys and their rotation. These key lifecycles are separate.
 
 - Operator selected a project-owned Identity service with vetted, replaceable
   protocol libraries on 2026-08-02.
+- An isolated Node.js 24 protocol and persistence-shape spike passed on
+  2026-08-03; the operator accepted `oidc-provider` and SimpleWebAuthn.
 - Current OpenAI plugin authentication requirements were verified on
   2026-08-02.
 
@@ -82,12 +85,12 @@ OAuth signing keys and their rotation. These key lifecycles are separate.
 
 ## Open questions
 
-- Final acceptance of `oidc-provider` after the conformance and persistence
-  spike.
 - Access-token lifetime, refresh-session lifetime, and signing-key rotation
   intervals.
 - Production hostname, certificate automation, secret storage, backup RPO/RTO,
   and security monitoring.
+- End-to-end OpenID/OAuth conformance results for the implemented HTTP and
+  interaction flow before production use.
 
 ## Related material
 

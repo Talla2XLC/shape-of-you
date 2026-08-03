@@ -27,23 +27,27 @@
 
 ## Блокирующие архитектурные решения
 
-1. После технического спайка окончательно принять или отклонить
-   `oidc-provider`.
-2. После WebAuthn-спайка выбрать заменяемую библиотеку и утвердить точные
-   origin/RP-ID, challenge, counter и attestation policies.
-3. До production определить сроки жизни токенов, ротацию ключей, secret storage,
+1. До реализации WebAuthn-flow утвердить точные origin/RP-ID, challenge,
+   counter и attestation policies.
+2. До production определить сроки жизни токенов, ротацию ключей, secret storage,
    RPO/RTO и hostname/TLS topology.
 
 ## Этапы
 
 ### 1. Технический спайк протокольной библиотеки
 
-- Проверить Authorization Code + S256 PKCE, discovery, resource indicators,
-  predefined public client, JWT access tokens, revocation и refresh rotation.
-- Реализовать тестовый PostgreSQL adapter с типизированными таблицами без JSON.
-- Запустить OpenID/OAuth conformance-набор и зафиксировать несовместимости.
-- Проверить лицензию, security policy, maintainer risk, SBOM и возможность fork.
-- Вернуться на Architecture Review, если библиотека требует нарушения ADR.
+- [x] Проверить Authorization Code + S256 PKCE, discovery, resource indicators,
+  predefined public client и JWT access tokens.
+- [x] Проверить adapter payloads и возможность строгого отображения в
+  типизированные PostgreSQL-таблицы без JSON.
+- [x] Проверить Node.js 24, лицензию, дерево зависимостей, актуальный audit и
+  возможность изоляции/fork.
+- [x] Выбрать `oidc-provider` 9.11.1 и `@simplewebauthn/server` 13.3.2 за
+  проектными adapter boundaries.
+- Проверить revocation и refresh rotation/reuse на реализованном persistence
+  adapter.
+- Перенести end-to-end OpenID/OAuth conformance-набор на работающий HTTP-flow;
+  проверка остаётся обязательной до production.
 
 ### 2. Каркас deployable `apps/identity`
 
