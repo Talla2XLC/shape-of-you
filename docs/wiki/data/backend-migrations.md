@@ -13,14 +13,17 @@ tags:
 
 ## Summary
 
-PostgreSQL schema is defined in `apps/api/src/database/schema.ts`; versioned
-SQL migrations live in `apps/api/drizzle/`.
+Each deployable owns its PostgreSQL schema and migration chain. API schema and
+SQL live under `apps/api/`; Identity schema and SQL live under
+`apps/identity/`. They never share a database URL or migration command.
 
 ## Content
 
 ```powershell
-pnpm db:generate
-pnpm db:migrate
+pnpm db:generate:api
+pnpm db:migrate:api
+pnpm db:generate:identity
+pnpm db:migrate:identity
 ```
 
 The API image contains the migration runner, but the normal API process never
@@ -53,6 +56,12 @@ It verifies order, `created_at`, and SQL SHA-256 in
 Weight migration. The chain does not import Google Sheets, backfill operational
 data, or transfer authority.
 
+The separate Identity migration test applies only the Identity journal to a
+clean PostgreSQL 17 database, re-runs it idempotently, verifies journal hashes,
+checks the approved foundation table set, and rejects JSON/JSONB columns. The
+first Identity migration contains accounts, WebAuthn credentials and hashed
+challenges, recovery-code batches and hashes, and passkey recovery sessions.
+
 Never modify an accepted applied migration; generate a new file.
 
 ## Evidence
@@ -64,6 +73,8 @@ Never modify an accepted applied migration; generate a new file.
 
 - Use codebase-first `drizzle-kit generate` plus `drizzle-orm` migrator.
 - `drizzle-kit push` is not a delivery path.
+- Root migration commands must name the owning deployable; a generic command
+  that could target the wrong database is forbidden.
 
 ## Open questions
 

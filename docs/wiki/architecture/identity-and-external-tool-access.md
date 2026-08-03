@@ -17,7 +17,8 @@ tags:
 
 The accepted project-owned Identity service centralizes authentication and
 OAuth/OIDC for ChatGPT and future clients. The API retains Person authorization
-and domain authority. The boundary is accepted but not implemented yet.
+and domain authority. The deployable scaffold and account/WebAuthn persistence
+foundation exist; authentication and OAuth flows are not implemented yet.
 
 ## Content
 
@@ -39,6 +40,13 @@ The service uses pinned `oidc-provider` 9.11.1 behind a project-owned, strict
 protocol adapter. The accepted adapter supports only the enabled protocol
 profile and translates provider state into typed relational tables. Unknown
 payload fields fail compatibility tests. OAuth state does not use JSON blobs.
+
+Identity state is organized by lifecycle rather than a generic provider
+artifact table. Accounts have a distinct immutable public subject. Passkeys,
+hashed challenges, recovery-code batches, grants, sessions, interactions,
+hashed authorization codes, and refresh-token families have dedicated typed
+tables. Small immutable protocol snapshots may use constrained PostgreSQL
+arrays. JWT access tokens remain stateless.
 
 The initial profile uses authorization code with S256 PKCE, OIDC discovery, a
 predefined ChatGPT public client, short-lived audience-bound JWT access tokens,
@@ -82,6 +90,7 @@ OAuth signing keys and their rotation. These key lifecycles are separate.
 - [Identity service ADR](../../adr/20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md)
 - [User and Person separation](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Service autonomy](../../adr/20260728-deployable-service-autonomy.md)
+- [Identity relational model](../../adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
 
 ## Open questions
 

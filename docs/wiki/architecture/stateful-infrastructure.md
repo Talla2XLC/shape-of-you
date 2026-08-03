@@ -35,10 +35,11 @@ measured drivers.
 - **Not required:** Elasticsearch/OpenSearch, TimescaleDB, and full event
   sourcing without measured gaps.
 
-The accepted Identity service will move authentication-account and refresh-
-session authority into its own PostgreSQL database. OAuth state uses typed
-relational tables rather than JSON blobs. The service is not implemented and
-does not alter the current API database yet.
+The Identity deployable has a separate generated PostgreSQL migration for
+accounts, passkeys, hashed challenges, recovery-code hashes, and passkey
+recovery sessions. Runtime database wiring and later OAuth/signing/audit
+tables remain pending. The model uses no generic provider-artifact table or
+JSON persistence and does not alter the API database.
 
 ## Evidence
 
@@ -49,6 +50,7 @@ does not alter the current API database yet.
 - [PostgreSQL sessions](../../adr/20260729-store-revocable-auth-sessions-in-postgresql.md)
 - [S3-compatible media](../../adr/20260729-use-s3-compatible-object-storage-for-media.md)
 - [PostgreSQL outbox before Kafka](../../adr/20260729-use-postgresql-outbox-before-kafka.md)
+- [Identity relational model](../../adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
 
 ## Open questions
 

@@ -37,9 +37,22 @@ Host development:
 ```powershell
 pnpm install
 Copy-Item .env.example .env
-pnpm db:migrate
+pnpm db:migrate:api
 pnpm dev
 ```
+
+Database commands always name their owner. API commands use the API
+`DATABASE_URL`; Identity commands use a separate Identity `DATABASE_URL`:
+
+```powershell
+pnpm db:generate:api
+pnpm db:migrate:api
+pnpm db:generate:identity
+pnpm db:migrate:identity
+```
+
+The Identity service is not part of local Compose yet. Its migration tests use
+an isolated PostgreSQL container and do not apply SQL to an operator database.
 
 Validation:
 

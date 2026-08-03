@@ -51,11 +51,21 @@
 
 ### 2. Каркас deployable `apps/identity`
 
-- Добавить отдельные `package.json`, `Dockerfile`, `AGENTS.md`, конфигурацию,
+- [x] Добавить отдельные `package.json`, `Dockerfile`, `AGENTS.md`, конфигурацию,
   probes и integration tests.
 - Создать отдельную PostgreSQL database boundary, credentials, Drizzle schema и
   воспроизводимые миграции.
 - Не добавлять cross-service SQL или общие credentials.
+
+### 2.1. Типизированная модель Identity
+
+- [x] Принять lifecycle-таблицы без generic artifact table и без JSON.
+- [x] Отделить неизменяемый публичный `subject` от внутреннего account ID.
+- [x] Реализовать первую миграцию: accounts, passkeys, hashed challenges, recovery
+  code batches/codes и passkey recovery sessions.
+- Реализовать вторую миграцию: OAuth clients/grants/sessions/interactions,
+  hashed authorization codes и refresh-token families.
+- Реализовать третью миграцию: signing-key metadata и typed security audit.
 
 ### 3. Accounts, login и sessions
 

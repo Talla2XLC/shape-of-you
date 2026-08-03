@@ -30,10 +30,11 @@ Person; User access requires an active `PersonAccessGrant` role (`owner`,
 `editor`, `viewer`, or `coach`). Client-supplied `person_id` alone grants
 nothing. Until authentication, only explicit synthetic context is allowed.
 
-The accepted but unimplemented Identity service owns authentication accounts
-and OAuth sessions. API-local User remains the authorization principal and
-maps to an Identity `(issuer, subject)`; Identity never owns Person grants or
-fitness facts.
+The Identity deployable owns its authentication and OAuth persistence boundary.
+Its separate Drizzle schema now contains the account/WebAuthn/recovery
+foundation; runtime database wiring and OAuth state are not implemented yet.
+API-local User remains the authorization principal and maps to an Identity
+`(issuer, subject)`; Identity never owns Person grants or fitness facts.
 
 Ownership classes:
 

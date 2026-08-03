@@ -16,8 +16,10 @@
     "test:docs": "node --test scripts/validate-docs.test.mjs",
     "docs:validate": "node scripts/validate-docs.mjs",
     "typecheck": "pnpm --filter @shape-of-you/contracts build && pnpm --filter @shape-of-you/config build && pnpm -r --sort typecheck",
-    "db:generate": "pnpm --filter @shape-of-you/api db:generate",
-    "db:migrate": "pnpm --filter @shape-of-you/api db:migrate"
+    "db:generate:api": "pnpm --filter @shape-of-you/api db:generate",
+    "db:migrate:api": "pnpm --filter @shape-of-you/api db:migrate",
+    "db:generate:identity": "pnpm --filter @shape-of-you/identity db:generate",
+    "db:migrate:identity": "pnpm --filter @shape-of-you/identity db:migrate"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

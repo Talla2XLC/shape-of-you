@@ -5,6 +5,9 @@ packages:
 confirmModulesPurge: false
 injectWorkspacePackages: true
 
+overrides:
+  find-my-way: 9.7.0
+
 allowBuilds:
   cpu-features: false
   esbuild: true
