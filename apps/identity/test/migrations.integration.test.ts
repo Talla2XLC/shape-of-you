@@ -129,6 +129,7 @@ describe("Identity migration chain", () => {
       );
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "identity_accounts",
+        "identity_security_events",
         "oauth_authorization_codes",
         "oauth_client_allowed_scopes",
         "oauth_client_redirect_uris",
@@ -143,6 +144,7 @@ describe("Identity migration chain", () => {
         "oauth_refresh_tokens",
         "oauth_session_authorizations",
         "oauth_sessions",
+        "oauth_signing_keys",
         "passkey_recovery_sessions",
         "recovery_code_batches",
         "recovery_codes",
@@ -173,6 +175,19 @@ describe("Identity migration chain", () => {
                   and column_name = 'token'))`
       );
       expect(bearerColumns.rows).toEqual([]);
+
+      const privateKeyColumns = await pool.query<{
+        column_name: string;
+        table_name: string;
+      }>(
+        `select table_name, column_name
+           from information_schema.columns
+          where table_schema = 'public'
+            and column_name in
+                ('private_key', 'private_key_pem', 'private_jwk', 'jwk',
+                 'secret_value', 'key_material')`
+      );
+      expect(privateKeyColumns.rows).toEqual([]);
     } finally {
       await pool.end();
     }
@@ -393,6 +408,137 @@ describe("Identity migration chain", () => {
         )
       ).rejects.toMatchObject({
         constraint: "oauth_refresh_tokens_next_generation"
+      });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("enforces signing-key rotation and typed security-event boundaries", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const accountId = randomUUID();
+    const clientId = "security-event-test-client";
+    const sessionId = randomUUID();
+    const firstKeyId = randomUUID();
+    const secondKeyId = randomUUID();
+    try {
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [accountId, randomUUID(), randomBytes(32), "Security event account"]
+      );
+      await pool.query(
+        `insert into oauth_clients (id, display_name)
+         values ($1, $2)`,
+        [clientId, "Security event client"]
+      );
+      await pool.query(
+        `insert into oauth_sessions
+           (id, account_id, credential_hash, provider_uid, authenticated_at,
+            acr, amr, expires_at)
+         values ($1, $2, $3, $4, now(), $5, ARRAY['passkey'],
+                 now() + interval '1 hour')`,
+        [sessionId, accountId, randomBytes(32), randomUUID(), "urn:soy:passkey"]
+      );
+      await pool.query(
+        `insert into oauth_signing_keys
+           (id, key_id, algorithm, public_key_spki, secret_provider_handle,
+            status, published_at, activated_at)
+         values ($1, $2, 'ES256', $3, $4, 'active', now(), now())`,
+        [firstKeyId, "test-key-1", randomBytes(91), "secret-provider/key-1"]
+      );
+
+      await expect(
+        pool.query(
+          `insert into oauth_signing_keys
+             (id, key_id, algorithm, public_key_spki, secret_provider_handle,
+              status, published_at, activated_at)
+           values ($1, $2, 'ES256', $3, $4, 'active', now(), now())`,
+          [secondKeyId, "test-key-2", randomBytes(91), "secret-provider/key-2"]
+        )
+      ).rejects.toMatchObject({
+        constraint: "oauth_signing_keys_one_active_uq"
+      });
+
+      await expect(
+        pool.query(
+          `insert into oauth_signing_keys
+             (id, key_id, algorithm, public_key_spki, secret_provider_handle,
+              status, activated_at)
+           values ($1, $2, 'ES256', $3, $4, 'staged', now())`,
+          [randomUUID(), "invalid-staged-key", randomBytes(91), "secret-provider/invalid"]
+        )
+      ).rejects.toMatchObject({
+        constraint: "oauth_signing_keys_activated_after_publish"
+      });
+
+      await pool.query(
+        `update oauth_signing_keys
+            set status = 'verifying', signing_stopped_at = now()
+          where id = $1`,
+        [firstKeyId]
+      );
+      await pool.query(
+        `insert into oauth_signing_keys
+           (id, key_id, algorithm, public_key_spki, secret_provider_handle,
+            status, published_at, activated_at)
+         values ($1, $2, 'ES256', $3, $4, 'active', now(), now())`,
+        [secondKeyId, "test-key-2", randomBytes(91), "secret-provider/key-2"]
+      );
+
+      await pool.query(
+        `insert into identity_security_events
+           (id, event_type, outcome, actor_kind, actor_account_id, account_id,
+            client_id, session_id, signing_key_id, correlation_id,
+            source_address_hash, user_agent_hash)
+         values ($1, 'signing_key_lifecycle_changed', 'succeeded', 'account',
+                 $2, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          randomUUID(),
+          accountId,
+          clientId,
+          sessionId,
+          secondKeyId,
+          "security-event-correlation",
+          randomBytes(32),
+          randomBytes(32)
+        ]
+      );
+
+      await expect(
+        pool.query(
+          `insert into identity_security_events
+             (id, event_type, outcome, actor_kind, actor_account_id,
+              correlation_id)
+           values ($1, 'passkey_authentication', 'denied', 'anonymous', $2, $3)`,
+          [randomUUID(), accountId, "invalid-anonymous-actor"]
+        )
+      ).rejects.toMatchObject({
+        constraint: "identity_security_events_actor_account"
+      });
+
+      await expect(
+        pool.query(
+          `insert into identity_security_events
+             (id, event_type, outcome, actor_kind, correlation_id,
+              source_address_hash)
+           values ($1, 'passkey_authentication', 'failed', 'anonymous', $2, $3)`,
+          [randomUUID(), "invalid-source-hash", randomBytes(31)]
+        )
+      ).rejects.toMatchObject({
+        constraint: "identity_security_events_source_hash_length"
+      });
+
+      await expect(
+        pool.query(
+          `insert into identity_security_events
+             (id, event_type, outcome, actor_kind, session_id, correlation_id)
+           values ($1, 'oauth_session_revoked', 'succeeded', 'system', $2, $3)`,
+          [randomUUID(), sessionId, "missing-session-account"]
+        )
+      ).rejects.toMatchObject({
+        constraint: "identity_security_events_session_account"
       });
     } finally {
       await pool.end();

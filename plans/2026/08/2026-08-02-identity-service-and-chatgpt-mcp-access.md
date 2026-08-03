@@ -65,7 +65,7 @@
   code batches/codes и passkey recovery sessions.
 - [x] Реализовать вторую миграцию: OAuth clients/grants/sessions/interactions,
   hashed authorization codes и refresh-token families.
-- Реализовать третью миграцию: signing-key metadata и typed security audit.
+- [x] Реализовать третью миграцию: signing-key metadata и typed security audit.
 
 ### 3. Accounts, login и sessions
 

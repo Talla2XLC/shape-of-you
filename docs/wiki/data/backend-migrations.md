@@ -64,6 +64,11 @@ credentials and hashed challenges, recovery-code batches and hashes, and
 passkey recovery sessions. The second contains OAuth clients with exact
 redirect/scope allowlists, grants, hashed sessions, interactions, hashed
 authorization codes bound to S256 PKCE, and rotating refresh-token families.
+The third contains signing-key metadata without private key material and typed
+security events without generic detail payloads. Migration tests also reject
+generated PostgreSQL identifiers longer than 63 UTF-8 bytes and verify
+signing-key lifecycle, single-active-key, audit-reference, and source-hash
+constraints.
 
 Never modify an accepted applied migration; generate a new file.
 

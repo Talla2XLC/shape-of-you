@@ -64,6 +64,42 @@ export const oauthCodeChallengeMethod = pgEnum(
   "oauth_code_challenge_method",
   ["S256"]
 );
+export const oauthSigningKeyAlgorithm = pgEnum("oauth_signing_key_algorithm", [
+  "ES256"
+]);
+export const oauthSigningKeyStatus = pgEnum("oauth_signing_key_status", [
+  "staged",
+  "active",
+  "verifying",
+  "retired",
+  "revoked"
+]);
+export const identitySecurityEventType = pgEnum(
+  "identity_security_event_type",
+  [
+    "account_status_changed",
+    "passkey_registered",
+    "passkey_authentication",
+    "passkey_revoked",
+    "recovery_codes_issued",
+    "recovery_code_used",
+    "passkey_recovery_completed",
+    "oauth_authorization",
+    "oauth_code_exchange",
+    "oauth_refresh_rotation",
+    "oauth_refresh_reuse_detected",
+    "oauth_session_revoked",
+    "signing_key_lifecycle_changed"
+  ]
+);
+export const identitySecurityEventOutcome = pgEnum(
+  "identity_security_event_outcome",
+  ["succeeded", "denied", "failed"]
+);
+export const identitySecurityActorKind = pgEnum(
+  "identity_security_actor_kind",
+  ["anonymous", "account", "oauth_client", "system"]
+);
 
 export const identityAccounts = pgTable(
   "identity_accounts",
@@ -951,6 +987,174 @@ export const oauthRefreshTokens = pgTable(
     check(
       "oauth_refresh_tokens_next_generation",
       sql`${table.replacedByGeneration} IS NULL OR ${table.replacedByGeneration} = ${table.generation} + 1`
+    )
+  ]
+);
+
+export const oauthSigningKeys = pgTable(
+  "oauth_signing_keys",
+  {
+    id: uuid("id").primaryKey(),
+    keyId: varchar("key_id", { length: 200 }).notNull(),
+    algorithm: oauthSigningKeyAlgorithm("algorithm").notNull(),
+    publicKeySpki: bytea("public_key_spki").notNull(),
+    secretProviderHandle: varchar("secret_provider_handle", {
+      length: 500
+    }).notNull(),
+    status: oauthSigningKeyStatus("status").default("staged").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    publishedAt: timestamp("published_at", {
+      withTimezone: true,
+      mode: "date"
+    }),
+    activatedAt: timestamp("activated_at", {
+      withTimezone: true,
+      mode: "date"
+    }),
+    signingStoppedAt: timestamp("signing_stopped_at", {
+      withTimezone: true,
+      mode: "date"
+    }),
+    retiredAt: timestamp("retired_at", {
+      withTimezone: true,
+      mode: "date"
+    }),
+    revokedAt: timestamp("revoked_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+  },
+  (table) => [
+    unique("oauth_signing_keys_key_id_uq").on(table.keyId),
+    unique("oauth_signing_keys_secret_handle_uq").on(
+      table.secretProviderHandle
+    ),
+    uniqueIndex("oauth_signing_keys_one_active_uq")
+      .on(table.status)
+      .where(sql`${table.status} = 'active'`),
+    index("oauth_signing_keys_status_idx").on(table.status),
+    check(
+      "oauth_signing_keys_key_id_nonempty",
+      sql`length(btrim(${table.keyId})) > 0`
+    ),
+    check(
+      "oauth_signing_keys_public_spki_length",
+      sql`octet_length(${table.publicKeySpki}) BETWEEN 1 AND 8192`
+    ),
+    check(
+      "oauth_signing_keys_secret_handle_nonempty",
+      sql`length(btrim(${table.secretProviderHandle})) > 0`
+    ),
+    check(
+      "oauth_signing_keys_published_after_creation",
+      sql`${table.publishedAt} IS NULL OR ${table.publishedAt} >= ${table.createdAt}`
+    ),
+    check(
+      "oauth_signing_keys_activated_after_publish",
+      sql`${table.activatedAt} IS NULL OR (${table.publishedAt} IS NOT NULL AND ${table.activatedAt} >= ${table.publishedAt})`
+    ),
+    check(
+      "oauth_signing_keys_stopped_after_activation",
+      sql`${table.signingStoppedAt} IS NULL OR (${table.activatedAt} IS NOT NULL AND ${table.signingStoppedAt} >= ${table.activatedAt})`
+    ),
+    check(
+      "oauth_signing_keys_retired_after_stop",
+      sql`${table.retiredAt} IS NULL OR (${table.signingStoppedAt} IS NOT NULL AND ${table.retiredAt} >= ${table.signingStoppedAt})`
+    ),
+    check(
+      "oauth_signing_keys_revoked_after_creation",
+      sql`${table.revokedAt} IS NULL OR ${table.revokedAt} >= ${table.createdAt}`
+    ),
+    check(
+      "oauth_signing_keys_lifecycle_state",
+      sql`(${table.status} = 'staged' AND ${table.activatedAt} IS NULL AND ${table.signingStoppedAt} IS NULL AND ${table.retiredAt} IS NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'active' AND ${table.publishedAt} IS NOT NULL AND ${table.activatedAt} IS NOT NULL AND ${table.signingStoppedAt} IS NULL AND ${table.retiredAt} IS NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'verifying' AND ${table.publishedAt} IS NOT NULL AND ${table.activatedAt} IS NOT NULL AND ${table.signingStoppedAt} IS NOT NULL AND ${table.retiredAt} IS NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'retired' AND ${table.publishedAt} IS NOT NULL AND ${table.activatedAt} IS NOT NULL AND ${table.signingStoppedAt} IS NOT NULL AND ${table.retiredAt} IS NOT NULL AND ${table.revokedAt} IS NULL) OR (${table.status} = 'revoked' AND ${table.revokedAt} IS NOT NULL)`
+    )
+  ]
+);
+
+export const identitySecurityEvents = pgTable(
+  "identity_security_events",
+  {
+    id: uuid("id").primaryKey(),
+    eventType: identitySecurityEventType("event_type").notNull(),
+    outcome: identitySecurityEventOutcome("outcome").notNull(),
+    actorKind: identitySecurityActorKind("actor_kind").notNull(),
+    actorAccountId: uuid("actor_account_id"),
+    accountId: uuid("account_id"),
+    clientId: varchar("client_id", { length: 200 }),
+    sessionId: uuid("session_id"),
+    signingKeyId: uuid("signing_key_id"),
+    correlationId: varchar("correlation_id", { length: 200 }).notNull(),
+    sourceAddressHash: bytea("source_address_hash"),
+    userAgentHash: bytea("user_agent_hash"),
+    occurredAt: timestamp("occurred_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "identity_sec_events_actor_account_fk",
+      columns: [table.actorAccountId],
+      foreignColumns: [identityAccounts.id]
+    }),
+    foreignKey({
+      name: "identity_sec_events_account_fk",
+      columns: [table.accountId],
+      foreignColumns: [identityAccounts.id]
+    }),
+    foreignKey({
+      name: "identity_sec_events_client_fk",
+      columns: [table.clientId],
+      foreignColumns: [oauthClients.id]
+    }),
+    foreignKey({
+      name: "identity_sec_events_signing_key_fk",
+      columns: [table.signingKeyId],
+      foreignColumns: [oauthSigningKeys.id]
+    }),
+    foreignKey({
+      name: "identity_security_events_session_account_fk",
+      columns: [table.sessionId, table.accountId],
+      foreignColumns: [oauthSessions.id, oauthSessions.accountId]
+    }),
+    index("identity_security_events_occurred_idx").on(table.occurredAt),
+    index("identity_security_events_account_idx").on(
+      table.accountId,
+      table.occurredAt
+    ),
+    index("identity_security_events_client_idx").on(
+      table.clientId,
+      table.occurredAt
+    ),
+    index("identity_security_events_correlation_idx").on(table.correlationId),
+    check(
+      "identity_security_events_actor_account",
+      sql`(${table.actorKind} = 'account' AND ${table.actorAccountId} IS NOT NULL) OR (${table.actorKind} <> 'account' AND ${table.actorAccountId} IS NULL)`
+    ),
+    check(
+      "identity_security_events_client_actor",
+      sql`${table.actorKind} <> 'oauth_client' OR ${table.clientId} IS NOT NULL`
+    ),
+    check(
+      "identity_security_events_session_account",
+      sql`(${table.sessionId} IS NULL AND ${table.accountId} IS NULL) OR (${table.sessionId} IS NOT NULL AND ${table.accountId} IS NOT NULL) OR (${table.sessionId} IS NULL AND ${table.accountId} IS NOT NULL)`
+    ),
+    check(
+      "identity_security_events_correlation_nonempty",
+      sql`length(btrim(${table.correlationId})) > 0`
+    ),
+    check(
+      "identity_security_events_source_hash_length",
+      sql`${table.sourceAddressHash} IS NULL OR octet_length(${table.sourceAddressHash}) = 32`
+    ),
+    check(
+      "identity_security_events_agent_hash_length",
+      sql`${table.userAgentHash} IS NULL OR octet_length(${table.userAgentHash}) = 32`
     )
   ]
 );
