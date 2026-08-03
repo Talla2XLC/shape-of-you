@@ -35,6 +35,11 @@ measured drivers.
 - **Not required:** Elasticsearch/OpenSearch, TimescaleDB, and full event
   sourcing without measured gaps.
 
+The accepted Identity service will move authentication-account and refresh-
+session authority into its own PostgreSQL database. OAuth state uses typed
+relational tables rather than JSON blobs. The service is not implemented and
+does not alter the current API database yet.
+
 ## Evidence
 
 - Current one-API/PostgreSQL topology and behavior audit.
@@ -56,3 +61,4 @@ measured drivers.
 - [Data ownership](data-ownership.md)
 - [Quality attributes](quality-attributes.md)
 - [Deployment](deployment.md)
+- [Identity and external tool access](identity-and-external-tool-access.md)

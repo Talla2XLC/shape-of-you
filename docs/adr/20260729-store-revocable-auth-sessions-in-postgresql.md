@@ -2,10 +2,10 @@
 id: "decisions-20260729-store-revocable-auth-sessions-in-postgresql"
 kind: adr
 title: "Store revocable authentication sessions in PostgreSQL without mandatory Redis"
-status: accepted
+status: superseded
 date: 2026-07-29
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries"
 tags:
   - "authentication"
   - "postgresql"

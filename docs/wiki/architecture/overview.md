@@ -32,6 +32,11 @@ Current foundation:
 - no cross-service SQL; integration through APIs, events, or published read
   models.
 
+An accepted but unimplemented Identity boundary adds one project-owned
+deployable for shared OAuth/OIDC while keeping Person authorization in the API.
+Login is passkey-first; protocol-library adoption remains gated by a technical
+spike.
+
 Bounded contexts are logical modeling boundaries, not services. Current
 implementation remains one modular backend. Transport schemas, domain
 validation, and repositories are separated without generic CRUD abstractions.
@@ -61,5 +66,6 @@ operational fitness data until dual-run and cutover.
 - [Data ownership](data-ownership.md)
 - [Repository and runtime](repository-and-runtime.md)
 - [Stateful infrastructure](stateful-infrastructure.md)
+- [Identity and external tool access](identity-and-external-tool-access.md)
 - [Migration strategy](migration-strategy.md)
 - [Bounded contexts](../domain/bounded-contexts.md)

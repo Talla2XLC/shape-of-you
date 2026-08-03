@@ -30,6 +30,11 @@ Person; User access requires an active `PersonAccessGrant` role (`owner`,
 `editor`, `viewer`, or `coach`). Client-supplied `person_id` alone grants
 nothing. Until authentication, only explicit synthetic context is allowed.
 
+The accepted but unimplemented Identity service owns authentication accounts
+and OAuth sessions. API-local User remains the authorization principal and
+maps to an Identity `(issuer, subject)`; Identity never owns Person grants or
+fitness facts.
+
 Ownership classes:
 
 - shared immutable reference definitions (brands, ingredients, foods,
@@ -74,3 +79,4 @@ events, or owned published read models with explicit freshness contracts.
 - [Service autonomy ADR](../../adr/20260728-deployable-service-autonomy.md)
 - [Identity ADR](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Shared-reference ADR](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
+- [Identity and external tool access](identity-and-external-tool-access.md)

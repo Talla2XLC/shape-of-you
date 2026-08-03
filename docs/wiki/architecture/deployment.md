@@ -56,6 +56,11 @@ Environment input into root-owned `/etc/shape-of-you/staging/api.env` mode
 VM resources are limited and swap is in use. Current limits (`384m` API,
 `64m` edge) require observation before adding load.
 
+The accepted Identity service is not deployed. Before implementation it needs
+an independent database/credential boundary, resource sizing, HTTPS hostname,
+backup/restore, signing-key rotation, and an approved deployment plan. Edge/ACME
+would own TLS certificates; Identity would own OAuth signing keys.
+
 ## Evidence
 
 - Read-only VM/container inventory, PostgreSQL 17.4 access evidence, and
@@ -76,6 +81,7 @@ VM resources are limited and swap is in use. Current limits (`384m` API,
 - [Repository/runtime](repository-and-runtime.md)
 - [Backend runtime](backend-runtime.md)
 - [Data ownership](data-ownership.md)
+- [Identity and external tool access](identity-and-external-tool-access.md)
 - [Deployment runbook](../operations/temporary-vm-deployment.md)
 - [Rollback](../operations/temporary-vm-rollback.md)
 - [PostgreSQL provisioning](../operations/postgresql-provisioning.md)
