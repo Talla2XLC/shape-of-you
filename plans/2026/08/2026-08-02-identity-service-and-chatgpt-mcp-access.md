@@ -53,6 +53,8 @@
 
 - [x] Добавить отдельные `package.json`, `Dockerfile`, `AGENTS.md`, конфигурацию,
   probes и integration tests.
+- [x] Подключить runtime к отдельному `DATABASE_URL`, database-aware readiness,
+  graceful pool shutdown и отдельный migration runner.
 - Создать отдельную PostgreSQL database boundary, credentials, Drizzle schema и
   воспроизводимые миграции.
 - Не добавлять cross-service SQL или общие credentials.

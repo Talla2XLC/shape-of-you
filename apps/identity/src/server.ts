@@ -1,9 +1,21 @@
 import { createIdentityServer } from "./app.js";
 import { loadIdentityConfig } from "./config.js";
+import {
+  checkIdentityDatabaseReadiness,
+  createIdentityDatabase
+} from "./database/context.js";
 
 async function main(): Promise<void> {
   const config = loadIdentityConfig();
-  const server = createIdentityServer();
+  const database = createIdentityDatabase(
+    config.DATABASE_URL,
+    config.DATABASE_POOL_MAX
+  );
+  const server = createIdentityServer({
+    readiness: {
+      check: async () => checkIdentityDatabaseReadiness(database)
+    }
+  });
   let shuttingDown = false;
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
@@ -24,32 +36,56 @@ async function main(): Promise<void> {
     }, config.SHUTDOWN_TIMEOUT_MS);
     timeout.unref();
 
-    await new Promise<void>((resolve, reject) => {
-      server.close((error) => {
-        clearTimeout(timeout);
-        if (error) {
-          reject(error);
-        } else {
-          resolve();
-        }
-      });
+    try {
+      await Promise.all([
+        new Promise<void>((resolve, reject) => {
+          server.close((error) => {
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
+          });
+        }),
+        database.pool.end()
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
+
+  const requestShutdown = (signal: NodeJS.Signals): void => {
+    void shutdown(signal).catch((error: unknown) => {
+      process.stderr.write(
+        `${JSON.stringify({
+          level: "error",
+          message: "Identity graceful shutdown failed",
+          error: error instanceof Error ? error.message : "unknown error"
+        })}\n`
+      );
+      process.exitCode = 1;
     });
   };
 
   process.once("SIGINT", () => {
-    void shutdown("SIGINT");
+    requestShutdown("SIGINT");
   });
   process.once("SIGTERM", () => {
-    void shutdown("SIGTERM");
+    requestShutdown("SIGTERM");
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(config.PORT, config.HOST, () => {
-      server.off("error", reject);
-      resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(config.PORT, config.HOST, () => {
+        server.off("error", reject);
+        resolve();
+      });
     });
-  });
+  } catch (error) {
+    await database.pool.end();
+    throw error;
+  }
 
   process.stdout.write(
     `${JSON.stringify({

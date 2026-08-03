@@ -39,9 +39,11 @@ The Identity deployable has a separate generated PostgreSQL migration chain
 for accounts, passkeys, hashed challenges, recovery-code hashes, passkey
 recovery sessions, and typed OAuth clients/grants/sessions/interactions,
 authorization codes, refresh-token families, signing-key metadata, and typed
-security events. Runtime database wiring remains pending. This Identity
-protocol model uses no generic provider-artifact table or JSON persistence and
-does not alter the API database.
+security events. The Identity runtime now owns a bounded PostgreSQL pool,
+requires its own `DATABASE_URL`, and reports database availability through
+`GET /ready`; external database provisioning and deployment remain pending.
+This Identity protocol model uses no generic provider-artifact table or JSON
+persistence and does not alter the API database.
 
 ## Evidence
 

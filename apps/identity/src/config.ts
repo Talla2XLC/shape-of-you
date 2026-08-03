@@ -1,9 +1,21 @@
 import { z } from "zod";
 
+const postgresqlUrlSchema = z
+  .string()
+  .url()
+  .refine(
+    (value) => ["postgres:", "postgresql:"].includes(new URL(value).protocol),
+    {
+      message: "must use the postgres or postgresql protocol"
+    }
+  );
+
 const identityEnvironmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3_000),
+  DATABASE_URL: postgresqlUrlSchema,
+  DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

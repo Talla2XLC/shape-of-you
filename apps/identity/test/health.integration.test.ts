@@ -17,9 +17,19 @@ afterEach(async () => {
 
 describe("Identity health endpoints", () => {
   let origin: string;
+  let readinessError: Error | null;
 
   beforeEach(async () => {
-    const server = createIdentityServer();
+    readinessError = null;
+    const server = createIdentityServer({
+      readiness: {
+        check: async () => {
+          if (readinessError) {
+            throw readinessError;
+          }
+        }
+      }
+    });
     servers.add(server);
     await new Promise<void>((resolve, reject) => {
       server.once("error", reject);
@@ -38,6 +48,20 @@ describe("Identity health endpoints", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       status: path === "live" ? "alive" : "ready"
+    });
+  });
+
+  it("keeps liveness up and returns 503 readiness without leaking errors", async () => {
+    readinessError = new Error("database password must not leak");
+
+    const liveResponse = await fetch(`${origin}/live`);
+    const readyResponse = await fetch(`${origin}/ready`);
+
+    expect(liveResponse.status).toBe(200);
+    await expect(liveResponse.json()).resolves.toEqual({ status: "alive" });
+    expect(readyResponse.status).toBe(503);
+    await expect(readyResponse.json()).resolves.toEqual({
+      status: "not_ready"
     });
   });
 

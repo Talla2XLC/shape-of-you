@@ -33,3 +33,15 @@ export function createIdentityDatabase(
     pool
   };
 }
+
+/**
+ * Verifies that the Identity process can execute a PostgreSQL query.
+ *
+ * @param database - Identity-owned database context to check.
+ * @throws Error when PostgreSQL is unavailable or rejects the query.
+ */
+export async function checkIdentityDatabaseReadiness(
+  database: IdentityDatabaseContext
+): Promise<void> {
+  await database.pool.query("select 1");
+}

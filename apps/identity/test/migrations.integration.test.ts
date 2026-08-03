@@ -9,6 +9,10 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runIdentityMigrations } from "../src/database/migrate.js";
+import {
+  checkIdentityDatabaseReadiness,
+  createIdentityDatabase
+} from "../src/database/context.js";
 
 interface MigrationJournalEntry {
   readonly tag: string;
@@ -83,6 +87,18 @@ afterAll(async () => {
 });
 
 describe("Identity migration chain", () => {
+  it("checks the runtime database connection through the owned pool", async () => {
+    const database = createIdentityDatabase(container.getConnectionUri(), 1);
+
+    try {
+      await expect(
+        checkIdentityDatabaseReadiness(database)
+      ).resolves.toBeUndefined();
+    } finally {
+      await database.pool.end();
+    }
+  });
+
   it("keeps every generated PostgreSQL identifier within 63 bytes", async () => {
     const overlongIdentifiers: string[] = [];
 

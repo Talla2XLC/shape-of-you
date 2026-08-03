@@ -56,10 +56,12 @@ Environment input into root-owned `/etc/shape-of-you/staging/api.env` mode
 VM resources are limited and swap is in use. Current limits (`384m` API,
 `64m` edge) require observation before adding load.
 
-The accepted Identity service is not deployed. Before implementation it needs
-an independent database/credential boundary, resource sizing, HTTPS hostname,
-backup/restore, signing-key rotation, and an approved deployment plan. Edge/ACME
-would own TLS certificates; Identity would own OAuth signing keys.
+The accepted Identity service is not deployed. Its runtime requires a separate
+`DATABASE_URL`, uses database-aware readiness, and keeps migration execution in
+a separate one-shot entrypoint. Before deployment it still needs provisioned
+database credentials, resource sizing, HTTPS hostname, backup/restore,
+signing-key rotation, and an approved deployment plan. Edge/ACME would own TLS
+certificates; Identity would own OAuth signing keys.
 
 ## Evidence
 

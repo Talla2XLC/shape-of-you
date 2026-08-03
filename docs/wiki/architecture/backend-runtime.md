@@ -45,6 +45,12 @@ versioned exercises/programs, immutable sessions/sets, records, and progression
 projections. Recovery and Coaching retain typed facts, policies, evidence, and
 ownership boundaries.
 
+The repository also contains the independent `apps/identity` runtime. It owns
+its PostgreSQL connection pool, requires a separate `DATABASE_URL`, keeps
+`GET /live` dependency-free, and makes `GET /ready` execute `select 1` with a
+stable `503` response on database failure. Its migration runner remains a
+separate one-shot entrypoint; Identity is not deployed yet.
+
 ## Evidence
 
 - `apps/api/src/` and API unit/integration tests.

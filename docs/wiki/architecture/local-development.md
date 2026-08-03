@@ -53,6 +53,9 @@ pnpm db:migrate:identity
 
 The Identity service is not part of local Compose yet. Its migration tests use
 an isolated PostgreSQL container and do not apply SQL to an operator database.
+Running Identity directly requires a separately supplied Identity
+`DATABASE_URL`; its `/ready` endpoint checks that database while `/live`
+remains dependency-free.
 
 Validation:
 

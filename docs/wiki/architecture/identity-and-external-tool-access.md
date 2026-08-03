@@ -19,7 +19,8 @@ The accepted project-owned Identity service centralizes authentication and
 OAuth/OIDC for ChatGPT and future clients. The API retains Person authorization
 and domain authority. The deployable scaffold and typed account, WebAuthn,
 recovery, OAuth protocol, signing-key metadata, and security-audit persistence
-exist; authentication and OAuth HTTP flows are not implemented yet.
+exist. Runtime PostgreSQL ownership and database-aware readiness are wired;
+authentication and OAuth HTTP flows are not implemented yet.
 
 ## Content
 
@@ -34,6 +35,12 @@ The API owns its local User authorization principal, issuer/subject mapping,
 PersonAccessGrant, fitness data, and domain policy. A token never authorizes a
 Person solely because it contains a subject or a client supplied a Person id.
 Cross-service SQL and shared credentials remain forbidden.
+
+Identity requires its own `DATABASE_URL` at process startup and owns its
+bounded PostgreSQL pool. `GET /live` remains process-only; `GET /ready` executes
+`select 1` and returns stable `503` JSON without exposing database errors.
+Migrations remain an explicit one-shot command and never run during normal
+server startup.
 
 ### Accepted protocol boundary
 
