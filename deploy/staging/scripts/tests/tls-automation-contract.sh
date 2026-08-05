@@ -7,6 +7,7 @@ SHARED_COMPOSE="$REPOSITORY_ROOT/deploy/staging/compose.shared-ingress.yaml"
 STANDALONE_COMPOSE="$REPOSITORY_ROOT/deploy/staging/compose.standalone.yaml"
 DEPLOY="$REPOSITORY_ROOT/deploy/staging/scripts/deploy.sh"
 NGINX="$REPOSITORY_ROOT/deploy/staging/nginx/nginx.conf.template"
+NGINX_BOOTSTRAP="$REPOSITORY_ROOT/deploy/staging/nginx/bootstrap.conf"
 NGINX_START="$REPOSITORY_ROOT/deploy/staging/nginx/start-edge.sh"
 INSTALLER="$REPOSITORY_ROOT/deploy/staging/certbot/install-certificate.sh"
 RENEW="$REPOSITORY_ROOT/deploy/staging/system/shape-of-you-staging-cert-renew"
@@ -57,6 +58,11 @@ assert_contains "$NGINX" 'return 503'
 assert_contains "$NGINX" 'listen 8443 ssl ${EDGE_PROXY_PROTOCOL};'
 assert_contains "$NGINX" 'limit_req_zone ${EDGE_CLIENT_ADDRESS}'
 assert_contains "$NGINX" 'proxy_set_header X-Forwarded-For ${EDGE_FORWARDED_FOR};'
+assert_contains "$NGINX_BOOTSTRAP" 'client_body_temp_path /tmp/client_temp;'
+assert_contains "$NGINX_BOOTSTRAP" 'proxy_temp_path /tmp/proxy_temp;'
+assert_contains "$NGINX_BOOTSTRAP" 'fastcgi_temp_path /tmp/fastcgi_temp;'
+assert_contains "$NGINX_BOOTSTRAP" 'uwsgi_temp_path /tmp/uwsgi_temp;'
+assert_contains "$NGINX_BOOTSTRAP" 'scgi_temp_path /tmp/scgi_temp;'
 assert_contains "$NGINX_START" "x:proxy_protocol:'\$proxy_protocol_addr':'\$proxy_protocol_addr'"
 assert_contains "$NGINX_START" "x::'\$remote_addr':'\$proxy_add_x_forwarded_for'"
 assert_contains "$DEPLOY" 'compose.shared-ingress.yaml'
