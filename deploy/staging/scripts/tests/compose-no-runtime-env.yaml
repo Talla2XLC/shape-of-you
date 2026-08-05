@@ -1,0 +1,6 @@
+services:
+  api:
+    env_file: !reset []
+
+  migrate:
+    env_file: !reset []

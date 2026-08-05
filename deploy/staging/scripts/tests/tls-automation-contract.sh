@@ -14,6 +14,7 @@ TIMER="$REPOSITORY_ROOT/deploy/staging/system/shape-of-you-staging-cert-renew.ti
 PUBLISH_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/publish-staging.yml"
 DEPLOY_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/deploy-staging.yml"
 RELEASE_ENV="$REPOSITORY_ROOT/deploy/staging/release.env.example"
+COMPOSE_TEST_OVERRIDE="$REPOSITORY_ROOT/deploy/staging/scripts/tests/compose-no-runtime-env.yaml"
 RENDER_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/shape-of-you-compose-render.XXXXXX")
 
 cleanup() {
@@ -76,16 +77,18 @@ docker compose \
   --env-file "$RELEASE_ENV" \
   --file "$COMPOSE" \
   --file "$SHARED_COMPOSE" \
+  --file "$COMPOSE_TEST_OVERRIDE" \
   --profile operations \
-  config --no-env-resolution > "$RENDER_ROOT/shared.yaml"
+  config > "$RENDER_ROOT/shared.yaml"
 
 docker compose \
   --project-name shape-of-you-contract-test \
   --env-file "$RELEASE_ENV" \
   --file "$COMPOSE" \
   --file "$STANDALONE_COMPOSE" \
+  --file "$COMPOSE_TEST_OVERRIDE" \
   --profile operations \
-  config --no-env-resolution > "$RENDER_ROOT/standalone.yaml"
+  config > "$RENDER_ROOT/standalone.yaml"
 
 assert_not_contains "$RENDER_ROOT/shared.yaml" 'ports:'
 assert_contains "$RENDER_ROOT/shared.yaml" 'name: shared-vm-ingress'
