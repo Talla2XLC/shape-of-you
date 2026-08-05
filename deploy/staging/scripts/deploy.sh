@@ -91,7 +91,9 @@ if ! compose run --rm --no-deps --entrypoint sh certbot -c \
 
   challenge_probe=shape-of-you-ingress-ready
   compose run --rm --no-deps --entrypoint sh certbot -c \
-    "printf '%s' '$challenge_probe' > /var/www/certbot/$challenge_probe"
+    "mkdir -p /var/www/certbot/.well-known/acme-challenge && \
+     printf '%s' '$challenge_probe' > \
+       /var/www/certbot/.well-known/acme-challenge/$challenge_probe"
 
   for hostname in "$APP_HOST" "$IDENTITY_HOST"; do
     probe_response=$(curl --fail --silent --show-error \
@@ -103,7 +105,7 @@ if ! compose run --rm --no-deps --entrypoint sh certbot -c \
   done
 
   compose run --rm --no-deps --entrypoint sh certbot -c \
-    "rm -f /var/www/certbot/$challenge_probe"
+    "rm -f /var/www/certbot/.well-known/acme-challenge/$challenge_probe"
 
   compose run --rm --no-deps certbot certonly \
     --non-interactive \
