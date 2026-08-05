@@ -2,10 +2,10 @@
 id: "decisions-20260805-automate-staging-tls-with-nginx-certbot-and-systemd"
 kind: adr
 title: "Automate staging TLS with nginx, Certbot, and a root-owned systemd timer"
-status: accepted
+status: superseded
 date: 2026-08-05
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260805-route-shared-vm-ingress-by-host-and-sni"
 tags:
   - "acme"
   - "certbot"

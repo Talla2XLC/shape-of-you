@@ -22,9 +22,14 @@
 - Staging использует `https://staging.shape-of-you.ru` и
   `https://identity.staging.shape-of-you.ru`; staging WebAuthn RP ID —
   `identity.staging.shape-of-you.ru`.
-- Staging edge остаётся на nginx. Сертификат для двух точных имён выпускает и
-  продлевает Certbot; renewal запускает root-owned systemd timer. Wildcard и
-  DNS-provider credentials не используются.
+- Общий root-owned nginx на ВМ маршрутизирует HTTP по Host и непрозрачный TLS
+  по SNI через внешнюю Docker-сеть. Сервисные nginx независимо завершают TLS и
+  владеют своими сертификатами. Shape of You выпускает сертификат для двух
+  точных имён через Certbot; renewal запускает root-owned systemd timer.
+  Wildcard и DNS-provider credentials не используются.
+- Staging Compose имеет общую базу и два проверяемых overlay: `shared-ingress`
+  для текущей ВМ и `standalone` для собственной ВМ с прямым владением
+  `80/443`. Перенос не требует изменения приложения, миграций или TLS ownership.
 - OAuth-состояние хранится в типизированных реляционных таблицах, не в JSON.
 - Вход выполняется через WebAuthn/passkeys без пароля. Аккаунт поддерживает
   несколько passkeys; одноразовые recovery codes хранятся только как hashes и
@@ -108,15 +113,19 @@
 
 ### 7. Deployment и проверка безопасности
 
-- [x] Утвердить staging hostname/RP-ID и nginx + Certbot + root-owned systemd
-  timer как TLS lifecycle.
-- Реализовать воспроизводимый HTTP-01 bootstrap, постоянное раздельное хранение
+- [x] Утвердить staging hostname/RP-ID, общий L4 ingress без TLS termination,
+  внешний Docker network и сервисный nginx + Certbot + root-owned systemd timer
+  как TLS lifecycle Shape of You.
+- [x] Реализовать репозиторную часть внешнего ingress-контракта,
+  воспроизводимый HTTP-01 bootstrap, постоянное раздельное хранение
   ACME/serving state, автоматический renewal, проверку nginx и reload.
 - Перевести staging smoke и GitHub Environment URL на HTTPS; убрать публичный
   `3001` после подтверждённого cutover.
 - Первый cutover провести в две фазы через
   `STAGING_TLS_AUTOMATION_ENABLED`, чтобы push с новым CI-контрактом не обогнал
-  установку root-owned wrapper и systemd units.
+  установку root-owned wrapper и systemd units. Пока gate выключен, первый
+  rollout разрешён только через явный запуск `Deploy staging`; после HTTPS
+  smoke gate включает автоматические деплои с `main`.
 - Отдельно, с явным разрешением, установить root-owned units, открыть `80/443`,
   выпустить сертификат и выполнить HTTPS smoke на VM.
 - Настроить отдельные secrets, backups, restore drill, rate limits, monitoring

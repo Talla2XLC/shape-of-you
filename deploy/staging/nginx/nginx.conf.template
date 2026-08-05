@@ -9,7 +9,10 @@ http {
     include /etc/nginx/mime.types;
     default_type application/octet-stream;
 
-    access_log /dev/stdout;
+    log_format edge '${EDGE_CLIENT_ADDRESS} - $remote_user [$time_local] '
+                    '"$request" $status $body_bytes_sent '
+                    '"$http_referer" "$http_user_agent"';
+    access_log /dev/stdout edge;
     error_log /dev/stderr warn;
     server_tokens off;
 
@@ -19,7 +22,7 @@ http {
     uwsgi_temp_path /tmp/uwsgi_temp;
     scgi_temp_path /tmp/scgi_temp;
 
-    limit_req_zone $binary_remote_addr zone=api_per_ip:10m rate=5r/s;
+    limit_req_zone ${EDGE_CLIENT_ADDRESS} zone=api_per_ip:10m rate=5r/s;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_session_cache shared:SSL:10m;
@@ -62,7 +65,7 @@ http {
     }
 
     server {
-        listen 8443 ssl default_server;
+        listen 8443 ssl ${EDGE_PROXY_PROTOCOL} default_server;
         server_name _;
 
         ssl_certificate /etc/nginx/tls/shape-of-you-staging/fullchain.pem;
@@ -72,7 +75,7 @@ http {
     }
 
     server {
-        listen 8443 ssl;
+        listen 8443 ssl ${EDGE_PROXY_PROTOCOL};
         server_name staging.shape-of-you.ru;
 
         ssl_certificate /etc/nginx/tls/shape-of-you-staging/fullchain.pem;
@@ -111,14 +114,15 @@ http {
 
             proxy_set_header Host $host;
             proxy_set_header X-Request-Id $request_id;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Real-IP ${EDGE_CLIENT_ADDRESS};
+            proxy_set_header X-Forwarded-For ${EDGE_FORWARDED_FOR};
             proxy_set_header X-Forwarded-Proto https;
             proxy_set_header Connection "";
         }
     }
 
     server {
-        listen 8443 ssl;
+        listen 8443 ssl ${EDGE_PROXY_PROTOCOL};
         server_name identity.staging.shape-of-you.ru;
 
         ssl_certificate /etc/nginx/tls/shape-of-you-staging/fullchain.pem;

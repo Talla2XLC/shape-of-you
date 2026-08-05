@@ -18,6 +18,7 @@ cp "$ROLLBACK_SOURCE" "$TEST_ROOT/package/scripts/rollback.sh"
 printf '%s\n' \
   'CERTBOT_IMAGE=ghcr.io/example/shape-of-you-certbot' \
   'CERTBOT_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  'DEPLOYMENT_TOPOLOGY=shared-ingress' \
   > "$TEST_ROOT/deploy/releases/$RELEASE_ID/release.env"
 
 FAKE_DOCKER_LOG="$TEST_ROOT/docker.log"
@@ -52,10 +53,20 @@ chmod 0755 "$TEST_ROOT/package/scripts/smoke.sh"
 PATH="$TEST_ROOT/fake-bin:$PATH" \
 DEPLOY_ROOT="$TEST_ROOT/deploy" \
 LOCK_FILE="$TEST_ROOT/deploy.lock" \
+EXPECTED_DEPLOYMENT_TOPOLOGY=shared-ingress \
   sh "$TEST_ROOT/package/scripts/rollback.sh" "$RELEASE_ID" >/dev/null
 
 grep -F -- 'up --detach --wait --wait-timeout 90 --remove-orphans api edge' \
   "$FAKE_DOCKER_LOG" >/dev/null
 test -s "$FAKE_SMOKE_LOG"
+
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$TEST_ROOT/deploy" \
+  LOCK_FILE="$TEST_ROOT/deploy.lock" \
+  EXPECTED_DEPLOYMENT_TOPOLOGY=standalone \
+  sh "$TEST_ROOT/package/scripts/rollback.sh" "$RELEASE_ID" >/dev/null 2>&1; then
+  printf '%s\n' 'Cross-topology automatic rollback was not rejected.' >&2
+  exit 1
+fi
 
 printf '%s\n' 'rollback readiness regression test passed.'

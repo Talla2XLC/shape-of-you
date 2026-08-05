@@ -44,6 +44,7 @@ EDGE_DIGEST=
 CERTBOT_DIGEST=
 ACME_EMAIL=
 PUBLIC_IPV4=
+DEPLOYMENT_TOPOLOGY=
 SCHEMA_BACKWARD_COMPATIBLE=
 RUN_WRITE_SMOKE=
 GHCR_NAMESPACE=
@@ -65,7 +66,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -77,6 +78,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
         CERTBOT_DIGEST) CERTBOT_DIGEST=$input_value ;;
         ACME_EMAIL) ACME_EMAIL=$input_value ;;
         PUBLIC_IPV4) PUBLIC_IPV4=$input_value ;;
+        DEPLOYMENT_TOPOLOGY) DEPLOYMENT_TOPOLOGY=$input_value ;;
         SCHEMA_BACKWARD_COMPATIBLE) SCHEMA_BACKWARD_COMPATIBLE=$input_value ;;
         RUN_WRITE_SMOKE) RUN_WRITE_SMOKE=$input_value ;;
         GHCR_NAMESPACE) GHCR_NAMESPACE=$input_value ;;
@@ -98,6 +100,7 @@ done
 [ -n "$CERTBOT_DIGEST" ] || fail 'CERTBOT_DIGEST is required.'
 [ -n "$ACME_EMAIL" ] || fail 'ACME_EMAIL is required.'
 [ -n "$PUBLIC_IPV4" ] || fail 'PUBLIC_IPV4 is required.'
+[ -n "$DEPLOYMENT_TOPOLOGY" ] || fail 'DEPLOYMENT_TOPOLOGY is required.'
 [ -n "$SCHEMA_BACKWARD_COMPATIBLE" ] || fail 'SCHEMA_BACKWARD_COMPATIBLE is required.'
 [ -n "$RUN_WRITE_SMOKE" ] || fail 'RUN_WRITE_SMOKE is required.'
 [ -n "$GHCR_NAMESPACE" ] || fail 'GHCR_NAMESPACE is required.'
@@ -119,6 +122,11 @@ printf '%s\n' "$PUBLIC_IPV4" |
   fail 'Invalid PUBLIC_IPV4.'
 printf '%s\n' "$GHCR_NAMESPACE" | grep -Eq '^[a-z0-9][a-z0-9._-]*$' || fail 'Invalid GHCR_NAMESPACE.'
 printf '%s\n' "$GHCR_ACTOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]*$' || fail 'Invalid GHCR_ACTOR.'
+
+case "$DEPLOYMENT_TOPOLOGY" in
+  shared-ingress|standalone) ;;
+  *) fail 'Invalid DEPLOYMENT_TOPOLOGY.' ;;
+esac
 
 case "$SCHEMA_BACKWARD_COMPATIBLE" in
   true|false) ;;
@@ -171,6 +179,7 @@ CERTBOT_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-certbot
 CERTBOT_DIGEST=$CERTBOT_DIGEST
 ACME_EMAIL=$ACME_EMAIL
 PUBLIC_IPV4=$PUBLIC_IPV4
+DEPLOYMENT_TOPOLOGY=$DEPLOYMENT_TOPOLOGY
 SCHEMA_BACKWARD_COMPATIBLE=$SCHEMA_BACKWARD_COMPATIBLE
 EOF
 

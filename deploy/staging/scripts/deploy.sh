@@ -35,6 +35,16 @@ fi
 : "${ACME_EMAIL:?ACME_EMAIL is required}"
 : "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}"
 : "${SCHEMA_BACKWARD_COMPATIBLE:?SCHEMA_BACKWARD_COMPATIBLE is required}"
+: "${DEPLOYMENT_TOPOLOGY:?DEPLOYMENT_TOPOLOGY is required}"
+
+case "$DEPLOYMENT_TOPOLOGY" in
+  shared-ingress) COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.shared-ingress.yaml" ;;
+  standalone) COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.standalone.yaml" ;;
+  *)
+    printf '%s\n' "Unsupported deployment topology: $DEPLOYMENT_TOPOLOGY" >&2
+    exit 2
+    ;;
+esac
 
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
 printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
@@ -57,12 +67,13 @@ compose() {
     --project-name "$COMPOSE_PROJECT" \
     --env-file "$RELEASE_DIR/release.env" \
     --file "$COMPOSE_FILE" \
+    --file "$COMPOSE_TOPOLOGY_FILE" \
     "$@"
 }
 
 cleanup() {
   if [ "$bootstrap_started" = "true" ]; then
-    compose stop edge-bootstrap >/dev/null 2>&1 || true
+    compose rm --force --stop edge-bootstrap >/dev/null 2>&1 || true
   fi
 }
 
@@ -72,13 +83,27 @@ compose --profile operations pull
 
 if ! compose run --rm --no-deps --entrypoint sh certbot -c \
   "test -s /etc/letsencrypt/live/$CERT_NAME/fullchain.pem && test -s /etc/letsencrypt/live/$CERT_NAME/privkey.pem"; then
-  if compose ps --status running --services | grep -Fx edge >/dev/null &&
-    compose port edge 8080 2>/dev/null | grep -Eq '(^|:)80$'; then
-    printf '%s\n' 'Using the running TLS edge for the HTTP-01 challenge.'
-  else
-    compose --profile operations up --detach --wait --wait-timeout 45 edge-bootstrap
-    bootstrap_started=true
-  fi
+  # Remove the old edge before bootstrap so standalone port ownership or the
+  # shared-ingress alias has exactly one destination during first issuance.
+  compose rm --force --stop edge
+  compose --profile operations up --detach --wait --wait-timeout 45 edge-bootstrap
+  bootstrap_started=true
+
+  challenge_probe=shape-of-you-ingress-ready
+  compose run --rm --no-deps --entrypoint sh certbot -c \
+    "printf '%s' '$challenge_probe' > /var/www/certbot/$challenge_probe"
+
+  for hostname in "$APP_HOST" "$IDENTITY_HOST"; do
+    probe_response=$(curl --fail --silent --show-error \
+      "http://$hostname/.well-known/acme-challenge/$challenge_probe")
+    if [ "$probe_response" != "$challenge_probe" ]; then
+      printf '%s\n' "The active ingress did not route HTTP for $hostname." >&2
+      exit 1
+    fi
+  done
+
+  compose run --rm --no-deps --entrypoint sh certbot -c \
+    "rm -f /var/www/certbot/$challenge_probe"
 
   compose run --rm --no-deps certbot certonly \
     --non-interactive \
@@ -97,13 +122,14 @@ compose run --rm --no-deps \
   certbot
 
 if [ "$bootstrap_started" = "true" ]; then
-  compose stop edge-bootstrap
+  compose rm --force --stop edge-bootstrap
   bootstrap_started=false
 fi
 
 compose --profile operations run --rm migrate
 compose up --detach --wait --wait-timeout 90 api
-compose run --rm --no-deps --entrypoint nginx edge -t
+compose run --rm --no-deps \
+  --entrypoint /usr/local/bin/start-shape-of-you-edge edge --test
 compose up --detach --wait --wait-timeout 90 --remove-orphans edge
 
 api_container=$(compose ps --quiet api)
@@ -126,7 +152,8 @@ if ! RELEASE_ID="$RELEASE_ID" sh "$SCRIPT_DIR/smoke.sh"; then
   if [ "$SCHEMA_BACKWARD_COMPATIBLE" = "true" ] && [ -L "$CURRENT_LINK" ]; then
     previous_release=$(basename "$(readlink -f "$CURRENT_LINK")")
     printf '%s\n' "Attempting application rollback to $previous_release." >&2
-    RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/rollback.sh" "$previous_release"
+    EXPECTED_DEPLOYMENT_TOPOLOGY="$DEPLOYMENT_TOPOLOGY" \
+      RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/rollback.sh" "$previous_release"
   else
     printf '%s\n' \
       "Automatic rollback is disabled because schema compatibility is not confirmed." >&2

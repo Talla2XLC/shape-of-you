@@ -4,14 +4,14 @@ services:
     depends_on:
       api:
         condition: service_healthy
-    ports:
-      - "80:8080"
-      - "443:8443"
+    expose:
+      - "8080"
+      - "8443"
     volumes:
       - acme_challenge:/var/www/certbot:ro
       - edge_tls:/etc/nginx/tls:ro
     networks:
-      - edge
+      edge:
     restart: unless-stopped
     read_only: true
     tmpfs:
@@ -43,12 +43,12 @@ services:
   edge-bootstrap:
     image: "${EDGE_IMAGE:?EDGE_IMAGE is required}@${EDGE_DIGEST:?EDGE_DIGEST is required}"
     command: ["nginx", "-c", "/etc/nginx/bootstrap.conf", "-g", "daemon off;"]
-    ports:
-      - "80:8080"
+    expose:
+      - "8080"
     volumes:
       - acme_challenge:/var/www/certbot:ro
     networks:
-      - edge
+      edge:
     profiles:
       - operations
     restart: "no"

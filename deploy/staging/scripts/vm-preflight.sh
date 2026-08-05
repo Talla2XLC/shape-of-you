@@ -24,6 +24,20 @@ test -f "$RELEASE_ENV"
 . "$RELEASE_ENV"
 
 : "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}"
+: "${DEPLOYMENT_TOPOLOGY:?DEPLOYMENT_TOPOLOGY is required}"
+
+case "$DEPLOYMENT_TOPOLOGY" in
+  shared-ingress)
+    COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.shared-ingress.yaml"
+    ;;
+  standalone)
+    COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.standalone.yaml"
+    ;;
+  *)
+    printf '%s\n' "Unsupported deployment topology: $DEPLOYMENT_TOPOLOGY" >&2
+    exit 2
+    ;;
+esac
 
 command -v getent >/dev/null 2>&1
 command -v awk >/dev/null 2>&1
@@ -41,6 +55,7 @@ docker compose \
   --project-name "$COMPOSE_PROJECT" \
   --env-file "$RELEASE_ENV" \
   --file "$COMPOSE_FILE" \
+  --file "$COMPOSE_TOPOLOGY_FILE" \
   --profile operations \
   config --quiet
 
@@ -52,6 +67,7 @@ compose_port() {
     --project-name "$COMPOSE_PROJECT" \
     --env-file "$RELEASE_ENV" \
     --file "$COMPOSE_FILE" \
+    --file "$COMPOSE_TOPOLOGY_FILE" \
     --profile operations \
     port "$service" "$container_port" 2>/dev/null || true
 }
@@ -72,18 +88,29 @@ port_is_project_owned() {
   return 1
 }
 
-if command -v ss >/dev/null 2>&1; then
+if [ "$DEPLOYMENT_TOPOLOGY" = "shared-ingress" ]; then
+  docker network inspect shared-vm-ingress >/dev/null
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn | grep -Eq '(^|[[:space:]])[^[:space:]]*:80[[:space:]]' || {
+      printf '%s\n' 'Shared ingress is not listening on host port 80.' >&2
+      exit 1
+    }
+    ss -ltn | grep -Eq '(^|[[:space:]])[^[:space:]]*:443[[:space:]]' || {
+      printf '%s\n' 'Shared ingress is not listening on host port 443.' >&2
+      exit 1
+    }
+  fi
+elif command -v ss >/dev/null 2>&1; then
   if ss -ltn | grep -Eq '(^|[[:space:]])[^[:space:]]*:80[[:space:]]' &&
     ! port_is_project_owned 80 8080 8080; then
-    printf '%s\n' \
-      "Port 80 is already listening and is not owned by this Compose project." >&2
+    printf '%s\n' 'Port 80 is owned by another process.' >&2
     exit 1
   fi
 
   if ss -ltn | grep -Eq '(^|[[:space:]])[^[:space:]]*:443[[:space:]]' &&
     ! port_is_project_owned 443 8443 ''; then
-    printf '%s\n' \
-      "Port 443 is already listening and is not owned by this Compose project." >&2
+    printf '%s\n' 'Port 443 is owned by another process.' >&2
     exit 1
   fi
 fi

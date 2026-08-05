@@ -113,7 +113,7 @@ lifecycles are separate.
 - [User and Person separation](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Service autonomy](../../adr/20260728-deployable-service-autonomy.md)
 - [Identity relational model](../../adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
-- [Automated staging TLS](../../adr/20260805-automate-staging-tls-with-nginx-certbot-and-systemd.md)
+- [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 
 ## Open questions
 

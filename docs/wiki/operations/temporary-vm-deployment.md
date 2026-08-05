@@ -26,8 +26,12 @@ and deployment mutations always require the corresponding explicit approval.
 - Both `staging.shape-of-you.ru` and `identity.staging.shape-of-you.ru` resolve
   publicly to `STAGING_PUBLIC_IPV4`.
 - VM has Docker Engine, Compose plugin, `curl`, `getent`, `flock`, systemd, and
-  `visudo`; ports `80` and `443` are allowed by the provider firewall and are
-  free or owned by this Compose project.
+  `visudo`; ports `80` and `443` are allowed by the provider firewall.
+- In `shared-ingress` mode, `/opt/shared-vm-ingress` exclusively owns those
+  ports, external network `shared-vm-ingress` exists, HTTP reaches
+  `shape-of-you-edge:8080`, and SNI/PROXY routing reaches port `8443`.
+- In `standalone` mode, the ports are free or already owned by the Shape of You
+  Compose project; no external ingress network is required.
 - Database/login `shape_of_you_api` exists.
 - Password-locked `shape-deploy` exists outside Docker group; operator installed
   root wrapper and sudoers rule.
@@ -51,6 +55,7 @@ STAGING_VM_PORT
 GHCR_NAMESPACE
 STAGING_ACME_EMAIL
 STAGING_PUBLIC_IPV4
+STAGING_DEPLOYMENT_TOPOLOGY
 ```
 
 Repository variable used as the initial cutover gate:
@@ -66,6 +71,30 @@ postgresql://shape_of_you_api:<secret>@host.docker.internal:5431/shape_of_you_ap
 ```
 
 Never log or store the value in release manifests.
+
+`STAGING_DEPLOYMENT_TOPOLOGY` accepts `shared-ingress` or `standalone`. The
+current shared VM uses `shared-ingress`; the workflow defaults to that value
+while the variable is absent. Set it explicitly before enabling automatic
+deployment. A dedicated VM uses `standalone` and must have ports `80/443` free
+or already owned by the Shape of You Compose project.
+
+The corresponding render contracts are explicit:
+
+```sh
+docker compose \
+  --file deploy/staging/compose.yaml \
+  --file deploy/staging/compose.shared-ingress.yaml \
+  config
+
+docker compose \
+  --file deploy/staging/compose.yaml \
+  --file deploy/staging/compose.standalone.yaml \
+  config
+```
+
+Deployment, renewal, and rollback select the same overlay from the allowlisted
+topology stored in `release.env`; operators do not hand-edit the base Compose
+file during a move.
 
 ### Publication and deployment
 
@@ -101,23 +130,32 @@ For the initial HTTP-to-HTTPS cutover, keep
 push publishes all three images but skips deployment. Then, with separate
 approval:
 
-1. allow inbound TCP `80` and `443` and confirm no unrelated listener owns
-   them;
+1. complete the coordinated [shared ingress](shared-vm-ingress.md) maintenance
+   cutover and validate both existing talking-to-ai traffic and Shape of You
+   HTTP routing;
 2. set `STAGING_ACME_EMAIL` to the operational certificate contact and
    `STAGING_PUBLIC_IPV4` to the VM public IPv4;
 3. update the VM checkout to the reviewed `main` commit and run the root asset
    installer above;
-4. set `STAGING_TLS_AUTOMATION_ENABLED=true`;
-5. manually dispatch `Publish staging images` for the same `main` commit.
+4. keep `STAGING_TLS_AUTOMATION_ENABLED` absent and manually dispatch
+   `Deploy staging` with the exact commit and image digests published by the
+   reviewed `main` run;
+5. verify certificate issuance, HTTPS smoke, both existing applications, and
+   rollback readiness;
+6. set `STAGING_TLS_AUTOMATION_ENABLED=true`.
 
 After the verified cutover, leave the gate at `true`; later `main` pushes return
-to normal automatic deployment. This sequence prevents the new workflow input
-contract from racing the old installed root wrapper.
+to normal automatic deployment. Direct `Deploy staging` dispatch is the only
+deployment path allowed while the gate is absent. This sequence prevents the
+new workflow input contract from racing the old installed root wrapper.
 
 ### TLS activation and renewal
 
-The first TLS-capable deployment verifies both DNS answers and exclusive port
-ownership. If no certificate exists, it starts the HTTP-only bootstrap edge,
+The first TLS-capable deployment verifies both DNS answers, the external
+network and shared-ingress listeners in shared mode, or exclusive port
+availability in standalone mode. If no certificate exists, it removes the old
+edge endpoint, starts the HTTP-only bootstrap edge under the selected
+transport, verifies both public Host routes with a temporary challenge,
 requests one certificate for both exact names through the HTTP-01 webroot,
 copies only the serving chain/key into the nginx volume, validates nginx, and
 starts the HTTPS edge. Existing ACME state is reused on later deployments.
@@ -165,7 +203,7 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Dedicated identity ADR](../../adr/20260729-use-dedicated-staging-deployment-identity.md)
 - [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
-- [Automated staging TLS](../../adr/20260805-automate-staging-tls-with-nginx-certbot-and-systemd.md)
+- [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 
 ## Open questions
 
@@ -175,6 +213,7 @@ This does not affect unrelated Compose/PostgreSQL.
 ## Related material
 
 - [Topology](../architecture/deployment.md)
+- [Shared ingress](shared-vm-ingress.md)
 - [Rollback](temporary-vm-rollback.md)
 - [Provisioning](postgresql-provisioning.md)
 - [Backup](postgresql-backup-and-restore.md)

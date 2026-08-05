@@ -11,6 +11,7 @@ CURRENT_LINK="$DEPLOY_ROOT/current"
 PREVIOUS_LINK="$DEPLOY_ROOT/previous"
 TARGET_RELEASE=${1:-}
 LOCK_FILE=${LOCK_FILE:-/run/shape-of-you-staging.lock}
+EXPECTED_DEPLOYMENT_TOPOLOGY=${EXPECTED_DEPLOYMENT_TOPOLOGY:-}
 
 if [ "${SHAPE_OF_YOU_STAGING_LOCK_HELD:-false}" != "true" ]; then
   command -v flock >/dev/null 2>&1
@@ -41,13 +42,30 @@ test -f "$TARGET_ENV"
 . "$TARGET_ENV"
 : "${CERTBOT_IMAGE:?Target release predates TLS automation and cannot be rolled back safely}"
 : "${CERTBOT_DIGEST:?Target release predates TLS automation and cannot be rolled back safely}"
+: "${DEPLOYMENT_TOPOLOGY:?Target release has no deployment topology}"
 printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+
+case "$DEPLOYMENT_TOPOLOGY" in
+  shared-ingress) COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.shared-ingress.yaml" ;;
+  standalone) COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.standalone.yaml" ;;
+  *)
+    printf '%s\n' "Unsupported deployment topology: $DEPLOYMENT_TOPOLOGY" >&2
+    exit 2
+    ;;
+esac
+
+if [ -n "$EXPECTED_DEPLOYMENT_TOPOLOGY" ] &&
+  [ "$DEPLOYMENT_TOPOLOGY" != "$EXPECTED_DEPLOYMENT_TOPOLOGY" ]; then
+  printf '%s\n' 'Automatic rollback across deployment topologies is forbidden.' >&2
+  exit 1
+fi
 
 compose() {
   docker compose \
     --project-name "$COMPOSE_PROJECT" \
     --env-file "$TARGET_ENV" \
     --file "$COMPOSE_FILE" \
+    --file "$COMPOSE_TOPOLOGY_FILE" \
     "$@"
 }
 

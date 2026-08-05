@@ -1,0 +1,21 @@
+services:
+  edge:
+    environment:
+      EDGE_PROXY_PROTOCOL: proxy_protocol
+      EDGE_CLIENT_ADDRESS: $$proxy_protocol_addr
+      EDGE_FORWARDED_FOR: $$proxy_protocol_addr
+    networks:
+      shared_ingress:
+        aliases:
+          - shape-of-you-edge
+
+  edge-bootstrap:
+    networks:
+      shared_ingress:
+        aliases:
+          - shape-of-you-edge
+
+networks:
+  shared_ingress:
+    external: true
+    name: shared-vm-ingress

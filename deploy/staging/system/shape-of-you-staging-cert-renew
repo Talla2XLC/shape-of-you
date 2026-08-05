@@ -35,6 +35,15 @@ if [ -z "${CERTBOT_IMAGE:-}" ] || [ -z "${CERTBOT_DIGEST:-}" ]; then
   exit 0
 fi
 
+case "${DEPLOYMENT_TOPOLOGY:-}" in
+  shared-ingress) COMPOSE_TOPOLOGY_FILE="$CONTROL_STAGING/compose.shared-ingress.yaml" ;;
+  standalone) COMPOSE_TOPOLOGY_FILE="$CONTROL_STAGING/compose.standalone.yaml" ;;
+  *)
+    printf '%s\n' 'Certificate renewal refused: invalid deployment topology.' >&2
+    exit 1
+    ;;
+esac
+
 exec 9>"$LOCK_FILE"
 if ! flock -n 9; then
   printf '%s\n' 'Certificate renewal skipped because a deployment or renewal is active.'
@@ -46,6 +55,7 @@ compose() {
     --project-name "$COMPOSE_PROJECT" \
     --env-file "$RELEASE_ENV" \
     --file "$COMPOSE_FILE" \
+    --file "$COMPOSE_TOPOLOGY_FILE" \
     --profile operations \
     "$@"
 }
@@ -64,7 +74,7 @@ compose run --rm --no-deps \
   --entrypoint /usr/local/bin/install-shape-of-you-certificate \
   certbot
 
-compose exec -T edge nginx -t
-compose exec -T edge nginx -s reload
+compose exec -T edge /usr/local/bin/start-shape-of-you-edge --test
+compose exec -T edge nginx -c /tmp/nginx.conf -s reload
 
 printf '%s\n' 'Staging certificate renewal check and nginx reload completed.'

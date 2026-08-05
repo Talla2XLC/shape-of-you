@@ -24,6 +24,11 @@ Successful releases store secret-free manifest:
 /opt/shape-of-you/staging/releases/<commit-sha>/release.env
 ```
 
+The manifest includes the allowlisted deployment topology, so rollback uses
+the same shared or standalone overlay as the target release. Automatic rollback
+refuses a target from another topology; after a VM/topology move, complete a
+verified deployment to establish a new rollback baseline.
+
 `current` and `previous` symlinks identify the last two successful releases.
 After separate approval:
 
@@ -49,7 +54,9 @@ the release manifest gained `CERTBOT_IMAGE` and `CERTBOT_DIGEST` cannot be
 rendered by the current Compose contract and is rejected before any container
 change. Roll back only to a TLS-capable release; otherwise prepare an explicit
 roll-forward decision. Certificate and ACME account volumes remain intact
-across application rollback.
+across application rollback. The shared ingress and external network are host
+infrastructure and are not changed by application rollback. A topology-cutover
+failure uses the separate [shared-ingress rollback](shared-vm-ingress.md#rollback).
 
 Database rollback never uses down migration. Incompatible schema needs
 expand/migrate/contract or restore from a previously verified backup with
@@ -62,7 +69,7 @@ separate approval.
 ## Decisions
 
 - Application rolls back by immutable digest; database rollback is separate.
-- [Automated staging TLS](../../adr/20260805-automate-staging-tls-with-nginx-certbot-and-systemd.md)
+- [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 
 ## Open questions
 

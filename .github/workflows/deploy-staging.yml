@@ -60,7 +60,7 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ vars.STAGING_TLS_AUTOMATION_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.STAGING_TLS_AUTOMATION_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
@@ -78,6 +78,7 @@ jobs:
       CERTBOT_DIGEST: ${{ inputs.certbot_digest }}
       ACME_EMAIL: ${{ vars.STAGING_ACME_EMAIL }}
       PUBLIC_IPV4: ${{ vars.STAGING_PUBLIC_IPV4 }}
+      DEPLOYMENT_TOPOLOGY: ${{ vars.STAGING_DEPLOYMENT_TOPOLOGY || 'shared-ingress' }}
       SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.schema_backward_compatible }}
       RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
 
@@ -92,6 +93,7 @@ jobs:
           printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$ACME_EMAIL" | grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
           printf '%s\n' "$PUBLIC_IPV4" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
+          printf '%s\n' "$DEPLOYMENT_TOPOLOGY" | grep -Eq '^(shared-ingress|standalone)$'
           printf '%s\n' "$VM_HOST" | grep -Eq '^[A-Za-z0-9.-]+$'
           test "$VM_USER" = 'shape-deploy'
           printf '%s\n' "$VM_PORT" | grep -Eq '^[0-9]{1,5}$'
@@ -126,6 +128,7 @@ jobs:
             printf 'CERTBOT_DIGEST=%s\n' "$CERTBOT_DIGEST"
             printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
             printf 'PUBLIC_IPV4=%s\n' "$PUBLIC_IPV4"
+            printf 'DEPLOYMENT_TOPOLOGY=%s\n' "$DEPLOYMENT_TOPOLOGY"
             printf 'SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$SCHEMA_BACKWARD_COMPATIBLE"
             printf 'RUN_WRITE_SMOKE=%s\n' "$RUN_WRITE_SMOKE"
             printf 'GHCR_NAMESPACE=%s\n' "$GHCR_NAMESPACE"

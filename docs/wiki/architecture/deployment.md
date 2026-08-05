@@ -14,9 +14,10 @@ tags:
 ## Summary
 
 Temporary staging runs on a shared VM. GitHub Actions builds immutable images;
-project nginx exposes the web/API through HTTPS; a dedicated `shape-deploy`
-identity invokes a constrained root-owned wrapper. Certbot and a root-owned
-systemd timer automate the edge certificate lifecycle.
+an operator-owned transport ingress selects independently owned application
+edges; a dedicated `shape-deploy` identity invokes a constrained root-owned
+wrapper. Shape of You nginx, Certbot, and a root-owned systemd timer own the
+project certificate lifecycle.
 
 ## Content
 
@@ -33,13 +34,22 @@ verified `origin/main` at exact `CONTROL_SHA`.
 
 ### Runtime and data
 
-Project nginx exposes `https://staging.shape-of-you.ru`: `/` is reserved for
-web and `/api/` routes to the internal API. Port `80` serves HTTP-01 challenges
-and redirects the two accepted staging hosts to HTTPS; unknown hosts fail
-closed. `https://identity.staging.shape-of-you.ru` is the accepted Identity and
+The root-owned `/opt/shared-vm-ingress` Compose project is the only owner of
+host ports `80` and `443`. It routes HTTP by Host and opaque TLS by SNI over the
+external `shared-vm-ingress` Docker network. It stores no certificates. Shape
+of You nginx is reachable only as `shape-of-you-edge:8080/8443`, terminates its
+own TLS, serves HTTP-01 and redirects, and routes `/api/` to the internal API.
+`https://identity.staging.shape-of-you.ru` is the accepted Identity and
 WebAuthn origin and returns a controlled `503` until Identity is deployed.
-nginx is a deployment adapter, not a domain service. Unrelated nginx/Compose
-are untouched.
+Unknown hosts fail closed at both boundaries. PROXY protocol preserves client
+addresses for logging, forwarding, and rate limiting.
+
+The base staging Compose file has two deployment overlays. Current staging uses
+`shared-ingress`; a dedicated VM uses `standalone`, where Shape of You nginx
+publishes `80/443` directly and does not expect PROXY protocol. Both modes use
+one generated nginx configuration template and preserve the same Certbot,
+volumes, services, probes, and release process. `DEPLOYMENT_TOPOLOGY` is stored
+with the release so renewal and rollback cannot silently select another mode.
 
 One exact-name certificate covers both staging hosts. Certbot persists ACME
 account and renewal state in dedicated volumes. nginx mounts only a restrictive
@@ -83,7 +93,7 @@ owns OAuth signing keys.
 
 - [Temporary shared-VM deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
-- [Automated staging TLS](../../adr/20260805-automate-staging-tls-with-nginx-certbot-and-systemd.md)
+- [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 
 ## Open questions
 
@@ -97,5 +107,6 @@ owns OAuth signing keys.
 - [Data ownership](data-ownership.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Deployment runbook](../operations/temporary-vm-deployment.md)
+- [Shared VM ingress](../operations/shared-vm-ingress.md)
 - [Rollback](../operations/temporary-vm-rollback.md)
 - [PostgreSQL provisioning](../operations/postgresql-provisioning.md)
