@@ -5,7 +5,11 @@ services:
       api:
         condition: service_healthy
     ports:
-      - "3001:8080"
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - acme_challenge:/var/www/certbot:ro
+      - edge_tls:/etc/nginx/tls:ro
     networks:
       - edge
     restart: unless-stopped
@@ -23,7 +27,7 @@ services:
           "wget",
           "--quiet",
           "--output-document=-",
-          "http://127.0.0.1:8080/edge-health"
+          "http://127.0.0.1:8081/edge-health"
         ]
       interval: 10s
       timeout: 3s
@@ -35,6 +39,77 @@ services:
       options:
         max-size: 10m
         max-file: "3"
+
+  edge-bootstrap:
+    image: "${EDGE_IMAGE:?EDGE_IMAGE is required}@${EDGE_DIGEST:?EDGE_DIGEST is required}"
+    command: ["nginx", "-c", "/etc/nginx/bootstrap.conf", "-g", "daemon off;"]
+    ports:
+      - "80:8080"
+    volumes:
+      - acme_challenge:/var/www/certbot:ro
+    networks:
+      - edge
+    profiles:
+      - operations
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--output-document=-",
+          "http://127.0.0.1:8081/edge-health"
+        ]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+    mem_limit: 32m
+    pids_limit: 32
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "2"
+
+  certbot:
+    image: "${CERTBOT_IMAGE:?CERTBOT_IMAGE is required}@${CERTBOT_DIGEST:?CERTBOT_DIGEST is required}"
+    volumes:
+      - certbot_state:/etc/letsencrypt
+      - certbot_work:/var/lib/letsencrypt
+      - certbot_logs:/var/log/letsencrypt
+      - acme_challenge:/var/www/certbot
+      - edge_tls:/var/lib/shape-of-you/tls
+    networks:
+      - acme_egress
+    profiles:
+      - operations
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 192m
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "2"
 
   api:
     image: "${API_IMAGE:?API_IMAGE is required}@${API_DIGEST:?API_DIGEST is required}"
@@ -120,3 +195,11 @@ services:
 networks:
   edge:
   database_access:
+  acme_egress:
+
+volumes:
+  acme_challenge:
+  certbot_logs:
+  certbot_state:
+  certbot_work:
+  edge_tls:

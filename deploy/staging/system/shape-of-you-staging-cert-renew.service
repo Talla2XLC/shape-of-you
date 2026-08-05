@@ -1,0 +1,32 @@
+[Unit]
+Description=Renew Shape of You staging TLS certificates
+Documentation=https://github.com/Talla2XLC/shape-of-you
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/shape-of-you/staging/current/release.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/usr/local/sbin/shape-of-you-staging-cert-renew
+TimeoutStartSec=15min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+RuntimeDirectory=shape-of-you-cert-renew-docker
+RuntimeDirectoryMode=0700
+ProtectHome=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=multi-user.target

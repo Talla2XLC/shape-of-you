@@ -19,8 +19,21 @@ install -d -o root -g root -m 0700 /etc/shape-of-you/staging
 
 install -o root -g root -m 0755 "$script_dir/shape-of-you-staging-deploy" \
   /usr/local/sbin/shape-of-you-staging-deploy
+install -o root -g root -m 0755 "$script_dir/shape-of-you-staging-cert-renew" \
+  /usr/local/sbin/shape-of-you-staging-cert-renew
+install -o root -g root -m 0644 \
+  "$script_dir/shape-of-you-staging-cert-renew.service" \
+  /etc/systemd/system/shape-of-you-staging-cert-renew.service
+install -o root -g root -m 0644 \
+  "$script_dir/shape-of-you-staging-cert-renew.timer" \
+  /etc/systemd/system/shape-of-you-staging-cert-renew.timer
 install -o root -g root -m 0440 "$script_dir/shape-deploy.sudoers" \
   /etc/sudoers.d/shape-deploy
 
 visudo -cf /etc/sudoers.d/shape-deploy
+systemd-analyze verify \
+  /etc/systemd/system/shape-of-you-staging-cert-renew.service \
+  /etc/systemd/system/shape-of-you-staging-cert-renew.timer
+systemctl daemon-reload
+systemctl enable --now shape-of-you-staging-cert-renew.timer
 printf '%s\n' 'Root-owned Shape of You staging deployment assets installed.'

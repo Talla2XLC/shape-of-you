@@ -12,6 +12,9 @@ on:
       edge_digest:
         required: true
         type: string
+      certbot_digest:
+        required: true
+        type: string
       schema_backward_compatible:
         required: true
         type: boolean
@@ -30,6 +33,10 @@ on:
         type: string
       edge_digest:
         description: Published edge sha256 digest
+        required: true
+        type: string
+      certbot_digest:
+        description: Published Certbot sha256 digest
         required: true
         type: string
       schema_backward_compatible:
@@ -53,11 +60,12 @@ permissions:
 
 jobs:
   deploy:
+    if: ${{ vars.STAGING_TLS_AUTOMATION_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment:
       name: staging
-      url: http://2.58.15.24:3001/
+      url: https://staging.shape-of-you.ru/
 
     env:
       VM_HOST: ${{ vars.STAGING_VM_HOST }}
@@ -67,6 +75,9 @@ jobs:
       RELEASE_ID: ${{ inputs.release_id }}
       API_DIGEST: ${{ inputs.api_digest }}
       EDGE_DIGEST: ${{ inputs.edge_digest }}
+      CERTBOT_DIGEST: ${{ inputs.certbot_digest }}
+      ACME_EMAIL: ${{ vars.STAGING_ACME_EMAIL }}
+      PUBLIC_IPV4: ${{ vars.STAGING_PUBLIC_IPV4 }}
       SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.schema_backward_compatible }}
       RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
 
@@ -78,6 +89,9 @@ jobs:
           printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$'
           printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$ACME_EMAIL" | grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+          printf '%s\n' "$PUBLIC_IPV4" | grep -Eq '^([0-9]{1,3}\.){3}[0-9]{1,3}$'
           printf '%s\n' "$VM_HOST" | grep -Eq '^[A-Za-z0-9.-]+$'
           test "$VM_USER" = 'shape-deploy'
           printf '%s\n' "$VM_PORT" | grep -Eq '^[0-9]{1,5}$'
@@ -109,6 +123,9 @@ jobs:
             printf 'RELEASE_ID=%s\n' "$RELEASE_ID"
             printf 'API_DIGEST=%s\n' "$API_DIGEST"
             printf 'EDGE_DIGEST=%s\n' "$EDGE_DIGEST"
+            printf 'CERTBOT_DIGEST=%s\n' "$CERTBOT_DIGEST"
+            printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
+            printf 'PUBLIC_IPV4=%s\n' "$PUBLIC_IPV4"
             printf 'SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$SCHEMA_BACKWARD_COMPATIBLE"
             printf 'RUN_WRITE_SMOKE=%s\n' "$RUN_WRITE_SMOKE"
             printf 'GHCR_NAMESPACE=%s\n' "$GHCR_NAMESPACE"

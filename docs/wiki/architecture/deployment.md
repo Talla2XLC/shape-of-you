@@ -14,8 +14,9 @@ tags:
 ## Summary
 
 Temporary staging runs on a shared VM. GitHub Actions builds immutable images;
-project nginx exposes web/API through one port; a dedicated `shape-deploy`
-identity invokes a constrained root-owned wrapper.
+project nginx exposes the web/API through HTTPS; a dedicated `shape-deploy`
+identity invokes a constrained root-owned wrapper. Certbot and a root-owned
+systemd timer automate the edge certificate lifecycle.
 
 ## Content
 
@@ -32,14 +33,24 @@ verified `origin/main` at exact `CONTROL_SHA`.
 
 ### Runtime and data
 
-Project nginx exposes `http://2.58.15.24:3001/`: `/` is reserved for web and
-`/api/` routes to the internal API. It is a deployment adapter, not a domain
-service. Unrelated nginx/Compose are untouched.
+Project nginx exposes `https://staging.shape-of-you.ru`: `/` is reserved for
+web and `/api/` routes to the internal API. Port `80` serves HTTP-01 challenges
+and redirects the two accepted staging hosts to HTTPS; unknown hosts fail
+closed. `https://identity.staging.shape-of-you.ru` is the accepted Identity and
+WebAuthn origin and returns a controlled `503` until Identity is deployed.
+nginx is a deployment adapter, not a domain service. Unrelated nginx/Compose
+are untouched.
+
+One exact-name certificate covers both staging hosts. Certbot persists ACME
+account and renewal state in dedicated volumes. nginx mounts only a restrictive
+serving copy of the current chain and private key. A root-owned systemd timer
+runs the renewal check twice daily, validates nginx, and reloads it. Certbot has
+no Docker socket, and application services receive no TLS material.
 
 API owns `shape_of_you_api`, login, credentials, and migrations in the existing
 PostgreSQL cluster. The container reaches host port `5431` through
 `host.docker.internal`, not the unrelated Compose network. Existing external
-port exposure/no SSL is a throwaway-staging limitation; developer access should
+database exposure is a throwaway-staging limitation; developer access should
 use SSH tunneling.
 
 ### Security and portability
@@ -59,9 +70,9 @@ VM resources are limited and swap is in use. Current limits (`384m` API,
 The accepted Identity service is not deployed. Its runtime requires a separate
 `DATABASE_URL`, uses database-aware readiness, and keeps migration execution in
 a separate one-shot entrypoint. Before deployment it still needs provisioned
-database credentials, resource sizing, HTTPS hostname, backup/restore,
-signing-key rotation, and an approved deployment plan. Edge/ACME would own TLS
-certificates; Identity would own OAuth signing keys.
+database credentials, resource sizing, backup/restore, signing-key rotation,
+and an approved deployment plan. Edge/ACME owns TLS certificates; Identity
+owns OAuth signing keys.
 
 ## Evidence
 
@@ -72,10 +83,11 @@ certificates; Identity would own OAuth signing keys.
 
 - [Temporary shared-VM deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
+- [Automated staging TLS](../../adr/20260805-automate-staging-tls-with-nginx-certbot-and-systemd.md)
 
 ## Open questions
 
-- Shared-cluster backup/restore; domain/TLS/auth before real data; target cloud,
+- Shared-cluster backup/restore; authentication before real data; target cloud,
   SLO, and long-term secrets policy.
 
 ## Related material

@@ -11,6 +11,7 @@ CONTROL_BRANCH=main
 RUNTIME_ENV=/etc/shape-of-you/staging/api.env
 RELEASE_ENV=
 DOCKER_CONFIG_DIR=
+LOCK_FILE=/run/shape-of-you-staging.lock
 
 cleanup() {
   if [ -n "$RELEASE_ENV" ]; then
@@ -29,11 +30,20 @@ fail() {
   exit 2
 }
 
+command -v flock >/dev/null 2>&1 || fail 'flock is required.'
+exec 9>"$LOCK_FILE"
+flock -n 9 || fail 'A staging deployment or certificate renewal is already active.'
+SHAPE_OF_YOU_STAGING_LOCK_HELD=true
+export SHAPE_OF_YOU_STAGING_LOCK_HELD
+
 [ "$#" -eq 0 ] || fail 'Deployment wrapper accepts no arguments.'
 
 RELEASE_ID=
 API_DIGEST=
 EDGE_DIGEST=
+CERTBOT_DIGEST=
+ACME_EMAIL=
+PUBLIC_IPV4=
 SCHEMA_BACKWARD_COMPATIBLE=
 RUN_WRITE_SMOKE=
 GHCR_NAMESPACE=
@@ -55,7 +65,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|EDGE_DIGEST|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -64,6 +74,9 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
         RELEASE_ID) RELEASE_ID=$input_value ;;
         API_DIGEST) API_DIGEST=$input_value ;;
         EDGE_DIGEST) EDGE_DIGEST=$input_value ;;
+        CERTBOT_DIGEST) CERTBOT_DIGEST=$input_value ;;
+        ACME_EMAIL) ACME_EMAIL=$input_value ;;
+        PUBLIC_IPV4) PUBLIC_IPV4=$input_value ;;
         SCHEMA_BACKWARD_COMPATIBLE) SCHEMA_BACKWARD_COMPATIBLE=$input_value ;;
         RUN_WRITE_SMOKE) RUN_WRITE_SMOKE=$input_value ;;
         GHCR_NAMESPACE) GHCR_NAMESPACE=$input_value ;;
@@ -82,6 +95,9 @@ done
 [ -n "$RELEASE_ID" ] || fail 'RELEASE_ID is required.'
 [ -n "$API_DIGEST" ] || fail 'API_DIGEST is required.'
 [ -n "$EDGE_DIGEST" ] || fail 'EDGE_DIGEST is required.'
+[ -n "$CERTBOT_DIGEST" ] || fail 'CERTBOT_DIGEST is required.'
+[ -n "$ACME_EMAIL" ] || fail 'ACME_EMAIL is required.'
+[ -n "$PUBLIC_IPV4" ] || fail 'PUBLIC_IPV4 is required.'
 [ -n "$SCHEMA_BACKWARD_COMPATIBLE" ] || fail 'SCHEMA_BACKWARD_COMPATIBLE is required.'
 [ -n "$RUN_WRITE_SMOKE" ] || fail 'RUN_WRITE_SMOKE is required.'
 [ -n "$GHCR_NAMESPACE" ] || fail 'GHCR_NAMESPACE is required.'
@@ -94,6 +110,13 @@ printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid RELEASE
 printf '%s\n' "$CONTROL_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid CONTROL_SHA.'
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid API_DIGEST.'
 printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid EDGE_DIGEST.'
+printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid CERTBOT_DIGEST.'
+printf '%s\n' "$ACME_EMAIL" |
+  grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$' ||
+  fail 'Invalid ACME_EMAIL.'
+printf '%s\n' "$PUBLIC_IPV4" |
+  awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }' ||
+  fail 'Invalid PUBLIC_IPV4.'
 printf '%s\n' "$GHCR_NAMESPACE" | grep -Eq '^[a-z0-9][a-z0-9._-]*$' || fail 'Invalid GHCR_NAMESPACE.'
 printf '%s\n' "$GHCR_ACTOR" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9-]*$' || fail 'Invalid GHCR_ACTOR.'
 
@@ -144,6 +167,10 @@ API_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-api
 API_DIGEST=$API_DIGEST
 EDGE_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-edge
 EDGE_DIGEST=$EDGE_DIGEST
+CERTBOT_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-certbot
+CERTBOT_DIGEST=$CERTBOT_DIGEST
+ACME_EMAIL=$ACME_EMAIL
+PUBLIC_IPV4=$PUBLIC_IPV4
 SCHEMA_BACKWARD_COMPATIBLE=$SCHEMA_BACKWARD_COMPATIBLE
 EOF
 

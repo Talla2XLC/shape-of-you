@@ -1,7 +1,9 @@
 #!/bin/sh
 set -eu
 
-BASE_URL=${BASE_URL:-http://127.0.0.1:3001}
+BASE_URL=${BASE_URL:-https://staging.shape-of-you.ru}
+HTTP_BASE_URL=${HTTP_BASE_URL:-http://staging.shape-of-you.ru}
+IDENTITY_URL=${IDENTITY_URL:-https://identity.staging.shape-of-you.ru}
 RUN_WRITE_SMOKE=${RUN_WRITE_SMOKE:-false}
 RELEASE_ID=${RELEASE_ID:-manual}
 
@@ -10,6 +12,34 @@ curl --fail --silent --show-error --output /dev/null "$BASE_URL/edge-health"
 curl --fail --silent --show-error --output /dev/null "$BASE_URL/api/health"
 curl --fail --silent --show-error --output /dev/null "$BASE_URL/api/ready"
 curl --fail --silent --show-error --output /dev/null "$BASE_URL/api/openapi.json"
+
+redirect_url=$(
+  curl \
+    --silent \
+    --show-error \
+    --output /dev/null \
+    --write-out '%{redirect_url}' \
+    "$HTTP_BASE_URL/"
+)
+
+if [ "$redirect_url" != "$BASE_URL/" ]; then
+  printf '%s\n' "Expected HTTP redirect to $BASE_URL/, got $redirect_url." >&2
+  exit 1
+fi
+
+identity_status=$(
+  curl \
+    --silent \
+    --show-error \
+    --output /dev/null \
+    --write-out '%{http_code}' \
+    "$IDENTITY_URL/"
+)
+
+if [ "$identity_status" != "503" ]; then
+  printf '%s\n' "Expected Identity placeholder to return 503, got $identity_status." >&2
+  exit 1
+fi
 
 oversize_status=$(
   head -c 70000 /dev/zero |

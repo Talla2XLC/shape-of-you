@@ -49,7 +49,17 @@ while [ "$#" -gt 0 ]; do
 done
 
 if [ "$write_out" = "true" ]; then
-  printf '%s' '413'
+  case "$url" in
+    http://staging.shape-of-you.ru/)
+      printf '%s' 'https://staging.shape-of-you.ru/'
+      ;;
+    https://identity.staging.shape-of-you.ru/)
+      printf '%s' '503'
+      ;;
+    *)
+      printf '%s' '413'
+      ;;
+  esac
   exit 0
 fi
 

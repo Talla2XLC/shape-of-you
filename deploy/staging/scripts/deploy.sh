@@ -10,6 +10,10 @@ RELEASES_DIR="$DEPLOY_ROOT/releases"
 CURRENT_LINK="$DEPLOY_ROOT/current"
 PREVIOUS_LINK="$DEPLOY_ROOT/previous"
 RELEASE_ENV_INPUT=${1:-}
+APP_HOST=staging.shape-of-you.ru
+IDENTITY_HOST=identity.staging.shape-of-you.ru
+CERT_NAME=shape-of-you-staging
+bootstrap_started=false
 
 if [ -z "$RELEASE_ENV_INPUT" ] || [ ! -f "$RELEASE_ENV_INPUT" ]; then
   printf '%s\n' "Usage: deploy.sh <release-env-file>" >&2
@@ -26,11 +30,20 @@ fi
 : "${API_DIGEST:?API_DIGEST is required}"
 : "${EDGE_IMAGE:?EDGE_IMAGE is required}"
 : "${EDGE_DIGEST:?EDGE_DIGEST is required}"
+: "${CERTBOT_IMAGE:?CERTBOT_IMAGE is required}"
+: "${CERTBOT_DIGEST:?CERTBOT_DIGEST is required}"
+: "${ACME_EMAIL:?ACME_EMAIL is required}"
+: "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}"
 : "${SCHEMA_BACKWARD_COMPATIBLE:?SCHEMA_BACKWARD_COMPATIBLE is required}"
 
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
 printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
 printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$'
+printf '%s\n' "$ACME_EMAIL" |
+  grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+printf '%s\n' "$PUBLIC_IPV4" |
+  awk -F. 'NF == 4 { for (i = 1; i <= 4; i++) if ($i !~ /^[0-9]+$/ || $i > 255) exit 1; exit 0 } { exit 1 }'
 
 mkdir -p "$RELEASES_DIR"
 RELEASE_DIR="$RELEASES_DIR/$RELEASE_ID"
@@ -47,9 +60,51 @@ compose() {
     "$@"
 }
 
+cleanup() {
+  if [ "$bootstrap_started" = "true" ]; then
+    compose stop edge-bootstrap >/dev/null 2>&1 || true
+  fi
+}
+
+trap cleanup EXIT HUP INT TERM
+
 compose --profile operations pull
+
+if ! compose run --rm --no-deps --entrypoint sh certbot -c \
+  "test -s /etc/letsencrypt/live/$CERT_NAME/fullchain.pem && test -s /etc/letsencrypt/live/$CERT_NAME/privkey.pem"; then
+  if compose ps --status running --services | grep -Fx edge >/dev/null &&
+    compose port edge 8080 2>/dev/null | grep -Eq '(^|:)80$'; then
+    printf '%s\n' 'Using the running TLS edge for the HTTP-01 challenge.'
+  else
+    compose --profile operations up --detach --wait --wait-timeout 45 edge-bootstrap
+    bootstrap_started=true
+  fi
+
+  compose run --rm --no-deps certbot certonly \
+    --non-interactive \
+    --agree-tos \
+    --no-eff-email \
+    --email "$ACME_EMAIL" \
+    --cert-name "$CERT_NAME" \
+    --webroot \
+    --webroot-path /var/www/certbot \
+    --domain "$APP_HOST" \
+    --domain "$IDENTITY_HOST"
+fi
+
+compose run --rm --no-deps \
+  --entrypoint /usr/local/bin/install-shape-of-you-certificate \
+  certbot
+
+if [ "$bootstrap_started" = "true" ]; then
+  compose stop edge-bootstrap
+  bootstrap_started=false
+fi
+
 compose --profile operations run --rm migrate
-compose up --detach --remove-orphans api edge
+compose up --detach --wait --wait-timeout 90 api
+compose run --rm --no-deps --entrypoint nginx edge -t
+compose up --detach --wait --wait-timeout 90 --remove-orphans edge
 
 api_container=$(compose ps --quiet api)
 if [ -z "$api_container" ]; then

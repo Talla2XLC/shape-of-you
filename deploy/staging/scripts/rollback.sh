@@ -10,6 +10,16 @@ RELEASES_DIR="$DEPLOY_ROOT/releases"
 CURRENT_LINK="$DEPLOY_ROOT/current"
 PREVIOUS_LINK="$DEPLOY_ROOT/previous"
 TARGET_RELEASE=${1:-}
+LOCK_FILE=${LOCK_FILE:-/run/shape-of-you-staging.lock}
+
+if [ "${SHAPE_OF_YOU_STAGING_LOCK_HELD:-false}" != "true" ]; then
+  command -v flock >/dev/null 2>&1
+  exec 9>"$LOCK_FILE"
+  if ! flock -n 9; then
+    printf '%s\n' 'Rollback refused because a deployment or renewal is active.' >&2
+    exit 1
+  fi
+fi
 
 if [ -z "$TARGET_RELEASE" ]; then
   if [ ! -L "$PREVIOUS_LINK" ]; then
@@ -24,6 +34,14 @@ printf '%s\n' "$TARGET_RELEASE" | grep -Eq '^[0-9a-f]{40}$'
 TARGET_DIR="$RELEASES_DIR/$TARGET_RELEASE"
 TARGET_ENV="$TARGET_DIR/release.env"
 test -f "$TARGET_ENV"
+
+# The current Compose topology always includes the digest-pinned Certbot image.
+# A release created before this topology cutover cannot be rendered safely.
+# shellcheck disable=SC1090
+. "$TARGET_ENV"
+: "${CERTBOT_IMAGE:?Target release predates TLS automation and cannot be rolled back safely}"
+: "${CERTBOT_DIGEST:?Target release predates TLS automation and cannot be rolled back safely}"
+printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
 
 compose() {
   docker compose \

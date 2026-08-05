@@ -15,7 +15,10 @@ trap cleanup EXIT HUP INT TERM
 mkdir -p "$TEST_ROOT/package/scripts" "$TEST_ROOT/fake-bin" \
   "$TEST_ROOT/deploy/releases/$RELEASE_ID"
 cp "$ROLLBACK_SOURCE" "$TEST_ROOT/package/scripts/rollback.sh"
-touch "$TEST_ROOT/deploy/releases/$RELEASE_ID/release.env"
+printf '%s\n' \
+  'CERTBOT_IMAGE=ghcr.io/example/shape-of-you-certbot' \
+  'CERTBOT_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+  > "$TEST_ROOT/deploy/releases/$RELEASE_ID/release.env"
 
 FAKE_DOCKER_LOG="$TEST_ROOT/docker.log"
 FAKE_WAIT_MARKER="$TEST_ROOT/edge-ready"
@@ -34,6 +37,12 @@ chmod 0755 "$TEST_ROOT/fake-bin/docker"
 
 printf '%s\n' \
   '#!/bin/sh' \
+  'exit 0' \
+  > "$TEST_ROOT/fake-bin/flock"
+chmod 0755 "$TEST_ROOT/fake-bin/flock"
+
+printf '%s\n' \
+  '#!/bin/sh' \
   'set -eu' \
   'test -f "$FAKE_WAIT_MARKER"' \
   'printf "%s\\n" "$RELEASE_ID" > "$FAKE_SMOKE_LOG"' \
@@ -42,6 +51,7 @@ chmod 0755 "$TEST_ROOT/package/scripts/smoke.sh"
 
 PATH="$TEST_ROOT/fake-bin:$PATH" \
 DEPLOY_ROOT="$TEST_ROOT/deploy" \
+LOCK_FILE="$TEST_ROOT/deploy.lock" \
   sh "$TEST_ROOT/package/scripts/rollback.sh" "$RELEASE_ID" >/dev/null
 
 grep -F -- 'up --detach --wait --wait-timeout 90 --remove-orphans api edge' \

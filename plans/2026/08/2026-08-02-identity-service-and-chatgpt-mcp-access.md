@@ -19,6 +19,12 @@
 - Перед мутацией ChatGPT явно спрашивает подтверждение пользователя.
 - TLS-сертификаты выпускает и продлевает edge/ACME, а Identity управляет только
   ключами подписи OAuth-токенов.
+- Staging использует `https://staging.shape-of-you.ru` и
+  `https://identity.staging.shape-of-you.ru`; staging WebAuthn RP ID —
+  `identity.staging.shape-of-you.ru`.
+- Staging edge остаётся на nginx. Сертификат для двух точных имён выпускает и
+  продлевает Certbot; renewal запускает root-owned systemd timer. Wildcard и
+  DNS-provider credentials не используются.
 - OAuth-состояние хранится в типизированных реляционных таблицах, не в JSON.
 - Вход выполняется через WebAuthn/passkeys без пароля. Аккаунт поддерживает
   несколько passkeys; одноразовые recovery codes хранятся только как hashes и
@@ -27,8 +33,9 @@
 
 ## Блокирующие архитектурные решения
 
-1. До реализации WebAuthn-flow утвердить точные origin/RP-ID, challenge,
-   counter и attestation policies.
+1. До реализации WebAuthn-flow утвердить challenge, counter и attestation
+   policies. Staging origin/RP-ID уже утверждены; production RP-ID будет
+   `identity.shape-of-you.ru`, но production topology остаётся отдельным gate.
 2. До production определить сроки жизни токенов, ротацию ключей, secret storage,
    RPO/RTO и hostname/TLS topology.
 
@@ -101,8 +108,17 @@
 
 ### 7. Deployment и проверка безопасности
 
-- Добавить HTTPS endpoints через edge/ACME без передачи TLS lifecycle в
-  Identity.
+- [x] Утвердить staging hostname/RP-ID и nginx + Certbot + root-owned systemd
+  timer как TLS lifecycle.
+- Реализовать воспроизводимый HTTP-01 bootstrap, постоянное раздельное хранение
+  ACME/serving state, автоматический renewal, проверку nginx и reload.
+- Перевести staging smoke и GitHub Environment URL на HTTPS; убрать публичный
+  `3001` после подтверждённого cutover.
+- Первый cutover провести в две фазы через
+  `STAGING_TLS_AUTOMATION_ENABLED`, чтобы push с новым CI-контрактом не обогнал
+  установку root-owned wrapper и systemd units.
+- Отдельно, с явным разрешением, установить root-owned units, открыть `80/443`,
+  выпустить сертификат и выполнить HTTPS smoke на VM.
 - Настроить отдельные secrets, backups, restore drill, rate limits, monitoring
   и alerting.
 - Пройти Security Review и проверить revoke/rotation/incident scenarios.

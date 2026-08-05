@@ -21,6 +21,9 @@ jobs:
       - name: Test staging write smoke contract
         run: sh deploy/staging/scripts/tests/write-smoke-contract.sh
 
+      - name: Test staging TLS automation contract
+        run: sh deploy/staging/scripts/tests/tls-automation-contract.sh
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:

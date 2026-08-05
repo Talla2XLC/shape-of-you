@@ -93,8 +93,10 @@ No raw prompt or full conversation is stored.
 
 ### Operational separation
 
-The edge/ACME layer owns HTTPS certificate issuance and renewal. Identity owns
-OAuth signing keys and their rotation. These key lifecycles are separate.
+The edge/ACME layer owns HTTPS certificate issuance and renewal. Staging uses
+`https://identity.staging.shape-of-you.ru` as both the Identity origin and its
+WebAuthn RP ID. Identity owns OAuth signing keys and their rotation. These key
+lifecycles are separate.
 
 ## Evidence
 
@@ -111,13 +113,13 @@ OAuth signing keys and their rotation. These key lifecycles are separate.
 - [User and Person separation](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Service autonomy](../../adr/20260728-deployable-service-autonomy.md)
 - [Identity relational model](../../adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
+- [Automated staging TLS](../../adr/20260805-automate-staging-tls-with-nginx-certbot-and-systemd.md)
 
 ## Open questions
 
 - Access-token lifetime, refresh-session lifetime, and signing-key rotation
   intervals.
-- Production hostname, certificate automation, secret storage, backup RPO/RTO,
-  and security monitoring.
+- Production hostname, secret storage, backup RPO/RTO, and security monitoring.
 - End-to-end OpenID/OAuth conformance results for the implemented HTTP and
   interaction flow before production use.
 

@@ -14,7 +14,7 @@ tags:
 ## Summary
 
 Application rollback restores previous API/edge image digests and never
-automatically rolls back PostgreSQL schema.
+automatically rolls back PostgreSQL schema or ACME state.
 
 ## Content
 
@@ -41,7 +41,15 @@ Or target a release:
 The script pulls previous images, updates API/edge, and reruns smoke without
 migrations. Automatic application rollback is allowed only when
 `SCHEMA_BACKWARD_COMPATIBLE=true`; otherwise stop for roll-forward or an
-approved restore decision.
+approved restore decision. Direct rollback shares the deployment/certificate
+renewal lock and refuses to start while either operation is active.
+
+The HTTPS topology is a one-way operational cutover. A release created before
+the release manifest gained `CERTBOT_IMAGE` and `CERTBOT_DIGEST` cannot be
+rendered by the current Compose contract and is rejected before any container
+change. Roll back only to a TLS-capable release; otherwise prepare an explicit
+roll-forward decision. Certificate and ACME account volumes remain intact
+across application rollback.
 
 Database rollback never uses down migration. Incompatible schema needs
 expand/migrate/contract or restore from a previously verified backup with
@@ -54,6 +62,7 @@ separate approval.
 ## Decisions
 
 - Application rolls back by immutable digest; database rollback is separate.
+- [Automated staging TLS](../../adr/20260805-automate-staging-tls-with-nginx-certbot-and-systemd.md)
 
 ## Open questions
 

@@ -1,0 +1,70 @@
+#!/bin/sh
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+DEPLOY_ROOT=/opt/shape-of-you/staging
+CONTROL_STAGING="$DEPLOY_ROOT/control/deploy/staging"
+RELEASE_ENV="$DEPLOY_ROOT/current/release.env"
+COMPOSE_FILE="$CONTROL_STAGING/compose.yaml"
+COMPOSE_PROJECT=shape-of-you-staging
+LOCK_FILE=/run/shape-of-you-staging.lock
+DOCKER_CONFIG=/run/shape-of-you-cert-renew-docker
+
+export DOCKER_CONFIG
+
+[ "$(id -u)" -eq 0 ] || {
+  printf '%s\n' 'Run as root.' >&2
+  exit 1
+}
+
+command -v docker >/dev/null 2>&1
+command -v flock >/dev/null 2>&1
+test -f "$COMPOSE_FILE"
+
+if [ ! -f "$RELEASE_ENV" ]; then
+  printf '%s\n' 'Certificate renewal skipped because no active release exists.'
+  exit 0
+fi
+
+# shellcheck disable=SC1090
+. "$RELEASE_ENV"
+
+if [ -z "${CERTBOT_IMAGE:-}" ] || [ -z "${CERTBOT_DIGEST:-}" ]; then
+  printf '%s\n' \
+    'Certificate renewal skipped because the active release predates TLS automation.'
+  exit 0
+fi
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  printf '%s\n' 'Certificate renewal skipped because a deployment or renewal is active.'
+  exit 0
+fi
+
+compose() {
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$RELEASE_ENV" \
+    --file "$COMPOSE_FILE" \
+    --profile operations \
+    "$@"
+}
+
+if ! compose ps --status running --services | grep -Fx edge >/dev/null; then
+  printf '%s\n' 'Staging edge is not running; refusing certificate renewal.' >&2
+  exit 1
+fi
+
+compose run --rm --no-deps certbot renew \
+  --non-interactive \
+  --quiet \
+  --no-random-sleep-on-renew
+
+compose run --rm --no-deps \
+  --entrypoint /usr/local/bin/install-shape-of-you-certificate \
+  certbot
+
+compose exec -T edge nginx -t
+compose exec -T edge nginx -s reload
+
+printf '%s\n' 'Staging certificate renewal check and nginx reload completed.'
