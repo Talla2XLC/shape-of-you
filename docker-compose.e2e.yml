@@ -1,0 +1,25 @@
+services:
+  identity:
+    environment:
+      IDENTITY_PUBLIC_ORIGIN: http://identity:3000
+      WEBAUTHN_RP_ID: identity
+
+  e2e:
+    image: node:24-alpine
+    command: ["node", "/tests/smoke.mjs"]
+    volumes:
+      - ./test/e2e:/tests:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+    networks:
+      - local_services
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

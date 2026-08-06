@@ -16,6 +16,17 @@ parsing, shared day lifecycle, and real-data migration remain separate stages.
 
 ## Content
 
+### 2026-08-06 — Reproducible local API and Identity environment
+
+- Added persistent local API and Identity stacks with separate PostgreSQL
+  databases, credentials, migrations, volumes, and private database networks.
+- Added service-owned local environment examples and explicit commands for
+  containerized and host-based development.
+- Added a disposable cross-service E2E stack that starts from clean databases,
+  checks both services, and removes its project resources after every run.
+- Reused the same E2E command in CI without staging credentials or external
+  databases.
+
 ### 2026-08-02 — English canonical documentation
 
 - Changed repository language policy: plans remain Russian; Wiki, ADRs,

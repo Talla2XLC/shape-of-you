@@ -1,19 +1,82 @@
 services:
-  postgres:
+  api-database:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: shape_of_you
-      POSTGRES_USER: shape_of_you
-      POSTGRES_PASSWORD: shape_of_you
+      POSTGRES_DB: shape_of_you_api
+      POSTGRES_USER: shape_of_you_api
+      POSTGRES_PASSWORD: shape_of_you_api
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U shape_of_you -d shape_of_you"]
+      test: ["CMD-SHELL", "pg_isready -U shape_of_you_api -d shape_of_you_api"]
       interval: 2s
       timeout: 3s
       retries: 20
     ports:
-      - "5432:5432"
+      - "${LOCAL_API_DATABASE_PORT:-5432}:5432"
     volumes:
-      - shape_of_you_postgres:/var/lib/postgresql/data
+      - api_database_data:/var/lib/postgresql/data
+    networks:
+      - api_database
+
+  identity-database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: shape_of_you_identity
+      POSTGRES_USER: shape_of_you_identity
+      POSTGRES_PASSWORD: shape_of_you_identity
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shape_of_you_identity -d shape_of_you_identity"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "${LOCAL_IDENTITY_DATABASE_PORT:-5433}:5432"
+    volumes:
+      - identity_database_data:/var/lib/postgresql/data
+    networks:
+      - identity_database
+
+  api-migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    command: ["node", "dist/database/migrate.js"]
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://shape_of_you_api:shape_of_you_api@api-database:5432/shape_of_you_api
+      LOG_LEVEL: info
+      PERSON_CONTEXT_MODE: synthetic
+      SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
+      SHUTDOWN_TIMEOUT_MS: 10000
+    depends_on:
+      api-database:
+        condition: service_healthy
+    networks:
+      - api_database
+    restart: "no"
+
+  identity-migrate:
+    build:
+      context: .
+      dockerfile: apps/identity/Dockerfile
+    command: ["node", "dist/database/migrate.js"]
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: 3000
+      DATABASE_URL: postgresql://shape_of_you_identity:shape_of_you_identity@identity-database:5432/shape_of_you_identity
+      IDENTITY_PUBLIC_ORIGIN: http://localhost:3001
+      WEBAUTHN_RP_ID: localhost
+      WEBAUTHN_RP_NAME: Shape of You
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    depends_on:
+      identity-database:
+        condition: service_healthy
+    networks:
+      - identity_database
+    restart: "no"
 
   api:
     build:
@@ -23,46 +86,62 @@ services:
       NODE_ENV: production
       HOST: 0.0.0.0
       PORT: 3000
-      DATABASE_URL: postgresql://shape_of_you:shape_of_you@postgres:5432/shape_of_you
+      DATABASE_URL: postgresql://shape_of_you_api:shape_of_you_api@api-database:5432/shape_of_you_api
       LOG_LEVEL: info
       PERSON_CONTEXT_MODE: synthetic
       SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
       SHUTDOWN_TIMEOUT_MS: 10000
     depends_on:
-      migrate:
+      api-migrate:
         condition: service_completed_successfully
     healthcheck:
-      test:
-        [
-          "CMD",
-          "node",
-          "-e",
-          "fetch('http://127.0.0.1:3000/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
-        ]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 20
     ports:
-      - "3000:3000"
+      - "${LOCAL_API_PORT:-3000}:3000"
+    networks:
+      - api_database
+      - local_services
+    init: true
 
-  migrate:
+  identity:
     build:
       context: .
-      dockerfile: apps/api/Dockerfile
-    command: ["node", "dist/database/migrate.js"]
+      dockerfile: apps/identity/Dockerfile
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       HOST: 0.0.0.0
       PORT: 3000
-      DATABASE_URL: postgresql://shape_of_you:shape_of_you@postgres:5432/shape_of_you
+      DATABASE_URL: postgresql://shape_of_you_identity:shape_of_you_identity@identity-database:5432/shape_of_you_identity
+      IDENTITY_PUBLIC_ORIGIN: ${LOCAL_IDENTITY_ORIGIN:-http://localhost:3001}
+      WEBAUTHN_RP_ID: ${LOCAL_IDENTITY_RP_ID:-localhost}
+      WEBAUTHN_RP_NAME: Shape of You
       LOG_LEVEL: info
-      PERSON_CONTEXT_MODE: synthetic
-      SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
       SHUTDOWN_TIMEOUT_MS: 10000
     depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
+      identity-migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "${LOCAL_IDENTITY_PORT:-3001}:3000"
+    networks:
+      - identity_database
+      - local_services
+    init: true
+
+networks:
+  api_database:
+    internal: true
+  identity_database:
+    internal: true
+  local_services:
 
 volumes:
-  shape_of_you_postgres:
+  api_database_data:
+  identity_database_data:

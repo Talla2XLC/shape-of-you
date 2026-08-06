@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx watch src/server.ts",
+    "dev:local": "node --watch --env-file=.env.local --import tsx src/server.ts",
     "start": "node dist/server.js",
     "lint": "eslint src test drizzle.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -17,7 +18,8 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "db:migrate": "tsx src/database/migrate.ts"
+    "db:migrate": "tsx src/database/migrate.ts",
+    "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts"
   },
   "dependencies": {
     "@nestjs/common": "^11.1.28",

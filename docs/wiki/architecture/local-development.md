@@ -2,7 +2,7 @@
 id: "architecture-local-development"
 kind: architecture
 title: "Local backend development"
-status: draft
+status: accepted
 tags:
   - "development"
   - "docker"
@@ -13,67 +13,90 @@ tags:
 
 ## Summary
 
-Full local development uses Node.js 24, pnpm 11, and Docker Compose. Compose
-starts PostgreSQL, applies migrations, and runs the API.
+Full local development uses Node.js 24, pnpm 11, and Docker Compose. API and
+Identity retain separate PostgreSQL databases, credentials, migration jobs,
+and runtime services.
 
 ## Content
 
 Containerized startup:
 
-```powershell
-docker compose up --build
+```sh
+pnpm local:up
 ```
 
-After readiness, API is available at `http://localhost:3000`:
+After readiness, API is available at `http://localhost:3000` and Identity at
+`http://localhost:3001`:
 
-```powershell
-Invoke-RestMethod http://localhost:3000/health
-Invoke-RestMethod http://localhost:3000/ready
-Invoke-RestMethod http://localhost:3000/openapi.json
+```sh
+curl --fail http://localhost:3000/health
+curl --fail http://localhost:3000/ready
+curl --fail http://localhost:3001/live
+curl --fail http://localhost:3001/ready
 ```
 
-Host development:
+The Compose databases use project-scoped persistent volumes. Stop services
+without deleting data with `pnpm local:down`. `pnpm local:reset` explicitly
+deletes both local database volumes.
 
-```powershell
+For host-based watch mode, create service-owned local environment files and
+start only the database dependencies first:
+
+```sh
 pnpm install
-Copy-Item .env.example .env
-pnpm db:migrate:api
+cp apps/api/.env.example apps/api/.env.local
+cp apps/identity/.env.example apps/identity/.env.local
+pnpm local:dependencies
+pnpm local:migrate
 pnpm dev
 ```
 
-Database commands always name their owner. API commands use the API
-`DATABASE_URL`; Identity commands use a separate Identity `DATABASE_URL`:
+The ignored `.env.local` files belong to their service and must contain only
+local credentials. Database commands always name their owner:
 
-```powershell
+```sh
 pnpm db:generate:api
 pnpm db:migrate:api
 pnpm db:generate:identity
 pnpm db:migrate:identity
 ```
 
-The Identity service is not part of local Compose yet. Its migration tests use
-an isolated PostgreSQL container and do not apply SQL to an operator database.
-Running Identity directly requires a separately supplied Identity
-`DATABASE_URL`; its `/ready` endpoint checks that database while `/live`
-remains dependency-free.
+Package integration tests continue to use isolated PostgreSQL Testcontainers.
+They do not apply SQL to developer, staging, or operator databases.
+
+Cross-service smoke uses a separate disposable Compose project:
+
+```sh
+pnpm test:e2e
+```
+
+The runner assigns ephemeral host ports, waits for both migration chains and
+runtime readiness, verifies API and Identity liveness/readiness through their
+internal network, and always removes its containers, volumes, networks, and
+project-built images. CI executes the same command. Local edge, TLS, OAuth flow
+automation, and browser passkey automation remain outside this first E2E
+increment.
 
 Validation:
 
-```powershell
+```sh
 pnpm lint
 pnpm typecheck
 pnpm build
 pnpm test
+pnpm test:e2e
 node scripts/validate-docs.mjs
 ```
 
 `pnpm test` includes PostgreSQL integration tests and needs a working container
-runtime. `pnpm test:unit` runs fast Docker-free checks.
+runtime. `pnpm test:e2e` additionally builds and verifies the disposable local
+stack. `pnpm test:unit` runs fast Docker-free checks.
 
 ## Evidence
 
-- Workspace manifests, `.env.example`, Compose, API Dockerfile, and verified
-  build/typecheck/lint/unit/integration/image checks.
+- Workspace manifests, service-owned `.env.example` files, Compose, service
+  Dockerfiles, E2E runner, and verified build/typecheck/lint/unit/integration
+  checks.
 
 ## Decisions
 
@@ -81,7 +104,8 @@ runtime. `pnpm test:unit` runs fast Docker-free checks.
 
 ## Open questions
 
-- Staging smoke for a new version requires separate deployment authorization.
+- Add an edge-routed OAuth E2E scenario after the OAuth endpoints and
+  API-to-Identity trust contract are implemented.
 
 ## Related material
 

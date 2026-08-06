@@ -54,5 +54,8 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Test local API and Identity stack
+        run: pnpm test:e2e
+
       - name: Validate canonical documentation
         run: node scripts/validate-docs.mjs
