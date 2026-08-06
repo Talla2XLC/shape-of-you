@@ -9,6 +9,7 @@ CONTROL_ROOT=/opt/shape-of-you/staging/control
 CONTROL_REPOSITORY=https://github.com/Talla2XLC/shape-of-you.git
 CONTROL_BRANCH=main
 RUNTIME_ENV=/etc/shape-of-you/staging/api.env
+IDENTITY_RUNTIME_ENV=/etc/shape-of-you/staging/identity.env
 RELEASE_ENV=
 DOCKER_CONFIG_DIR=
 LOCK_FILE=/run/shape-of-you-staging.lock
@@ -40,6 +41,8 @@ export SHAPE_OF_YOU_STAGING_LOCK_HELD
 
 RELEASE_ID=
 API_DIGEST=
+IDENTITY_DIGEST=
+IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=
 EDGE_DIGEST=
 CERTBOT_DIGEST=
 ACME_EMAIL=
@@ -51,6 +54,7 @@ GHCR_NAMESPACE=
 GHCR_ACTOR=
 CONTROL_SHA=
 DATABASE_URL=
+IDENTITY_DATABASE_URL=
 GHCR_TOKEN=
 seen_keys=' '
 
@@ -66,7 +70,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -74,17 +78,20 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
       case "$input_key" in
         RELEASE_ID) RELEASE_ID=$input_value ;;
         API_DIGEST) API_DIGEST=$input_value ;;
+        IDENTITY_DIGEST) IDENTITY_DIGEST=$input_value ;;
         EDGE_DIGEST) EDGE_DIGEST=$input_value ;;
         CERTBOT_DIGEST) CERTBOT_DIGEST=$input_value ;;
         ACME_EMAIL) ACME_EMAIL=$input_value ;;
         PUBLIC_IPV4) PUBLIC_IPV4=$input_value ;;
         DEPLOYMENT_TOPOLOGY) DEPLOYMENT_TOPOLOGY=$input_value ;;
         SCHEMA_BACKWARD_COMPATIBLE) SCHEMA_BACKWARD_COMPATIBLE=$input_value ;;
+        IDENTITY_SCHEMA_BACKWARD_COMPATIBLE) IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=$input_value ;;
         RUN_WRITE_SMOKE) RUN_WRITE_SMOKE=$input_value ;;
         GHCR_NAMESPACE) GHCR_NAMESPACE=$input_value ;;
         GHCR_ACTOR) GHCR_ACTOR=$input_value ;;
         CONTROL_SHA) CONTROL_SHA=$input_value ;;
         DATABASE_URL) DATABASE_URL=$input_value ;;
+        IDENTITY_DATABASE_URL) IDENTITY_DATABASE_URL=$input_value ;;
         GHCR_TOKEN) GHCR_TOKEN=$input_value ;;
       esac
       ;;
@@ -112,6 +119,21 @@ done
 printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid RELEASE_ID.'
 printf '%s\n' "$CONTROL_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid CONTROL_SHA.'
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid API_DIGEST.'
+if [ -n "$IDENTITY_DIGEST" ] || [ -n "$IDENTITY_DATABASE_URL" ] ||
+  [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ]; then
+  [ -n "$IDENTITY_DIGEST" ] || fail 'IDENTITY_DIGEST is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_DATABASE_URL" ] || fail 'IDENTITY_DATABASE_URL is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ] || fail 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE is required when Identity deployment is enabled.'
+  printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid IDENTITY_DIGEST.'
+  case "$IDENTITY_DATABASE_URL" in
+    postgresql://*) ;;
+    *) fail 'IDENTITY_DATABASE_URL must use the postgresql scheme.' ;;
+  esac
+  case "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" in
+    true|false) ;;
+    *) fail 'Invalid IDENTITY_SCHEMA_BACKWARD_COMPATIBLE.' ;;
+  esac
+fi
 printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid EDGE_DIGEST.'
 printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid CERTBOT_DIGEST.'
 printf '%s\n' "$ACME_EMAIL" |
@@ -168,6 +190,13 @@ printf 'DATABASE_URL=%s\n' "$DATABASE_URL" > "$runtime_file"
 install -m 0600 "$runtime_file" "$RUNTIME_ENV"
 rm -f "$runtime_file"
 
+if [ -n "$IDENTITY_DATABASE_URL" ]; then
+  identity_runtime_file=$(mktemp /etc/shape-of-you/staging/identity.env.XXXXXX)
+  printf 'DATABASE_URL=%s\n' "$IDENTITY_DATABASE_URL" > "$identity_runtime_file"
+  install -m 0600 "$identity_runtime_file" "$IDENTITY_RUNTIME_ENV"
+  rm -f "$identity_runtime_file"
+fi
+
 RELEASE_ENV=$(mktemp /run/shape-of-you-staging-release.XXXXXX)
 cat > "$RELEASE_ENV" <<EOF
 RELEASE_ID=$RELEASE_ID
@@ -183,6 +212,14 @@ DEPLOYMENT_TOPOLOGY=$DEPLOYMENT_TOPOLOGY
 SCHEMA_BACKWARD_COMPATIBLE=$SCHEMA_BACKWARD_COMPATIBLE
 EOF
 
+if [ -n "$IDENTITY_DIGEST" ]; then
+  cat >> "$RELEASE_ENV" <<EOF
+IDENTITY_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-identity
+IDENTITY_DIGEST=$IDENTITY_DIGEST
+IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE
+EOF
+fi
+
 DOCKER_CONFIG_DIR=$(mktemp -d)
 printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
   docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin >/dev/null
@@ -190,6 +227,7 @@ printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
 COMPOSE_FILE="$CONTROL_STAGING/compose.yaml" \
 DEPLOY_ROOT="$DEPLOY_ROOT" \
 RUNTIME_ENV="$RUNTIME_ENV" \
+IDENTITY_RUNTIME_ENV="$IDENTITY_RUNTIME_ENV" \
 RUN_WRITE_SMOKE="$RUN_WRITE_SMOKE" \
 DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
   sh "$CONTROL_STAGING/scripts/deploy.sh" "$RELEASE_ENV"

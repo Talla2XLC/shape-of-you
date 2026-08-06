@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_DIR=$(dirname "$SCRIPT_DIR")
 COMPOSE_FILE=${COMPOSE_FILE:-"$PACKAGE_DIR/compose.yaml"}
+IDENTITY_COMPOSE_FILE=${IDENTITY_COMPOSE_FILE:-"$PACKAGE_DIR/compose.identity.yaml"}
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-shape-of-you-staging}
 DEPLOY_ROOT=${DEPLOY_ROOT:-/opt/shape-of-you/staging}
 RELEASES_DIR="$DEPLOY_ROOT/releases"
@@ -14,6 +15,8 @@ APP_HOST=staging.shape-of-you.ru
 IDENTITY_HOST=identity.staging.shape-of-you.ru
 CERT_NAME=shape-of-you-staging
 bootstrap_started=false
+identity_enabled=false
+rollback_schema_compatible=false
 
 if [ -z "$RELEASE_ENV_INPUT" ] || [ ! -f "$RELEASE_ENV_INPUT" ]; then
   printf '%s\n' "Usage: deploy.sh <release-env-file>" >&2
@@ -36,6 +39,30 @@ fi
 : "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}"
 : "${SCHEMA_BACKWARD_COMPATIBLE:?SCHEMA_BACKWARD_COMPATIBLE is required}"
 : "${DEPLOYMENT_TOPOLOGY:?DEPLOYMENT_TOPOLOGY is required}"
+
+if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
+  [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ]; then
+  : "${IDENTITY_IMAGE:?IDENTITY_IMAGE is required when Identity deployment is enabled}"
+  : "${IDENTITY_DIGEST:?IDENTITY_DIGEST is required when Identity deployment is enabled}"
+  printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+  test -f "$IDENTITY_COMPOSE_FILE"
+  : "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:?IDENTITY_SCHEMA_BACKWARD_COMPATIBLE is required when Identity deployment is enabled}"
+  case "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" in
+    true|false) ;;
+    *)
+      printf '%s\n' 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE must be true or false.' >&2
+      exit 2
+      ;;
+  esac
+  identity_enabled=true
+fi
+
+if [ "$SCHEMA_BACKWARD_COMPATIBLE" = "true" ]; then
+  if [ "$identity_enabled" = "false" ] ||
+    [ "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" = "true" ]; then
+    rollback_schema_compatible=true
+  fi
+fi
 
 case "$DEPLOYMENT_TOPOLOGY" in
   shared-ingress) COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.shared-ingress.yaml" ;;
@@ -63,12 +90,22 @@ install -m 0600 "$RELEASE_ENV_INPUT" "$RELEASE_DIR/release.env"
 sh "$SCRIPT_DIR/vm-preflight.sh" "$RELEASE_DIR/release.env"
 
 compose() {
-  docker compose \
-    --project-name "$COMPOSE_PROJECT" \
-    --env-file "$RELEASE_DIR/release.env" \
-    --file "$COMPOSE_FILE" \
-    --file "$COMPOSE_TOPOLOGY_FILE" \
-    "$@"
+  if [ "$identity_enabled" = "true" ]; then
+    docker compose \
+      --project-name "$COMPOSE_PROJECT" \
+      --env-file "$RELEASE_DIR/release.env" \
+      --file "$COMPOSE_FILE" \
+      --file "$COMPOSE_TOPOLOGY_FILE" \
+      --file "$IDENTITY_COMPOSE_FILE" \
+      "$@"
+  else
+    docker compose \
+      --project-name "$COMPOSE_PROJECT" \
+      --env-file "$RELEASE_DIR/release.env" \
+      --file "$COMPOSE_FILE" \
+      --file "$COMPOSE_TOPOLOGY_FILE" \
+      "$@"
+  fi
 }
 
 cleanup() {
@@ -129,29 +166,42 @@ if [ "$bootstrap_started" = "true" ]; then
 fi
 
 compose --profile operations run --rm migrate
-compose up --detach --wait --wait-timeout 90 api
+if [ "$identity_enabled" = "true" ]; then
+  compose --profile operations run --rm identity-migrate
+  compose up --detach --wait --wait-timeout 90 api identity
+else
+  compose up --detach --wait --wait-timeout 90 api
+fi
 compose run --rm --no-deps \
   --entrypoint /usr/local/bin/start-shape-of-you-edge edge --test
 compose up --detach --wait --wait-timeout 90 --remove-orphans edge
 
-api_container=$(compose ps --quiet api)
-if [ -z "$api_container" ]; then
-  printf '%s\n' 'API container was not found after startup.' >&2
-  exit 1
-fi
+assert_no_published_ports() {
+  service=$1
+  container=$(compose ps --quiet "$service")
+  if [ -z "$container" ]; then
+    printf '%s\n' "$service container was not found after startup." >&2
+    exit 1
+  fi
 
-published_api_ports=$(docker inspect \
-  --format '{{range $port, $bindings := .HostConfig.PortBindings}}{{if $bindings}}{{$port}} {{end}}{{end}}' \
-  "$api_container")
-if [ -n "$published_api_ports" ]; then
-  printf '%s\n' "API unexpectedly publishes host port(s): $published_api_ports" >&2
-  exit 1
+  published_ports=$(docker inspect \
+    --format '{{range $port, $bindings := .HostConfig.PortBindings}}{{if $bindings}}{{$port}} {{end}}{{end}}' \
+    "$container")
+  if [ -n "$published_ports" ]; then
+    printf '%s\n' "$service unexpectedly publishes host port(s): $published_ports" >&2
+    exit 1
+  fi
+}
+
+assert_no_published_ports api
+if [ "$identity_enabled" = "true" ]; then
+  assert_no_published_ports identity
 fi
 
 if ! RELEASE_ID="$RELEASE_ID" sh "$SCRIPT_DIR/smoke.sh"; then
   printf '%s\n' "Deployment smoke failed." >&2
 
-  if [ "$SCHEMA_BACKWARD_COMPATIBLE" = "true" ] && [ -L "$CURRENT_LINK" ]; then
+  if [ "$rollback_schema_compatible" = "true" ] && [ -L "$CURRENT_LINK" ]; then
     previous_release=$(basename "$(readlink -f "$CURRENT_LINK")")
     printf '%s\n' "Attempting application rollback to $previous_release." >&2
     EXPECTED_DEPLOYMENT_TOPOLOGY="$DEPLOYMENT_TOPOLOGY" \

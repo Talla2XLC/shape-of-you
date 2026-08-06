@@ -4,6 +4,7 @@ set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_DIR=$(dirname "$SCRIPT_DIR")
 COMPOSE_FILE=${COMPOSE_FILE:-"$PACKAGE_DIR/compose.yaml"}
+IDENTITY_COMPOSE_FILE=${IDENTITY_COMPOSE_FILE:-"$PACKAGE_DIR/compose.identity.yaml"}
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-shape-of-you-staging}
 DEPLOY_ROOT=${DEPLOY_ROOT:-/opt/shape-of-you/staging}
 RELEASES_DIR="$DEPLOY_ROOT/releases"
@@ -45,6 +46,24 @@ test -f "$TARGET_ENV"
 : "${DEPLOYMENT_TOPOLOGY:?Target release has no deployment topology}"
 printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
 
+identity_enabled=false
+if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
+  [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ]; then
+  : "${IDENTITY_IMAGE:?Target release has incomplete Identity coordinates}"
+  : "${IDENTITY_DIGEST:?Target release has incomplete Identity coordinates}"
+  : "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:?Target release has no Identity schema compatibility declaration}"
+  case "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" in
+    true|false) ;;
+    *)
+      printf '%s\n' 'Invalid Identity schema compatibility declaration.' >&2
+      exit 2
+      ;;
+  esac
+  printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+  test -f "$IDENTITY_COMPOSE_FILE"
+  identity_enabled=true
+fi
+
 case "$DEPLOYMENT_TOPOLOGY" in
   shared-ingress) COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.shared-ingress.yaml" ;;
   standalone) COMPOSE_TOPOLOGY_FILE="$PACKAGE_DIR/compose.standalone.yaml" ;;
@@ -61,16 +80,31 @@ if [ -n "$EXPECTED_DEPLOYMENT_TOPOLOGY" ] &&
 fi
 
 compose() {
-  docker compose \
-    --project-name "$COMPOSE_PROJECT" \
-    --env-file "$TARGET_ENV" \
-    --file "$COMPOSE_FILE" \
-    --file "$COMPOSE_TOPOLOGY_FILE" \
-    "$@"
+  if [ "$identity_enabled" = "true" ]; then
+    docker compose \
+      --project-name "$COMPOSE_PROJECT" \
+      --env-file "$TARGET_ENV" \
+      --file "$COMPOSE_FILE" \
+      --file "$COMPOSE_TOPOLOGY_FILE" \
+      --file "$IDENTITY_COMPOSE_FILE" \
+      "$@"
+  else
+    docker compose \
+      --project-name "$COMPOSE_PROJECT" \
+      --env-file "$TARGET_ENV" \
+      --file "$COMPOSE_FILE" \
+      --file "$COMPOSE_TOPOLOGY_FILE" \
+      "$@"
+  fi
 }
 
-compose pull api edge
-compose up --detach --wait --wait-timeout 90 --remove-orphans api edge
+if [ "$identity_enabled" = "true" ]; then
+  compose pull api identity edge
+  compose up --detach --wait --wait-timeout 90 --remove-orphans api identity edge
+else
+  compose pull api edge
+  compose up --detach --wait --wait-timeout 90 --remove-orphans api edge
+fi
 
 RELEASE_ID="$TARGET_RELEASE" RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/smoke.sh"
 

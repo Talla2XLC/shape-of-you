@@ -24,9 +24,13 @@ project certificate lifecycle.
 ### Delivery
 
 Pushes to `main` run quality, publish SHA-linked GHCR images, and automatically
-deploy exact digests to Environment `staging`. Input is an allowlisted stdin
-protocol to `/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no
-build context, toolchain, writable scripts, or Compose file from CI.
+deploy exact digests to Environment `staging`. API, Identity, edge, and Certbot
+are independently built and attested. During the one-time Identity cutover
+preparation, the automatic release still deploys the existing API, edge, and
+Certbot coordinates; the Identity image is published but not passed to the VM.
+Input is an allowlisted stdin protocol to
+`/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no build context,
+toolchain, writable scripts, or Compose file from CI.
 
 `shape-deploy` is outside Docker group and has passwordless sudo only for the
 wrapper without arguments. The wrapper fetches a root-owned control tree from
@@ -77,11 +81,14 @@ Environment input into root-owned `/etc/shape-of-you/staging/api.env` mode
 VM resources are limited and swap is in use. Current limits (`384m` API,
 `64m` edge) require observation before adding load.
 
-The accepted Identity service is not deployed. Its runtime requires a separate
-`DATABASE_URL`, uses database-aware readiness, and keeps migration execution in
-a separate one-shot entrypoint. Before deployment it still needs provisioned
-database credentials, resource sizing, backup/restore, signing-key rotation,
-and an approved deployment plan. Edge/ACME owns TLS certificates; Identity
+The accepted Identity service is not deployed yet. Its optional staging
+overlay, separate `identity.env`, one-shot migration service, runtime health
+policy, rollback handling, and independently published image are prepared.
+The compatibility path deliberately leaves the current release unchanged until
+the operator provisions the separate database/login and GitHub secret and
+installs the updated root-owned wrapper. The activation commit will then make
+the Identity digest and database URL mandatory and replace the edge `503`
+placeholder with the internal proxy. Edge/ACME owns TLS certificates; Identity
 owns OAuth signing keys.
 
 ## Evidence

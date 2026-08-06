@@ -24,6 +24,9 @@ jobs:
       - name: Test staging TLS automation contract
         run: sh deploy/staging/scripts/tests/tls-automation-contract.sh
 
+      - name: Test Identity deployment contract
+        run: sh deploy/staging/scripts/tests/identity-deployment-contract.sh
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:

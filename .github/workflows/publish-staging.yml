@@ -91,6 +91,83 @@ jobs:
             "ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-api" \
             "${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
+  publish-identity:
+    needs: quality
+    concurrency:
+      group: publish-staging-identity-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and publish Identity image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/identity/Dockerfile
+          push: true
+          tags: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-identity:sha-${{ github.sha }}
+          provenance: mode=max
+          sbom: true
+
+      - name: Wait for Identity image manifest
+        shell: bash
+        env:
+          IMAGE: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-identity
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+
+          if docker buildx imagetools inspect "$IMAGE@$DIGEST" >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          for delay in 1 2 4 8 16; do
+            sleep "$delay"
+
+            if docker buildx imagetools inspect "$IMAGE@$DIGEST" >/dev/null 2>&1; then
+              exit 0
+            fi
+          done
+
+          printf 'Image manifest did not become readable: %s@%s\n' "$IMAGE" "$DIGEST" >&2
+          exit 1
+
+      - name: Attest Identity image
+        uses: actions/attest@v4
+        with:
+          subject-name: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-identity
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Publish Identity digest
+        run: |
+          printf '### Identity image\n\n`%s@%s`\n' \
+            "ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-identity" \
+            "${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
+
   publish-edge:
     needs: quality
     concurrency:
@@ -248,6 +325,7 @@ jobs:
   deploy-staging:
     needs:
       - publish-api
+      - publish-identity
       - publish-edge
       - publish-certbot
     uses: ./.github/workflows/deploy-staging.yml

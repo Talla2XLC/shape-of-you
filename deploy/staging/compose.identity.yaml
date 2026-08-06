@@ -1,0 +1,91 @@
+services:
+  edge:
+    depends_on:
+      identity:
+        condition: service_healthy
+
+  identity:
+    image: "${IDENTITY_IMAGE:?IDENTITY_IMAGE is required}@${IDENTITY_DIGEST:?IDENTITY_DIGEST is required}"
+    env_file:
+      - path: /etc/shape-of-you/staging/identity.env
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      IDENTITY_PUBLIC_ORIGIN: https://identity.staging.shape-of-you.ru
+      WEBAUTHN_RP_ID: identity.staging.shape-of-you.ru
+      WEBAUTHN_RP_NAME: Shape of You
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - edge
+      - identity_database_access
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 15s
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+    mem_limit: 256m
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  identity-migrate:
+    image: "${IDENTITY_IMAGE:?IDENTITY_IMAGE is required}@${IDENTITY_DIGEST:?IDENTITY_DIGEST is required}"
+    command: ["node", "dist/database/migrate.js"]
+    env_file:
+      - path: /etc/shape-of-you/staging/identity.env
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      IDENTITY_PUBLIC_ORIGIN: https://identity.staging.shape-of-you.ru
+      WEBAUTHN_RP_ID: identity.staging.shape-of-you.ru
+      WEBAUTHN_RP_NAME: Shape of You
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - identity_database_access
+    profiles:
+      - operations
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+networks:
+  identity_database_access:

@@ -5,6 +5,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 PACKAGE_DIR=$(dirname "$SCRIPT_DIR")
 COMPOSE_FILE=${COMPOSE_FILE:-"$PACKAGE_DIR/compose.yaml"}
 RUNTIME_ENV=${RUNTIME_ENV:-/etc/shape-of-you/staging/api.env}
+IDENTITY_RUNTIME_ENV=${IDENTITY_RUNTIME_ENV:-/etc/shape-of-you/staging/identity.env}
 RELEASE_ENV=${1:-}
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-shape-of-you-staging}
 
@@ -25,6 +26,24 @@ test -f "$RELEASE_ENV"
 
 : "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}"
 : "${DEPLOYMENT_TOPOLOGY:?DEPLOYMENT_TOPOLOGY is required}"
+
+identity_enabled=false
+if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
+  [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ]; then
+  : "${IDENTITY_IMAGE:?IDENTITY_IMAGE is required when Identity deployment is enabled}"
+  : "${IDENTITY_DIGEST:?IDENTITY_DIGEST is required when Identity deployment is enabled}"
+  : "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:?IDENTITY_SCHEMA_BACKWARD_COMPATIBLE is required when Identity deployment is enabled}"
+  case "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" in
+    true|false) ;;
+    *)
+      printf '%s\n' 'Invalid Identity schema compatibility declaration.' >&2
+      exit 2
+      ;;
+  esac
+  test -f "$IDENTITY_RUNTIME_ENV"
+  test -f "$PACKAGE_DIR/compose.identity.yaml"
+  identity_enabled=true
+fi
 
 case "$DEPLOYMENT_TOPOLOGY" in
   shared-ingress)
@@ -51,13 +70,24 @@ for hostname in staging.shape-of-you.ru identity.staging.shape-of-you.ru; do
   fi
 done
 
-docker compose \
-  --project-name "$COMPOSE_PROJECT" \
-  --env-file "$RELEASE_ENV" \
-  --file "$COMPOSE_FILE" \
-  --file "$COMPOSE_TOPOLOGY_FILE" \
-  --profile operations \
-  config --quiet
+if [ "$identity_enabled" = "true" ]; then
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$RELEASE_ENV" \
+    --file "$COMPOSE_FILE" \
+    --file "$COMPOSE_TOPOLOGY_FILE" \
+    --file "$PACKAGE_DIR/compose.identity.yaml" \
+    --profile operations \
+    config --quiet
+else
+  docker compose \
+    --project-name "$COMPOSE_PROJECT" \
+    --env-file "$RELEASE_ENV" \
+    --file "$COMPOSE_FILE" \
+    --file "$COMPOSE_TOPOLOGY_FILE" \
+    --profile operations \
+    config --quiet
+fi
 
 compose_port() {
   service=$1

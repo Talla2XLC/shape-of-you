@@ -1,0 +1,6 @@
+services:
+  identity:
+    env_file: !reset []
+
+  identity-migrate:
+    env_file: !reset []
