@@ -80,6 +80,21 @@ hashes and can authorize a narrowly scoped replacement-passkey enrollment with
 session revocation. No password, email-only, or security-question fallback is
 allowed.
 
+Discoverable credentials require user verification and use attestation `none`.
+Hashed single-use challenges expire after at most five minutes. Signature
+counters are retained as secondary risk and audit evidence rather than a hard
+failure condition for synchronized passkeys.
+
+Browser/OAuth sessions use a 30-day sliding inactivity deadline with no
+absolute maximum lifetime. Successful browser-session use or refresh-token
+rotation extends the deadline; ordinary resource requests using a short-lived
+JWT do not contact Identity and do not count as session activity. A session is
+bound to the passkey that established it. Users can list, rename, and revoke
+passkeys and can list and revoke sessions. Revoking a passkey revokes its
+sessions and refresh families; recovery revokes existing sessions. The final
+usable authentication method cannot be removed without another active passkey
+or valid recovery path.
+
 Initial scopes are `person:read`, `weight:write`,
 `body-measurement:write`, `meal:write`, and `workout:write`.
 
@@ -113,12 +128,12 @@ lifecycles are separate.
 - [User and Person separation](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Service autonomy](../../adr/20260728-deployable-service-autonomy.md)
 - [Identity relational model](../../adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
+- [Passkey-bound sliding sessions](../../adr/20260806-use-passkey-bound-sliding-identity-sessions.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 
 ## Open questions
 
-- Access-token lifetime, refresh-session lifetime, and signing-key rotation
-  intervals.
+- Access-token lifetime and signing-key rotation intervals.
 - Production hostname, secret storage, backup RPO/RTO, and security monitoring.
 - End-to-end OpenID/OAuth conformance results for the implemented HTTP and
   interaction flow before production use.

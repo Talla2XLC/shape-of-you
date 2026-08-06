@@ -162,6 +162,10 @@ export const webauthnCredentials = pgTable(
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" })
   },
   (table) => [
+    unique("webauthn_credentials_id_account_uq").on(
+      table.id,
+      table.accountId
+    ),
     unique("webauthn_credentials_credential_id_uq").on(table.credentialId),
     index("webauthn_credentials_account_idx").on(table.accountId),
     uniqueIndex("webauthn_credentials_active_account_label_uq")
@@ -226,6 +230,10 @@ export const webauthnChallenges = pgTable(
     check(
       "webauthn_challenges_expiry_after_creation",
       sql`${table.expiresAt} > ${table.createdAt}`
+    ),
+    check(
+      "webauthn_challenges_max_lifetime",
+      sql`${table.expiresAt} <= ${table.createdAt} + interval '5 minutes'`
     ),
     check(
       "webauthn_challenges_consumption_window",
@@ -542,6 +550,7 @@ export const oauthSessions = pgTable(
     accountId: uuid("account_id")
       .notNull()
       .references(() => identityAccounts.id),
+    webauthnCredentialId: uuid("webauthn_credential_id"),
     credentialHash: bytea("credential_hash").notNull(),
     providerUid: varchar("provider_uid", { length: 200 }).notNull(),
     authenticatedAt: timestamp("authenticated_at", {
@@ -553,15 +562,27 @@ export const oauthSessions = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull(),
+    lastActivityAt: timestamp("last_activity_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" })
       .notNull(),
     revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" })
   },
   (table) => [
+    foreignKey({
+      name: "oauth_sessions_webauthn_credential_account_fk",
+      columns: [table.webauthnCredentialId, table.accountId],
+      foreignColumns: [webauthnCredentials.id, webauthnCredentials.accountId]
+    }),
     unique("oauth_sessions_id_account_uq").on(table.id, table.accountId),
     unique("oauth_sessions_credential_hash_uq").on(table.credentialHash),
     unique("oauth_sessions_provider_uid_uq").on(table.providerUid),
     index("oauth_sessions_account_idx").on(table.accountId),
+    index("oauth_sessions_webauthn_credential_idx").on(
+      table.webauthnCredentialId
+    ),
     index("oauth_sessions_expiry_idx").on(table.expiresAt),
     check(
       "oauth_sessions_credential_hash_length",
@@ -583,6 +604,14 @@ export const oauthSessions = pgTable(
     check(
       "oauth_sessions_expiry_after_creation",
       sql`${table.expiresAt} > ${table.createdAt}`
+    ),
+    check(
+      "oauth_sessions_activity_window",
+      sql`${table.lastActivityAt} >= ${table.authenticatedAt} AND ${table.lastActivityAt} < ${table.expiresAt} AND ${table.expiresAt} <= ${table.lastActivityAt} + interval '30 days'`
+    ),
+    check(
+      "oauth_sessions_passkey_binding",
+      sql`array_position(${table.amr}, 'passkey') IS NULL OR ${table.webauthnCredentialId} IS NOT NULL`
     ),
     check(
       "oauth_sessions_revocation_after_creation",

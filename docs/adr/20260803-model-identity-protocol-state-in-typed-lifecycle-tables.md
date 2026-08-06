@@ -78,9 +78,11 @@ is never silently discarded or serialized as a fallback.
 - `oauth_grants` is the consent aggregate. OIDC scopes and resource-specific
   scopes use typed child rows; there is no duplicate consent aggregate.
 - `oauth_sessions` stores only a hash of the browser session credential plus
-  the provider UID, account, authentication time, ACR, AMR snapshot, expiry,
-  and revocation. `oauth_session_authorizations` maps a session and client to
-  its active grant.
+  the provider UID, account, originating WebAuthn credential, authentication
+  and last-activity times, ACR, AMR snapshot, sliding inactivity deadline, and
+  revocation. `oauth_session_authorizations` maps a session and client to its
+  active grant. The credential/account binding prevents a session from being
+  attributed to another account's passkey.
 - `oauth_interactions` contains the fixed request and prompt columns required
   by the enabled authorization-code profile. It references relational session
   and grant state instead of embedding their payloads.
@@ -174,5 +176,6 @@ Implement the model through three reproducible migration increments:
 
 - [Identity service and protocol libraries](20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
+- [Passkey-bound sliding sessions](20260806-use-passkey-bound-sliding-identity-sessions.md)
 - [Data ownership](../wiki/architecture/data-ownership.md)
 - [Stateful infrastructure](../wiki/architecture/stateful-infrastructure.md)

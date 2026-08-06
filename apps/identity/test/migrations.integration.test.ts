@@ -1,10 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -134,6 +137,90 @@ describe("Identity migration chain", () => {
     }
   });
 
+  it("upgrades existing sessions and backfills their activity time", async () => {
+    const journal = JSON.parse(
+      await readFile(new URL("meta/_journal.json", migrationsFolder), "utf8")
+    ) as MigrationJournal;
+    const priorEntries = journal.entries.slice(0, -1);
+    const sources = new Map(
+      (await migrationSources()).map((source) => [source.tag, source.contents])
+    );
+    const temporaryMigrations = await mkdtemp(
+      join(tmpdir(), "shape-of-you-identity-upgrade-")
+    );
+    const temporaryMeta = join(temporaryMigrations, "meta");
+    const databaseName = `identity_upgrade_${randomUUID().replaceAll("-", "")}`;
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    const upgradeUrl = new URL(container.getConnectionUri());
+    upgradeUrl.pathname = `/${databaseName}`;
+
+    try {
+      await mkdir(temporaryMeta);
+      await writeFile(
+        join(temporaryMeta, "_journal.json"),
+        JSON.stringify({ entries: priorEntries, version: "7", dialect: "postgresql" })
+      );
+      for (const entry of priorEntries) {
+        const contents = sources.get(entry.tag);
+        if (contents === undefined) {
+          throw new Error(`Missing generated migration source: ${entry.tag}`);
+        }
+        await writeFile(join(temporaryMigrations, `${entry.tag}.sql`), contents);
+      }
+
+      await adminPool.query(`create database "${databaseName}"`);
+      const legacyDatabase = createIdentityDatabase(upgradeUrl.toString(), 1);
+      try {
+        await migrate(legacyDatabase.db, {
+          migrationsFolder: temporaryMigrations
+        });
+        const accountId = randomUUID();
+        await legacyDatabase.pool.query(
+          `insert into identity_accounts
+             (id, subject, webauthn_user_handle, display_name)
+           values ($1, $2, $3, $4)`,
+          [accountId, randomUUID(), randomBytes(32), "Upgrade test account"]
+        );
+        await legacyDatabase.pool.query(
+          `insert into oauth_sessions
+             (id, account_id, credential_hash, provider_uid, authenticated_at,
+              acr, amr, expires_at)
+           values ($1, $2, $3, $4, now() - interval '1 minute', $5,
+                   ARRAY['recovery'], now() + interval '90 days')`,
+          [randomUUID(), accountId, randomBytes(32), randomUUID(), "urn:soy:recovery"]
+        );
+      } finally {
+        await legacyDatabase.pool.end();
+      }
+
+      await runIdentityMigrations(upgradeUrl.toString());
+
+      const upgradedPool = new Pool({ connectionString: upgradeUrl.toString() });
+      try {
+        const result = await upgradedPool.query<{
+          authenticated_at: Date;
+          expires_at: Date;
+          last_activity_at: Date;
+        }>(
+          `select authenticated_at, last_activity_at, expires_at
+             from oauth_sessions`
+        );
+        expect(result.rows).toHaveLength(1);
+        expect(result.rows[0]!.last_activity_at).toEqual(
+          result.rows[0]!.authenticated_at
+        );
+        expect(result.rows[0]!.expires_at.getTime()).toBe(
+          result.rows[0]!.authenticated_at.getTime() + 30 * 24 * 60 * 60 * 1_000
+        );
+      } finally {
+        await upgradedPool.end();
+      }
+    } finally {
+      await adminPool.end();
+      await rm(temporaryMigrations, { force: true, recursive: true });
+    }
+  });
+
   it("creates only the approved typed lifecycle tables without JSON columns", async () => {
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     try {
@@ -252,6 +339,80 @@ describe("Identity migration chain", () => {
       ).rejects.toMatchObject({
         constraint: "webauthn_challenges_registration_account"
       });
+
+      await expect(
+        pool.query(
+          `insert into webauthn_challenges
+             (id, purpose, challenge_hash, expected_rp_id, expected_origin,
+              user_verification, expires_at)
+           values ($1, 'authentication', $2, $3, $4, 'required',
+                   now() + interval '5 minutes 1 second')`,
+          [
+            randomUUID(),
+            randomBytes(32),
+            "identity.example.test",
+            "https://identity.example.test"
+          ]
+        )
+      ).rejects.toMatchObject({
+        constraint: "webauthn_challenges_max_lifetime"
+      });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("binds passkey sessions to one account and a 30-day idle window", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const firstAccountId = randomUUID();
+    const secondAccountId = randomUUID();
+    const credentialId = randomUUID();
+    try {
+      for (const accountId of [firstAccountId, secondAccountId]) {
+        await pool.query(
+          `insert into identity_accounts
+             (id, subject, webauthn_user_handle, display_name)
+           values ($1, $2, $3, $4)`,
+          [accountId, randomUUID(), randomBytes(32), "Session policy account"]
+        );
+      }
+      await pool.query(
+        `insert into webauthn_credentials
+           (id, account_id, credential_id, public_key, device_type)
+         values ($1, $2, $3, $4, 'multi_device')`,
+        [credentialId, firstAccountId, randomBytes(32), randomBytes(64)]
+      );
+
+      const insertSession = (accountId: string, expiresInterval: string) =>
+        pool.query(
+          `insert into oauth_sessions
+             (id, account_id, webauthn_credential_id, credential_hash,
+              provider_uid, authenticated_at, acr, amr, last_activity_at,
+              expires_at)
+           values ($1, $2, $3, $4, $5, now(), $6, ARRAY['passkey'], now(),
+                   now() + $7::interval)`,
+          [
+            randomUUID(),
+            accountId,
+            credentialId,
+            randomBytes(32),
+            randomUUID(),
+            "urn:soy:passkey",
+            expiresInterval
+          ]
+        );
+
+      await expect(
+        insertSession(secondAccountId, "1 day")
+      ).rejects.toMatchObject({
+        constraint: "oauth_sessions_webauthn_credential_account_fk"
+      });
+      await expect(
+        insertSession(firstAccountId, "30 days 1 second")
+      ).rejects.toMatchObject({
+        constraint: "oauth_sessions_activity_window"
+      });
+      await expect(insertSession(firstAccountId, "30 days")).resolves.toBeDefined();
     } finally {
       await pool.end();
     }
@@ -264,12 +425,19 @@ describe("Identity migration chain", () => {
     const redirectUri = "https://chatgpt.example.test/oauth/callback";
     const grantId = randomUUID();
     const sessionId = randomUUID();
+    const webauthnCredentialId = randomUUID();
     try {
       await pool.query(
         `insert into identity_accounts
            (id, subject, webauthn_user_handle, display_name)
          values ($1, $2, $3, $4)`,
         [accountId, randomUUID(), randomBytes(32), "OAuth migration account"]
+      );
+      await pool.query(
+        `insert into webauthn_credentials
+           (id, account_id, credential_id, public_key, device_type)
+         values ($1, $2, $3, $4, 'multi_device')`,
+        [webauthnCredentialId, accountId, randomBytes(32), randomBytes(64)]
       );
       await pool.query(
         `insert into oauth_clients
@@ -295,11 +463,19 @@ describe("Identity migration chain", () => {
       );
       await pool.query(
         `insert into oauth_sessions
-           (id, account_id, credential_hash, provider_uid, authenticated_at,
-            acr, amr, expires_at)
-         values ($1, $2, $3, $4, now() - interval '1 second', $5,
-                 ARRAY['passkey'], now() + interval '1 hour')`,
-        [sessionId, accountId, randomBytes(32), randomUUID(), "urn:soy:passkey"]
+           (id, account_id, webauthn_credential_id, credential_hash,
+            provider_uid, authenticated_at, acr, amr, last_activity_at,
+            expires_at)
+         values ($1, $2, $3, $4, $5, now() - interval '1 second', $6,
+                 ARRAY['passkey'], now(), now() + interval '1 hour')`,
+        [
+          sessionId,
+          accountId,
+          webauthnCredentialId,
+          randomBytes(32),
+          randomUUID(),
+          "urn:soy:passkey"
+        ]
       );
 
       const authorizationCodeValues = [
@@ -435,6 +611,7 @@ describe("Identity migration chain", () => {
     const accountId = randomUUID();
     const clientId = "security-event-test-client";
     const sessionId = randomUUID();
+    const webauthnCredentialId = randomUUID();
     const firstKeyId = randomUUID();
     const secondKeyId = randomUUID();
     try {
@@ -445,17 +622,31 @@ describe("Identity migration chain", () => {
         [accountId, randomUUID(), randomBytes(32), "Security event account"]
       );
       await pool.query(
+        `insert into webauthn_credentials
+           (id, account_id, credential_id, public_key, device_type)
+         values ($1, $2, $3, $4, 'multi_device')`,
+        [webauthnCredentialId, accountId, randomBytes(32), randomBytes(64)]
+      );
+      await pool.query(
         `insert into oauth_clients (id, display_name)
          values ($1, $2)`,
         [clientId, "Security event client"]
       );
       await pool.query(
         `insert into oauth_sessions
-           (id, account_id, credential_hash, provider_uid, authenticated_at,
-            acr, amr, expires_at)
-         values ($1, $2, $3, $4, now(), $5, ARRAY['passkey'],
+           (id, account_id, webauthn_credential_id, credential_hash,
+            provider_uid, authenticated_at, acr, amr, last_activity_at,
+            expires_at)
+         values ($1, $2, $3, $4, $5, now(), $6, ARRAY['passkey'], now(),
                  now() + interval '1 hour')`,
-        [sessionId, accountId, randomBytes(32), randomUUID(), "urn:soy:passkey"]
+        [
+          sessionId,
+          accountId,
+          webauthnCredentialId,
+          randomBytes(32),
+          randomUUID(),
+          "urn:soy:passkey"
+        ]
       );
       await pool.query(
         `insert into oauth_signing_keys

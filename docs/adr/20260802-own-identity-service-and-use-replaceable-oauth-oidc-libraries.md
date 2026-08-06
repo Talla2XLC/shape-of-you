@@ -133,9 +133,9 @@ multiple passkeys. Initial enrollment produces single-use recovery codes that
 are stored only as hashes. A recovery code can start a tightly scoped,
 auditable flow to register a replacement passkey and revoke affected sessions.
 There is no password fallback, email-only recovery, or security-question
-recovery. The exact WebAuthn library remains replaceable and must pass an
-origin/RP-ID, challenge, counter, attestation-policy, and recovery threat-model
-spike before adoption.
+recovery. The exact WebAuthn library remains replaceable. Challenge, counter,
+attestation, passkey-management, and sliding session policies are defined by
+the dedicated passkey-session ADR.
 
 ## Considered alternatives
 
@@ -233,3 +233,4 @@ spike before adoption.
 - [Deployable service autonomy](20260728-deployable-service-autonomy.md)
 - [Cross-service communication](20260728-api-or-event-only-cross-service-communication.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
+- [Passkey-bound sliding sessions](20260806-use-passkey-bound-sliding-identity-sessions.md)

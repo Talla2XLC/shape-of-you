@@ -38,10 +38,11 @@
 
 ## Блокирующие архитектурные решения
 
-1. До реализации WebAuthn-flow утвердить challenge, counter и attestation
-   policies. Staging origin/RP-ID уже утверждены; production RP-ID будет
-   `identity.shape-of-you.ru`, но production topology остаётся отдельным gate.
-2. До production определить сроки жизни токенов, ротацию ключей, secret storage,
+1. [x] Утвердить WebAuthn challenge, counter, attestation, управление passkeys
+   и session policies: challenge не более 5 минут, counter как дополнительный
+   risk/audit signal, attestation `none`, скользящий idle timeout 30 дней без
+   абсолютного лимита.
+2. До production определить срок жизни access token, ротацию ключей, secret storage,
    RPO/RTO и hostname/TLS topology.
 
 ## Этапы
@@ -83,8 +84,14 @@
 
 ### 3. Accounts, login и sessions
 
+- [x] Утвердить WebAuthn и session policy, включая удаление passkey и связанных
+  сессий.
+- [x] Добавить к OAuth session ссылку на исходный passkey, время последней
+  активности и скользящий `expires_at`; не изменять уже выпущенные миграции.
 - Реализовать WebAuthn/passkey enrollment и login, несколько passkeys на
   аккаунт, hashed single-use recovery codes и replacement enrollment.
+- Реализовать список, переименование и удаление passkeys, список и отзыв
+  сессий, а также защиту от удаления последнего доступного способа входа.
 - Реализовать account status, consent, registered clients, одноразовые auth
   codes, hashed refresh credentials, rotation family и reuse detection.
 - Добавить security audit без токенов, паролей и лишних персональных данных.
