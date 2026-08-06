@@ -86,10 +86,18 @@
 
 - [x] Утвердить WebAuthn и session policy, включая удаление passkey и связанных
   сессий.
+- [x] Утвердить первый enrollment через operator CLI с одноразовым hashed
+  bootstrap token на 15 минут и Origin + session-bound CSRF policy.
 - [x] Добавить к OAuth session ссылку на исходный passkey, время последней
   активности и скользящий `expires_at`; не изменять уже выпущенные миграции.
-- Реализовать WebAuthn/passkey enrollment и login, несколько passkeys на
-  аккаунт, hashed single-use recovery codes и replacement enrollment.
+- [x] Реализовать operator CLI для создания аккаунта и первичного enrollment без
+  ручного SQL или публичной самостоятельной регистрации.
+- [x] Реализовать базовые WebAuthn/passkey enrollment и login через четыре HTTP
+  endpoint, discoverable credentials и passkey-bound sliding session.
+- Реализовать несколько passkeys на аккаунт через UI, hashed single-use recovery
+  codes и replacement enrollment.
+- [x] Для browser POST проверять exact Origin; для cookie-authenticated mutations
+  дополнительно требовать session-bound CSRF token, храня только его hash.
 - Реализовать список, переименование и удаление passkeys, список и отзыв
   сессий, а также защиту от удаления последнего доступного способа входа.
 - Реализовать account status, consent, registered clients, одноразовые auth

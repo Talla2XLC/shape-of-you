@@ -17,9 +17,11 @@
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
-    "db:migrate": "tsx src/database/migrate.ts"
+    "db:migrate": "tsx src/database/migrate.ts",
+    "account:bootstrap": "tsx src/commands/bootstrap-account.ts"
   },
   "dependencies": {
+    "@simplewebauthn/server": "13.3.2",
     "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3",
     "zod": "^4.1.12"

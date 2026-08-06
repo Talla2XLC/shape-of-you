@@ -121,3 +121,4 @@ recovery path remains.
 - [Identity service and protocol libraries](20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md)
 - [Identity relational model](20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
+- [Initial passkey bootstrap and CSRF](20260806-bootstrap-first-passkey-and-require-origin-csrf-defense.md)

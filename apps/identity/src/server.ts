@@ -1,4 +1,6 @@
 import { createIdentityServer } from "./app.js";
+import { IdentityAuthenticationService } from "./authentication/service.js";
+import { SimpleWebAuthnAdapter } from "./authentication/webauthn-adapter.js";
 import { loadIdentityConfig } from "./config.js";
 import {
   checkIdentityDatabaseReadiness,
@@ -14,7 +16,13 @@ async function main(): Promise<void> {
   const server = createIdentityServer({
     readiness: {
       check: async () => checkIdentityDatabaseReadiness(database)
-    }
+    },
+    authentication: new IdentityAuthenticationService(
+      database.pool,
+      new SimpleWebAuthnAdapter(),
+      config
+    ),
+    publicOrigin: config.IDENTITY_PUBLIC_ORIGIN
   });
   let shuttingDown = false;
 

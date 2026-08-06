@@ -78,6 +78,7 @@ export const identitySecurityEventType = pgEnum(
   "identity_security_event_type",
   [
     "account_status_changed",
+    "initial_passkey_enrollment_created",
     "passkey_registered",
     "passkey_authentication",
     "passkey_revoked",
@@ -198,11 +199,69 @@ export const webauthnCredentials = pgTable(
   ]
 );
 
+export const initialPasskeyEnrollments = pgTable(
+  "initial_passkey_enrollments",
+  {
+    id: uuid("id").primaryKey(),
+    accountId: uuid("account_id").notNull(),
+    tokenHash: bytea("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" })
+      .notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+    invalidatedAt: timestamp("invalidated_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+  },
+  (table) => [
+    foreignKey({
+      name: "initial_passkey_enrollments_account_fk",
+      columns: [table.accountId],
+      foreignColumns: [identityAccounts.id]
+    }),
+    unique("initial_passkey_enrollments_id_account_uq").on(
+      table.id,
+      table.accountId
+    ),
+    unique("initial_passkey_enrollments_token_hash_uq").on(table.tokenHash),
+    index("initial_passkey_enrollments_expiry_idx").on(table.expiresAt),
+    uniqueIndex("initial_passkey_enrollments_active_account_uq")
+      .on(table.accountId)
+      .where(
+        sql`${table.consumedAt} IS NULL AND ${table.invalidatedAt} IS NULL`
+      ),
+    check(
+      "initial_passkey_enrollments_hash_length",
+      sql`octet_length(${table.tokenHash}) = 32`
+    ),
+    check(
+      "initial_passkey_enrollments_lifetime",
+      sql`${table.expiresAt} > ${table.createdAt} AND ${table.expiresAt} <= ${table.createdAt} + interval '15 minutes'`
+    ),
+    check(
+      "initial_passkey_enrollments_terminal_state",
+      sql`NOT (${table.consumedAt} IS NOT NULL AND ${table.invalidatedAt} IS NOT NULL)`
+    ),
+    check(
+      "initial_passkey_enrollments_consumption_time",
+      sql`${table.consumedAt} IS NULL OR (${table.consumedAt} >= ${table.createdAt} AND ${table.consumedAt} <= ${table.expiresAt})`
+    ),
+    check(
+      "initial_passkey_enrollments_invalidation_time",
+      sql`${table.invalidatedAt} IS NULL OR ${table.invalidatedAt} >= ${table.createdAt}`
+    )
+  ]
+);
+
 export const webauthnChallenges = pgTable(
   "webauthn_challenges",
   {
     id: uuid("id").primaryKey(),
     accountId: uuid("account_id").references(() => identityAccounts.id),
+    initialPasskeyEnrollmentId: uuid("initial_passkey_enrollment_id"),
     purpose: webauthnChallengePurpose("purpose").notNull(),
     challengeHash: bytea("challenge_hash").notNull(),
     expectedRpId: varchar("expected_rp_id", { length: 253 }).notNull(),
@@ -216,6 +275,11 @@ export const webauthnChallenges = pgTable(
     consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" })
   },
   (table) => [
+    foreignKey({
+      name: "webauthn_challenges_initial_enrollment_account_fk",
+      columns: [table.initialPasskeyEnrollmentId, table.accountId],
+      foreignColumns: [initialPasskeyEnrollments.id, initialPasskeyEnrollments.accountId]
+    }),
     unique("webauthn_challenges_hash_uq").on(table.challengeHash),
     index("webauthn_challenges_account_idx").on(table.accountId),
     index("webauthn_challenges_expiry_idx").on(table.expiresAt),
@@ -226,6 +290,10 @@ export const webauthnChallenges = pgTable(
     check(
       "webauthn_challenges_registration_account",
       sql`${table.purpose} = 'authentication' OR ${table.accountId} IS NOT NULL`
+    ),
+    check(
+      "webauthn_challenges_initial_enrollment_purpose",
+      sql`${table.initialPasskeyEnrollmentId} IS NULL OR ${table.purpose} = 'registration'`
     ),
     check(
       "webauthn_challenges_expiry_after_creation",
@@ -552,6 +620,7 @@ export const oauthSessions = pgTable(
       .references(() => identityAccounts.id),
     webauthnCredentialId: uuid("webauthn_credential_id"),
     credentialHash: bytea("credential_hash").notNull(),
+    csrfTokenHash: bytea("csrf_token_hash").notNull(),
     providerUid: varchar("provider_uid", { length: 200 }).notNull(),
     authenticatedAt: timestamp("authenticated_at", {
       withTimezone: true,
@@ -587,6 +656,10 @@ export const oauthSessions = pgTable(
     check(
       "oauth_sessions_credential_hash_length",
       sql`octet_length(${table.credentialHash}) = 32`
+    ),
+    check(
+      "oauth_sessions_csrf_token_hash_length",
+      sql`octet_length(${table.csrfTokenHash}) = 32`
     ),
     check(
       "oauth_sessions_provider_uid_nonempty",

@@ -10,12 +10,25 @@ const postgresqlUrlSchema = z
     }
   );
 
+const publicOriginSchema = z.string().url().superRefine((value, context) => {
+  const url = new URL(value);
+  if (url.origin !== value || url.username || url.password) {
+    context.addIssue({
+      code: "custom",
+      message: "must be an exact origin without credentials, path, query, or fragment"
+    });
+  }
+});
+
 const identityEnvironmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3_000),
   DATABASE_URL: postgresqlUrlSchema,
   DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(50).default(10),
+  IDENTITY_PUBLIC_ORIGIN: publicOriginSchema,
+  WEBAUTHN_RP_ID: z.string().min(1).max(253),
+  WEBAUTHN_RP_NAME: z.string().min(1).max(100).default("Shape of You"),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
@@ -47,6 +60,21 @@ export function loadIdentityConfig(
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
       .join("; ");
     throw new Error(`Invalid Identity runtime configuration: ${details}`);
+  }
+
+  const origin = new URL(parsed.data.IDENTITY_PUBLIC_ORIGIN);
+  if (
+    parsed.data.NODE_ENV === "production" &&
+    origin.protocol !== "https:"
+  ) {
+    throw new Error(
+      "Invalid Identity runtime configuration: IDENTITY_PUBLIC_ORIGIN: must use https in production"
+    );
+  }
+  if (origin.hostname !== parsed.data.WEBAUTHN_RP_ID) {
+    throw new Error(
+      "Invalid Identity runtime configuration: WEBAUTHN_RP_ID: must equal the public origin hostname"
+    );
   }
 
   return parsed.data;

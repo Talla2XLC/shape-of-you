@@ -30,7 +30,10 @@ credentials with another deployable.
 - Credentials and private keys enter only through the runtime environment or
   an approved secret provider.
 - Never store or print secrets, raw tokens, credential material, or recovery
-  codes in source, logs, snapshots, fixtures, or documentation.
+  codes in source, logs, snapshots, fixtures, or documentation. The sole
+  exception is the approved operator-only account bootstrap CLI, which may
+  print its newly generated one-time enrollment token once to an interactive
+  controlling terminal and must never emit it through structured logs.
 - TLS certificate lifecycle belongs to the edge; OAuth signing keys belong to
   Identity.
 

@@ -184,9 +184,10 @@ describe("Identity migration chain", () => {
         await legacyDatabase.pool.query(
           `insert into oauth_sessions
              (id, account_id, credential_hash, provider_uid, authenticated_at,
-              acr, amr, expires_at)
+              acr, amr, last_activity_at, expires_at)
            values ($1, $2, $3, $4, now() - interval '1 minute', $5,
-                   ARRAY['recovery'], now() + interval '90 days')`,
+                   ARRAY['recovery'], now() - interval '1 minute',
+                   now() + interval '30 days' - interval '1 minute')`,
           [randomUUID(), accountId, randomBytes(32), randomUUID(), "urn:soy:recovery"]
         );
       } finally {
@@ -199,10 +200,13 @@ describe("Identity migration chain", () => {
       try {
         const result = await upgradedPool.query<{
           authenticated_at: Date;
+          csrf_token_hash: Buffer;
           expires_at: Date;
           last_activity_at: Date;
+          revoked_at: Date;
         }>(
-          `select authenticated_at, last_activity_at, expires_at
+          `select authenticated_at, csrf_token_hash, last_activity_at,
+                  expires_at, revoked_at
              from oauth_sessions`
         );
         expect(result.rows).toHaveLength(1);
@@ -212,6 +216,8 @@ describe("Identity migration chain", () => {
         expect(result.rows[0]!.expires_at.getTime()).toBe(
           result.rows[0]!.authenticated_at.getTime() + 30 * 24 * 60 * 60 * 1_000
         );
+        expect(result.rows[0]!.csrf_token_hash).toEqual(Buffer.alloc(32));
+        expect(result.rows[0]!.revoked_at).toBeInstanceOf(Date);
       } finally {
         await upgradedPool.end();
       }
@@ -233,6 +239,7 @@ describe("Identity migration chain", () => {
       expect(tables.rows.map((row) => row.table_name)).toEqual([
         "identity_accounts",
         "identity_security_events",
+        "initial_passkey_enrollments",
         "oauth_authorization_codes",
         "oauth_client_allowed_scopes",
         "oauth_client_redirect_uris",
@@ -362,6 +369,41 @@ describe("Identity migration chain", () => {
     }
   });
 
+  it("enforces hashed, short-lived, single-state initial enrollment", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const accountId = randomUUID();
+    try {
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [accountId, randomUUID(), randomBytes(32), "Enrollment policy account"]
+      );
+      await expect(
+        pool.query(
+          `insert into initial_passkey_enrollments
+             (id, account_id, token_hash, expires_at)
+           values ($1, $2, $3, now() + interval '15 minutes 1 second')`,
+          [randomUUID(), accountId, randomBytes(32)]
+        )
+      ).rejects.toMatchObject({
+        constraint: "initial_passkey_enrollments_lifetime"
+      });
+      await expect(
+        pool.query(
+          `insert into initial_passkey_enrollments
+             (id, account_id, token_hash, expires_at, consumed_at, invalidated_at)
+           values ($1, $2, $3, now() + interval '15 minutes', now(), now())`,
+          [randomUUID(), accountId, randomBytes(32)]
+        )
+      ).rejects.toMatchObject({
+        constraint: "initial_passkey_enrollments_terminal_state"
+      });
+    } finally {
+      await pool.end();
+    }
+  });
+
   it("binds passkey sessions to one account and a 30-day idle window", async () => {
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     const firstAccountId = randomUUID();
@@ -387,14 +429,15 @@ describe("Identity migration chain", () => {
         pool.query(
           `insert into oauth_sessions
              (id, account_id, webauthn_credential_id, credential_hash,
-              provider_uid, authenticated_at, acr, amr, last_activity_at,
-              expires_at)
-           values ($1, $2, $3, $4, $5, now(), $6, ARRAY['passkey'], now(),
-                   now() + $7::interval)`,
+              csrf_token_hash, provider_uid, authenticated_at, acr, amr,
+              last_activity_at, expires_at)
+           values ($1, $2, $3, $4, $5, $6, now(), $7, ARRAY['passkey'], now(),
+                   now() + $8::interval)`,
           [
             randomUUID(),
             accountId,
             credentialId,
+            randomBytes(32),
             randomBytes(32),
             randomUUID(),
             "urn:soy:passkey",
@@ -464,14 +507,15 @@ describe("Identity migration chain", () => {
       await pool.query(
         `insert into oauth_sessions
            (id, account_id, webauthn_credential_id, credential_hash,
-            provider_uid, authenticated_at, acr, amr, last_activity_at,
-            expires_at)
-         values ($1, $2, $3, $4, $5, now() - interval '1 second', $6,
+            csrf_token_hash, provider_uid, authenticated_at, acr, amr,
+            last_activity_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, now() - interval '1 second', $7,
                  ARRAY['passkey'], now(), now() + interval '1 hour')`,
         [
           sessionId,
           accountId,
           webauthnCredentialId,
+          randomBytes(32),
           randomBytes(32),
           randomUUID(),
           "urn:soy:passkey"
@@ -635,14 +679,15 @@ describe("Identity migration chain", () => {
       await pool.query(
         `insert into oauth_sessions
            (id, account_id, webauthn_credential_id, credential_hash,
-            provider_uid, authenticated_at, acr, amr, last_activity_at,
-            expires_at)
-         values ($1, $2, $3, $4, $5, now(), $6, ARRAY['passkey'], now(),
+            csrf_token_hash, provider_uid, authenticated_at, acr, amr,
+            last_activity_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, now(), $7, ARRAY['passkey'], now(),
                  now() + interval '1 hour')`,
         [
           sessionId,
           accountId,
           webauthnCredentialId,
+          randomBytes(32),
           randomBytes(32),
           randomUUID(),
           "urn:soy:passkey"
