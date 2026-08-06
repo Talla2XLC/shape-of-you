@@ -4,6 +4,7 @@ set -eu
 BASE_URL=${BASE_URL:-https://staging.shape-of-you.ru}
 HTTP_BASE_URL=${HTTP_BASE_URL:-http://staging.shape-of-you.ru}
 IDENTITY_URL=${IDENTITY_URL:-https://identity.staging.shape-of-you.ru}
+IDENTITY_SMOKE_ENABLED=${IDENTITY_SMOKE_ENABLED:-false}
 RUN_WRITE_SMOKE=${RUN_WRITE_SMOKE:-false}
 RELEASE_ID=${RELEASE_ID:-manual}
 
@@ -27,18 +28,23 @@ if [ "$redirect_url" != "$BASE_URL/" ]; then
   exit 1
 fi
 
-identity_status=$(
-  curl \
-    --silent \
-    --show-error \
-    --output /dev/null \
-    --write-out '%{http_code}' \
-    "$IDENTITY_URL/"
-)
+if [ "$IDENTITY_SMOKE_ENABLED" = "true" ]; then
+  curl --fail --silent --show-error --output /dev/null "$IDENTITY_URL/live"
+  curl --fail --silent --show-error --output /dev/null "$IDENTITY_URL/ready"
+else
+  identity_status=$(
+    curl \
+      --silent \
+      --show-error \
+      --output /dev/null \
+      --write-out '%{http_code}' \
+      "$IDENTITY_URL/"
+  )
 
-if [ "$identity_status" != "503" ]; then
-  printf '%s\n' "Expected Identity placeholder to return 503, got $identity_status." >&2
-  exit 1
+  if [ "$identity_status" != "503" ]; then
+    printf '%s\n' "Expected inactive Identity release to return 503, got $identity_status." >&2
+    exit 1
+  fi
 fi
 
 oversize_status=$(

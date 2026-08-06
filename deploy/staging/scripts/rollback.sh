@@ -106,7 +106,10 @@ else
   compose up --detach --wait --wait-timeout 90 --remove-orphans api edge
 fi
 
-RELEASE_ID="$TARGET_RELEASE" RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/smoke.sh"
+RELEASE_ID="$TARGET_RELEASE" \
+RUN_WRITE_SMOKE=false \
+IDENTITY_SMOKE_ENABLED="$identity_enabled" \
+  sh "$SCRIPT_DIR/smoke.sh"
 
 old_current=
 if [ -L "$CURRENT_LINK" ]; then

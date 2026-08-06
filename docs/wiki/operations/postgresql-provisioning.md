@@ -13,8 +13,10 @@ tags:
 
 ## Summary
 
-Shape of You uses a dedicated database and login role inside the existing
-PostgreSQL 17.4 cluster. Provisioning is an operator-approved one-time action.
+Shape of You uses separate API and Identity databases and login roles inside
+the existing PostgreSQL 17.4 cluster. Provisioning is an operator-approved
+one-time action; application tables are created only by service-owned
+migrations.
 
 ## Content
 
@@ -55,6 +57,32 @@ PostgreSQL may grant CONNECT to other databases through PUBLIC. This procedure
 does not alter unrelated ACLs; strict cluster isolation needs a separately
 approved ACL/`pg_hba.conf` change. Store the service URL only as GitHub
 Environment secret `STAGING_DATABASE_URL`.
+
+Identity uses the same least-privilege pattern with distinct ownership:
+
+```sql
+CREATE ROLE shape_of_you_identity
+  LOGIN
+  NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION;
+
+\password shape_of_you_identity
+
+CREATE DATABASE shape_of_you_identity
+  OWNER shape_of_you_identity TEMPLATE template0 ENCODING 'UTF8';
+
+REVOKE ALL ON DATABASE shape_of_you_identity FROM PUBLIC;
+GRANT CONNECT, TEMPORARY ON DATABASE shape_of_you_identity
+  TO shape_of_you_identity;
+
+\connect shape_of_you_identity
+
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE, CREATE ON SCHEMA public TO shape_of_you_identity;
+```
+
+Identity runtime and its one-shot migration service share only this dedicated
+role. Store its URL only as Environment secret
+`STAGING_IDENTITY_DATABASE_URL`; never reuse API credentials.
 
 ## Evidence
 

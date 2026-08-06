@@ -68,7 +68,7 @@
   probes и integration tests.
 - [x] Подключить runtime к отдельному `DATABASE_URL`, database-aware readiness,
   graceful pool shutdown и отдельный migration runner.
-- Создать отдельную PostgreSQL database boundary, credentials, Drizzle schema и
+- [x] Создать отдельную PostgreSQL database boundary, credentials, Drizzle schema и
   воспроизводимые миграции.
 - Не добавлять cross-service SQL или общие credentials.
 
@@ -134,7 +134,7 @@
 - [x] Реализовать репозиторную часть внешнего ingress-контракта,
   воспроизводимый HTTP-01 bootstrap, постоянное раздельное хранение
   ACME/serving state, автоматический renewal, проверку nginx и reload.
-- Перевести staging smoke и GitHub Environment URL на HTTPS; убрать публичный
+- [x] Перевести staging smoke и GitHub Environment URL на HTTPS; убрать публичный
   `3001` после подтверждённого cutover.
 - [x] Первый cutover провести в две фазы через временный gate, чтобы push с
   новым CI-контрактом не обогнал установку root-owned wrapper и systemd units;

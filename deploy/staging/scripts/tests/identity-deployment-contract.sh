@@ -10,9 +10,12 @@ COMPOSE_TEST_OVERRIDE="$REPOSITORY_ROOT/deploy/staging/scripts/tests/compose-no-
 IDENTITY_TEST_OVERRIDE="$REPOSITORY_ROOT/deploy/staging/scripts/tests/compose-identity-no-runtime-env.yaml"
 RELEASE_ENV="$REPOSITORY_ROOT/deploy/staging/release.env.example"
 PUBLISH_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/publish-staging.yml"
+DEPLOY_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/deploy-staging.yml"
 DEPLOY="$REPOSITORY_ROOT/deploy/staging/scripts/deploy.sh"
 ROLLBACK="$REPOSITORY_ROOT/deploy/staging/scripts/rollback.sh"
 WRAPPER="$REPOSITORY_ROOT/deploy/staging/system/shape-of-you-staging-deploy"
+SMOKE="$REPOSITORY_ROOT/deploy/staging/scripts/smoke.sh"
+NGINX="$REPOSITORY_ROOT/deploy/staging/nginx/nginx.conf.template"
 RENDER_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/shape-of-you-identity-render.XXXXXX")
 
 cleanup() {
@@ -44,6 +47,10 @@ assert_not_contains "$IDENTITY_COMPOSE" 'ports:'
 assert_contains "$PUBLISH_WORKFLOW" 'file: apps/identity/Dockerfile'
 assert_contains "$PUBLISH_WORKFLOW" 'shape-of-you-identity:sha-${{ github.sha }}'
 assert_contains "$PUBLISH_WORKFLOW" 'Attest Identity image'
+assert_contains "$PUBLISH_WORKFLOW" 'identity_digest: ${{ needs.publish-identity.outputs.digest }}'
+assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_DATABASE_URL'
+assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_DIGEST=%s"
+assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s"
 assert_contains "$DEPLOY" 'identity-migrate'
 assert_contains "$DEPLOY" 'api identity'
 assert_contains "$ROLLBACK" 'api identity edge'
@@ -52,6 +59,10 @@ assert_contains "$WRAPPER" 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE'
 assert_contains "$WRAPPER" '/etc/shape-of-you/staging/identity.env'
 assert_contains "$WRAPPER" 'shape-of-you-identity'
 assert_contains "$DEPLOY" 'rollback_schema_compatible'
+assert_contains "$SMOKE" 'IDENTITY_SMOKE_ENABLED'
+assert_contains "$SMOKE" '"$IDENTITY_URL/live"'
+assert_contains "$SMOKE" '"$IDENTITY_URL/ready"'
+assert_contains "$NGINX" 'proxy_pass http://identity:3000;'
 
 docker compose \
   --project-name shape-of-you-identity-contract-test \
@@ -81,4 +92,4 @@ assert_not_contains "$RENDER_ROOT/shared.yaml" 'published:'
 assert_contains "$RENDER_ROOT/standalone.yaml" 'published: "80"'
 assert_contains "$RENDER_ROOT/standalone.yaml" 'published: "443"'
 
-printf '%s\n' 'Identity deployment preparation contract test passed.'
+printf '%s\n' 'Identity deployment contract test passed.'

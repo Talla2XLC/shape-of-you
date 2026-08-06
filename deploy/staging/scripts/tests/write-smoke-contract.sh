@@ -96,4 +96,10 @@ RUN_WRITE_SMOKE=true \
 RELEASE_ID=0123456789abcdef0123456789abcdef01234567 \
   sh "$SMOKE_SOURCE" >/dev/null
 
+PATH="$TEST_ROOT/fake-bin:$PATH" \
+RUN_WRITE_SMOKE=false \
+IDENTITY_SMOKE_ENABLED=true \
+RELEASE_ID=0123456789abcdef0123456789abcdef01234567 \
+  sh "$SMOKE_SOURCE" >/dev/null
+
 printf '%s\n' 'write smoke contract regression test passed.'

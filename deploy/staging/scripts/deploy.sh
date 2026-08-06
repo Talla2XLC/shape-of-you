@@ -198,7 +198,9 @@ if [ "$identity_enabled" = "true" ]; then
   assert_no_published_ports identity
 fi
 
-if ! RELEASE_ID="$RELEASE_ID" sh "$SCRIPT_DIR/smoke.sh"; then
+if ! RELEASE_ID="$RELEASE_ID" \
+  IDENTITY_SMOKE_ENABLED="$identity_enabled" \
+  sh "$SCRIPT_DIR/smoke.sh"; then
   printf '%s\n' "Deployment smoke failed." >&2
 
   if [ "$rollback_schema_compatible" = "true" ] && [ -L "$CURRENT_LINK" ]; then

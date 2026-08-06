@@ -24,18 +24,18 @@ Identity.
 
 1. [x] Добавить публикацию Identity image и обратно совместимую поддержку его
    digest в проверяемый протокол root-owned deployment wrapper.
-2. [ ] Создать отдельный root-owned `identity.env` из
+2. [x] Создать отдельный root-owned `identity.env` из
    `STAGING_IDENTITY_DATABASE_URL` и неизменяемой публичной конфигурации staging.
 3. [x] Добавить `identity` и `identity-migrate` в опциональный Compose overlay
    без host ports и с
    отдельной database-access сетью.
-4. [ ] Запускать Identity migrations до runtime и ждать `/ready` перед запуском
+4. [x] Запускать Identity migrations до runtime и ждать `/ready` перед запуском
    edge.
-5. [ ] Заменить Identity `503` placeholder на reverse proxy и добавить HTTPS
+5. [x] Заменить Identity `503` placeholder на reverse proxy и добавить HTTPS
    smoke для `/live` и `/ready`.
 6. [x] Подготовить Identity в rollback, preflight и regression contracts с
    сохранением работоспособности старых release manifests.
-7. [ ] Обновить только затронутые Wiki/runbook страницы и основной Identity
+7. [x] Обновить только затронутые Wiki/runbook страницы и основной Identity
    план; ADR не требуется, потому что решение уже принято.
 8. [ ] Прогнать lint, typecheck, build, unit/integration tests, Compose renders,
    shell contracts, проверку документации и Architecture Review.

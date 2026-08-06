@@ -158,7 +158,8 @@ describe("Identity WebAuthn HTTP flow", () => {
     };
     const replacementToken = createOpaqueToken();
     await pool.query(
-      `update initial_passkey_enrollments set invalidated_at = now()
+      `update initial_passkey_enrollments
+          set invalidated_at = greatest(clock_timestamp(), created_at)
         where account_id = $1 and invalidated_at is null and consumed_at is null`,
       [mismatchBootstrap.accountId]
     );

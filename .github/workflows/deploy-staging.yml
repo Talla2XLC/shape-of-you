@@ -9,6 +9,9 @@ on:
       api_digest:
         required: true
         type: string
+      identity_digest:
+        required: true
+        type: string
       edge_digest:
         required: true
         type: string
@@ -16,6 +19,9 @@ on:
         required: true
         type: string
       schema_backward_compatible:
+        required: true
+        type: boolean
+      identity_schema_backward_compatible:
         required: true
         type: boolean
       run_write_smoke:
@@ -31,6 +37,10 @@ on:
         description: Published API sha256 digest
         required: true
         type: string
+      identity_digest:
+        description: Published Identity sha256 digest
+        required: true
+        type: string
       edge_digest:
         description: Published edge sha256 digest
         required: true
@@ -41,6 +51,11 @@ on:
         type: string
       schema_backward_compatible:
         description: Previous API image can run after this migration
+        required: true
+        default: false
+        type: boolean
+      identity_schema_backward_compatible:
+        description: Previous Identity image can run after this migration
         required: true
         default: false
         type: boolean
@@ -73,12 +88,14 @@ jobs:
       GHCR_NAMESPACE: ${{ vars.GHCR_NAMESPACE }}
       RELEASE_ID: ${{ inputs.release_id }}
       API_DIGEST: ${{ inputs.api_digest }}
+      IDENTITY_DIGEST: ${{ inputs.identity_digest }}
       EDGE_DIGEST: ${{ inputs.edge_digest }}
       CERTBOT_DIGEST: ${{ inputs.certbot_digest }}
       ACME_EMAIL: ${{ vars.STAGING_ACME_EMAIL }}
       PUBLIC_IPV4: ${{ vars.STAGING_PUBLIC_IPV4 }}
       DEPLOYMENT_TOPOLOGY: ${{ vars.STAGING_DEPLOYMENT_TOPOLOGY || 'shared-ingress' }}
       SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.schema_backward_compatible }}
+      IDENTITY_SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.identity_schema_backward_compatible }}
       RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
 
     steps:
@@ -88,6 +105,7 @@ jobs:
           set -eu
           printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$'
           printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$ACME_EMAIL" | grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
@@ -114,26 +132,31 @@ jobs:
         shell: bash
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
+          IDENTITY_DATABASE_URL: ${{ secrets.STAGING_IDENTITY_DATABASE_URL }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
           test -n "$DATABASE_URL"
+          test -n "$IDENTITY_DATABASE_URL"
           test -n "$GHCR_TOKEN"
           target="$VM_USER@$VM_HOST"
           {
             printf 'RELEASE_ID=%s\n' "$RELEASE_ID"
             printf 'API_DIGEST=%s\n' "$API_DIGEST"
+            printf 'IDENTITY_DIGEST=%s\n' "$IDENTITY_DIGEST"
             printf 'EDGE_DIGEST=%s\n' "$EDGE_DIGEST"
             printf 'CERTBOT_DIGEST=%s\n' "$CERTBOT_DIGEST"
             printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"
             printf 'PUBLIC_IPV4=%s\n' "$PUBLIC_IPV4"
             printf 'DEPLOYMENT_TOPOLOGY=%s\n' "$DEPLOYMENT_TOPOLOGY"
             printf 'SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$SCHEMA_BACKWARD_COMPATIBLE"
+            printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE"
             printf 'RUN_WRITE_SMOKE=%s\n' "$RUN_WRITE_SMOKE"
             printf 'GHCR_NAMESPACE=%s\n' "$GHCR_NAMESPACE"
             printf 'GHCR_ACTOR=%s\n' "$GITHUB_ACTOR"
             printf 'CONTROL_SHA=%s\n' "$GITHUB_SHA"
             printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+            printf 'IDENTITY_DATABASE_URL=%s\n' "$IDENTITY_DATABASE_URL"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } | ssh -p "$VM_PORT" "$target" \
             -o BatchMode=yes \

@@ -25,10 +25,8 @@ project certificate lifecycle.
 
 Pushes to `main` run quality, publish SHA-linked GHCR images, and automatically
 deploy exact digests to Environment `staging`. API, Identity, edge, and Certbot
-are independently built and attested. During the one-time Identity cutover
-preparation, the automatic release still deploys the existing API, edge, and
-Certbot coordinates; the Identity image is published but not passed to the VM.
-Input is an allowlisted stdin protocol to
+are independently built and attested, and all four coordinates belong to one
+atomic release. Input is an allowlisted stdin protocol to
 `/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no build context,
 toolchain, writable scripts, or Compose file from CI.
 
@@ -42,9 +40,9 @@ The root-owned `/opt/shared-vm-ingress` Compose project is the only owner of
 host ports `80` and `443`. It routes HTTP by Host and opaque TLS by SNI over the
 external `shared-vm-ingress` Docker network. It stores no certificates. Shape
 of You nginx is reachable only as `shape-of-you-edge:8080/8443`, terminates its
-own TLS, serves HTTP-01 and redirects, and routes `/api/` to the internal API.
-`https://identity.staging.shape-of-you.ru` is the accepted Identity and
-WebAuthn origin and returns a controlled `503` until Identity is deployed.
+own TLS, serves HTTP-01 and redirects, routes `/api/` to the internal API, and
+routes `https://identity.staging.shape-of-you.ru` to the internal Identity
+service. That exact HTTPS origin is also the staging WebAuthn RP origin.
 Unknown hosts fail closed at both boundaries. PROXY protocol preserves client
 addresses for logging, forwarding, and rate limiting.
 
@@ -61,8 +59,10 @@ serving copy of the current chain and private key. A root-owned systemd timer
 runs the renewal check twice daily, validates nginx, and reloads it. Certbot has
 no Docker socket, and application services receive no TLS material.
 
-API owns `shape_of_you_api`, login, credentials, and migrations in the existing
-PostgreSQL cluster. The container reaches host port `5431` through
+API owns `shape_of_you_api`; Identity independently owns
+`shape_of_you_identity`. Each has a separate login, credentials, root-owned
+runtime env file, one-shot migration service, and database-access Docker
+network. Both containers reach host port `5431` through
 `host.docker.internal`, not the unrelated Compose network. Existing external
 database exposure is a throwaway-staging limitation; developer access should
 use SSH tunneling.
@@ -81,15 +81,13 @@ Environment input into root-owned `/etc/shape-of-you/staging/api.env` mode
 VM resources are limited and swap is in use. Current limits (`384m` API,
 `64m` edge) require observation before adding load.
 
-The accepted Identity service is not deployed yet. Its optional staging
-overlay, separate `identity.env`, one-shot migration service, runtime health
-policy, rollback handling, and independently published image are prepared.
-The compatibility path deliberately leaves the current release unchanged until
-the operator provisions the separate database/login and GitHub secret and
-installs the updated root-owned wrapper. The activation commit will then make
-the Identity digest and database URL mandatory and replace the edge `503`
-placeholder with the internal proxy. Edge/ACME owns TLS certificates; Identity
-owns OAuth signing keys.
+Identity runs from its independently published digest through the staging
+overlay. The deployment wrapper writes its database URL only to root-owned
+`/etc/shape-of-you/staging/identity.env`, applies Identity-owned migrations,
+waits for database-aware readiness, and then starts edge. API and Identity
+schema compatibility are declared independently; automatic rollback of an
+Identity release requires both declarations to be true. Edge/ACME owns TLS
+certificates; Identity owns OAuth signing keys.
 
 ## Evidence
 

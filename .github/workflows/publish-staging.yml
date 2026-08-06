@@ -332,8 +332,10 @@ jobs:
     with:
       release_id: ${{ github.sha }}
       api_digest: ${{ needs.publish-api.outputs.digest }}
+      identity_digest: ${{ needs.publish-identity.outputs.digest }}
       edge_digest: ${{ needs.publish-edge.outputs.digest }}
       certbot_digest: ${{ needs.publish-certbot.outputs.digest }}
       schema_backward_compatible: false
+      identity_schema_backward_compatible: false
       run_write_smoke: true
     secrets: inherit

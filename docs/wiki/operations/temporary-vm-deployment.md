@@ -21,8 +21,7 @@ and deployment mutations always require the corresponding explicit approval.
 ### Preconditions
 
 - Commit passed `CI`; API, Identity, edge, and Certbot GHCR images are selected
-  by full digest. During Identity cutover preparation, Identity is published
-  but intentionally omitted from the active release inputs.
+  by full digest.
 - Environment `staging` contains required secrets/variables.
 - Both `staging.shape-of-you.ru` and `identity.staging.shape-of-you.ru` resolve
   publicly to `STAGING_PUBLIC_IPV4`.
@@ -33,16 +32,19 @@ and deployment mutations always require the corresponding explicit approval.
   `shape-of-you-edge:8080`, and SNI/PROXY routing reaches port `8443`.
 - In `standalone` mode, the ports are free or already owned by the Shape of You
   Compose project; no external ingress network is required.
-- Database/login `shape_of_you_api` exists.
+- Separate databases/logins `shape_of_you_api` and `shape_of_you_identity`
+  exist.
 - Password-locked `shape-deploy` exists outside Docker group; operator installed
   root wrapper and sudoers rule.
-- `/etc/shape-of-you/staging/api.env` is `root:root` mode `0600`.
+- `/etc/shape-of-you/staging/api.env` and `identity.env` are `root:root` mode
+  `0600`.
 - Shared-cluster backup checkpoint is agreed.
 
 Environment secrets:
 
 ```text
 STAGING_DATABASE_URL
+STAGING_IDENTITY_DATABASE_URL
 STAGING_VM_SSH_PRIVATE_KEY
 STAGING_VM_KNOWN_HOSTS
 ```
@@ -63,6 +65,7 @@ Database URL shape:
 
 ```text
 postgresql://shape_of_you_api:<secret>@host.docker.internal:5431/shape_of_you_api
+postgresql://shape_of_you_identity:<secret>@host.docker.internal:5431/shape_of_you_identity
 ```
 
 Never log or store the value in release manifests.
@@ -79,11 +82,13 @@ The corresponding render contracts are explicit:
 docker compose \
   --file deploy/staging/compose.yaml \
   --file deploy/staging/compose.shared-ingress.yaml \
+  --file deploy/staging/compose.identity.yaml \
   config
 
 docker compose \
   --file deploy/staging/compose.yaml \
   --file deploy/staging/compose.standalone.yaml \
+  --file deploy/staging/compose.identity.yaml \
   config
 ```
 
@@ -96,10 +101,9 @@ file during a move.
 `publish-staging.yml` publishes SHA tags for API, Identity, edge, and the
 project Certbot image and records provenance/SBOM; digest is deployment
 authority. After quality and publication for a `main` push, it automatically
-invokes `deploy-staging.yml`. During the first Identity preparation release,
-the call intentionally retains the existing three-image deployment contract.
-Manual targeted retry supplies full commit SHA, the active image digests,
-schema backward-compatibility flag, and write-smoke choice.
+invokes `deploy-staging.yml` with all four digests. Manual targeted retry
+supplies full commit SHA, all image digests, separate API and Identity schema
+backward-compatibility flags, and write-smoke choice.
 
 The Environment job invokes only:
 
@@ -122,24 +126,13 @@ sudo sh deploy/staging/system/install-root-owned-assets.sh
 
 GitHub Actions never runs this installer.
 
-The one-time Identity cutover is deliberately split without a permanent
-feature flag:
-
-1. publish and deploy the backward-compatible preparation release;
-2. provision database/login `shape_of_you_identity` without manual schema SQL;
-3. add Environment secret `STAGING_IDENTITY_DATABASE_URL` using the Identity
-   database URL;
-4. update the verified VM checkout and reinstall the root-owned wrapper;
-5. merge the activation release that makes the Identity digest and secret
-   mandatory, runs Identity migrations, replaces the edge placeholder, and
-   extends smoke checks.
-
-The preparation wrapper accepts the Identity digest, database URL, and Identity
-schema-compatibility declaration only as one complete group and writes
+The completed Identity cutover used a backward-compatible preparation release
+before the digest, database URL, and Identity schema-compatibility declaration
+became one mandatory input group. The wrapper writes
 `/etc/shape-of-you/staging/identity.env` independently from `api.env`. An
 Identity release can automatically roll back only when both API and Identity
 schema compatibility are explicitly true. Older releases remain renderable
-without the optional Identity overlay.
+without the optional Identity overlay and expect the historical edge `503`.
 
 The initial HTTP-to-HTTPS cutover used a temporary deployment gate. With
 separate approval, the operator:
