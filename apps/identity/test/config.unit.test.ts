@@ -71,4 +71,15 @@ describe("loadIdentityConfig", () => {
       })
     ).toThrow("must use https in production");
   });
+
+  it("requires both TOTP key-ring settings when recovery is enabled", () => {
+    expect(() =>
+      loadIdentityConfig({
+        DATABASE_URL: "postgresql://identity:identity@127.0.0.1:5432/identity",
+        IDENTITY_PUBLIC_ORIGIN: "http://identity.localhost",
+        WEBAUTHN_RP_ID: "identity.localhost",
+        IDENTITY_TOTP_ACTIVE_KEY_ID: "v1"
+      })
+    ).toThrow("must be supplied together");
+  });
 });

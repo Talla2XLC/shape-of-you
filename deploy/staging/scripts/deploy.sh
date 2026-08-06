@@ -118,6 +118,11 @@ trap cleanup EXIT HUP INT TERM
 
 compose --profile operations pull
 
+if [ "$identity_enabled" = "true" ]; then
+  compose run --rm --no-deps identity node --input-type=module --eval \
+    "const c=(await import('./dist/config.js')).loadIdentityConfig(); const p=await import('./dist/authentication/totp.js'); p.parseTotpKeyRing(c.IDENTITY_TOTP_ACTIVE_KEY_ID ?? '', c.IDENTITY_TOTP_ENCRYPTION_KEYS ?? '');"
+fi
+
 if ! compose run --rm --no-deps --entrypoint sh certbot -c \
   "test -s /etc/letsencrypt/live/$CERT_NAME/fullchain.pem && test -s /etc/letsencrypt/live/$CERT_NAME/privkey.pem"; then
   # Remove the old edge before bootstrap so standalone port ownership or the

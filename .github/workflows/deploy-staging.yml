@@ -133,11 +133,15 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
           IDENTITY_DATABASE_URL: ${{ secrets.STAGING_IDENTITY_DATABASE_URL }}
+          IDENTITY_TOTP_ACTIVE_KEY_ID: ${{ vars.STAGING_IDENTITY_TOTP_ACTIVE_KEY_ID }}
+          IDENTITY_TOTP_ENCRYPTION_KEYS: ${{ secrets.STAGING_IDENTITY_TOTP_ENCRYPTION_KEYS }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
           test -n "$DATABASE_URL"
           test -n "$IDENTITY_DATABASE_URL"
+          test -n "$IDENTITY_TOTP_ACTIVE_KEY_ID"
+          test -n "$IDENTITY_TOTP_ENCRYPTION_KEYS"
           test -n "$GHCR_TOKEN"
           target="$VM_USER@$VM_HOST"
           {
@@ -157,6 +161,8 @@ jobs:
             printf 'CONTROL_SHA=%s\n' "$GITHUB_SHA"
             printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
             printf 'IDENTITY_DATABASE_URL=%s\n' "$IDENTITY_DATABASE_URL"
+            printf 'IDENTITY_TOTP_ACTIVE_KEY_ID=%s\n' "$IDENTITY_TOTP_ACTIVE_KEY_ID"
+            printf 'IDENTITY_TOTP_ENCRYPTION_KEYS=%s\n' "$IDENTITY_TOTP_ENCRYPTION_KEYS"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } | ssh -p "$VM_PORT" "$target" \
             -o BatchMode=yes \

@@ -1,6 +1,7 @@
 import { createIdentityServer } from "./app.js";
 import { IdentityAuthenticationService } from "./authentication/service.js";
 import { SimpleWebAuthnAdapter } from "./authentication/webauthn-adapter.js";
+import { parseTotpKeyRing } from "./authentication/totp.js";
 import { loadIdentityConfig } from "./config.js";
 import {
   checkIdentityDatabaseReadiness,
@@ -9,6 +10,13 @@ import {
 
 async function main(): Promise<void> {
   const config = loadIdentityConfig();
+  const totpKeyRing =
+    config.IDENTITY_TOTP_ACTIVE_KEY_ID && config.IDENTITY_TOTP_ENCRYPTION_KEYS
+      ? parseTotpKeyRing(
+          config.IDENTITY_TOTP_ACTIVE_KEY_ID,
+          config.IDENTITY_TOTP_ENCRYPTION_KEYS
+        )
+      : undefined;
   const database = createIdentityDatabase(
     config.DATABASE_URL,
     config.DATABASE_POOL_MAX
@@ -20,7 +28,8 @@ async function main(): Promise<void> {
     authentication: new IdentityAuthenticationService(
       database.pool,
       new SimpleWebAuthnAdapter(),
-      config
+      config,
+      totpKeyRing
     ),
     publicOrigin: config.IDENTITY_PUBLIC_ORIGIN
   });

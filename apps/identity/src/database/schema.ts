@@ -82,6 +82,8 @@ export const identitySecurityEventType = pgEnum(
     "passkey_registered",
     "passkey_authentication",
     "passkey_revoked",
+    "totp_factor_enrolled",
+    "totp_recovery_started",
     "recovery_codes_issued",
     "recovery_code_used",
     "passkey_recovery_completed",
@@ -109,6 +111,7 @@ export const identityAccounts = pgTable(
     subject: uuid("subject").notNull(),
     webauthnUserHandle: bytea("webauthn_user_handle").notNull(),
     displayName: varchar("display_name", { length: 200 }).notNull(),
+    loginHandle: varchar("login_handle", { length: 64 }),
     status: identityAccountStatus("status").default("active").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .defaultNow()
@@ -123,6 +126,7 @@ export const identityAccounts = pgTable(
     unique("identity_accounts_webauthn_user_handle_uq").on(
       table.webauthnUserHandle
     ),
+    unique("identity_accounts_login_handle_uq").on(table.loginHandle),
     check("identity_accounts_subject_separate", sql`${table.subject} <> ${table.id}`),
     check(
       "identity_accounts_user_handle_length",
@@ -131,6 +135,10 @@ export const identityAccounts = pgTable(
     check(
       "identity_accounts_display_name_nonempty",
       sql`length(btrim(${table.displayName})) > 0`
+    ),
+    check(
+      "identity_accounts_login_handle_format",
+      sql`${table.loginHandle} IS NULL OR ${table.loginHandle} ~ '^[a-z0-9][a-z0-9._-]{2,63}$'`
     ),
     check(
       "identity_accounts_disabled_state",
@@ -420,6 +428,104 @@ export const passkeyRecoverySessions = pgTable(
       "passkey_recovery_sessions_terminal_state",
       sql`${table.completedAt} IS NULL OR ${table.invalidatedAt} IS NULL`
     )
+  ]
+);
+
+export const totpCredentials = pgTable(
+  "totp_credentials",
+  {
+    id: uuid("id").primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => identityAccounts.id),
+    secretCiphertext: bytea("secret_ciphertext").notNull(),
+    secretNonce: bytea("secret_nonce").notNull(),
+    secretTag: bytea("secret_tag").notNull(),
+    keyId: varchar("key_id", { length: 64 }).notNull(),
+    lastAcceptedStep: bigint("last_accepted_step", { mode: "number" }),
+    failedAttempts: integer("failed_attempts").default(0).notNull(),
+    attemptWindowStartedAt: timestamp("attempt_window_started_at", {
+      withTimezone: true,
+      mode: "date"
+    }),
+    lockedUntil: timestamp("locked_until", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    verifiedAt: timestamp("verified_at", { withTimezone: true, mode: "date" }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true, mode: "date" })
+  },
+  (table) => [
+    unique("totp_credentials_id_account_uq").on(table.id, table.accountId),
+    uniqueIndex("totp_credentials_active_account_uq")
+      .on(table.accountId)
+      .where(sql`${table.verifiedAt} IS NOT NULL AND ${table.revokedAt} IS NULL`),
+    uniqueIndex("totp_credentials_pending_account_uq")
+      .on(table.accountId)
+      .where(sql`${table.verifiedAt} IS NULL AND ${table.revokedAt} IS NULL`),
+    check("totp_credentials_ciphertext_nonempty", sql`octet_length(${table.secretCiphertext}) > 0`),
+    check("totp_credentials_nonce_length", sql`octet_length(${table.secretNonce}) = 12`),
+    check("totp_credentials_tag_length", sql`octet_length(${table.secretTag}) = 16`),
+    check("totp_credentials_key_id_nonempty", sql`length(btrim(${table.keyId})) > 0`),
+    check("totp_credentials_failed_attempts_range", sql`${table.failedAttempts} BETWEEN 0 AND 5`),
+    check("totp_credentials_verification_time", sql`${table.verifiedAt} IS NULL OR ${table.verifiedAt} >= ${table.createdAt}`),
+    check("totp_credentials_revocation_time", sql`${table.revokedAt} IS NULL OR ${table.revokedAt} >= ${table.createdAt}`)
+  ]
+);
+
+export const totpRecoverySessions = pgTable(
+  "totp_recovery_sessions",
+  {
+    id: uuid("id").primaryKey(),
+    accountId: uuid("account_id").notNull(),
+    totpCredentialId: uuid("totp_credential_id").notNull(),
+    tokenHash: bytea("token_hash").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    invalidatedAt: timestamp("invalidated_at", { withTimezone: true, mode: "date" })
+  },
+  (table) => [
+    foreignKey({
+      name: "totp_recovery_sessions_credential_account_fk",
+      columns: [table.totpCredentialId, table.accountId],
+      foreignColumns: [totpCredentials.id, totpCredentials.accountId]
+    }),
+    unique("totp_recovery_sessions_id_account_uq").on(table.id, table.accountId),
+    unique("totp_recovery_sessions_token_hash_uq").on(table.tokenHash),
+    index("totp_recovery_sessions_account_idx").on(table.accountId),
+    index("totp_recovery_sessions_expiry_idx").on(table.expiresAt),
+    check("totp_recovery_sessions_token_hash_length", sql`octet_length(${table.tokenHash}) = 32`),
+    check("totp_recovery_sessions_expiry_after_creation", sql`${table.expiresAt} > ${table.createdAt}`),
+    check("totp_recovery_sessions_max_lifetime", sql`${table.expiresAt} <= ${table.createdAt} + interval '15 minutes'`),
+    check("totp_recovery_sessions_completion_window", sql`${table.completedAt} IS NULL OR (${table.completedAt} >= ${table.createdAt} AND ${table.completedAt} <= ${table.expiresAt})`),
+    check("totp_recovery_sessions_invalidation_time", sql`${table.invalidatedAt} IS NULL OR ${table.invalidatedAt} >= ${table.createdAt}`),
+    check("totp_recovery_sessions_terminal_state", sql`NOT (${table.completedAt} IS NOT NULL AND ${table.invalidatedAt} IS NOT NULL)`)
+  ]
+);
+
+export const totpRecoveryChallengeBindings = pgTable(
+  "totp_recovery_challenge_bindings",
+  {
+    challengeId: uuid("challenge_id")
+      .primaryKey(),
+    recoverySessionId: uuid("recovery_session_id").notNull(),
+    accountId: uuid("account_id").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "totp_recovery_challenge_webauthn_fk",
+      columns: [table.challengeId],
+      foreignColumns: [webauthnChallenges.id]
+    }),
+    foreignKey({
+      name: "totp_recovery_challenge_session_account_fk",
+      columns: [table.recoverySessionId, table.accountId],
+      foreignColumns: [totpRecoverySessions.id, totpRecoverySessions.accountId]
+    }),
+    unique("totp_recovery_challenge_session_uq").on(table.recoverySessionId)
   ]
 );
 

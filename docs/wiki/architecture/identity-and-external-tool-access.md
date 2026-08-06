@@ -22,8 +22,8 @@ recovery, OAuth protocol, signing-key metadata, and security-audit persistence
 exist. Runtime PostgreSQL ownership and database-aware readiness are wired;
 the first-passkey bootstrap, passkey registration/login HTTP flow, secure
 browser session, exact-Origin validation, and session-bound CSRF defense are
-implemented. Recovery, credential/session management, and OAuth HTTP flows
-remain pending.
+implemented. TOTP emergency recovery and passkey/session management are also
+implemented; OAuth HTTP flows remain pending.
 
 ## Content
 
@@ -78,10 +78,11 @@ CIMD are deferred.
 
 Login is passkey-first through WebAuthn, initially implemented with pinned
 `@simplewebauthn/server` 13.3.2 behind a project-owned adapter. Accounts can
-register multiple passkeys. Single-use recovery codes are stored only as
-hashes and can authorize a narrowly scoped replacement-passkey enrollment with
-session revocation. No password, email-only, or security-question fallback is
-allowed.
+register multiple passkeys. Emergency recovery uses an optional TOTP factor
+from an RFC 6238-compatible authenticator application. It authorizes only a
+narrow replacement-passkey enrollment and then revokes existing sessions. No
+password, email-only, SMS, or security-question fallback is allowed. Existing
+recovery-code tables are retained but are not part of the initial product flow.
 
 Discoverable credentials require user verification and use attestation `none`.
 Hashed single-use challenges expire after at most five minutes. Signature
@@ -102,6 +103,14 @@ The first passkey is provisioned through an operator-only CLI that creates an
 account and a hashed, single-use enrollment token valid for 15 minutes. It does
 not enable public self-registration or require manual SQL. Additional passkeys
 require an active session.
+
+TOTP recovery requires a unique normalized login handle. The seed is shown
+once as an authenticator QR setup URI and persisted only as AES-256-GCM
+ciphertext with an external key identifier. Six-digit, 30-second codes accept
+one adjacent time step, reject replay, and are persistently throttled. A valid
+code creates a hashed 15-minute recovery authority bound to one WebAuthn
+recovery challenge. Completing replacement enrollment revokes all existing
+sessions and refresh families but leaves passkeys for explicit user review.
 
 Every browser POST must carry the exact configured Identity `Origin`.
 Cookie-authenticated mutations additionally require a session-bound
@@ -127,7 +136,9 @@ No raw prompt or full conversation is stored.
 The edge/ACME layer owns HTTPS certificate issuance and renewal. Staging uses
 `https://identity.staging.shape-of-you.ru` as both the Identity origin and its
 WebAuthn RP ID. Identity owns OAuth signing keys and their rotation. These key
-lifecycles are separate.
+lifecycles are separate. Staging transports the TOTP key-ring identifier and
+encrypted key-ring secret into the root-owned Identity runtime environment and
+validates the key ring before migrations or service replacement.
 
 ## Evidence
 
@@ -146,6 +157,7 @@ lifecycles are separate.
 - [Identity relational model](../../adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
 - [Passkey-bound sliding sessions](../../adr/20260806-use-passkey-bound-sliding-identity-sessions.md)
 - [Initial passkey bootstrap and CSRF](../../adr/20260806-bootstrap-first-passkey-and-require-origin-csrf-defense.md)
+- [TOTP emergency recovery](../../adr/20260806-use-totp-for-emergency-passkey-recovery.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 
 ## Open questions

@@ -49,12 +49,17 @@ assert_contains "$PUBLISH_WORKFLOW" 'shape-of-you-identity:sha-${{ github.sha }}
 assert_contains "$PUBLISH_WORKFLOW" 'Attest Identity image'
 assert_contains "$PUBLISH_WORKFLOW" 'identity_digest: ${{ needs.publish-identity.outputs.digest }}'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_DATABASE_URL'
+assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_TOTP_ACTIVE_KEY_ID'
+assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_TOTP_ENCRYPTION_KEYS'
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_DIGEST=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s"
 assert_contains "$DEPLOY" 'identity-migrate'
+assert_contains "$DEPLOY" 'parseTotpKeyRing'
 assert_contains "$DEPLOY" 'api identity'
 assert_contains "$ROLLBACK" 'api identity edge'
 assert_contains "$WRAPPER" 'IDENTITY_DATABASE_URL'
+assert_contains "$WRAPPER" 'IDENTITY_TOTP_ACTIVE_KEY_ID'
+assert_contains "$WRAPPER" 'IDENTITY_TOTP_ENCRYPTION_KEYS'
 assert_contains "$WRAPPER" 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE'
 assert_contains "$WRAPPER" '/etc/shape-of-you/staging/identity.env'
 assert_contains "$WRAPPER" 'shape-of-you-identity'

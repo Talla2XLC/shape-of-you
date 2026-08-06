@@ -13,6 +13,7 @@ import { z } from "zod";
 
 import {
   IdentityAuthenticationError,
+  identitySessionCookieName,
   type IdentityAuthenticationService
 } from "./authentication/service.js";
 
@@ -41,6 +42,14 @@ const registrationVerificationSchema = challengeSchema.extend({
 });
 const authenticationVerificationSchema = challengeSchema.extend({
   response: z.object({ id: z.string().min(1) }).passthrough()
+});
+const passkeyRenameSchema = z.object({ label: z.string().trim().min(1).max(200) });
+const totpSetupSchema = z.object({
+  loginHandle: z.string().trim().min(3).max(64)
+});
+const totpCodeSchema = z.object({ code: z.string().regex(/^\d{6}$/) });
+const totpRecoverySchema = totpCodeSchema.extend({
+  loginHandle: z.string().trim().min(3).max(64)
 });
 
 function writeJson(
@@ -87,20 +96,20 @@ async function handleAuthenticationRequest(
   pathname: string,
   dependencies: IdentityServerDependencies
 ): Promise<boolean> {
-  if (request.method !== "POST") return false;
   if (!dependencies.authentication || !dependencies.publicOrigin) return false;
   response.setHeader("cache-control", "no-store");
-  if (request.headers.origin !== dependencies.publicOrigin) {
+  const method = request.method ?? "GET";
+  if (["POST", "PATCH", "DELETE"].includes(method) && request.headers.origin !== dependencies.publicOrigin) {
     throw new IdentityAuthenticationError(403, "invalid_origin", "Request Origin is not allowed");
   }
-  if (pathname === "/v1/webauthn/registration/options") {
+  if (method === "POST" && pathname === "/v1/webauthn/registration/options") {
     const result = await dependencies.authentication.createRegistrationOptions(
       requestAuthority(request)
     );
     writeJson(response, 200, result);
     return true;
   }
-  if (pathname === "/v1/webauthn/registration/verify") {
+  if (method === "POST" && pathname === "/v1/webauthn/registration/verify") {
     const body = registrationVerificationSchema.parse(await readJson(request));
     const result = await dependencies.authentication.verifyRegistration({
       authority: requestAuthority(request),
@@ -111,12 +120,12 @@ async function handleAuthenticationRequest(
     writeJson(response, 201, result);
     return true;
   }
-  if (pathname === "/v1/webauthn/authentication/options") {
+  if (method === "POST" && pathname === "/v1/webauthn/authentication/options") {
     const result = await dependencies.authentication.createAuthenticationOptions();
     writeJson(response, 200, result);
     return true;
   }
-  if (pathname === "/v1/webauthn/authentication/verify") {
+  if (method === "POST" && pathname === "/v1/webauthn/authentication/verify") {
     const body = authenticationVerificationSchema.parse(await readJson(request));
     const result = await dependencies.authentication.verifyAuthentication({
       challengeId: body.challengeId,
@@ -124,6 +133,48 @@ async function handleAuthenticationRequest(
     });
     response.setHeader("set-cookie", result.cookie);
     writeJson(response, 200, result.body);
+    return true;
+  }
+  if (method === "GET" && pathname === "/v1/security/passkeys") {
+    writeJson(response, 200, await dependencies.authentication.listPasskeys(requestAuthority(request)));
+    return true;
+  }
+  const passkeyMatch = pathname.match(/^\/v1\/security\/passkeys\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/);
+  if (method === "PATCH" && passkeyMatch) {
+    const body = passkeyRenameSchema.parse(await readJson(request));
+    writeJson(response, 200, await dependencies.authentication.renamePasskey(requestAuthority(request), passkeyMatch[1]!, body.label));
+    return true;
+  }
+  if (method === "DELETE" && passkeyMatch) {
+    const result = await dependencies.authentication.revokePasskey(requestAuthority(request), passkeyMatch[1]!);
+    if (result.currentSessionRevoked) response.setHeader("set-cookie", `${identitySessionCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`);
+    writeJson(response, 200, result);
+    return true;
+  }
+  if (method === "GET" && pathname === "/v1/security/sessions") {
+    writeJson(response, 200, await dependencies.authentication.listSessions(requestAuthority(request)));
+    return true;
+  }
+  const sessionMatch = pathname.match(/^\/v1\/security\/sessions\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/);
+  if (method === "DELETE" && sessionMatch) {
+    const result = await dependencies.authentication.revokeSession(requestAuthority(request), sessionMatch[1]!);
+    if (result.currentSessionRevoked) response.setHeader("set-cookie", `${identitySessionCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`);
+    writeJson(response, 200, result);
+    return true;
+  }
+  if (method === "POST" && pathname === "/v1/security/totp/setup") {
+    const body = totpSetupSchema.parse(await readJson(request));
+    writeJson(response, 201, await dependencies.authentication.createTotpSetup(requestAuthority(request), body.loginHandle));
+    return true;
+  }
+  if (method === "POST" && pathname === "/v1/security/totp/verify") {
+    const body = totpCodeSchema.parse(await readJson(request));
+    writeJson(response, 200, await dependencies.authentication.confirmTotpSetup(requestAuthority(request), body.code));
+    return true;
+  }
+  if (method === "POST" && pathname === "/v1/recovery/totp") {
+    const body = totpRecoverySchema.parse(await readJson(request));
+    writeJson(response, 200, await dependencies.authentication.startTotpRecovery(body.loginHandle, body.code));
     return true;
   }
   return false;

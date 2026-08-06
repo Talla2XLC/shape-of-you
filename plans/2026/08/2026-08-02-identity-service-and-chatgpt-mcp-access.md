@@ -32,8 +32,8 @@
   `80/443`. Перенос не требует изменения приложения, миграций или TLS ownership.
 - OAuth-состояние хранится в типизированных реляционных таблицах, не в JSON.
 - Вход выполняется через WebAuthn/passkeys без пароля. Аккаунт поддерживает
-  несколько passkeys; одноразовые recovery codes хранятся только как hashes и
-  разрешают ограниченную регистрацию нового passkey с отзывом сессий.
+  несколько passkeys; аварийное восстановление использует TOTP authenticator
+  только для ограниченной регистрации нового passkey с отзывом сессий.
 - Email-only recovery, security questions и password fallback запрещены.
 
 ## Блокирующие архитектурные решения
@@ -94,11 +94,12 @@
   ручного SQL или публичной самостоятельной регистрации.
 - [x] Реализовать базовые WebAuthn/passkey enrollment и login через четыре HTTP
   endpoint, discoverable credentials и passkey-bound sliding session.
-- Реализовать несколько passkeys на аккаунт через UI, hashed single-use recovery
-  codes и replacement enrollment.
+- [x] Реализовать backend API для нескольких passkeys, управления сессиями и
+  TOTP recovery с replacement enrollment; пользовательский UI остаётся будущей
+  задачей.
 - [x] Для browser POST проверять exact Origin; для cookie-authenticated mutations
   дополнительно требовать session-bound CSRF token, храня только его hash.
-- Реализовать список, переименование и удаление passkeys, список и отзыв
+- [x] Реализовать список, переименование и удаление passkeys, список и отзыв
   сессий, а также защиту от удаления последнего доступного способа входа.
 - Реализовать account status, consent, registered clients, одноразовые auth
   codes, hashed refresh credentials, rotation family и reuse detection.

@@ -55,6 +55,8 @@ GHCR_ACTOR=
 CONTROL_SHA=
 DATABASE_URL=
 IDENTITY_DATABASE_URL=
+IDENTITY_TOTP_ACTIVE_KEY_ID=
+IDENTITY_TOTP_ENCRYPTION_KEYS=
 GHCR_TOKEN=
 seen_keys=' '
 
@@ -70,7 +72,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|IDENTITY_TOTP_ACTIVE_KEY_ID|IDENTITY_TOTP_ENCRYPTION_KEYS|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -92,6 +94,8 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
         CONTROL_SHA) CONTROL_SHA=$input_value ;;
         DATABASE_URL) DATABASE_URL=$input_value ;;
         IDENTITY_DATABASE_URL) IDENTITY_DATABASE_URL=$input_value ;;
+        IDENTITY_TOTP_ACTIVE_KEY_ID) IDENTITY_TOTP_ACTIVE_KEY_ID=$input_value ;;
+        IDENTITY_TOTP_ENCRYPTION_KEYS) IDENTITY_TOTP_ENCRYPTION_KEYS=$input_value ;;
         GHCR_TOKEN) GHCR_TOKEN=$input_value ;;
       esac
       ;;
@@ -120,10 +124,14 @@ printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid RELEASE
 printf '%s\n' "$CONTROL_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid CONTROL_SHA.'
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid API_DIGEST.'
 if [ -n "$IDENTITY_DIGEST" ] || [ -n "$IDENTITY_DATABASE_URL" ] ||
-  [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ]; then
+  [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ] ||
+  [ -n "$IDENTITY_TOTP_ACTIVE_KEY_ID" ] ||
+  [ -n "$IDENTITY_TOTP_ENCRYPTION_KEYS" ]; then
   [ -n "$IDENTITY_DIGEST" ] || fail 'IDENTITY_DIGEST is required when Identity deployment is enabled.'
   [ -n "$IDENTITY_DATABASE_URL" ] || fail 'IDENTITY_DATABASE_URL is required when Identity deployment is enabled.'
   [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ] || fail 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_TOTP_ACTIVE_KEY_ID" ] || fail 'IDENTITY_TOTP_ACTIVE_KEY_ID is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_TOTP_ENCRYPTION_KEYS" ] || fail 'IDENTITY_TOTP_ENCRYPTION_KEYS is required when Identity deployment is enabled.'
   printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid IDENTITY_DIGEST.'
   case "$IDENTITY_DATABASE_URL" in
     postgresql://*) ;;
@@ -133,6 +141,8 @@ if [ -n "$IDENTITY_DIGEST" ] || [ -n "$IDENTITY_DATABASE_URL" ] ||
     true|false) ;;
     *) fail 'Invalid IDENTITY_SCHEMA_BACKWARD_COMPATIBLE.' ;;
   esac
+  printf '%s\n' "$IDENTITY_TOTP_ACTIVE_KEY_ID" |
+    grep -Eq '^[A-Za-z0-9._-]{1,64}$' || fail 'Invalid IDENTITY_TOTP_ACTIVE_KEY_ID.'
 fi
 printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid EDGE_DIGEST.'
 printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid CERTBOT_DIGEST.'
@@ -192,7 +202,11 @@ rm -f "$runtime_file"
 
 if [ -n "$IDENTITY_DATABASE_URL" ]; then
   identity_runtime_file=$(mktemp /etc/shape-of-you/staging/identity.env.XXXXXX)
-  printf 'DATABASE_URL=%s\n' "$IDENTITY_DATABASE_URL" > "$identity_runtime_file"
+  {
+    printf 'DATABASE_URL=%s\n' "$IDENTITY_DATABASE_URL"
+    printf 'IDENTITY_TOTP_ACTIVE_KEY_ID=%s\n' "$IDENTITY_TOTP_ACTIVE_KEY_ID"
+    printf 'IDENTITY_TOTP_ENCRYPTION_KEYS=%s\n' "$IDENTITY_TOTP_ENCRYPTION_KEYS"
+  } > "$identity_runtime_file"
   install -m 0600 "$identity_runtime_file" "$IDENTITY_RUNTIME_ENV"
   rm -f "$identity_runtime_file"
 fi

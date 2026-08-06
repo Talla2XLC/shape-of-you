@@ -137,11 +137,15 @@ describe("Identity migration chain", () => {
     }
   });
 
-  it("upgrades existing sessions and backfills their activity time", async () => {
+  it("upgrades existing sessions and backfills their CSRF state", async () => {
     const journal = JSON.parse(
       await readFile(new URL("meta/_journal.json", migrationsFolder), "utf8")
     ) as MigrationJournal;
-    const priorEntries = journal.entries.slice(0, -1);
+    const csrfMigrationIndex = journal.entries.findIndex(
+      (entry) => entry.tag === "20260806075426_mysterious_malcolm_colcord"
+    );
+    expect(csrfMigrationIndex).toBeGreaterThan(0);
+    const priorEntries = journal.entries.slice(0, csrfMigrationIndex);
     const sources = new Map(
       (await migrationSources()).map((source) => [source.tag, source.contents])
     );
@@ -258,6 +262,9 @@ describe("Identity migration chain", () => {
         "passkey_recovery_sessions",
         "recovery_code_batches",
         "recovery_codes",
+        "totp_credentials",
+        "totp_recovery_challenge_bindings",
+        "totp_recovery_sessions",
         "webauthn_challenges",
         "webauthn_credentials"
       ]);

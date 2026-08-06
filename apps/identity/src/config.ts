@@ -20,7 +20,8 @@ const publicOriginSchema = z.string().url().superRefine((value, context) => {
   }
 });
 
-const identityEnvironmentSchema = z.object({
+const identityEnvironmentSchema = z
+  .object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
   PORT: z.coerce.number().int().min(1).max(65_535).default(3_000),
@@ -29,6 +30,8 @@ const identityEnvironmentSchema = z.object({
   IDENTITY_PUBLIC_ORIGIN: publicOriginSchema,
   WEBAUTHN_RP_ID: z.string().min(1).max(253),
   WEBAUTHN_RP_NAME: z.string().min(1).max(100).default("Shape of You"),
+  IDENTITY_TOTP_ACTIVE_KEY_ID: z.string().min(1).max(64).optional(),
+  IDENTITY_TOTP_ENCRYPTION_KEYS: z.string().min(1).optional(),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
@@ -38,7 +41,19 @@ const identityEnvironmentSchema = z.object({
     .min(100)
     .max(60_000)
     .default(10_000)
-});
+  })
+  .superRefine((value, context) => {
+    if (
+      Boolean(value.IDENTITY_TOTP_ACTIVE_KEY_ID) !==
+      Boolean(value.IDENTITY_TOTP_ENCRYPTION_KEYS)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["IDENTITY_TOTP_ENCRYPTION_KEYS"],
+        message: "must be supplied together with IDENTITY_TOTP_ACTIVE_KEY_ID"
+      });
+    }
+  });
 
 /** Validated runtime configuration owned by the Identity deployable. */
 export type IdentityConfig = z.infer<typeof identityEnvironmentSchema>;
