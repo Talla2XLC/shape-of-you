@@ -95,12 +95,15 @@ runbook records the contract and reconstruction procedure without making Shape
 of You the runtime owner of shared ingress.
 
 The first cutover is a coordinated maintenance operation. Automatic Shape of
-You deployment remains disabled through `STAGING_TLS_AUTOMATION_ENABLED` while
-an explicitly dispatched deployment performs first certificate issuance and
-HTTPS smoke. The gate is enabled only after the external network, both
+You deployment remains disabled through a transitional gate while an
+explicitly dispatched deployment performs first certificate issuance and
+HTTPS smoke. The gate is retired only after the external network, both
 application edges, shared ingress, root-owned Shape of You assets, certificate
-issuance, and HTTPS smoke checks are ready. A push or a called workflow cannot
-bypass the disabled gate.
+issuance, and HTTPS smoke checks are ready.
+
+That cutover completed on 2026-08-05. Normal `main` pushes now deploy staging
+after successful quality and image-publication jobs; the one-time gate is no
+longer part of the runtime or CI contract.
 
 ## Considered alternatives
 

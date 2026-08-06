@@ -76,8 +76,8 @@ assert_contains "$RENEW" 'start-shape-of-you-edge --test'
 assert_contains "$RENEW" 'nginx -c /tmp/nginx.conf -s reload'
 assert_contains "$TIMER" 'OnCalendar=*-*-* 03,15:00:00'
 assert_contains "$TIMER" 'Persistent=true'
-assert_contains "$PUBLISH_WORKFLOW" "vars.STAGING_TLS_AUTOMATION_ENABLED == 'true'"
-assert_contains "$DEPLOY_WORKFLOW" "github.event_name == 'workflow_dispatch' || vars.STAGING_TLS_AUTOMATION_ENABLED == 'true'"
+assert_not_contains "$PUBLISH_WORKFLOW" 'STAGING_TLS_AUTOMATION_ENABLED'
+assert_not_contains "$DEPLOY_WORKFLOW" 'STAGING_TLS_AUTOMATION_ENABLED'
 
 docker compose \
   --project-name shape-of-you-contract-test \

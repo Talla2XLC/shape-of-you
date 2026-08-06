@@ -300,7 +300,7 @@ The operator-approved maintenance window is below one hour.
    deployment verifies HTTP routing before requesting a certificate.
 9. Verify certificates, external client addresses, redirects, health, API,
    Identity placeholder, unknown-host rejection, and renewal timer.
-10. Enable `STAGING_TLS_AUTOMATION_ENABLED` only after the complete cutover
+10. Restore normal automatic `main` deployment only after the complete cutover
     passes.
 
 ### Rollback

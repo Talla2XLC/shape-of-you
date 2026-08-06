@@ -246,7 +246,6 @@ jobs:
             "${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
   deploy-staging:
-    if: ${{ vars.STAGING_TLS_AUTOMATION_ENABLED == 'true' }}
     needs:
       - publish-api
       - publish-edge

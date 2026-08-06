@@ -58,12 +58,6 @@ STAGING_PUBLIC_IPV4
 STAGING_DEPLOYMENT_TOPOLOGY
 ```
 
-Repository variable used as the initial cutover gate:
-
-```text
-STAGING_TLS_AUTOMATION_ENABLED
-```
-
 Database URL shape:
 
 ```text
@@ -125,29 +119,27 @@ sudo sh deploy/staging/system/install-root-owned-assets.sh
 
 GitHub Actions never runs this installer.
 
-For the initial HTTP-to-HTTPS cutover, keep
-`STAGING_TLS_AUTOMATION_ENABLED` absent or set to `false` before merging. The
-push publishes all three images but skips deployment. Then, with separate
-approval:
+The initial HTTP-to-HTTPS cutover used a temporary deployment gate. With
+separate approval, the operator:
 
-1. complete the coordinated [shared ingress](shared-vm-ingress.md) maintenance
-   cutover and validate both existing talking-to-ai traffic and Shape of You
+1. completed the coordinated [shared ingress](shared-vm-ingress.md) maintenance
+   cutover and validated both existing talking-to-ai traffic and Shape of You
    HTTP routing;
 2. set `STAGING_ACME_EMAIL` to the operational certificate contact and
    `STAGING_PUBLIC_IPV4` to the VM public IPv4;
-3. update the VM checkout to the reviewed `main` commit and run the root asset
+3. updated the VM checkout to the reviewed `main` commit and ran the root asset
    installer above;
-4. keep `STAGING_TLS_AUTOMATION_ENABLED` absent and manually dispatch
-   `Deploy staging` with the exact commit and image digests published by the
-   reviewed `main` run;
-5. verify certificate issuance, HTTPS smoke, both existing applications, and
+4. manually dispatched `Deploy staging` with the exact commit and image
+   digests published by the reviewed `main` run;
+5. verified certificate issuance, HTTPS smoke, both existing applications, and
    rollback readiness;
-6. set `STAGING_TLS_AUTOMATION_ENABLED=true`.
+6. retired the temporary gate.
 
-After the verified cutover, leave the gate at `true`; later `main` pushes return
-to normal automatic deployment. Direct `Deploy staging` dispatch is the only
-deployment path allowed while the gate is absent. This sequence prevents the
-new workflow input contract from racing the old installed root wrapper.
+The cutover completed on 2026-08-05. Every successful `main` publication now
+invokes staging deployment automatically. Direct `Deploy staging` dispatch
+remains available for an explicit retry or operator-selected release. The
+historical sequence prevented the new workflow input contract from racing the
+old installed root wrapper; it is not a steady-state switch.
 
 ### TLS activation and renewal
 

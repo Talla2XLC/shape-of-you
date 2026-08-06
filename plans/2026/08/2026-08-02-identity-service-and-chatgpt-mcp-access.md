@@ -128,12 +128,10 @@
   ACME/serving state, автоматический renewal, проверку nginx и reload.
 - Перевести staging smoke и GitHub Environment URL на HTTPS; убрать публичный
   `3001` после подтверждённого cutover.
-- Первый cutover провести в две фазы через
-  `STAGING_TLS_AUTOMATION_ENABLED`, чтобы push с новым CI-контрактом не обогнал
-  установку root-owned wrapper и systemd units. Пока gate выключен, первый
-  rollout разрешён только через явный запуск `Deploy staging`; после HTTPS
-  smoke gate включает автоматические деплои с `main`.
-- Отдельно, с явным разрешением, установить root-owned units, открыть `80/443`,
+- [x] Первый cutover провести в две фазы через временный gate, чтобы push с
+  новым CI-контрактом не обогнал установку root-owned wrapper и systemd units;
+  после HTTPS smoke удалить gate и вернуть автоматические деплои с `main`.
+- [x] Отдельно, с явным разрешением, установить root-owned units, открыть `80/443`,
   выпустить сертификат и выполнить HTTPS smoke на VM.
 - Настроить отдельные secrets, backups, restore drill, rate limits, monitoring
   и alerting.

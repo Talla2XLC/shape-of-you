@@ -69,16 +69,20 @@ nginx configuration, and reloads nginx. It does not pull images, modify DNS, or
 receive Docker-socket access inside a container. Deployment and renewal share
 a host lock so they cannot mutate certificate/runtime state concurrently.
 
-Certificate issuance, systemd enablement, firewall changes, deployment, and
-other VM mutations remain explicit operator actions. Repository automation does
-not perform them merely because code is merged.
+Initial certificate issuance, systemd enablement, firewall changes, and other
+host-bootstrap mutations remain explicit operator actions. After that bootstrap
+is verified, repository automation performs ordinary staging deployments and
+certificate renewal without repeating privileged host setup.
 
-Gate the first cutover with the repository variable
-`STAGING_TLS_AUTOMATION_ENABLED`. While it is absent or not `true`, the publish
-workflow still produces the reviewed images but skips automatic deployment.
-After the root-owned assets and firewall are ready, the operator sets the gate
-to `true` and explicitly dispatches the publish workflow. Later `main` pushes
-resume normal automatic staging deployment.
+Gate the first cutover so the publish workflow can produce reviewed images
+without deploying before the root-owned assets and firewall are ready. After
+the operator explicitly dispatches and verifies the first HTTPS deployment,
+retire the transitional gate and restore normal automatic staging deployment
+for every successful `main` publication.
+
+The first cutover completed on 2026-08-05. The transitional gate has therefore
+been removed: a successful `main` pipeline now proceeds from quality through
+image publication to staging deployment without another repository switch.
 
 ## Considered alternatives
 
