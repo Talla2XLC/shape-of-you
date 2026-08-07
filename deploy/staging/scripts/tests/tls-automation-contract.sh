@@ -56,6 +56,8 @@ assert_contains "$DEPLOY" '/var/www/certbot/.well-known/acme-challenge/$challeng
 assert_contains "$NGINX" 'return 308 https://$host$request_uri;'
 assert_contains "$NGINX" 'server_name identity.staging.shape-of-you.ru;'
 assert_contains "$NGINX" 'proxy_pass http://identity:3000;'
+assert_contains "$NGINX" 'location = /.well-known/oauth-protected-resource {'
+assert_contains "$NGINX" 'proxy_pass http://api:3000/.well-known/oauth-protected-resource;'
 assert_not_contains "$NGINX" 'return 503'
 assert_contains "$NGINX" 'listen 8443 ssl ${EDGE_PROXY_PROTOCOL};'
 assert_contains "$NGINX" 'limit_req_zone ${EDGE_CLIENT_ADDRESS}'
