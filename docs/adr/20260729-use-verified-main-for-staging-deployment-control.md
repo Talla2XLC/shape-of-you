@@ -5,7 +5,7 @@ title: "Use verified main as the staging deployment-control source"
 status: accepted
 date: 2026-07-29
 supersedes: "decisions-20260729-use-dedicated-staging-deployment-identity"
-superseded_by: null
+superseded_by: "decisions-20260807-use-stable-root-bootstrap-and-versioned-deployment-controller"
 tags:
   - "deployment"
   - "security"

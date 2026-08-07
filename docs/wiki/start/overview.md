@@ -33,7 +33,12 @@ DEV-027 completed the workspace, product/domain baseline, architecture
 documentation, ADRs, and versioned plans. DEV-023 currently provides one NestJS
 API with `FastifyAdapter`, PostgreSQL, typed provenance and append-only
 corrections, Physical State and Goals, Nutrition, Training, Recovery, Coaching,
-and a durable Intake queue with the first Weight route.
+and a durable Intake queue with the first Weight route. The independently
+deployed Identity service provides passkey authentication, TOTP recovery, and
+the initial OAuth profile. The API contains the accepted OAuth-protected MCP
+resource server for weight, body measurement, meal, and workout operations;
+staging key/client/subject provisioning and external ChatGPT smoke remain
+separately approved operational work.
 
 A production Intake parser, remaining Intake routes, and the shared day
 lifecycle are not implemented. Google Sheets remains authoritative for
