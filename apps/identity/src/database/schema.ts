@@ -726,6 +726,7 @@ export const oauthSessions = pgTable(
       .references(() => identityAccounts.id),
     webauthnCredentialId: uuid("webauthn_credential_id"),
     credentialHash: bytea("credential_hash").notNull(),
+    providerCredentialHash: bytea("provider_credential_hash"),
     csrfTokenHash: bytea("csrf_token_hash").notNull(),
     providerUid: varchar("provider_uid", { length: 200 }).notNull(),
     authenticatedAt: timestamp("authenticated_at", {
@@ -753,6 +754,9 @@ export const oauthSessions = pgTable(
     }),
     unique("oauth_sessions_id_account_uq").on(table.id, table.accountId),
     unique("oauth_sessions_credential_hash_uq").on(table.credentialHash),
+    unique("oauth_sessions_provider_credential_hash_uq").on(
+      table.providerCredentialHash
+    ),
     unique("oauth_sessions_provider_uid_uq").on(table.providerUid),
     index("oauth_sessions_account_idx").on(table.accountId),
     index("oauth_sessions_webauthn_credential_idx").on(
@@ -762,6 +766,10 @@ export const oauthSessions = pgTable(
     check(
       "oauth_sessions_credential_hash_length",
       sql`octet_length(${table.credentialHash}) = 32`
+    ),
+    check(
+      "oauth_sessions_provider_credential_hash_length",
+      sql`${table.providerCredentialHash} IS NULL OR octet_length(${table.providerCredentialHash}) = 32`
     ),
     check(
       "oauth_sessions_csrf_token_hash_length",
@@ -853,6 +861,8 @@ export const oauthInteractions = pgTable(
     grantId: uuid("grant_id"),
     prompt: oauthInteractionPrompt("prompt").notNull(),
     status: oauthInteractionStatus("status").default("pending").notNull(),
+    providerCid: varchar("provider_cid", { length: 200 }).notNull(),
+    providerReturnTo: text("provider_return_to").notNull(),
     redirectUri: text("redirect_uri").notNull(),
     codeChallenge: varchar("code_challenge", { length: 128 }).notNull(),
     codeChallengeMethod: oauthCodeChallengeMethod("code_challenge_method")
@@ -897,6 +907,14 @@ export const oauthInteractions = pgTable(
     check(
       "oauth_interactions_credential_hash_length",
       sql`octet_length(${table.credentialHash}) = 32`
+    ),
+    check(
+      "oauth_interactions_provider_cid_format",
+      sql`length(${table.providerCid}) = 43 AND ${table.providerCid} ~ '^[A-Za-z0-9_-]+$'`
+    ),
+    check(
+      "oauth_interactions_provider_return_to_nonempty",
+      sql`length(btrim(${table.providerReturnTo})) > 0`
     ),
     check(
       "oauth_interactions_pkce_s256",

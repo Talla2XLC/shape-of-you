@@ -7,6 +7,14 @@ import {
   checkIdentityDatabaseReadiness,
   createIdentityDatabase
 } from "./database/context.js";
+import { OAuthBrowserUi } from "./oauth/browser-ui.js";
+import { OAuthClientStore } from "./oauth/client-store.js";
+import { OAuthRuntime } from "./oauth/runtime.js";
+import { OAuthSigningKeyStore } from "./oauth/signing-key-store.js";
+import {
+  parseOAuthCookieKeys,
+  parseOAuthSigningKeyRing
+} from "./oauth/signing-keys.js";
 
 async function main(): Promise<void> {
   const config = loadIdentityConfig();
@@ -21,17 +29,48 @@ async function main(): Promise<void> {
     config.DATABASE_URL,
     config.DATABASE_POOL_MAX
   );
+  const authentication = new IdentityAuthenticationService(
+    database.pool,
+    new SimpleWebAuthnAdapter(),
+    config,
+    totpKeyRing
+  );
+  let oauthRuntime: OAuthRuntime | undefined;
+  let oauthBrowserUi: OAuthBrowserUi | undefined;
+  if (
+    config.IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID &&
+    config.IDENTITY_OAUTH_SIGNING_KEYS &&
+    config.IDENTITY_OAUTH_COOKIE_KEYS &&
+    config.IDENTITY_OAUTH_RESOURCE
+  ) {
+    const signingKeys = parseOAuthSigningKeyRing(
+      config.IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID,
+      config.IDENTITY_OAUTH_SIGNING_KEYS
+    );
+    await new OAuthSigningKeyStore(database.pool).reconcile(signingKeys);
+    oauthRuntime = new OAuthRuntime({
+      pool: database.pool,
+      issuer: config.IDENTITY_PUBLIC_ORIGIN,
+      resource: config.IDENTITY_OAUTH_RESOURCE,
+      signingKeys,
+      cookieKeys: parseOAuthCookieKeys(config.IDENTITY_OAUTH_COOKIE_KEYS)
+    });
+    oauthBrowserUi = new OAuthBrowserUi({
+      authentication,
+      clients: new OAuthClientStore(database.pool),
+      publicOrigin: config.IDENTITY_PUBLIC_ORIGIN,
+      resource: config.IDENTITY_OAUTH_RESOURCE,
+      runtime: oauthRuntime
+    });
+  }
   const server = createIdentityServer({
     readiness: {
       check: async () => checkIdentityDatabaseReadiness(database)
     },
-    authentication: new IdentityAuthenticationService(
-      database.pool,
-      new SimpleWebAuthnAdapter(),
-      config,
-      totpKeyRing
-    ),
-    publicOrigin: config.IDENTITY_PUBLIC_ORIGIN
+    authentication,
+    publicOrigin: config.IDENTITY_PUBLIC_ORIGIN,
+    ...(oauthBrowserUi ? { oauthBrowserUi } : {}),
+    ...(oauthRuntime ? { oauthRuntime } : {})
   });
   let shuttingDown = false;
 

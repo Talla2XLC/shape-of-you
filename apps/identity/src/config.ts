@@ -32,6 +32,10 @@ const identityEnvironmentSchema = z
   WEBAUTHN_RP_NAME: z.string().min(1).max(100).default("Shape of You"),
   IDENTITY_TOTP_ACTIVE_KEY_ID: z.string().min(1).max(64).optional(),
   IDENTITY_TOTP_ENCRYPTION_KEYS: z.string().min(1).optional(),
+  IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: z.string().min(1).max(64).optional(),
+  IDENTITY_OAUTH_SIGNING_KEYS: z.string().min(1).optional(),
+  IDENTITY_OAUTH_COOKIE_KEYS: z.string().min(1).optional(),
+  IDENTITY_OAUTH_RESOURCE: z.string().url().optional(),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
@@ -51,6 +55,19 @@ const identityEnvironmentSchema = z
         code: "custom",
         path: ["IDENTITY_TOTP_ENCRYPTION_KEYS"],
         message: "must be supplied together with IDENTITY_TOTP_ACTIVE_KEY_ID"
+      });
+    }
+    const oauthSettings = [
+      value.IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID,
+      value.IDENTITY_OAUTH_SIGNING_KEYS,
+      value.IDENTITY_OAUTH_COOKIE_KEYS,
+      value.IDENTITY_OAUTH_RESOURCE
+    ];
+    if (oauthSettings.some(Boolean) && !oauthSettings.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["IDENTITY_OAUTH_SIGNING_KEYS"],
+        message: "all OAuth runtime settings must be supplied together"
       });
     }
   });
@@ -90,6 +107,27 @@ export function loadIdentityConfig(
     throw new Error(
       "Invalid Identity runtime configuration: WEBAUTHN_RP_ID: must equal the public origin hostname"
     );
+  }
+  if (parsed.data.IDENTITY_OAUTH_RESOURCE) {
+    const resource = new URL(parsed.data.IDENTITY_OAUTH_RESOURCE);
+    if (
+      resource.username ||
+      resource.password ||
+      resource.search ||
+      resource.hash
+    ) {
+      throw new Error(
+        "Invalid Identity runtime configuration: IDENTITY_OAUTH_RESOURCE: must not contain credentials, query, or fragment"
+      );
+    }
+    if (
+      parsed.data.NODE_ENV === "production" &&
+      resource.protocol !== "https:"
+    ) {
+      throw new Error(
+        "Invalid Identity runtime configuration: IDENTITY_OAUTH_RESOURCE: must use https in production"
+      );
+    }
   }
 
   return parsed.data;

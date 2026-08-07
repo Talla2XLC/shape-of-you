@@ -94,6 +94,11 @@
   ручного SQL или публичной самостоятельной регистрации.
 - [x] Реализовать базовые WebAuthn/passkey enrollment и login через четыре HTTP
   endpoint, discoverable credentials и passkey-bound sliding session.
+- [x] Добавить в Identity минимальную same-origin страницу passkey-входа и
+  consent для OAuth interaction; общий Nuxt UI и визуальную полировку отложить.
+- [x] Сохранить `oidc-provider` interaction `cid` и `returnTo` в отдельных
+  типизированных колонках и при resume явно связать конкретную passkey-сессию
+  с provider Session UID без поиска «последней» сессии.
 - [x] Реализовать backend API для нескольких passkeys, управления сессиями и
   TOTP recovery с replacement enrollment; пользовательский UI остаётся будущей
   задачей.
@@ -101,16 +106,21 @@
   дополнительно требовать session-bound CSRF token, храня только его hash.
 - [x] Реализовать список, переименование и удаление passkeys, список и отзыв
   сессий, а также защиту от удаления последнего доступного способа входа.
-- Реализовать account status, consent, registered clients, одноразовые auth
+- [x] Реализовать account status, consent, registered clients, одноразовые auth
   codes, hashed refresh credentials, rotation family и reuse detection.
 - Добавить security audit без токенов, паролей и лишних персональных данных.
 
 ### 4. Issuer, tokens и keys
 
-- Опубликовать discovery metadata и JWKS.
-- Выпускать короткоживущие JWT access tokens с `iss`, `sub`, `aud`, `exp`, `iat`,
+- [x] Опубликовать discovery metadata и JWKS.
+- [x] Выпускать JWT access tokens сроком десять минут с `iss`, `sub`, `aud`, `exp`, `iat`,
   `jti` и scopes без Person-данных.
-- Реализовать перекрывающуюся ротацию signing keys и аварийный runbook.
+- [x] Для local/staging получать приватные ES256 keys из versioned secret key
+  ring в runtime environment; в PostgreSQL хранить только public SPKI,
+  lifecycle metadata и opaque handle.
+- [ ] Реализовать перекрывающуюся ротацию signing keys и аварийный runbook.
+- [ ] До production отдельно выбрать Vault/KMS-grade provider для приватных
+  signing keys.
 
 ### 5. API resource-server integration
 

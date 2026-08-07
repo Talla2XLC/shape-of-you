@@ -1,0 +1,257 @@
+import { randomUUID } from "node:crypto";
+import type { IncomingMessage, ServerResponse } from "node:http";
+
+import Provider, {
+  errors,
+  type Interaction,
+  type InteractionResults,
+  type JWK
+} from "oidc-provider";
+import type { Pool } from "pg";
+
+import { OAuthClientStore } from "./client-store.js";
+import { createOAuthProviderAdapterFactory } from "./provider-adapter.js";
+import { OAuthRequestContext } from "./request-context.js";
+import type { OAuthSigningKeyRing } from "./signing-keys.js";
+
+/** Initial resource scopes exposed to the ChatGPT OAuth client. */
+export const initialOAuthScopes = [
+  "body-measurement:write",
+  "meal:write",
+  "person:read",
+  "weight:write",
+  "workout:write"
+] as const;
+
+/** Inputs required to create the Identity-owned OAuth protocol runtime. */
+export interface OAuthRuntimeDependencies {
+  readonly pool: Pool;
+  readonly issuer: string;
+  readonly resource: string;
+  readonly signingKeys: OAuthSigningKeyRing;
+  readonly cookieKeys: readonly string[];
+}
+
+/** Narrow wrapper around `oidc-provider` used by the native Identity server. */
+export class OAuthRuntime {
+  private readonly provider: Provider;
+  private readonly callback: ReturnType<Provider["callback"]>;
+  private readonly requestContext = new OAuthRequestContext();
+  private readonly clients: OAuthClientStore;
+
+  public constructor(private readonly dependencies: OAuthRuntimeDependencies) {
+    this.clients = new OAuthClientStore(dependencies.pool);
+    const secureCookies = new URL(dependencies.issuer).protocol === "https:";
+    this.provider = new Provider(dependencies.issuer, {
+      adapter: createOAuthProviderAdapterFactory({
+        pool: dependencies.pool,
+        clients: this.clients,
+        requestContext: this.requestContext,
+        issuer: dependencies.issuer,
+        resource: dependencies.resource
+      }),
+      clientAuthMethods: ["none"],
+      cookies: {
+        keys: dependencies.cookieKeys,
+        long: { httpOnly: true, sameSite: "lax", secure: secureCookies },
+        names: {
+          interaction: "shape_of_you_oidc_interaction",
+          resume: "shape_of_you_oidc_resume",
+          session: "shape_of_you_oidc_session"
+        },
+        short: { httpOnly: true, sameSite: "lax", secure: secureCookies }
+      },
+      enabledJWA: { idTokenSigningAlgValues: ["ES256"] },
+      expiresWithSession: async () => true,
+      features: {
+        devInteractions: { enabled: false },
+        introspection: { enabled: false },
+        registration: { enabled: false },
+        resourceIndicators: {
+          enabled: true,
+          getResourceServerInfo: async (_context, resource) => {
+            if (resource !== dependencies.resource) {
+              throw new errors.InvalidTarget("Unsupported OAuth resource indicator");
+            }
+            return {
+              accessTokenFormat: "jwt",
+              accessTokenTTL: 600,
+              audience: dependencies.resource,
+              jwt: { sign: { alg: "ES256", kid: dependencies.signingKeys.activeKeyId } },
+              scope: initialOAuthScopes.join(" ")
+            };
+          }
+        },
+        revocation: { enabled: true },
+        rpInitiatedLogout: { enabled: false },
+        userinfo: { enabled: false }
+      },
+      findAccount: async (_context, accountId) => {
+        const result = await dependencies.pool.query<{ subject: string }>(
+          "select subject from identity_accounts where id = $1 and status = 'active'",
+          [accountId]
+        );
+        const row = result.rows[0];
+        if (!row) return undefined;
+        return {
+          accountId,
+          claims: async () => ({ sub: row.subject })
+        };
+      },
+      formats: {
+        customizers: {
+          jwt: async (_context, token, structured) => {
+            if (!("accountId" in token) || !token.accountId) {
+              throw new Error("OAuth access token has no account");
+            }
+            const result = await dependencies.pool.query<{ subject: string }>(
+              "select subject from identity_accounts where id = $1 and status = 'active'",
+              [token.accountId]
+            );
+            const row = result.rows[0];
+            if (!row) throw new Error("OAuth access-token account is unavailable");
+            structured.payload.sub = row.subject;
+            return structured;
+          }
+        }
+      },
+      interactions: {
+        url: async (_context, interaction) =>
+          `/oauth/interaction/${interaction.uid}`
+      },
+      issueRefreshToken: async (_context, client) =>
+        this.clients.isRefreshTokenEnabled(client.clientId),
+      jwks: { keys: dependencies.signingKeys.jwks as readonly JWK[] },
+      pkce: { required: () => true },
+      renderError: async (context, out) => {
+        context.set("cache-control", "no-store");
+        context.set("content-security-policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
+        context.set("referrer-policy", "no-referrer");
+        context.set("x-content-type-options", "nosniff");
+        context.set("x-frame-options", "DENY");
+        context.type = "html";
+        const description = typeof out.error_description === "string"
+          ? out.error_description
+          : "The authorization request could not be completed.";
+        context.body = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Authorization failed · Shape of You</title></head><body><main><h1>Authorization failed</h1><p>${escapeHtml(description)}</p></main></body></html>`;
+      },
+      responseTypes: ["code"],
+      rotateRefreshToken: true,
+      routes: {
+        authorization: "/oauth/authorize",
+        jwks: "/oauth/jwks",
+        revocation: "/oauth/revoke",
+        token: "/oauth/token"
+      },
+      scopes: initialOAuthScopes,
+      subjectTypes: ["public"],
+      ttl: {
+        AccessToken: 600,
+        AuthorizationCode: 600,
+        Grant: 365 * 24 * 60 * 60,
+        Interaction: 10 * 60,
+        RefreshToken: 30 * 24 * 60 * 60,
+        Session: 30 * 24 * 60 * 60
+      }
+    });
+    this.provider.proxy = true;
+    this.provider.on("server_error", (_context, error) => {
+      process.stderr.write(
+        `${JSON.stringify({
+          level: "error",
+          message: "OAuth provider request failed",
+          error: error.message
+        })}\n`
+      );
+    });
+    this.callback = this.provider.callback();
+  }
+
+  /** Returns true for protocol routes owned directly by `oidc-provider`. */
+  public ownsProviderPath(pathname: string): boolean {
+    return (
+      pathname === "/.well-known/openid-configuration" ||
+      pathname === "/.well-known/oauth-authorization-server" ||
+      pathname === "/oauth/authorize" ||
+      pathname.startsWith("/oauth/authorize/") ||
+      pathname === "/oauth/jwks" ||
+      pathname === "/oauth/revoke" ||
+      pathname === "/oauth/token"
+    );
+  }
+
+  /** Delegates one known protocol request and preserves resume binding context. */
+  public handleProviderRequest(
+    request: IncomingMessage,
+    response: ServerResponse,
+    pathname: string
+  ): void {
+    const resume = pathname.match(/^\/oauth\/authorize\/([A-Za-z0-9_-]{43})$/);
+    if (resume) {
+      this.requestContext.run(resume[1]!, () => this.delegate(request, response));
+      return;
+    }
+    this.delegate(request, response);
+  }
+
+  /** Reads the provider-validated details for the current interaction cookie. */
+  public async interactionDetails(
+    request: IncomingMessage,
+    response: ServerResponse
+  ): Promise<Interaction> {
+    return this.provider.interactionDetails(request, response);
+  }
+
+  /** Persists an interaction result and redirects to the provider resume route. */
+  public async finishInteraction(
+    request: IncomingMessage,
+    response: ServerResponse,
+    result: InteractionResults
+  ): Promise<void> {
+    await this.provider.interactionFinished(request, response, result, {
+      mergeWithLastSubmission: false
+    });
+  }
+
+  /** Creates or extends the consent grant used by an approved interaction. */
+  public async grantResourceScopes(input: {
+    readonly accountId: string;
+    readonly clientId: string;
+    readonly existingGrantId?: string | undefined;
+    readonly scopes: readonly string[];
+  }): Promise<string> {
+    const grant = input.existingGrantId
+      ? await this.provider.Grant.find(input.existingGrantId)
+      : new this.provider.Grant({
+          accountId: input.accountId,
+          clientId: input.clientId
+    });
+    if (!grant) throw new Error("OAuth grant is unavailable");
+    if (!grant.jti) grant.jti = randomUUID();
+    grant.addOIDCScope([...input.scopes]);
+    grant.addResourceScope(this.dependencies.resource, [...input.scopes]);
+    await grant.save();
+    return grant.jti;
+  }
+
+  private delegate(request: IncomingMessage, response: ServerResponse): void {
+    void this.callback(request, response).catch(() => {
+      if (!response.headersSent) {
+        response.writeHead(500, { "content-type": "application/json; charset=utf-8" });
+        response.end(JSON.stringify({ error: "server_error" }));
+      } else {
+        response.destroy();
+      }
+    });
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  })[character]!);
+}

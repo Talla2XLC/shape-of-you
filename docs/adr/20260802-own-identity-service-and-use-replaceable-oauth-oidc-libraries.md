@@ -103,8 +103,8 @@ Initial protocol profile:
   allowlisting and token endpoint authentication method `none`;
 - no implicit grant, resource-owner password grant, client credentials for the
   ChatGPT user flow, open DCR, or experimental CIMD in the first release;
-- short-lived, asymmetrically signed, audience-bound JWT access tokens with no
-  sensitive Person data;
+- ten-minute, ES256-signed, audience-bound JWT access tokens with no sensitive
+  Person data;
 - opaque authorization codes and rotating refresh credentials stored only as
   hashes in typed PostgreSQL tables;
 - public JWKS with planned key overlap and rotation;
@@ -112,6 +112,41 @@ Initial protocol profile:
   and `workout:write`;
 - exact issuer, audience/resource, lifetime, and scope validation at every
   resource server.
+
+For local development and staging, private ES256 signing keys enter Identity
+through a versioned secret key ring in the runtime environment. PostgreSQL
+stores only public SPKI material, lifecycle metadata, and an opaque key-ring
+handle. Rotation publishes the next public key before switching the active
+signer and retains the previous public key for a bounded verification overlap.
+Production use remains blocked until a separate decision selects and operates
+a Vault/KMS-grade private-key provider.
+
+The initial single-operator ChatGPT connection continues to use the predefined
+public client. CIMD is now the preferred OpenAI registration method for broader
+connector fleets, but adopting it would add remote metadata retrieval,
+validation, and SSRF controls that are not justified for this first connection.
+DCR remains deferred for the same reason.
+
+Identity serves the minimal first-party browser surface required to complete
+OAuth login and consent on the Identity origin. It reuses the existing passkey
+session and session-bound CSRF authority, displays the validated client and
+requested scopes, and submits the explicit decision to the provider
+interaction. This security-critical protocol UI does not make Identity the
+owner of the general product frontend. Moving it into a future Nuxt frontend
+would add cross-origin cookie, CORS, and deployable-availability coupling and
+requires another accepted decision.
+
+The provider interaction persists its opaque `cid` and exact `returnTo` in
+dedicated typed columns. On authorization resume, the project adapter binds the
+exact passkey session authenticated for that interaction to the provider
+Session UID and stores only a separate hash of the provider cookie credential
+on that same session row. It must not create a second browser-session aggregate
+or infer a session by account and recency.
+
+The raw session-bound CSRF token may be held in a separate Secure,
+SameSite=Lax, non-HttpOnly host-only cookie so a new same-origin OAuth consent
+page can reuse an active session. PostgreSQL still stores only its SHA-256 hash;
+the authentication session credential remains in a separate HttpOnly cookie.
 
 The initial MCP resource server remains a module of `apps/api` and delegates
 to existing application contracts. It publishes protected-resource metadata

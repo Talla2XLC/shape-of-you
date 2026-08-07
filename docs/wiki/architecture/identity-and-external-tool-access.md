@@ -72,9 +72,15 @@ ids, and fixed privacy-preserving source hashes without a generic details
 payload.
 
 The initial profile uses authorization code with S256 PKCE, OIDC discovery, a
-predefined ChatGPT public client, short-lived audience-bound JWT access tokens,
-hashed rotating refresh credentials, and public JWKS. Open DCR and experimental
-CIMD are deferred.
+predefined ChatGPT public client, ten-minute audience-bound ES256 JWT access
+tokens, hashed rotating refresh credentials, and public JWKS. Open DCR and CIMD
+are deferred for the first single-operator connection.
+
+Local development and staging supply private ES256 keys through a versioned
+runtime secret key ring. PostgreSQL stores only public SPKI material, lifecycle
+metadata, and an opaque handle. Key rotation publishes an overlap key before
+changing the active signer. Production remains blocked on a separate Vault/KMS
+decision.
 
 Login is passkey-first through WebAuthn, initially implemented with pinned
 `@simplewebauthn/server` 13.3.2 behind a project-owned adapter. Accounts can
@@ -120,6 +126,25 @@ cookie without a Domain attribute. Public login and initial enrollment use
 exact Origin plus single-use WebAuthn challenge/token authority rather than an
 ambient-cookie CSRF token.
 
+The raw CSRF token is also available to same-origin browser code through a
+separate Secure, SameSite=Lax, non-HttpOnly host-only cookie. This lets a newly
+opened OAuth consent page reuse the active session; the database still stores
+only its hash and the authentication credential remains HttpOnly.
+
+Identity also owns the minimal same-origin browser page required for OAuth
+login and consent. It reuses the passkey session and CSRF contract, renders only
+validated client/scope information, and completes the provider interaction.
+The general product UI and visual design remain outside Identity.
+
+OAuth interaction correlation and resume targets are stored as narrow typed
+columns. Authorization resume explicitly binds the interaction's authenticated
+passkey session to the provider Session UID; Identity does not create duplicate
+browser and protocol session aggregates or guess the newest account session.
+The passkey and provider cookie credentials are stored as separate hashes on
+that one session row. Rotating the provider cookie replaces only its hash and
+does not revoke the passkey session; explicit session revocation remains the
+shared lifecycle boundary.
+
 Initial scopes are `person:read`, `weight:write`,
 `body-measurement:write`, `meal:write`, and `workout:write`.
 
@@ -162,7 +187,7 @@ validates the key ring before migrations or service replacement.
 
 ## Open questions
 
-- Access-token lifetime and signing-key rotation intervals.
+- Signing-key overlap and rotation intervals.
 - Production hostname, secret storage, backup RPO/RTO, and security monitoring.
 - End-to-end OpenID/OAuth conformance results for the implemented HTTP and
   interaction flow before production use.

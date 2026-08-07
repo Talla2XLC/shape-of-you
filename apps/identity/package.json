@@ -20,16 +20,19 @@
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts",
-    "account:bootstrap": "tsx src/commands/bootstrap-account.ts"
+    "account:bootstrap": "tsx src/commands/bootstrap-account.ts",
+    "oauth-client:provision": "tsx src/commands/provision-oauth-client.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",
     "drizzle-orm": "^0.45.2",
+    "oidc-provider": "9.11.1",
     "pg": "^8.16.3",
     "zod": "^4.1.12"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "^11.7.2",
+    "@types/oidc-provider": "9.11.0",
     "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.10",
     "tsx": "^4.20.6",

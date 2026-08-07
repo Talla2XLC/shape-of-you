@@ -78,14 +78,28 @@ is never silently discarded or serialized as a fallback.
 - `oauth_grants` is the consent aggregate. OIDC scopes and resource-specific
   scopes use typed child rows; there is no duplicate consent aggregate.
 - `oauth_sessions` stores only a hash of the browser session credential plus
-  the provider UID, account, originating WebAuthn credential, authentication
-  and last-activity times, ACR, AMR snapshot, sliding inactivity deadline, and
-  revocation. `oauth_session_authorizations` maps a session and client to its
-  active grant. The credential/account binding prevents a session from being
-  attributed to another account's passkey.
+  a separate optional hash of the provider session cookie credential, the
+  provider UID, account, originating WebAuthn credential, authentication and
+  last-activity times, ACR, AMR snapshot, sliding inactivity deadline, and
+  revocation. Both credentials address the same session aggregate and neither
+  is stored in plaintext. `oauth_session_authorizations` maps a session and
+  client to its active grant. The credential/account binding prevents a session
+  from being attributed to another account's passkey. Provider-cookie rotation
+  clears only the replaced provider credential hash; it does not revoke the
+  underlying passkey session or discard its logical provider UID and grants.
+  User-initiated session revocation remains the authority that ends both uses.
 - `oauth_interactions` contains the fixed request and prompt columns required
-  by the enabled authorization-code profile. It references relational session
-  and grant state instead of embedding their payloads.
+  by the enabled authorization-code profile, including the provider's opaque
+  interaction correlation identifier (`cid`) and exact resume target
+  (`returnTo`). These values are typed columns, not a serialized provider
+  payload. `cid` intentionally repeats across the login and consent prompts of
+  one authorization transaction; the hashed interaction credential remains
+  unique. The interaction references relational session and grant state.
+- The passkey flow and `oidc-provider` do not create parallel browser-session
+  aggregates. During authorization resume, Identity binds the exact
+  authenticated `oauth_sessions` row to the provider Session UID carried by
+  that request. Matching an account's latest session or inferring the binding
+  from timestamps is forbidden because concurrent logins would be ambiguous.
 - `oauth_authorization_codes` stores only a hash of the opaque code, exact
   client and redirect binding, S256 challenge, account/session/grant binding,
   resource, issued scope snapshot, expiry, and consumption.

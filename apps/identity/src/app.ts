@@ -13,9 +13,12 @@ import { z } from "zod";
 
 import {
   IdentityAuthenticationError,
+  identityCsrfCookieName,
   identitySessionCookieName,
   type IdentityAuthenticationService
 } from "./authentication/service.js";
+import type { OAuthBrowserUi } from "./oauth/browser-ui.js";
+import type { OAuthRuntime } from "./oauth/runtime.js";
 
 const contentType = "application/json; charset=utf-8";
 
@@ -33,6 +36,10 @@ export interface IdentityServerDependencies {
   readonly authentication?: IdentityAuthenticationService;
   /** Exact browser Origin accepted by every POST route. */
   readonly publicOrigin?: string;
+  /** Optional Identity-owned OAuth interaction page. */
+  readonly oauthBrowserUi?: OAuthBrowserUi;
+  /** Optional OAuth protocol runtime when the full key configuration is present. */
+  readonly oauthRuntime?: OAuthRuntime;
 }
 
 const challengeSchema = z.object({ challengeId: z.string().uuid() });
@@ -131,7 +138,7 @@ async function handleAuthenticationRequest(
       challengeId: body.challengeId,
       response: body.response as unknown as AuthenticationResponseJSON
     });
-    response.setHeader("set-cookie", result.cookie);
+    response.setHeader("set-cookie", [result.cookie, result.csrfCookie]);
     writeJson(response, 200, result.body);
     return true;
   }
@@ -147,7 +154,7 @@ async function handleAuthenticationRequest(
   }
   if (method === "DELETE" && passkeyMatch) {
     const result = await dependencies.authentication.revokePasskey(requestAuthority(request), passkeyMatch[1]!);
-    if (result.currentSessionRevoked) response.setHeader("set-cookie", `${identitySessionCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`);
+    if (result.currentSessionRevoked) response.setHeader("set-cookie", expiredIdentityCookies());
     writeJson(response, 200, result);
     return true;
   }
@@ -158,7 +165,7 @@ async function handleAuthenticationRequest(
   const sessionMatch = pathname.match(/^\/v1\/security\/sessions\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/);
   if (method === "DELETE" && sessionMatch) {
     const result = await dependencies.authentication.revokeSession(requestAuthority(request), sessionMatch[1]!);
-    if (result.currentSessionRevoked) response.setHeader("set-cookie", `${identitySessionCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`);
+    if (result.currentSessionRevoked) response.setHeader("set-cookie", expiredIdentityCookies());
     writeJson(response, 200, result);
     return true;
   }
@@ -178,6 +185,13 @@ async function handleAuthenticationRequest(
     return true;
   }
   return false;
+}
+
+function expiredIdentityCookies(): readonly string[] {
+  return [
+    `${identitySessionCookieName}=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax`,
+    `${identityCsrfCookieName}=; Path=/; Max-Age=0; Secure; SameSite=Lax`
+  ];
 }
 
 /**
@@ -214,7 +228,21 @@ export function createIdentityServer(
       return;
     }
 
-    void handleAuthenticationRequest(request, response, pathname, dependencies)
+    if (dependencies.oauthRuntime?.ownsProviderPath(pathname)) {
+      dependencies.oauthRuntime.handleProviderRequest(request, response, pathname);
+      return;
+    }
+
+    void Promise.resolve()
+      .then(async () => {
+        if (
+          dependencies.oauthBrowserUi &&
+          await dependencies.oauthBrowserUi.handle(request, response, pathname)
+        ) {
+          return true;
+        }
+        return handleAuthenticationRequest(request, response, pathname, dependencies);
+      })
       .then((handled) => {
         if (!handled && !response.writableEnded) {
           writeJson(response, 404, {

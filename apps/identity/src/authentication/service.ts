@@ -26,6 +26,7 @@ import {
 } from "./totp.js";
 
 export const identitySessionCookieName = "__Host-shape_of_you_identity";
+export const identityCsrfCookieName = "__Host-shape_of_you_csrf";
 const challengeLifetimeMs = 5 * 60 * 1_000;
 const enrollmentLifetimeMs = 15 * 60 * 1_000;
 const sessionIdleLifetimeMs = 30 * 24 * 60 * 60 * 1_000;
@@ -79,6 +80,22 @@ interface SessionAuthority {
   readonly account: AccountRow;
   readonly sessionId: string;
   readonly credentialId: string | null;
+  readonly providerUid: string;
+  readonly authenticatedAt: Date;
+  readonly acr: string;
+  readonly amr: string[];
+}
+
+/** Authenticated browser-session identity exposed to the OAuth interaction flow. */
+export interface OAuthBrowserSession {
+  readonly accountId: string;
+  readonly subject: string;
+  readonly displayName: string;
+  readonly sessionId: string;
+  readonly providerUid: string;
+  readonly authenticatedAt: Date;
+  readonly acr: string;
+  readonly amr: readonly string[];
 }
 
 interface TotpRow {
@@ -374,6 +391,7 @@ export class IdentityAuthenticationService {
   }): Promise<{
     readonly body: Readonly<Record<string, unknown>>;
     readonly cookie: string;
+    readonly csrfCookie: string;
   }> {
     const challenge = await this.getChallenge(input.challengeId, "authentication");
     const credentialId = this.decodeCredentialId(input.response.id);
@@ -473,7 +491,8 @@ export class IdentityAuthenticationService {
         csrfToken,
         expiresAt: expiresAt.toISOString()
       },
-      cookie: `${identitySessionCookieName}=${sessionCredential}; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax`
+      cookie: `${identitySessionCookieName}=${sessionCredential}; Path=/; Max-Age=2592000; Secure; HttpOnly; SameSite=Lax`,
+      csrfCookie: `${identityCsrfCookieName}=${csrfToken}; Path=/; Max-Age=2592000; Secure; SameSite=Lax`
     };
   }
 
@@ -631,6 +650,48 @@ export class IdentityAuthenticationService {
     } finally {
       client.release();
     }
+  }
+
+  /** Resolves the active passkey session used by an OAuth interaction page. */
+  async getOAuthBrowserSession(
+    authority: RegistrationRequestAuthority
+  ): Promise<OAuthBrowserSession> {
+    return this.toOAuthBrowserSession(
+      await this.resolveSessionAuthority(authority, false)
+    );
+  }
+
+  /**
+   * Binds an OAuth interaction to the exact CSRF-authorized passkey session.
+   *
+   * @param authority - Cookie and session-bound CSRF authority from the page.
+   * @param interactionCredential - Opaque provider interaction identifier.
+   * @returns The exact session metadata used for provider login completion.
+   * @throws IdentityAuthenticationError when authority or interaction is invalid.
+   */
+  async bindOAuthInteractionSession(
+    authority: RegistrationRequestAuthority,
+    interactionCredential: string
+  ): Promise<OAuthBrowserSession> {
+    const session = await this.resolveSessionAuthority(authority, true);
+    const result = await this.pool.query(
+      `update oauth_interactions
+          set account_id = $2, session_id = $3
+        where credential_hash = $1
+          and status = 'pending' and expires_at >= now()
+          and (account_id is null or account_id = $2)
+          and (session_id is null or session_id = $3)
+      returning id`,
+      [hashBearerValue(interactionCredential), session.account.id, session.sessionId]
+    );
+    if (result.rowCount !== 1) {
+      throw new IdentityAuthenticationError(
+        400,
+        "invalid_oauth_interaction",
+        "OAuth interaction is invalid or expired"
+      );
+    }
+    return this.toOAuthBrowserSession(session);
   }
 
   /** Starts authenticated TOTP enrollment and returns its setup URI once. */
@@ -832,13 +893,18 @@ export class IdentityAuthenticationService {
     if (!sessionToken || (requireCsrf && !input.csrfToken)) throw this.denied();
     const result = await this.pool.query<
       AccountRow & {
+        acr: string;
+        amr: string[];
+        authenticated_at: Date;
         csrf_token_hash: Buffer;
+        provider_uid: string;
         session_id: string;
         webauthn_credential_id: string | null;
       }
     >(
       `select a.id, a.subject, a.webauthn_user_handle, a.display_name,
-              s.id as session_id, s.csrf_token_hash, s.webauthn_credential_id
+              s.id as session_id, s.csrf_token_hash, s.webauthn_credential_id,
+              s.provider_uid, s.authenticated_at, s.acr, s.amr
          from oauth_sessions s
          join identity_accounts a on a.id = s.account_id
         where s.credential_hash = $1 and s.revoked_at is null
@@ -868,7 +934,24 @@ export class IdentityAuthenticationService {
     return {
       account: row,
       sessionId: row.session_id,
-      credentialId: row.webauthn_credential_id
+      credentialId: row.webauthn_credential_id,
+      providerUid: row.provider_uid,
+      authenticatedAt: row.authenticated_at,
+      acr: row.acr,
+      amr: row.amr
+    };
+  }
+
+  private toOAuthBrowserSession(session: SessionAuthority): OAuthBrowserSession {
+    return {
+      accountId: session.account.id,
+      subject: session.account.subject,
+      displayName: session.account.display_name,
+      sessionId: session.sessionId,
+      providerUid: session.providerUid,
+      authenticatedAt: session.authenticatedAt,
+      acr: session.acr,
+      amr: session.amr
     };
   }
 

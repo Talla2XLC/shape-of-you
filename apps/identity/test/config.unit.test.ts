@@ -82,4 +82,32 @@ describe("loadIdentityConfig", () => {
       })
     ).toThrow("must be supplied together");
   });
+
+  it("requires the complete OAuth runtime configuration", () => {
+    expect(() =>
+      loadIdentityConfig({
+        DATABASE_URL: "postgresql://identity:identity@127.0.0.1:5432/identity",
+        IDENTITY_PUBLIC_ORIGIN: "http://identity.localhost",
+        WEBAUTHN_RP_ID: "identity.localhost",
+        IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: "v1"
+      })
+    ).toThrow("all OAuth runtime settings must be supplied together");
+  });
+
+  it("accepts a complete local OAuth runtime configuration", () => {
+    expect(
+      loadIdentityConfig({
+        DATABASE_URL: "postgresql://identity:identity@127.0.0.1:5432/identity",
+        IDENTITY_PUBLIC_ORIGIN: "http://identity.localhost",
+        WEBAUTHN_RP_ID: "identity.localhost",
+        IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: "v1",
+        IDENTITY_OAUTH_SIGNING_KEYS: "{\"v1\":\"private-key\"}",
+        IDENTITY_OAUTH_COOKIE_KEYS: "[\"cookie-key\"]",
+        IDENTITY_OAUTH_RESOURCE: "http://api.localhost:3000/mcp"
+      })
+    ).toMatchObject({
+      IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: "v1",
+      IDENTITY_OAUTH_RESOURCE: "http://api.localhost:3000/mcp"
+    });
+  });
 });

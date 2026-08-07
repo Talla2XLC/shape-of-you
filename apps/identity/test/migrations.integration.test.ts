@@ -1,7 +1,13 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import {
+  createHash,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID
+} from "node:crypto";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer as createNetServer } from "node:net";
 
 import {
   PostgreSqlContainer,
@@ -12,10 +18,24 @@ import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { runIdentityMigrations } from "../src/database/migrate.js";
+import { createIdentityServer } from "../src/app.js";
+import {
+  IdentityAuthenticationService,
+  identityCsrfCookieName,
+  identitySessionCookieName
+} from "../src/authentication/service.js";
+import { SimpleWebAuthnAdapter } from "../src/authentication/webauthn-adapter.js";
 import {
   checkIdentityDatabaseReadiness,
   createIdentityDatabase
 } from "../src/database/context.js";
+import { OAuthSigningKeyStore } from "../src/oauth/signing-key-store.js";
+import { parseOAuthSigningKeyRing } from "../src/oauth/signing-keys.js";
+import { OAuthClientStore } from "../src/oauth/client-store.js";
+import { createOAuthProviderAdapterFactory } from "../src/oauth/provider-adapter.js";
+import { OAuthRequestContext } from "../src/oauth/request-context.js";
+import { OAuthRuntime } from "../src/oauth/runtime.js";
+import { OAuthBrowserUi } from "../src/oauth/browser-ui.js";
 
 interface MigrationJournalEntry {
   readonly tag: string;
@@ -231,6 +251,93 @@ describe("Identity migration chain", () => {
     }
   });
 
+  it("fails the OAuth provider-state upgrade before inventing legacy interaction data", async () => {
+    const journal = JSON.parse(
+      await readFile(new URL("meta/_journal.json", migrationsFolder), "utf8")
+    ) as MigrationJournal;
+    const providerStateMigrationIndex = journal.entries.findIndex(
+      (entry) => entry.tag === "20260806171723_spotty_arachne"
+    );
+    expect(providerStateMigrationIndex).toBeGreaterThan(0);
+    expect(providerStateMigrationIndex).toBe(journal.entries.length - 1);
+    const priorEntries = journal.entries.slice(0, providerStateMigrationIndex);
+    const sources = new Map(
+      (await migrationSources()).map((source) => [source.tag, source.contents])
+    );
+    const temporaryMigrations = await mkdtemp(
+      join(tmpdir(), "shape-of-you-identity-provider-upgrade-")
+    );
+    const temporaryMeta = join(temporaryMigrations, "meta");
+    const databaseName = `identity_provider_upgrade_${randomUUID().replaceAll("-", "")}`;
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    const upgradeUrl = new URL(container.getConnectionUri());
+    upgradeUrl.pathname = `/${databaseName}`;
+
+    try {
+      await mkdir(temporaryMeta);
+      await writeFile(
+        join(temporaryMeta, "_journal.json"),
+        JSON.stringify({ entries: priorEntries, version: "7", dialect: "postgresql" })
+      );
+      for (const entry of priorEntries) {
+        const contents = sources.get(entry.tag);
+        if (contents === undefined) {
+          throw new Error(`Missing generated migration source: ${entry.tag}`);
+        }
+        await writeFile(join(temporaryMigrations, `${entry.tag}.sql`), contents);
+      }
+
+      await adminPool.query(`create database "${databaseName}"`);
+      const legacyDatabase = createIdentityDatabase(upgradeUrl.toString(), 1);
+      try {
+        await migrate(legacyDatabase.db, { migrationsFolder: temporaryMigrations });
+        await legacyDatabase.pool.query(
+          `insert into oauth_clients (id, display_name)
+           values ('legacy-client', 'Legacy client')`
+        );
+        await legacyDatabase.pool.query(
+          `insert into oauth_client_redirect_uris (id, client_id, redirect_uri)
+           values ($1, 'legacy-client', 'https://legacy.example.test/callback')`,
+          [randomUUID()]
+        );
+        await legacyDatabase.pool.query(
+          `insert into oauth_interactions
+             (id, credential_hash, client_id, prompt, redirect_uri,
+              code_challenge, expires_at)
+           values ($1, $2, 'legacy-client', 'login', $3, $4,
+                   now() + interval '10 minutes')`,
+          [
+            randomUUID(),
+            randomBytes(32),
+            "https://legacy.example.test/callback",
+            "P".repeat(43)
+          ]
+        );
+      } finally {
+        await legacyDatabase.pool.end();
+      }
+
+      await expect(runIdentityMigrations(upgradeUrl.toString())).rejects.toThrow(
+        "OAuth interaction provider state cannot be backfilled"
+      );
+      const failedUpgradePool = new Pool({ connectionString: upgradeUrl.toString() });
+      try {
+        const columns = await failedUpgradePool.query<{ count: string }>(
+          `select count(*)::text as count
+             from information_schema.columns
+            where table_schema = 'public' and table_name = 'oauth_interactions'
+              and column_name in ('provider_cid', 'provider_return_to')`
+        );
+        expect(columns.rows[0]?.count).toBe("0");
+      } finally {
+        await failedUpgradePool.end();
+      }
+    } finally {
+      await adminPool.end();
+      await rm(temporaryMigrations, { force: true, recursive: true });
+    }
+  });
+
   it("creates only the approved typed lifecycle tables without JSON columns", async () => {
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     try {
@@ -306,6 +413,709 @@ describe("Identity migration chain", () => {
       );
       expect(privateKeyColumns.rows).toEqual([]);
     } finally {
+      await pool.end();
+    }
+  });
+
+  it("activates and rotates external OAuth signing keys without private-key persistence", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const privateKeyValue = (): string => {
+      const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+      return privateKey
+        .export({ format: "der", type: "pkcs8" })
+        .toString("base64url");
+    };
+    const first = privateKeyValue();
+    const second = privateKeyValue();
+    const store = new OAuthSigningKeyStore(pool);
+    try {
+      await store.reconcile(
+        parseOAuthSigningKeyRing("v1", JSON.stringify({ v1: first }))
+      );
+      await store.reconcile(
+        parseOAuthSigningKeyRing(
+          "v2",
+          JSON.stringify({ v1: first, v2: second })
+        )
+      );
+
+      const rows = await pool.query<{
+        key_id: string;
+        secret_provider_handle: string;
+        status: string;
+      }>(
+        `select key_id, secret_provider_handle, status
+           from oauth_signing_keys
+          order by key_id`
+      );
+      expect(rows.rows).toEqual([
+        { key_id: "v1", secret_provider_handle: "env:v1", status: "verifying" },
+        { key_id: "v2", secret_provider_handle: "env:v2", status: "active" }
+      ]);
+      const events = await pool.query<{ count: string }>(
+        `select count(*)::text as count from identity_security_events
+          where event_type = 'signing_key_lifecycle_changed'
+            and signing_key_id in (
+              select id from oauth_signing_keys where secret_provider_handle like 'env:%'
+            )`
+      );
+      expect(events.rows[0]?.count).toBe("3");
+      await expect(
+        store.reconcile(
+          parseOAuthSigningKeyRing("v2", JSON.stringify({ v2: second }))
+        )
+      ).rejects.toThrow("still required for verification");
+    } finally {
+      await pool.query(
+        `delete from identity_security_events where signing_key_id in (
+           select id from oauth_signing_keys where secret_provider_handle like 'env:%'
+         )`
+      );
+      await pool.query(
+        "delete from oauth_signing_keys where secret_provider_handle like 'env:%'"
+      );
+      await pool.end();
+    }
+  });
+
+  it("provisions one exact public OAuth client without a client secret", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const store = new OAuthClientStore(pool);
+    try {
+      await store.provisionPublicClient({
+        clientId: "chatgpt",
+        displayName: "ChatGPT",
+        redirectUris: ["https://chatgpt.com/connector/oauth/callback-id"],
+        allowedScopes: ["person:read", "weight:write"],
+        refreshTokensEnabled: true
+      });
+      await store.provisionPublicClient({
+        clientId: "chatgpt",
+        displayName: "ChatGPT connector",
+        redirectUris: ["https://chatgpt.com/connector/oauth/new-callback-id"],
+        allowedScopes: ["person:read"],
+        refreshTokensEnabled: true
+      });
+
+      await expect(store.findProviderClient("chatgpt")).resolves.toEqual({
+        application_type: "web",
+        client_id: "chatgpt",
+        client_name: "ChatGPT connector",
+        grant_types: ["authorization_code", "refresh_token"],
+        id_token_signed_response_alg: "ES256",
+        redirect_uris: ["https://chatgpt.com/connector/oauth/new-callback-id"],
+        response_types: ["code"],
+        token_endpoint_auth_method: "none"
+      });
+      await expect(store.listAllowedScopes("chatgpt")).resolves.toEqual(
+        new Set(["person:read"])
+      );
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("persists provider interactions and binds the exact passkey session", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const clients = new OAuthClientStore(pool);
+    const requestContext = new OAuthRequestContext();
+    const resource = "https://api.example.test/mcp";
+    const issuer = "https://identity.example.test";
+    const adapters = createOAuthProviderAdapterFactory({
+      pool,
+      clients,
+      requestContext,
+      issuer,
+      resource
+    });
+    const accountId = randomUUID();
+    const credentialId = randomUUID();
+    const sessionId = randomUUID();
+    const interactionCredential = "I".repeat(43);
+    const providerCredential = "S".repeat(43);
+    const providerUid = "U".repeat(43);
+    const now = Math.floor(Date.now() / 1_000);
+    try {
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [accountId, randomUUID(), randomBytes(32), "OAuth adapter account"]
+      );
+      await pool.query(
+        `insert into webauthn_credentials
+           (id, account_id, credential_id, public_key, device_type)
+         values ($1, $2, $3, $4, 'multi_device')`,
+        [credentialId, accountId, randomBytes(32), randomBytes(64)]
+      );
+      await pool.query(
+        `insert into oauth_sessions
+           (id, account_id, webauthn_credential_id, credential_hash,
+            csrf_token_hash, provider_uid, authenticated_at, acr, amr,
+            last_activity_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, to_timestamp($7), $8,
+                 ARRAY['passkey'], to_timestamp($7), to_timestamp($9))`,
+        [
+          sessionId,
+          accountId,
+          credentialId,
+          randomBytes(32),
+          randomBytes(32),
+          randomUUID(),
+          now,
+          "urn:soy:passkey",
+          now + 3_600
+        ]
+      );
+
+      const interaction = adapters("Interaction");
+      await interaction.upsert(
+        interactionCredential,
+        {
+          cid: "C".repeat(43),
+          exp: now + 600,
+          iat: now,
+          jti: interactionCredential,
+          kind: "Interaction",
+          params: {
+            client_id: "chatgpt",
+            code_challenge: "P".repeat(43),
+            code_challenge_method: "S256",
+            redirect_uri: "https://chatgpt.com/connector/oauth/new-callback-id",
+            resource,
+            response_type: "code",
+            scope: "person:read",
+            state: "state"
+          },
+          prompt: { name: "login", reasons: ["no_session"], details: {} },
+          returnTo: `${issuer}/auth/${interactionCredential}`
+        },
+        600
+      );
+      await pool.query(
+        `update oauth_interactions
+            set account_id = $2, session_id = $3
+          where credential_hash = $1`,
+        [createHash("sha256").update(interactionCredential).digest(), accountId, sessionId]
+      );
+
+      const session = adapters("Session");
+      await requestContext.run(interactionCredential, () =>
+        session.upsert(providerCredential, {
+          accountId,
+          acr: "urn:soy:passkey",
+          amr: ["passkey"],
+          exp: now + 3_600,
+          iat: now,
+          jti: providerCredential,
+          kind: "Session",
+          loginTs: now,
+          uid: providerUid
+        })
+      );
+
+      await expect(session.find(providerCredential)).resolves.toMatchObject({
+        accountId,
+        jti: providerCredential,
+        uid: providerUid
+      });
+      await expect(session.findByUid(providerUid)).resolves.toMatchObject({
+        accountId,
+        uid: providerUid
+      });
+
+      const grantId = randomUUID();
+      const grant = adapters("Grant");
+      await grant.upsert(grantId, {
+        accountId,
+        clientId: "chatgpt",
+        iat: now,
+        jti: grantId,
+        kind: "Grant",
+        openid: { scope: "person:read" },
+        resources: { [resource]: "person:read" }
+      });
+      await requestContext.run(interactionCredential, () =>
+        session.upsert(providerCredential, {
+          accountId,
+          acr: "urn:soy:passkey",
+          amr: ["passkey"],
+          authorizations: { chatgpt: { grantId } },
+          exp: now + 3_600,
+          iat: now,
+          jti: providerCredential,
+          kind: "Session",
+          loginTs: now,
+          uid: providerUid
+        })
+      );
+
+      const authorizationCodeValue = "A".repeat(43);
+      const authorizationCode = adapters("AuthorizationCode");
+      await authorizationCode.upsert(authorizationCodeValue, {
+        accountId,
+        acr: "urn:soy:passkey",
+        amr: ["passkey"],
+        authTime: now,
+        clientId: "chatgpt",
+        codeChallenge: "P".repeat(43),
+        codeChallengeMethod: "S256",
+        exp: now + 600,
+        expiresWithSession: true,
+        grantId,
+        iat: now,
+        jti: authorizationCodeValue,
+        kind: "AuthorizationCode",
+        redirectUri: "https://chatgpt.com/connector/oauth/new-callback-id",
+        resource,
+        scope: "person:read",
+        sessionUid: providerUid
+      });
+      await expect(authorizationCode.find(authorizationCodeValue)).resolves.toMatchObject({
+        accountId,
+        consumed: undefined,
+        grantId,
+        sessionUid: providerUid
+      });
+      const codeConsumption = await Promise.allSettled([
+        authorizationCode.consume(authorizationCodeValue),
+        authorizationCode.consume(authorizationCodeValue)
+      ]);
+      expect(codeConsumption.map((result) => result.status).sort()).toEqual([
+        "fulfilled",
+        "rejected"
+      ]);
+      await expect(authorizationCode.find(authorizationCodeValue)).resolves.toMatchObject({
+        consumed: expect.any(Number)
+      });
+
+      const refreshToken = adapters("RefreshToken");
+      const firstRefreshValue = "R".repeat(43);
+      await refreshToken.upsert(firstRefreshValue, {
+        accountId,
+        acr: "urn:soy:passkey",
+        amr: ["passkey"],
+        authTime: now,
+        clientId: "chatgpt",
+        exp: now + 3_600,
+        expiresWithSession: true,
+        grantId,
+        gty: "authorization_code",
+        iat: now,
+        iiat: now,
+        jti: firstRefreshValue,
+        kind: "RefreshToken",
+        resource,
+        rotations: 0,
+        scope: "person:read",
+        sessionUid: providerUid
+      });
+      await refreshToken.consume(firstRefreshValue);
+      const secondRefreshValue = "T".repeat(43);
+      await refreshToken.upsert(secondRefreshValue, {
+        accountId,
+        acr: "urn:soy:passkey",
+        amr: ["passkey"],
+        authTime: now,
+        clientId: "chatgpt",
+        exp: now + 3_600,
+        expiresWithSession: true,
+        grantId,
+        gty: "authorization_code refresh_token",
+        iat: now,
+        iiat: now,
+        jti: secondRefreshValue,
+        kind: "RefreshToken",
+        resource,
+        rotations: 1,
+        scope: "person:read",
+        sessionUid: providerUid
+      });
+      await expect(refreshToken.find(secondRefreshValue)).resolves.toMatchObject({
+        rotations: 1,
+        scope: "person:read"
+      });
+      const refreshConsumption = await Promise.allSettled([
+        refreshToken.consume(secondRefreshValue),
+        refreshToken.consume(secondRefreshValue)
+      ]);
+      expect(refreshConsumption.map((result) => result.status).sort()).toEqual([
+        "fulfilled",
+        "rejected"
+      ]);
+      await expect(refreshToken.find(secondRefreshValue)).resolves.toBeUndefined();
+      const family = await pool.query<{ id: string; reuse_detected_at: Date | null }>(
+        "select id, reuse_detected_at from oauth_refresh_token_families where grant_id = $1",
+        [grantId]
+      );
+      expect(family.rows[0]?.reuse_detected_at).toBeInstanceOf(Date);
+      const audit = await pool.query<{ event_type: string }>(
+        `select event_type from identity_security_events
+          where correlation_id in ($1, $2)
+          order by event_type`,
+        [grantId, family.rows[0]!.id]
+      );
+      expect(audit.rows.map((row) => row.event_type)).toEqual([
+        "oauth_code_exchange",
+        "oauth_refresh_rotation",
+        "oauth_refresh_reuse_detected"
+      ]);
+
+      await expect(
+        interaction.upsert(interactionCredential, {
+          ...((await interaction.find(interactionCredential)) ?? {}),
+          unsupported: true
+        })
+      ).rejects.toThrow("unsupported fields");
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("serves discovery, JWKS, authorization and the passkey interaction page", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const clients = new OAuthClientStore(pool);
+    const keyId = `runtime-${randomUUID()}`;
+    const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
+    const keyValue = privateKey
+      .export({ format: "der", type: "pkcs8" })
+      .toString("base64url");
+    const signingKeys = parseOAuthSigningKeyRing(
+      keyId,
+      JSON.stringify({ [keyId]: keyValue })
+    );
+    const probe = createNetServer();
+    await new Promise<void>((resolve, reject) => {
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", resolve);
+    });
+    const address = probe.address();
+    if (!address || typeof address === "string") throw new Error("Loopback port is unavailable");
+    const port = address.port;
+    await new Promise<void>((resolve) => probe.close(() => resolve()));
+    const issuer = `http://127.0.0.1:${port}`;
+    const resource = "https://api.runtime.example.test/mcp";
+    const accountId = randomUUID();
+    const subject = randomUUID();
+    const credentialId = randomUUID();
+    const sessionId = randomUUID();
+    const sessionCredential = "B".repeat(43);
+    const csrfToken = "D".repeat(43);
+    let server: ReturnType<typeof createIdentityServer> | undefined;
+    try {
+      await new OAuthSigningKeyStore(pool).reconcile(signingKeys);
+      await clients.provisionPublicClient({
+        clientId: "chatgpt-runtime",
+        displayName: "ChatGPT runtime",
+        redirectUris: ["https://chatgpt.com/connector/oauth/runtime-callback"],
+        allowedScopes: ["person:read"],
+        refreshTokensEnabled: true
+      });
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [accountId, subject, randomBytes(32), "Runtime account"]
+      );
+      await pool.query(
+        `insert into webauthn_credentials
+           (id, account_id, credential_id, public_key, device_type)
+         values ($1, $2, $3, $4, 'multi_device')`,
+        [credentialId, accountId, randomBytes(32), randomBytes(64)]
+      );
+      await pool.query(
+        `insert into oauth_sessions
+           (id, account_id, webauthn_credential_id, credential_hash,
+            csrf_token_hash, provider_uid, authenticated_at, acr, amr,
+            last_activity_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, now(), 'urn:soy:passkey',
+                 ARRAY['passkey'], now(), now() + interval '30 days')`,
+        [
+          sessionId,
+          accountId,
+          credentialId,
+          createHash("sha256").update(sessionCredential).digest(),
+          createHash("sha256").update(csrfToken).digest(),
+          randomUUID()
+        ]
+      );
+      const runtime = new OAuthRuntime({
+        pool,
+        issuer,
+        resource,
+        signingKeys,
+        cookieKeys: [randomBytes(32).toString("base64url")]
+      });
+      const authentication = new IdentityAuthenticationService(
+        pool,
+        new SimpleWebAuthnAdapter(),
+        {
+          IDENTITY_PUBLIC_ORIGIN: issuer,
+          WEBAUTHN_RP_ID: "127.0.0.1",
+          WEBAUTHN_RP_NAME: "Shape of You"
+        }
+      );
+      server = createIdentityServer({
+        readiness: { check: async () => undefined },
+        authentication,
+        publicOrigin: issuer,
+        oauthRuntime: runtime,
+        oauthBrowserUi: new OAuthBrowserUi({
+          authentication,
+          clients,
+          publicOrigin: issuer,
+          resource,
+          runtime
+        })
+      });
+      await new Promise<void>((resolve, reject) => {
+        server!.once("error", reject);
+        server!.listen(port, "127.0.0.1", resolve);
+      });
+
+      const discovery = await fetch(`${issuer}/.well-known/oauth-authorization-server`);
+      expect(discovery.status).toBe(200);
+      await expect(discovery.json()).resolves.toMatchObject({
+        authorization_endpoint: `${issuer}/oauth/authorize`,
+        issuer,
+        jwks_uri: `${issuer}/oauth/jwks`,
+        token_endpoint: `${issuer}/oauth/token`
+      });
+      const jwks = await fetch(`${issuer}/oauth/jwks`);
+      await expect(jwks.json()).resolves.toMatchObject({
+        keys: [expect.objectContaining({ alg: "ES256", kid: keyId, kty: "EC" })]
+      });
+
+      const verifier = "V".repeat(43);
+      const challenge = createHash("sha256").update(verifier).digest("base64url");
+      const authorizationValues = {
+        client_id: "chatgpt-runtime",
+        code_challenge: challenge,
+        code_challenge_method: "S256",
+        redirect_uri: "https://chatgpt.com/connector/oauth/runtime-callback",
+        resource,
+        response_type: "code",
+        scope: "person:read",
+        state: "runtime-state"
+      };
+      const authorizationUrl = (overrides: Record<string, string> = {}): URL => {
+        const authorization = new URL(`${issuer}/oauth/authorize`);
+        for (const [name, value] of Object.entries({
+          ...authorizationValues,
+          ...overrides
+        })) authorization.searchParams.set(name, value);
+        return authorization;
+      };
+      for (const [label, invalid] of [
+        ["redirect", { redirect_uri: "https://attacker.example.test/callback" }],
+        ["pkce", { code_challenge_method: "plain" }],
+        ["scope", { scope: "weight:write" }],
+        ["resource", { resource: "https://unsupported.example.test/mcp" }]
+      ]) {
+        const rejected = await fetch(authorizationUrl(invalid as Record<string, string>), {
+          redirect: "manual"
+        });
+        if (rejected.status === 303) {
+          const errorRedirect = new URL(rejected.headers.get("location")!);
+          expect(errorRedirect.origin + errorRedirect.pathname, label as string).toBe(
+            "https://chatgpt.com/connector/oauth/runtime-callback"
+          );
+          expect(errorRedirect.searchParams.get("error"), label as string).toBeTruthy();
+          expect(errorRedirect.searchParams.has("code"), label as string).toBe(false);
+        } else {
+          expect(rejected.status, label as string).toBe(400);
+        }
+      }
+      await pool.query(
+        `update oauth_clients set status = 'disabled', disabled_at = now()
+          where id = 'chatgpt-runtime'`
+      );
+      const disabledClient = await fetch(authorizationUrl(), { redirect: "manual" });
+      expect(disabledClient.status).toBe(400);
+      await pool.query(
+        `update oauth_clients set status = 'active', disabled_at = null
+          where id = 'chatgpt-runtime'`
+      );
+
+      const authorization = authorizationUrl();
+      const start = await fetch(authorization, { redirect: "manual" });
+      expect(start.status).toBe(303);
+      const location = start.headers.get("location");
+      expect(location).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
+      const cookies = new Map<string, string>([
+        [identitySessionCookieName, sessionCredential],
+        [identityCsrfCookieName, csrfToken]
+      ]);
+      const applyCookies = (response: Response): void => {
+        for (const value of response.headers.getSetCookie()) {
+          const [pair] = value.split(";", 1);
+          const separator = pair!.indexOf("=");
+          cookies.set(pair!.slice(0, separator), pair!.slice(separator + 1));
+        }
+      };
+      const cookieHeader = (): string =>
+        [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+      applyCookies(start);
+      const page = await fetch(new URL(location!, issuer), {
+        headers: { cookie: cookieHeader() }
+      });
+      expect(page.status).toBe(200);
+      const pageHtml = await page.text();
+      expect(pageHtml).toContain("Continue as Runtime account");
+      expect(pageHtml).toContain("replace(/\\+/g,'-').replace(/\\//g,'_')");
+
+      const login = await fetch(new URL(`${location}/login`, issuer), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader(),
+          origin: issuer
+        },
+        body: JSON.stringify({ csrfToken }),
+        redirect: "manual"
+      });
+      expect(login.status).toBe(303);
+      applyCookies(login);
+      const loginResume = await fetch(new URL(login.headers.get("location")!, issuer), {
+        headers: { cookie: cookieHeader() },
+        redirect: "manual"
+      });
+      const loginResumeBody = loginResume.status === 303 ? "" : await loginResume.text();
+      expect(loginResume.status, loginResumeBody).toBe(303);
+      applyCookies(loginResume);
+      const consentLocation = loginResume.headers.get("location");
+      expect(consentLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
+      const consentPage = await fetch(new URL(consentLocation!, issuer), {
+        headers: { cookie: cookieHeader() }
+      });
+      expect(consentPage.status).toBe(200);
+      await expect(consentPage.text()).resolves.toContain("Read your profile");
+
+      const consent = await fetch(new URL(`${consentLocation}/consent`, issuer), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader(),
+          origin: issuer
+        },
+        body: JSON.stringify({ action: "allow", csrfToken }),
+        redirect: "manual"
+      });
+      expect(consent.status).toBe(303);
+      applyCookies(consent);
+      const consentResume = await fetch(new URL(consent.headers.get("location")!, issuer), {
+        headers: { cookie: cookieHeader() },
+        redirect: "manual"
+      });
+      expect(consentResume.status).toBe(303);
+      applyCookies(consentResume);
+      const consentResumeLocation = consentResume.headers.get("location");
+      const callback = new URL(consentResumeLocation!);
+      expect(callback.origin + callback.pathname).toBe(
+        "https://chatgpt.com/connector/oauth/runtime-callback"
+      );
+      expect(callback.searchParams.get("state")).toBe("runtime-state");
+      const code = callback.searchParams.get("code");
+      expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+      const token = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          code: code!,
+          code_verifier: verifier,
+          grant_type: "authorization_code",
+          redirect_uri: "https://chatgpt.com/connector/oauth/runtime-callback"
+        })
+      });
+      expect(token.status).toBe(200);
+      const tokenBody = await token.json() as {
+        access_token: string;
+        expires_in: number;
+        refresh_token: string;
+      };
+      expect(tokenBody.expires_in).toBe(600);
+      expect(tokenBody.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const accessPayload = JSON.parse(
+        Buffer.from(tokenBody.access_token.split(".")[1]!, "base64url").toString("utf8")
+      ) as Record<string, unknown>;
+      expect(accessPayload).toMatchObject({
+        aud: resource,
+        client_id: "chatgpt-runtime",
+        scope: "person:read",
+        sub: subject
+      });
+
+      const refreshed = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          grant_type: "refresh_token",
+          refresh_token: tokenBody.refresh_token
+        })
+      });
+      expect(refreshed.status).toBe(200);
+      const refreshedBody = await refreshed.json() as { refresh_token: string };
+      expect(refreshedBody.refresh_token).not.toBe(tokenBody.refresh_token);
+      const audit = await pool.query<{ event_type: string }>(
+        `select event_type from identity_security_events
+          where account_id = $1 and client_id = 'chatgpt-runtime'
+          order by event_type`,
+        [accountId]
+      );
+      expect(audit.rows.map((row) => row.event_type)).toEqual([
+        "oauth_authorization",
+        "oauth_code_exchange",
+        "oauth_refresh_rotation"
+      ]);
+      await pool.query(
+        "update identity_accounts set status = 'disabled', disabled_at = now() where id = $1",
+        [accountId]
+      );
+      const suspendedAccount = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          grant_type: "refresh_token",
+          refresh_token: refreshedBody.refresh_token
+        })
+      });
+      expect(suspendedAccount.status).toBe(400);
+      await pool.query(
+        "update identity_accounts set status = 'active', disabled_at = null where id = $1",
+        [accountId]
+      );
+      await pool.query(
+        "update oauth_sessions set revoked_at = now() where id = $1",
+        [sessionId]
+      );
+      const revokedSession = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          grant_type: "refresh_token",
+          refresh_token: refreshedBody.refresh_token
+        })
+      });
+      expect(revokedSession.status).toBe(400);
+    } finally {
+      if (server) {
+        await new Promise<void>((resolve) => server!.close(() => resolve()));
+      }
+      await pool.query(
+        `delete from identity_security_events where signing_key_id in (
+           select id from oauth_signing_keys where secret_provider_handle = $1
+         )`,
+        [`env:${keyId}`]
+      );
+      await pool.query(
+        "delete from oauth_signing_keys where secret_provider_handle = $1",
+        [`env:${keyId}`]
+      );
       await pool.end();
     }
   });

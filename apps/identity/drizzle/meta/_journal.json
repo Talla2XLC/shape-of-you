@@ -43,6 +43,13 @@
       "when": 1786022693118,
       "tag": "20260806132453_flaky_ghost_rider",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786036643705,
+      "tag": "20260806171723_spotty_arachne",
+      "breakpoints": true
     }
   ]
 }
