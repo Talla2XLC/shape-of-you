@@ -279,6 +279,28 @@ export const users = pgTable("users", {
     .notNull()
 });
 
+/** API-owned binding from one trusted external Identity subject to one User. */
+export const identitySubjectMappings = pgTable(
+  "identity_subject_mappings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    issuer: varchar("issuer", { length: 512 }).notNull(),
+    subject: varchar("subject", { length: 512 }).notNull(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("id_subj_map_iss_sub_uq").on(table.issuer, table.subject),
+    unique("id_subj_map_user_iss_uq").on(table.userId, table.issuer),
+    check("id_subj_map_issuer_nonempty", sql`length(btrim(${table.issuer})) > 0`),
+    check("id_subj_map_subject_nonempty", sql`length(btrim(${table.subject})) > 0`)
+  ]
+);
+
 export const personAccessGrants = pgTable(
   "person_access_grants",
   {

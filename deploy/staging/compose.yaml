@@ -123,6 +123,9 @@ services:
       LOG_LEVEL: info
       PERSON_CONTEXT_MODE: synthetic
       SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
+      IDENTITY_OAUTH_ISSUER: https://identity.staging.shape-of-you.ru
+      IDENTITY_OAUTH_JWKS_URI: https://identity.staging.shape-of-you.ru/oauth/jwks
+      IDENTITY_OAUTH_RESOURCE: https://staging.shape-of-you.ru/api/mcp
       SHUTDOWN_TIMEOUT_MS: 10000
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -171,6 +174,9 @@ services:
       LOG_LEVEL: info
       PERSON_CONTEXT_MODE: synthetic
       SYNTHETIC_PERSON_ID: 00000000-0000-4000-8000-000000000001
+      IDENTITY_OAUTH_ISSUER: https://identity.staging.shape-of-you.ru
+      IDENTITY_OAUTH_JWKS_URI: https://identity.staging.shape-of-you.ru/oauth/jwks
+      IDENTITY_OAUTH_RESOURCE: https://staging.shape-of-you.ru/api/mcp
       SHUTDOWN_TIMEOUT_MS: 10000
     extra_hosts:
       - "host.docker.internal:host-gateway"

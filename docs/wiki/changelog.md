@@ -16,6 +16,34 @@ parsing, shared day lifecycle, and real-data migration remain separate stages.
 
 ## Content
 
+### 2026-08-07 — Stable staging deployment bootstrap
+
+- Reduced the installed root-owned deployment entrypoint to a bounded
+  bootstrap that verifies exact `origin/main` and invokes one fixed controller
+  path from that commit.
+- Moved the evolving field allowlist, secret handoff, registry login, and
+  deployment orchestration into the versioned controller.
+- Preserved the dedicated `shape-deploy` identity, fixed sudoers rule, shared
+  deployment/renewal lock, strict controller validation, and no Docker-group
+  or arbitrary-shell access for CI.
+- Added a bootstrap security contract to CI. One final bootstrap installation
+  remains; subsequent deployment-protocol changes require no SSH maintenance.
+
+### 2026-08-07 — OAuth-protected MCP resource server
+
+- Added a stateless Streamable HTTP MCP endpoint inside the API with eight
+  allowlisted tools over existing weight, body measurement, meal, and workout
+  application contracts.
+- Added ES256/JWKS token verification, exact issuer/resource/scope checks,
+  API-owned Identity subject mappings, active Person-grant enforcement, and
+  request-scoped Person context without synthetic fallback.
+- Added protected-resource metadata, per-tool OAuth security schemes,
+  standards-complete challenges, an idempotent subject-binding CLI, and
+  staging runtime handoff for Identity OAuth keys.
+- Passed independent quality review and repository gates. Deployment, secrets,
+  subject binding, ChatGPT client provisioning, and external smoke remain
+  separate operations.
+
 ### 2026-08-06 — Reproducible local API and Identity environment
 
 - Added persistent local API and Identity stacks with separate PostgreSQL

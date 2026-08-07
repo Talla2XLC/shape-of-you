@@ -15,7 +15,8 @@ tags:
 
 Current runtime is one NestJS API in `apps/api` using `FastifyAdapter`,
 PostgreSQL, and Drizzle. It implements Physical State, Nutrition, Training,
-Recovery, Coaching, and asynchronous Intake in one modular deployable.
+Recovery, Coaching, asynchronous Intake, and an OAuth-protected MCP adapter in
+one modular deployable.
 
 ## Content
 
@@ -45,11 +46,20 @@ versioned exercises/programs, immutable sessions/sets, records, and progression
 projections. Recovery and Coaching retain typed facts, policies, evidence, and
 ownership boundaries.
 
+When all three OAuth trust values are configured, the API also exposes a
+stateless Streamable HTTP MCP endpoint at `/mcp` and protected-resource
+metadata. Its eight allowlisted tools reuse existing application services.
+Every invocation verifies the Identity JWT and then resolves an API-owned
+subject mapping and active Person grant into request-scoped Person context.
+The synthetic compatibility context is never used for MCP authorization.
+
 The repository also contains the independent `apps/identity` runtime. It owns
 its PostgreSQL connection pool, requires a separate `DATABASE_URL`, keeps
 `GET /live` dependency-free, and makes `GET /ready` execute `select 1` with a
 stable `503` response on database failure. Its migration runner remains a
-separate one-shot entrypoint; Identity is not deployed yet.
+separate one-shot entrypoint. Identity is deployed to staging; OAuth signing
+and API MCP activation remain configuration-gated until the required keys and
+operator mappings are provisioned.
 
 ## Evidence
 
@@ -63,7 +73,8 @@ separate one-shot entrypoint; Identity is not deployed yet.
 
 ## Open questions
 
-- TLS, authentication, authorization, metrics, tracing, observability, and SLOs.
+- Metrics, tracing, security monitoring, and SLOs.
+- Authentication coverage for non-MCP API routes before real-data activation.
 
 ## Related material
 

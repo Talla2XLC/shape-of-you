@@ -10,10 +10,13 @@ import {
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { eq } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 import { createDatabase } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
+import { personAccessGrants, users } from "../src/database/schema.js";
+import { IdentitySubjectMappingRepository } from "../src/storage/identity-subject-mapping-repository.js";
 
 interface MigrationJournalEntry {
   readonly idx: number;
@@ -116,6 +119,28 @@ afterAll(async () => {
 });
 
 describe("API migration chain", () => {
+  it("keeps every generated PostgreSQL identifier within 63 bytes", async () => {
+    const overlongIdentifiers: string[] = [];
+
+    for (const entry of journal.entries) {
+      const contents = await readFile(
+        new URL(`${entry.tag}.sql`, migrationsFolder),
+        "utf8"
+      );
+      for (const match of contents.matchAll(/"((?:""|[^"])*)"/g)) {
+        const identifier = match[1]!.replaceAll('""', '"');
+        const byteLength = Buffer.byteLength(identifier, "utf8");
+        if (byteLength > 63) {
+          overlongIdentifiers.push(
+            `${entry.tag}: ${byteLength} ${identifier}`
+          );
+        }
+      }
+    }
+
+    expect(overlongIdentifiers).toEqual([]);
+  });
+
   it("applies the full journal cleanly and idempotently", async () => {
     const url = container.getConnectionUri();
 
@@ -124,6 +149,42 @@ describe("API migration chain", () => {
 
     await runMigrations(url);
     expect(await appliedMigrations(url)).toEqual(expectedMigrations);
+
+    const database = createDatabase(databaseConfig(url));
+    const userId = "00000000-0000-4000-8000-000000000101";
+    try {
+      await database.db.insert(users).values({ id: userId });
+      await database.db.insert(personAccessGrants).values({
+        personId: syntheticPersonId,
+        userId,
+        role: "owner"
+      });
+      const mappings = new IdentitySubjectMappingRepository(database);
+      await expect(
+        mappings.bind("https://identity.example.test", "account-1", userId)
+      ).resolves.toBe("created");
+      await expect(
+        mappings.bind("https://identity.example.test", "account-1", userId)
+      ).resolves.toBe("existing");
+      await expect(
+        mappings.resolveAuthorizedPersons(
+          "https://identity.example.test",
+          "account-1"
+        )
+      ).resolves.toEqual([{ personId: syntheticPersonId, roles: ["owner"] }]);
+      await database.db
+        .update(personAccessGrants)
+        .set({ status: "revoked", revokedAt: new Date() })
+        .where(eq(personAccessGrants.userId, userId));
+      await expect(
+        mappings.resolveAuthorizedPersons(
+          "https://identity.example.test",
+          "account-1"
+        )
+      ).resolves.toEqual([]);
+    } finally {
+      await database.pool.end();
+    }
   });
 
   it("upgrades every committed journal prefix through the production runner", async () => {

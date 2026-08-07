@@ -13,7 +13,7 @@ PUBLISH_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/publish-staging.yml"
 DEPLOY_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/deploy-staging.yml"
 DEPLOY="$REPOSITORY_ROOT/deploy/staging/scripts/deploy.sh"
 ROLLBACK="$REPOSITORY_ROOT/deploy/staging/scripts/rollback.sh"
-WRAPPER="$REPOSITORY_ROOT/deploy/staging/system/shape-of-you-staging-deploy"
+CONTROLLER="$REPOSITORY_ROOT/deploy/staging/scripts/deployment-controller.sh"
 SMOKE="$REPOSITORY_ROOT/deploy/staging/scripts/smoke.sh"
 NGINX="$REPOSITORY_ROOT/deploy/staging/nginx/nginx.conf.template"
 RENDER_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/shape-of-you-identity-render.XXXXXX")
@@ -51,18 +51,24 @@ assert_contains "$PUBLISH_WORKFLOW" 'identity_digest: ${{ needs.publish-identity
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_DATABASE_URL'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_TOTP_ACTIVE_KEY_ID'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_TOTP_ENCRYPTION_KEYS'
+assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID'
+assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_OAUTH_SIGNING_KEYS'
+assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_OAUTH_COOKIE_KEYS'
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_DIGEST=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s"
 assert_contains "$DEPLOY" 'identity-migrate'
 assert_contains "$DEPLOY" 'parseTotpKeyRing'
 assert_contains "$DEPLOY" 'api identity'
 assert_contains "$ROLLBACK" 'api identity edge'
-assert_contains "$WRAPPER" 'IDENTITY_DATABASE_URL'
-assert_contains "$WRAPPER" 'IDENTITY_TOTP_ACTIVE_KEY_ID'
-assert_contains "$WRAPPER" 'IDENTITY_TOTP_ENCRYPTION_KEYS'
-assert_contains "$WRAPPER" 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE'
-assert_contains "$WRAPPER" '/etc/shape-of-you/staging/identity.env'
-assert_contains "$WRAPPER" 'shape-of-you-identity'
+assert_contains "$CONTROLLER" 'IDENTITY_DATABASE_URL'
+assert_contains "$CONTROLLER" 'IDENTITY_TOTP_ACTIVE_KEY_ID'
+assert_contains "$CONTROLLER" 'IDENTITY_TOTP_ENCRYPTION_KEYS'
+assert_contains "$CONTROLLER" 'IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID'
+assert_contains "$CONTROLLER" 'IDENTITY_OAUTH_SIGNING_KEYS'
+assert_contains "$CONTROLLER" 'IDENTITY_OAUTH_COOKIE_KEYS'
+assert_contains "$CONTROLLER" 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE'
+assert_contains "$CONTROLLER" '/etc/shape-of-you/staging/identity.env'
+assert_contains "$CONTROLLER" 'shape-of-you-identity'
 assert_contains "$DEPLOY" 'rollback_schema_compatible'
 assert_contains "$SMOKE" 'IDENTITY_SMOKE_ENABLED'
 assert_contains "$SMOKE" '"$IDENTITY_URL/live"'

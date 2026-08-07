@@ -135,6 +135,9 @@ jobs:
           IDENTITY_DATABASE_URL: ${{ secrets.STAGING_IDENTITY_DATABASE_URL }}
           IDENTITY_TOTP_ACTIVE_KEY_ID: ${{ vars.STAGING_IDENTITY_TOTP_ACTIVE_KEY_ID }}
           IDENTITY_TOTP_ENCRYPTION_KEYS: ${{ secrets.STAGING_IDENTITY_TOTP_ENCRYPTION_KEYS }}
+          IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: ${{ vars.STAGING_IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID }}
+          IDENTITY_OAUTH_SIGNING_KEYS: ${{ secrets.STAGING_IDENTITY_OAUTH_SIGNING_KEYS }}
+          IDENTITY_OAUTH_COOKIE_KEYS: ${{ secrets.STAGING_IDENTITY_OAUTH_COOKIE_KEYS }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
@@ -142,6 +145,9 @@ jobs:
           test -n "$IDENTITY_DATABASE_URL"
           test -n "$IDENTITY_TOTP_ACTIVE_KEY_ID"
           test -n "$IDENTITY_TOTP_ENCRYPTION_KEYS"
+          test -n "$IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID"
+          test -n "$IDENTITY_OAUTH_SIGNING_KEYS"
+          test -n "$IDENTITY_OAUTH_COOKIE_KEYS"
           test -n "$GHCR_TOKEN"
           target="$VM_USER@$VM_HOST"
           {
@@ -163,6 +169,9 @@ jobs:
             printf 'IDENTITY_DATABASE_URL=%s\n' "$IDENTITY_DATABASE_URL"
             printf 'IDENTITY_TOTP_ACTIVE_KEY_ID=%s\n' "$IDENTITY_TOTP_ACTIVE_KEY_ID"
             printf 'IDENTITY_TOTP_ENCRYPTION_KEYS=%s\n' "$IDENTITY_TOTP_ENCRYPTION_KEYS"
+            printf 'IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID=%s\n' "$IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID"
+            printf 'IDENTITY_OAUTH_SIGNING_KEYS=%s\n' "$IDENTITY_OAUTH_SIGNING_KEYS"
+            printf 'IDENTITY_OAUTH_COOKIE_KEYS=%s\n' "$IDENTITY_OAUTH_COOKIE_KEYS"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } | ssh -p "$VM_PORT" "$target" \
             -o BatchMode=yes \

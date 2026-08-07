@@ -11,7 +11,7 @@ import type { AppConfig } from "@shape-of-you/config";
 
 import { AppModule } from "./application/app.module.js";
 import {
-  SyntheticPersonContext,
+  RequestPersonContext,
   type PersonContext
 } from "./application/person-context.js";
 import {
@@ -54,6 +54,13 @@ import {
   type IntakeStore
 } from "./storage/intake-repository.js";
 import type { IntakeParser } from "./domain/intake.js";
+import { WeightMeasurementService } from "./weight-measurements/weight-measurement.service.js";
+import { BodyMeasurementSessionService } from "./body-measurement-sessions/body-measurement-session.service.js";
+import { NutritionService } from "./nutrition/nutrition.service.js";
+import { TrainingService } from "./training/training.service.js";
+import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
+import { McpAuthorizer } from "./mcp/oauth.js";
+import { registerMcpRoutes } from "./mcp/server.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -161,16 +168,11 @@ export async function buildApp(
 
   const personContext =
     options.personContext ??
-    (options.config.PERSON_CONTEXT_MODE === "synthetic" &&
-    options.config.SYNTHETIC_PERSON_ID
-      ? new SyntheticPersonContext(options.config.SYNTHETIC_PERSON_ID)
-      : undefined);
-
-  if (!personContext) {
-    throw new Error(
-      "Authenticated Person context is not implemented; use explicit synthetic mode"
+    new RequestPersonContext(
+      options.config.PERSON_CONTEXT_MODE === "synthetic"
+        ? options.config.SYNTHETIC_PERSON_ID
+        : undefined
     );
-  }
 
   const readinessProbe =
     options.readinessProbe ??
@@ -204,6 +206,33 @@ export async function buildApp(
     adapter,
     { logger }
   );
+
+  if (
+    database &&
+    personContext instanceof RequestPersonContext &&
+    options.config.IDENTITY_OAUTH_ISSUER &&
+    options.config.IDENTITY_OAUTH_JWKS_URI &&
+    options.config.IDENTITY_OAUTH_RESOURCE
+  ) {
+    registerMcpRoutes({
+      fastify: getFastifyInstance(app),
+      issuer: options.config.IDENTITY_OAUTH_ISSUER,
+      resource: options.config.IDENTITY_OAUTH_RESOURCE,
+      authorizer: new McpAuthorizer(
+        options.config.IDENTITY_OAUTH_ISSUER,
+        options.config.IDENTITY_OAUTH_JWKS_URI,
+        options.config.IDENTITY_OAUTH_RESOURCE,
+        new IdentitySubjectMappingRepository(database)
+      ),
+      personContext,
+      services: {
+        weights: app.get(WeightMeasurementService),
+        bodyMeasurements: app.get(BodyMeasurementSessionService),
+        nutrition: app.get(NutritionService),
+        training: app.get(TrainingService)
+      }
+    });
+  }
 
   app.useGlobalFilters(new ApplicationExceptionFilter());
   await app.init();

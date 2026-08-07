@@ -33,10 +33,15 @@ nothing. Until authentication, only explicit synthetic context is allowed.
 The Identity deployable owns its authentication and OAuth persistence boundary.
 Its separate Drizzle schema now contains account/WebAuthn/recovery state and
 typed OAuth client, grant, session, interaction, authorization-code, and
-refresh-family state. Runtime database wiring and protocol flows are not
-implemented yet.
-API-local User remains the authorization principal and maps to an Identity
-`(issuer, subject)`; Identity never owns Person grants or fitness facts.
+refresh-family state. Runtime database wiring, passkey/TOTP recovery, and the
+initial OAuth protocol flow are implemented.
+
+API-local User remains the authorization principal. The API-owned
+`identity_subject_mappings` table binds an exact Identity `(issuer, subject)`
+to one User; Identity never writes this table and never owns Person grants or
+fitness facts. Each authenticated MCP call resolves that mapping and a current
+active `PersonAccessGrant`. No token claim or first login implicitly creates a
+Person relationship.
 
 Ownership classes:
 

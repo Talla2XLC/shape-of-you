@@ -23,7 +23,9 @@ exist. Runtime PostgreSQL ownership and database-aware readiness are wired;
 the first-passkey bootstrap, passkey registration/login HTTP flow, secure
 browser session, exact-Origin validation, and session-bound CSRF defense are
 implemented. TOTP emergency recovery and passkey/session management are also
-implemented; OAuth HTTP flows remain pending.
+implemented. The OAuth HTTP profile and the API-owned MCP resource server are
+implemented; staging key provisioning, subject binding, ChatGPT client
+provisioning, and an external OAuth/MCP smoke remain operational steps.
 
 ## Content
 
@@ -150,11 +152,28 @@ Initial scopes are `person:read`, `weight:write`,
 
 ### ChatGPT and MCP
 
-The initial MCP resource server remains inside the API deployable and delegates
-to existing application contracts. It publishes protected-resource metadata
-and declares OAuth scopes per tool. ChatGPT confirms mutations conversationally;
-the API still enforces grants, validation, idempotency, provenance, and audit.
-No raw prompt or full conversation is stored.
+The initial MCP resource server is a stateless Streamable HTTP module inside
+the API deployable. Its internal endpoint is `/mcp`; staging exposes it as
+`https://staging.shape-of-you.ru/api/mcp`. The API publishes OAuth
+protected-resource metadata, advertises per-tool security schemes, and returns
+standards-complete OAuth challenges.
+
+Eight allowlisted tools list or record weight measurements, body measurement
+sessions, meals, and workout sessions. Reads require `person:read`; each write
+uses its domain-specific scope. Tools delegate to existing application
+contracts, so validation, idempotency, provenance, correction policy, and
+audit remain domain responsibilities rather than MCP-specific logic.
+
+Every tool call verifies the ES256 signature through Identity JWKS and checks
+the exact issuer, audience/resource, expiry, and required scope. The API then
+resolves an exact `(issuer, subject)` mapping to an active local User and an
+unambiguous active Person grant. Writes require `owner` or `editor`; `viewer`
+cannot mutate. Authenticated MCP execution always uses request-scoped Person
+context and never falls back to the synthetic compatibility context.
+
+ChatGPT confirms mutations conversationally before invoking a write tool; this
+is a client interaction policy, not a replacement for API authorization. No
+raw prompt or full conversation is stored.
 
 ### Operational separation
 
@@ -164,6 +183,11 @@ WebAuthn RP ID. Identity owns OAuth signing keys and their rotation. These key
 lifecycles are separate. Staging transports the TOTP key-ring identifier and
 encrypted key-ring secret into the root-owned Identity runtime environment and
 validates the key ring before migrations or service replacement.
+The same root-owned handoff transports the active OAuth signing-key identifier,
+the external signing-key ring, and provider cookie keys. The API receives only
+public trust configuration: Identity issuer, JWKS URI, and its own resource
+identifier. OAuth signing keys and TLS certificate keys never share storage or
+lifecycle.
 
 ## Evidence
 
@@ -171,8 +195,8 @@ validates the key ring before migrations or service replacement.
   protocol libraries on 2026-08-02.
 - An isolated Node.js 24 protocol and persistence-shape spike passed on
   2026-08-03; the operator accepted `oidc-provider` and SimpleWebAuthn.
-- Current OpenAI plugin authentication requirements were verified on
-  2026-08-02.
+- Current OpenAI plugin authentication requirements were re-verified on
+  2026-08-07 during independent quality review.
 
 ## Decisions
 

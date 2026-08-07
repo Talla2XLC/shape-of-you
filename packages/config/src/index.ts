@@ -17,6 +17,9 @@ const environmentSchema = z.object({
     .default("info"),
   PERSON_CONTEXT_MODE: z.enum(["synthetic", "authenticated"]),
   SYNTHETIC_PERSON_ID: z.string().uuid().optional(),
+  IDENTITY_OAUTH_ISSUER: z.string().url().optional(),
+  IDENTITY_OAUTH_JWKS_URI: z.string().url().optional(),
+  IDENTITY_OAUTH_RESOURCE: z.string().url().optional(),
   SHUTDOWN_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -32,6 +35,25 @@ const environmentSchema = z.object({
       code: "custom",
       path: ["SYNTHETIC_PERSON_ID"],
       message: "SYNTHETIC_PERSON_ID is required in synthetic mode"
+    });
+  }
+  const oauthSettings = [
+    environment.IDENTITY_OAUTH_ISSUER,
+    environment.IDENTITY_OAUTH_JWKS_URI,
+    environment.IDENTITY_OAUTH_RESOURCE
+  ];
+  if (oauthSettings.some(Boolean) && !oauthSettings.every(Boolean)) {
+    context.addIssue({
+      code: "custom",
+      path: ["IDENTITY_OAUTH_ISSUER"],
+      message: "Identity OAuth issuer, JWKS URI, and resource must be supplied together"
+    });
+  }
+  if (environment.PERSON_CONTEXT_MODE === "authenticated" && !oauthSettings.every(Boolean)) {
+    context.addIssue({
+      code: "custom",
+      path: ["IDENTITY_OAUTH_ISSUER"],
+      message: "Identity OAuth settings are required in authenticated mode"
     });
   }
 });

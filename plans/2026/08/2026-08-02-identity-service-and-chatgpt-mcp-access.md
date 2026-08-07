@@ -124,18 +124,24 @@
 
 ### 5. API resource-server integration
 
-- Добавить уникальное отображение `(issuer, subject)` на локальный `User`.
-- Проверять подпись, issuer, audience/resource, время и scopes.
-- После токена обязательно проверять локальный активный `PersonAccessGrant`.
-- Не создавать доступ к Person автоматически при первом входе.
+- [x] Инкремент `TASK-0031`: реализация и локальная проверка завершены;
+  staging activation и внешний smoke остаются отдельными операциями.
+- [x] Добавить уникальное отображение `(issuer, subject)` на локальный `User`.
+- [x] Проверять подпись, issuer, audience/resource, время и scopes.
+- [x] После токена обязательно проверять локальный активный
+  `PersonAccessGrant`.
+- [x] Не создавать доступ к Person автоматически при первом входе.
 
 ### 6. MCP adapter внутри API
 
-- Опубликовать protected-resource metadata и OAuth challenge.
-- Добавить allowlisted MCP tools поверх существующих application contracts.
-- Привязать scopes `person:read`, `weight:write`,
+- [x] Инкремент `TASK-0031`: код принят независимой проверкой качества.
+- [x] Опубликовать protected-resource metadata и OAuth challenge.
+- [x] Добавить allowlisted MCP tools поверх существующих application
+  contracts.
+- [x] Привязать scopes `person:read`, `weight:write`,
   `body-measurement:write`, `meal:write`, `workout:write` к отдельным tools.
-- Сохранить текущую идемпотентность и provenance; не хранить raw conversation.
+- [x] Сохранить текущую идемпотентность и provenance; не хранить raw
+  conversation.
 
 ### 7. Deployment и проверка безопасности
 

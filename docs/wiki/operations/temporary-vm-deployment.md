@@ -45,6 +45,9 @@ Environment secrets:
 ```text
 STAGING_DATABASE_URL
 STAGING_IDENTITY_DATABASE_URL
+STAGING_IDENTITY_TOTP_ENCRYPTION_KEYS
+STAGING_IDENTITY_OAUTH_SIGNING_KEYS
+STAGING_IDENTITY_OAUTH_COOKIE_KEYS
 STAGING_VM_SSH_PRIVATE_KEY
 STAGING_VM_KNOWN_HOSTS
 ```
@@ -59,6 +62,8 @@ GHCR_NAMESPACE
 STAGING_ACME_EMAIL
 STAGING_PUBLIC_IPV4
 STAGING_DEPLOYMENT_TOPOLOGY
+STAGING_IDENTITY_TOTP_ACTIVE_KEY_ID
+STAGING_IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID
 ```
 
 Database URL shape:
@@ -69,6 +74,14 @@ postgresql://shape_of_you_identity:<secret>@host.docker.internal:5431/shape_of_y
 ```
 
 Never log or store the value in release manifests.
+
+The OAuth signing-key ring contains private key material and the cookie key
+ring contains bearer-equivalent provider secrets. Create and store them only
+in the protected GitHub `staging` Environment. The corresponding active key id
+is a non-secret variable. The deploy workflow and root wrapper require the
+complete TOTP and OAuth groups whenever Identity deployment is enabled, then
+write them only to root-owned `identity.env`. Do not print either generated
+ring, copy it into chat, or commit it.
 
 `STAGING_DEPLOYMENT_TOPOLOGY` accepts `shared-ingress` or `standalone`. The
 current shared VM uses `shared-ingress`; the workflow defaults to that value
@@ -111,28 +124,44 @@ The Environment job invokes only:
 sudo -n /usr/local/sbin/shape-of-you-staging-deploy
 ```
 
-Wrapper accepts allowlisted stdin, creates runtime env, uses temporary
-`DOCKER_CONFIG`, verifies `CONTROL_SHA` against current `origin/main`, and runs
-root-owned
-`/opt/shape-of-you/staging/control/deploy/staging/scripts/deploy.sh`.
-CI sends no Compose, scripts, or arbitrary shell. Successful release updates
+The stable bootstrap accepts a bounded `key=value` request, extracts only
+`CONTROL_SHA`, verifies it against current `origin/main`, and invokes the fixed
+`deploy/staging/scripts/deployment-controller.sh` path from that exact commit.
+The versioned controller strictly validates the complete allowlist, creates
+runtime env, uses temporary `DOCKER_CONFIG`, and runs `deploy.sh`. CI sends no
+Compose, scripts, paths, or arbitrary shell. Successful release updates
 `current` and `previous`.
 
-After wrapper changes, operator installs from a verified checkout:
+Only a change to the bootstrap trust boundary or systemd/sudoers assets needs
+operator installation from a verified checkout:
 
 ```sh
 sudo sh deploy/staging/system/install-root-owned-assets.sh
 ```
 
-GitHub Actions never runs this installer.
+GitHub Actions never runs this installer. Ordinary controller, Compose,
+migration, smoke, and runtime-field changes arrive automatically with the
+verified commit and require no SSH maintenance.
 
 The completed Identity cutover used a backward-compatible preparation release
 before the digest, database URL, and Identity schema-compatibility declaration
-became one mandatory input group. The wrapper writes
+became one mandatory input group. The controller writes
 `/etc/shape-of-you/staging/identity.env` independently from `api.env`. An
 Identity release can automatically roll back only when both API and Identity
 schema compatibility are explicitly true. Older releases remain renderable
 without the optional Identity overlay and expect the historical edge `503`.
+
+Before the first OAuth/MCP-capable deployment, add the two OAuth secrets and
+active signing-key variable listed above, perform the one-time replacement of
+the old field-aware wrapper with the reviewed stable bootstrap, and deploy the
+accepted release. Stage that exact commit through a non-`main` preparation ref
+so the VM installation completes before updating `main`; this avoids an
+automatic deployment racing the old wrapper. All later controller protocol
+changes use the normal automatic `main` flow. After migrations, create the exact
+API subject binding through the provided operator CLI and provision the
+predefined ChatGPT client with the exact callback copied from ChatGPT. These
+are explicit operations; deployment does not guess or auto-create either
+relationship.
 
 The initial HTTP-to-HTTPS cutover used a temporary deployment gate. With
 separate approval, the operator:
@@ -154,7 +183,8 @@ The cutover completed on 2026-08-05. Every successful `main` publication now
 invokes staging deployment automatically. Direct `Deploy staging` dispatch
 remains available for an explicit retry or operator-selected release. The
 historical sequence prevented the new workflow input contract from racing the
-old installed root wrapper; it is not a steady-state switch.
+old installed root wrapper; the stable bootstrap removes this class of
+steady-state rollout race.
 
 ### TLS activation and renewal
 

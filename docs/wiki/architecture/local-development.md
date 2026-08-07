@@ -61,6 +61,44 @@ pnpm db:generate:identity
 pnpm db:migrate:identity
 ```
 
+OAuth and MCP are optional in host watch mode. Enable them only with local-only
+keys by setting all of the following service-owned values:
+
+```text
+apps/api/.env.local:
+IDENTITY_OAUTH_ISSUER
+IDENTITY_OAUTH_JWKS_URI
+IDENTITY_OAUTH_RESOURCE
+
+apps/identity/.env.local:
+IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID
+IDENTITY_OAUTH_SIGNING_KEYS
+IDENTITY_OAUTH_COOKIE_KEYS
+IDENTITY_OAUTH_RESOURCE
+```
+
+The three API values are an all-or-none group. With the example local ports,
+the MCP resource is `http://127.0.0.1:3000/mcp`, Identity is
+`http://127.0.0.1:3001`, and JWKS is available under `/oauth/jwks`. The checked-
+in environment examples contain names and safe placeholders only; ignored
+local files hold the generated local secrets.
+
+After API migrations and explicit creation of the API User/Person grant, bind
+the Identity subject without manual SQL:
+
+```sh
+cd apps/api
+node --env-file=.env.local --import tsx \
+  src/commands/bind-identity-subject.ts \
+  --issuer http://127.0.0.1:3001 \
+  --subject <identity-subject> \
+  --user-id <api-user-uuid>
+```
+
+The binding is idempotent and rejects a conflicting mapping. Default
+`pnpm local:up` remains a secret-free API/Identity development stack and does
+not invent OAuth signing keys or operator bindings.
+
 Package integration tests continue to use isolated PostgreSQL Testcontainers.
 They do not apply SQL to developer, staging, or operator databases.
 
@@ -74,8 +112,8 @@ The runner assigns ephemeral host ports, waits for both migration chains and
 runtime readiness, verifies API and Identity liveness/readiness through their
 internal network, and always removes its containers, volumes, networks, and
 project-built images. CI executes the same command. Local edge, TLS, OAuth flow
-automation, and browser passkey automation remain outside this first E2E
-increment.
+automation, MCP OAuth smoke, and browser passkey automation remain outside
+this first E2E increment.
 
 Validation:
 
@@ -104,8 +142,8 @@ stack. `pnpm test:unit` runs fast Docker-free checks.
 
 ## Open questions
 
-- Add an edge-routed OAuth E2E scenario after the OAuth endpoints and
-  API-to-Identity trust contract are implemented.
+- Add an edge-routed OAuth/MCP E2E scenario with disposable local signing keys
+  and explicit fixture bindings.
 
 ## Related material
 

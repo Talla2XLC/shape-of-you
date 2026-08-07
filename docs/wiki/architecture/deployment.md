@@ -16,7 +16,7 @@ tags:
 Temporary staging runs on a shared VM. GitHub Actions builds immutable images;
 an operator-owned transport ingress selects independently owned application
 edges; a dedicated `shape-deploy` identity invokes a constrained root-owned
-wrapper. Shape of You nginx, Certbot, and a root-owned systemd timer own the
+bootstrap. Shape of You nginx, Certbot, and a root-owned systemd timer own the
 project certificate lifecycle.
 
 ## Content
@@ -26,13 +26,17 @@ project certificate lifecycle.
 Pushes to `main` run quality, publish SHA-linked GHCR images, and automatically
 deploy exact digests to Environment `staging`. API, Identity, edge, and Certbot
 are independently built and attested, and all four coordinates belong to one
-atomic release. Input is an allowlisted stdin protocol to
+atomic release. Input is a bounded `key=value` request to
 `/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no build context,
 toolchain, writable scripts, or Compose file from CI.
 
 `shape-deploy` is outside Docker group and has passwordless sudo only for the
-wrapper without arguments. The wrapper fetches a root-owned control tree from
-verified `origin/main` at exact `CONTROL_SHA`.
+bootstrap without arguments. The stable bootstrap extracts only
+`CONTROL_SHA`, fetches a root-owned control tree from verified `origin/main`,
+requires an exact head match, and invokes the fixed versioned controller path
+from that commit. The controller owns the evolving release-field allowlist,
+validation, runtime environments, registry login, and deployment. Adding an
+ordinary deployment parameter therefore requires no bootstrap reinstall.
 
 ### Runtime and data
 
@@ -82,12 +86,25 @@ VM resources are limited and swap is in use. Current limits (`384m` API,
 `64m` edge) require observation before adding load.
 
 Identity runs from its independently published digest through the staging
-overlay. The deployment wrapper writes its database URL only to root-owned
-`/etc/shape-of-you/staging/identity.env`, applies Identity-owned migrations,
+overlay. The versioned deployment controller writes its database URL only to
+root-owned `/etc/shape-of-you/staging/identity.env`, applies Identity-owned migrations,
 waits for database-aware readiness, and then starts edge. API and Identity
 schema compatibility are declared independently; automatic rollback of an
 Identity release requires both declarations to be true. Edge/ACME owns TLS
 certificates; Identity owns OAuth signing keys.
+
+The root-owned runtime handoff also requires the Identity TOTP key ring, OAuth
+active signing-key identifier, OAuth signing-key ring, and provider cookie key
+ring whenever Identity deployment is enabled. API trust settings are fixed
+public values in the staging Compose contract: the Identity issuer and JWKS
+URI plus the external MCP resource
+`https://staging.shape-of-you.ru/api/mcp`. Identity uses that same resource
+identifier when issuing audience-bound access tokens.
+
+The edge exposes the API-owned MCP endpoint at `/api/mcp` while its internal
+route remains `/mcp`. Deploying the endpoint does not itself authorize a user:
+the API migration, explicit Identity subject-to-User binding, registered
+ChatGPT client, consent, and active Person grant remain separate gates.
 
 ## Evidence
 
