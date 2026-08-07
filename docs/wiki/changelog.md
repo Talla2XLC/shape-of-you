@@ -16,6 +16,22 @@ parsing, shared day lifecycle, and real-data migration remain separate stages.
 
 ## Content
 
+### 2026-08-07 — Minimal passkey-first Nuxt client
+
+- Added a static Nuxt 4 client with a public landing page, fragment-only
+  first-passkey enrollment, discoverable-passkey sign-in, and minimal passkey
+  and session management over existing Identity contracts.
+- Preserved the exact Identity origin, host-only session cookie, session-bound
+  CSRF, WebAuthn RP ID, API/MCP routes, and Identity protocol paths without
+  adding CORS, a frontend backend, a database, or another deployable runtime.
+- Embedded the static output in the existing unprivileged edge image and added
+  runtime host/path E2E coverage, immutable asset headers, safe client fallback,
+  and upstream-failure precedence.
+- Added deterministic Playwright coverage with a virtual WebAuthn authenticator
+  for fragment non-persistence, enrollment failures and cancellation, sign-in,
+  security mutations, unauthenticated redirects, keyboard focus, reduced
+  motion, and mobile width. ChatGPT provisioning and deployment remain deferred.
+
 ### 2026-08-07 — Stable staging deployment bootstrap
 
 - Reduced the installed root-owned deployment entrypoint to a bounded

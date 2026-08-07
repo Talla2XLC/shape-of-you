@@ -24,7 +24,12 @@ keys/
 node_modules/
 .pnpm-store/
 dist/
+apps/web/dist
 coverage/
+.nuxt/
+.output/
+playwright-report/
+test-results/
 
 # Deployment runtime state
 deploy/staging/*.env

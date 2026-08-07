@@ -26,6 +26,9 @@ implemented. TOTP emergency recovery and passkey/session management are also
 implemented. The OAuth HTTP profile and the API-owned MCP resource server are
 implemented; staging key provisioning, subject binding, ChatGPT client
 provisioning, and an external OAuth/MCP smoke remain operational steps.
+The accepted first Nuxt client preserves this exact Identity origin: edge serves
+the static browser shell on otherwise unreserved paths, while Identity keeps
+ownership of its metadata, OAuth, `/v1/`, and probe routes.
 
 ## Content
 
@@ -138,6 +141,15 @@ login and consent. It reuses the passkey session and CSRF contract, renders only
 validated client/scope information, and completes the provider interaction.
 The general product UI and visual design remain outside Identity.
 
+The first general browser UI is an edge-served static Nuxt client. Enrollment,
+sign-in, and security-management pages run only on the configured exact
+Identity origin and call relative `/v1/...` routes, so no CORS policy or cookie,
+CSRF, issuer, origin, or WebAuthn RP migration is introduced. The initial
+enrollment bearer is accepted only from a URL fragment, removed before the
+first request, held only in tab memory, and sent only in the Authorization
+header. TOTP/recovery UI and replacement of the narrow Identity-owned OAuth
+interaction page remain outside the first frontend release.
+
 OAuth interaction correlation and resume targets are stored as narrow typed
 columns. Authorization resume explicitly binds the interaction's authenticated
 passkey session to the provider Session UID; Identity does not create duplicate
@@ -208,6 +220,7 @@ lifecycle.
 - [Initial passkey bootstrap and CSRF](../../adr/20260806-bootstrap-first-passkey-and-require-origin-csrf-defense.md)
 - [TOTP emergency recovery](../../adr/20260806-use-totp-for-emergency-passkey-recovery.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
+- [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 
 ## Open questions
 

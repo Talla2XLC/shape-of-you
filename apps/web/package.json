@@ -1,0 +1,26 @@
+{
+  "name": "@shape-of-you/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt generate",
+    "dev": "nuxt dev --host 0.0.0.0 --port 3002",
+    "dev:local": "NUXT_PUBLIC_IDENTITY_ORIGIN=${NUXT_PUBLIC_IDENTITY_ORIGIN:-http://localhost:3002} nuxt dev --host 0.0.0.0 --port 3002",
+    "lint": "eslint app test nuxt.config.ts vitest.config.mjs",
+    "typecheck": "nuxt prepare && nuxt typecheck && tsc --noEmit -p test/tsconfig.json",
+    "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:e2e": "NUXT_PUBLIC_IDENTITY_ORIGIN=http://localhost:4173 nuxt generate && playwright test"
+  },
+  "dependencies": {
+    "@simplewebauthn/browser": "13.3.0",
+    "nuxt": "4.5.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "vue-tsc": "3.3.9"
+  }
+}

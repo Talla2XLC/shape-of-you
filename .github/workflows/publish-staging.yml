@@ -202,7 +202,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: deploy/staging/nginx
+          context: .
           file: deploy/staging/nginx/Dockerfile
           push: true
           tags: ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-edge:sha-${{ github.sha }}

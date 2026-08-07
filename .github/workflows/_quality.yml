@@ -30,6 +30,12 @@ jobs:
       - name: Test stable deployment bootstrap contract
         run: sh deploy/staging/scripts/tests/deployment-bootstrap-contract.sh
 
+      - name: Test frontend edge contract
+        run: sh deploy/staging/scripts/tests/frontend-edge-contract.sh
+
+      - name: Test frontend edge runtime
+        run: sh deploy/staging/scripts/tests/frontend-edge-runtime.sh
+
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -59,6 +65,12 @@ jobs:
 
       - name: Test local API and Identity stack
         run: pnpm test:e2e
+
+      - name: Install frontend E2E browser
+        run: pnpm --filter @shape-of-you/web exec playwright install --with-deps chromium
+
+      - name: Test frontend browser contracts
+        run: pnpm test:e2e:web
 
       - name: Validate canonical documentation
         run: node scripts/validate-docs.mjs

@@ -10,4 +10,8 @@ node_modules
 .pnpm-store
 **/dist
 **/coverage
+**/.nuxt
+**/.output
+**/playwright-report
+**/test-results
 *.log

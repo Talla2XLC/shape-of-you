@@ -9,13 +9,13 @@ tags:
   - "runtime"
 ---
 
-# Local backend development
+# Local development
 
 ## Summary
 
 Full local development uses Node.js 24, pnpm 11, and Docker Compose. API and
 Identity retain separate PostgreSQL databases, credentials, migration jobs,
-and runtime services.
+and runtime services. The Nuxt client runs on the host in watch mode.
 
 ## Content
 
@@ -60,6 +60,13 @@ pnpm db:migrate:api
 pnpm db:generate:identity
 pnpm db:migrate:identity
 ```
+
+Host watch mode serves the Nuxt client at `http://localhost:3002`. Its Vite
+development proxy keeps Identity browser requests same-origin while forwarding
+Identity-owned paths to `http://localhost:3001`. Identity uses the exact client
+origin `http://localhost:3002` for WebAuthn and session-cookie validation. This
+proxy is development-only; staging applies the same route ownership at the
+existing edge.
 
 OAuth and MCP are optional in host watch mode. Enable them only with local-only
 keys by setting all of the following service-owned values:
@@ -111,9 +118,22 @@ pnpm test:e2e
 The runner assigns ephemeral host ports, waits for both migration chains and
 runtime readiness, verifies API and Identity liveness/readiness through their
 internal network, and always removes its containers, volumes, networks, and
-project-built images. CI executes the same command. Local edge, TLS, OAuth flow
-automation, MCP OAuth smoke, and browser passkey automation remain outside
-this first E2E increment.
+project-built images. CI executes the same command.
+
+Frontend browser contracts run against the generated static output with
+Playwright Chromium and a virtual WebAuthn authenticator:
+
+```sh
+pnpm --filter @shape-of-you/web exec playwright install chromium
+pnpm test:e2e:web
+```
+
+The suite verifies same-origin navigation, fragment-only enrollment authority,
+passkey enrollment and sign-in, absence of bearer persistence, and CSRF on
+security mutations. Identity responses are bounded route fixtures, so the
+suite exercises the browser client deterministically without creating local
+accounts. Local edge, TLS, OAuth flow automation, and MCP OAuth smoke remain
+outside this E2E increment.
 
 Validation:
 
@@ -123,12 +143,14 @@ pnpm typecheck
 pnpm build
 pnpm test
 pnpm test:e2e
+pnpm test:e2e:web
 node scripts/validate-docs.mjs
 ```
 
 `pnpm test` includes PostgreSQL integration tests and needs a working container
 runtime. `pnpm test:e2e` additionally builds and verifies the disposable local
-stack. `pnpm test:unit` runs fast Docker-free checks.
+stack. `pnpm test:e2e:web` builds the static client and runs headless browser
+contracts. `pnpm test:unit` runs fast Docker-free checks.
 
 ## Evidence
 

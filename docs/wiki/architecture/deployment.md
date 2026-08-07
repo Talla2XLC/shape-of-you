@@ -19,6 +19,10 @@ edges; a dedicated `shape-deploy` identity invokes a constrained root-owned
 bootstrap. Shape of You nginx, Certbot, and a root-owned systemd timer own the
 project certificate lifecycle.
 
+The accepted first browser release adds a static Nuxt artifact to the existing
+Shape of You edge image. It does not add a frontend container or release
+coordinate.
+
 ## Content
 
 ### Delivery
@@ -49,6 +53,19 @@ routes `https://identity.staging.shape-of-you.ru` to the internal Identity
 service. That exact HTTPS origin is also the staging WebAuthn RP origin.
 Unknown hosts fail closed at both boundaries. PROXY protocol preserves client
 addresses for logging, forwarding, and rate limiting.
+
+On `staging.shape-of-you.ru`, edge serves the static Nuxt client by default
+while `/api`, `/api/`, `/.well-known/oauth-protected-resource`, and edge probes
+retain their current owners. On `identity.staging.shape-of-you.ru`, edge serves
+the same client by default while `/.well-known/`, `/oauth/`, `/v1/`, and the
+existing Identity probes continue to reach Identity. Reserved locations always
+take precedence over the static fallback and must not return client HTML for an
+upstream error or unknown backend route.
+
+The static artifact is the initial delivery mode rather than a permanent SSR
+restriction. A future stateless Nuxt/Nitro service can replace static fallback
+behind the same edge and origins when a measured server-rendering or independent
+release requirement justifies the extra runtime.
 
 The base staging Compose file has two deployment overlays. Current staging uses
 `shared-ingress`; a dedicated VM uses `standalone`, where Shape of You nginx
@@ -116,6 +133,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Temporary shared-VM deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
+- [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 
 ## Open questions
 
