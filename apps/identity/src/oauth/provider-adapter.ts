@@ -721,31 +721,49 @@ async function upsertSession(
   }
   const accountId = requireUuid(payload.accountId, "OAuth Session account id");
   const uid = requireString(payload.uid, "OAuth Session uid");
-  const resumeIdentifier = dependencies.requestContext.requireResumeIdentifier();
+  const resumeIdentifier = dependencies.requestContext.getResumeIdentifier();
   const client = await dependencies.pool.connect();
   try {
     await client.query("begin");
-    const bound = await client.query<{ id: string }>(
-      `update oauth_sessions s
-          set provider_uid = $4, provider_credential_hash = $5
-         from oauth_interactions i
-        where (i.credential_hash = $1 or i.provider_cid = $2)
-          and i.session_id = s.id
-          and i.account_id = $3 and s.account_id = $3 and s.id = i.session_id
-          and s.revoked_at is null and s.expires_at >= now()
-      returning s.id`,
-      [
-        hashBearerValue(resumeIdentifier),
-        resumeIdentifier,
-        accountId,
-        uid,
-        hashBearerValue(providerCredential)
-      ]
-    );
-    if (bound.rowCount !== 1) {
-      throw new Error("OAuth provider Session is not bound to the authorization resume");
+    let sessionId: string;
+    if (resumeIdentifier) {
+      const bound = await client.query<{ id: string }>(
+        `update oauth_sessions s
+            set provider_uid = $4, provider_credential_hash = $5
+           from oauth_interactions i
+          where (i.credential_hash = $1 or i.provider_cid = $2)
+            and i.session_id = s.id
+            and i.account_id = $3 and s.account_id = $3 and s.id = i.session_id
+            and s.revoked_at is null and s.expires_at >= now()
+        returning s.id`,
+        [
+          hashBearerValue(resumeIdentifier),
+          resumeIdentifier,
+          accountId,
+          uid,
+          hashBearerValue(providerCredential)
+        ]
+      );
+      if (bound.rowCount !== 1) {
+        throw new Error("OAuth provider Session is not bound to the authorization resume");
+      }
+      sessionId = bound.rows[0]!.id;
+    } else {
+      const existing = await client.query<{ id: string }>(
+        `select id
+           from oauth_sessions
+          where account_id = $1 and provider_uid = $2
+            and provider_credential_hash = $3
+            and revoked_at is null and expires_at >= now()
+          for update`,
+        [accountId, uid, hashBearerValue(providerCredential)]
+      );
+      if (existing.rowCount !== 1) {
+        throw new Error("OAuth provider Session is not already bound");
+      }
+      sessionId = existing.rows[0]!.id;
     }
-    await reconcileSessionAuthorizations(client, bound.rows[0]!.id, accountId, payload.authorizations);
+    await reconcileSessionAuthorizations(client, sessionId, accountId, payload.authorizations);
     await client.query("commit");
   } catch (error) {
     await client.query("rollback");
@@ -1127,23 +1145,61 @@ async function upsertRefreshToken(
   const client = await dependencies.pool.connect();
   try {
     await client.query("begin");
-    let family = await client.query<{ id: string }>(
-      `select id from oauth_refresh_token_families
-        where account_id = $1 and client_id = $2 and session_id = $3
-          and grant_id = $4 and created_at = to_timestamp($5)
+    const lockedSession = await client.query(
+      `select id
+         from oauth_sessions
+        where id = $1 and account_id = $2 and provider_uid = $3
+          and revoked_at is null and expires_at >= now()
         for update`,
-      [accountId, clientId, session.id, grantId, initialIat]
+      [session.id, accountId, sessionUid]
     );
-    if (generation === 0 && family.rowCount === 0) {
-      family = await client.query<{ id: string }>(
+    if (lockedSession.rowCount !== 1) {
+      throw new errors.InvalidGrant("OAuth RefreshToken session is unavailable");
+    }
+    let familyId: string | undefined;
+    if (generation === 0) {
+      const replacedFamilies = await client.query<{ id: string }>(
+        `select id
+           from oauth_refresh_token_families
+          where account_id = $1 and client_id = $2 and session_id = $3
+            and grant_id = $4 and revoked_at is null
+          for update`,
+        [accountId, clientId, session.id, grantId]
+      );
+      const replacedFamilyIds = replacedFamilies.rows.map((row) => row.id);
+      if (replacedFamilyIds.length > 0) {
+        await client.query(
+          `update oauth_refresh_tokens
+              set revoked_at = coalesce(revoked_at, now())
+            where family_id = any($1::uuid[])`,
+          [replacedFamilyIds]
+        );
+        await client.query(
+          `update oauth_refresh_token_families
+              set revoked_at = now()
+            where id = any($1::uuid[]) and revoked_at is null`,
+          [replacedFamilyIds]
+        );
+      }
+      const createdFamily = await client.query<{ id: string }>(
         `insert into oauth_refresh_token_families
            (id, account_id, client_id, session_id, grant_id, created_at, expires_at)
          values ($1, $2, $3, $4, $5, to_timestamp($6), to_timestamp($7))
          returning id`,
-        [randomUUID(), accountId, clientId, session.id, grantId, initialIat, expiresAt]
+        [randomUUID(), accountId, clientId, session.id, grantId, issuedAt, expiresAt]
       );
+      familyId = createdFamily.rows[0]?.id;
+    } else {
+      const activeFamily = await client.query<{ id: string }>(
+        `select id from oauth_refresh_token_families
+          where account_id = $1 and client_id = $2 and session_id = $3
+            and grant_id = $4 and created_at = to_timestamp($5)
+            and revoked_at is null
+          for update`,
+        [accountId, clientId, session.id, grantId, initialIat]
+      );
+      familyId = activeFamily.rows[0]?.id;
     }
-    const familyId = family.rows[0]?.id;
     if (!familyId) throw new Error("OAuth RefreshToken family is unavailable");
     const extended = await client.query(
       `update oauth_refresh_token_families

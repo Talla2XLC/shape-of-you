@@ -13,9 +13,14 @@ export class OAuthRequestContext {
     return this.storage.run({ resumeIdentifier }, callback);
   }
 
+  /** Returns the active authorization resume identifier when one is present. */
+  public getResumeIdentifier(): string | undefined {
+    return this.storage.getStore()?.resumeIdentifier;
+  }
+
   /** Returns the active provider resume identifier or fails closed outside that request. */
   public requireResumeIdentifier(): string {
-    const value = this.storage.getStore()?.resumeIdentifier;
+    const value = this.getResumeIdentifier();
     if (!value) {
       throw new Error("OAuth provider session write is not bound to an authorization resume");
     }

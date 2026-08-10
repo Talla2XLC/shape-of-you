@@ -14,6 +14,7 @@ import {
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import type { AdapterPayload } from "oidc-provider";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -653,6 +654,19 @@ describe("Identity migration chain", () => {
         accountId,
         uid: providerUid
       });
+      await expect(
+        session.upsert("N".repeat(43), {
+          accountId,
+          acr: "urn:soy:passkey",
+          amr: ["passkey"],
+          exp: now + 3_600,
+          iat: now,
+          jti: "N".repeat(43),
+          kind: "Session",
+          loginTs: now,
+          uid: providerUid
+        })
+      ).rejects.toThrow("OAuth provider Session is not already bound");
 
       const grantId = randomUUID();
       const grant = adapters("Grant");
@@ -665,20 +679,18 @@ describe("Identity migration chain", () => {
         openid: { scope: "person:read" },
         resources: { [resource]: "person:read" }
       });
-      await requestContext.run(interactionCredential, () =>
-        session.upsert(providerCredential, {
-          accountId,
-          acr: "urn:soy:passkey",
-          amr: ["passkey"],
-          authorizations: { chatgpt: { grantId } },
-          exp: now + 3_600,
-          iat: now,
-          jti: providerCredential,
-          kind: "Session",
-          loginTs: now,
-          uid: providerUid
-        })
-      );
+      await session.upsert(providerCredential, {
+        accountId,
+        acr: "urn:soy:passkey",
+        amr: ["passkey"],
+        authorizations: { chatgpt: { grantId } },
+        exp: now + 3_600,
+        iat: now,
+        jti: providerCredential,
+        kind: "Session",
+        loginTs: now,
+        uid: providerUid
+      });
 
       const authorizationCodeValue = "A".repeat(43);
       const authorizationCode = adapters("AuthorizationCode");
@@ -721,7 +733,8 @@ describe("Identity migration chain", () => {
 
       const refreshToken = adapters("RefreshToken");
       const firstRefreshValue = "R".repeat(43);
-      await refreshToken.upsert(firstRefreshValue, {
+      const concurrentRefreshValue = "Q".repeat(43);
+      const initialRefreshPayload: Omit<AdapterPayload, "jti"> = {
         accountId,
         acr: "urn:soy:passkey",
         amr: ["passkey"],
@@ -733,14 +746,43 @@ describe("Identity migration chain", () => {
         gty: "authorization_code",
         iat: now,
         iiat: now,
-        jti: firstRefreshValue,
         kind: "RefreshToken",
         resource,
         rotations: 0,
         scope: "person:read",
         sessionUid: providerUid
-      });
-      await refreshToken.consume(firstRefreshValue);
+      };
+      await Promise.all([
+        refreshToken.upsert(firstRefreshValue, {
+          ...initialRefreshPayload,
+          jti: firstRefreshValue
+        }),
+        refreshToken.upsert(concurrentRefreshValue, {
+          ...initialRefreshPayload,
+          jti: concurrentRefreshValue
+        })
+      ]);
+      const initialRefreshStates = await Promise.all([
+        refreshToken.find(firstRefreshValue),
+        refreshToken.find(concurrentRefreshValue)
+      ]);
+      expect(initialRefreshStates.filter(Boolean)).toHaveLength(1);
+      const activeInitialRefreshValue = initialRefreshStates[0]
+        ? firstRefreshValue
+        : concurrentRefreshValue;
+      const supersededInitialRefreshValue = initialRefreshStates[0]
+        ? concurrentRefreshValue
+        : firstRefreshValue;
+      await expect(
+        refreshToken.find(supersededInitialRefreshValue)
+      ).resolves.toBeUndefined();
+      const prematureReuseAudit = await pool.query(
+        `select id from identity_security_events
+          where account_id = $1 and event_type = 'oauth_refresh_reuse_detected'`,
+        [accountId]
+      );
+      expect(prematureReuseAudit.rowCount).toBe(0);
+      await refreshToken.consume(activeInitialRefreshValue);
       const secondRefreshValue = "T".repeat(43);
       await refreshToken.upsert(secondRefreshValue, {
         accountId,
@@ -775,7 +817,9 @@ describe("Identity migration chain", () => {
       ]);
       await expect(refreshToken.find(secondRefreshValue)).resolves.toBeUndefined();
       const family = await pool.query<{ id: string; reuse_detected_at: Date | null }>(
-        "select id, reuse_detected_at from oauth_refresh_token_families where grant_id = $1",
+        `select id, reuse_detected_at
+           from oauth_refresh_token_families
+          where grant_id = $1 and reuse_detected_at is not null`,
         [grantId]
       );
       expect(family.rows[0]?.reuse_detected_at).toBeInstanceOf(Date);
@@ -1084,7 +1128,56 @@ describe("Identity migration chain", () => {
         sub: subject
       });
 
-      const refreshed = await fetch(`${issuer}/oauth/token`, {
+      const repeatVerifier = "R".repeat(43);
+      const repeatChallenge = createHash("sha256")
+        .update(repeatVerifier)
+        .digest("base64url");
+      const authorizationCookies = [...cookies]
+        .filter(([name]) =>
+          name === identitySessionCookieName ||
+          name === identityCsrfCookieName ||
+          name.startsWith("shape_of_you_oidc_session")
+        )
+        .map(([name, value]) => `${name}=${value}`)
+        .join("; ");
+      const repeatedAuthorization = await fetch(
+        authorizationUrl({
+          code_challenge: repeatChallenge,
+          state: "repeat-runtime-state"
+        }),
+        {
+          headers: { cookie: authorizationCookies },
+          redirect: "manual"
+        }
+      );
+      const repeatedAuthorizationBody = repeatedAuthorization.status === 303
+        ? ""
+        : await repeatedAuthorization.text();
+      expect(repeatedAuthorization.status, repeatedAuthorizationBody).toBe(303);
+      const repeatedCallback = new URL(repeatedAuthorization.headers.get("location")!);
+      expect(repeatedCallback.origin + repeatedCallback.pathname).toBe(
+        "https://chatgpt.com/connector/oauth/runtime-callback"
+      );
+      expect(repeatedCallback.searchParams.get("state")).toBe("repeat-runtime-state");
+      const repeatedCode = repeatedCallback.searchParams.get("code");
+      expect(repeatedCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      const repeatedToken = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          code: repeatedCode!,
+          code_verifier: repeatVerifier,
+          grant_type: "authorization_code",
+          redirect_uri: "https://chatgpt.com/connector/oauth/runtime-callback"
+        })
+      });
+      expect(repeatedToken.status).toBe(200);
+      const repeatedTokenBody = await repeatedToken.json() as {
+        refresh_token: string;
+      };
+
+      const supersededRefresh = await fetch(`${issuer}/oauth/token`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: new URLSearchParams({
@@ -1093,9 +1186,19 @@ describe("Identity migration chain", () => {
           refresh_token: tokenBody.refresh_token
         })
       });
+      expect(supersededRefresh.status).toBe(400);
+      const refreshed = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          grant_type: "refresh_token",
+          refresh_token: repeatedTokenBody.refresh_token
+        })
+      });
       expect(refreshed.status).toBe(200);
       const refreshedBody = await refreshed.json() as { refresh_token: string };
-      expect(refreshedBody.refresh_token).not.toBe(tokenBody.refresh_token);
+      expect(refreshedBody.refresh_token).not.toBe(repeatedTokenBody.refresh_token);
       const audit = await pool.query<{ event_type: string }>(
         `select event_type from identity_security_events
           where account_id = $1 and client_id = 'chatgpt-runtime'
@@ -1104,6 +1207,7 @@ describe("Identity migration chain", () => {
       );
       expect(audit.rows.map((row) => row.event_type)).toEqual([
         "oauth_authorization",
+        "oauth_code_exchange",
         "oauth_code_exchange",
         "oauth_refresh_rotation"
       ]);
