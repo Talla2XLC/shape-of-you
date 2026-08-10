@@ -382,3 +382,37 @@ service-owned operator contract для отзыва `PersonAccessGrant`. Руч�
 Дополнение требует TSDoc для новых contracts/helpers, integration tests для
 revoke, повторного revoke, restore, повторного restore и конфликтов, полного
 developer gate и независимого Quality review до staging mutation.
+
+## Одобренное дополнение: безопасный OIDC `id_token_hint`
+
+После успешной проверки Identity session/refresh revocation ChatGPT 2026-08-10
+начал новый authorization request с OIDC `id_token_hint`. `oidc-provider`
+валидирует hint до создания Interaction, но typed adapter отклонил неизвестное
+поле и вернул `500`.
+
+Одобрено расширить существующую typed protocol-state модель:
+
+1. Разрешать `id_token_hint` только после стандартной проверки
+   `oidc-provider`; adapter не становится отдельным JWT verifier.
+2. Из проверенного hint извлекать только обязательный `sub` и сохранять его в
+   `oauth_interactions.id_token_hint_subject`. Raw JWT не сохранять, не
+   возвращать из adapter и не логировать.
+3. При завершении login требовать exact совпадение сохранённого OIDC subject с
+   выбранным active account. Принимаются отдельный public
+   `identity_accounts.subject` и provider account ID, который уже присутствует
+   в ранее выданных ID tokens; lookup другого account или неявная подмена
+   запрещены. Mismatch завершается fail-closed до изменения
+   Interaction/session/grant state.
+4. Добавить backward-compatible nullable column migration, проверку длины,
+   чистую migration-chain validation и runtime reconnect tests для accepted
+   hint, invalid hint и subject mismatch.
+5. Не менять issuer, OAuth endpoints, public client contract, access/refresh
+   token TTL, deployment topology или service ownership.
+
+Новый ADR не требуется: дополнение реализует уже принятое хранение OAuth
+protocol state в typed lifecycle tables. Migration, implementation, Quality,
+commit, push и deployment остаются отдельными gates.
+
+Выравнивание ID-token `sub` с отдельным public subject требует сквозного
+изменения provider Session/Grant/AuthorizationCode/RefreshToken contracts и не
+входит в это совместимое исправление reconnect.

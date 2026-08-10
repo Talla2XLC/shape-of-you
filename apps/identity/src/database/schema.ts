@@ -870,6 +870,7 @@ export const oauthInteractions = pgTable(
       .notNull(),
     clientState: text("client_state"),
     oidcNonce: text("oidc_nonce"),
+    idTokenHintSubject: varchar("id_token_hint_subject", { length: 512 }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull(),
@@ -923,6 +924,10 @@ export const oauthInteractions = pgTable(
     check(
       "oauth_interactions_expiry_after_creation",
       sql`${table.expiresAt} > ${table.createdAt}`
+    ),
+    check(
+      "oauth_interactions_id_token_hint_subject_nonempty",
+      sql`${table.idTokenHintSubject} IS NULL OR length(btrim(${table.idTokenHintSubject})) > 0`
     ),
     check(
       "oauth_interactions_account_session_pair",

@@ -50,6 +50,13 @@
       "when": 1786036643705,
       "tag": "20260806171723_spotty_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786375322997,
+      "tag": "20260810152202_solid_ultimates",
+      "breakpoints": true
     }
   ]
 }

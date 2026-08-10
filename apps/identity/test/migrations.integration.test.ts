@@ -289,8 +289,12 @@ describe("Identity migration chain", () => {
     const providerStateMigrationIndex = journal.entries.findIndex(
       (entry) => entry.tag === "20260806171723_spotty_arachne"
     );
+    const idTokenHintMigrationIndex = journal.entries.findIndex(
+      (entry) => entry.tag === "20260810152202_solid_ultimates"
+    );
     expect(providerStateMigrationIndex).toBeGreaterThan(0);
-    expect(providerStateMigrationIndex).toBe(journal.entries.length - 1);
+    expect(idTokenHintMigrationIndex).toBe(providerStateMigrationIndex + 1);
+    expect(idTokenHintMigrationIndex).toBe(journal.entries.length - 1);
     const priorEntries = journal.entries.slice(0, providerStateMigrationIndex);
     const sources = new Map(
       (await migrationSources()).map((source) => [source.tag, source.contents])
@@ -560,18 +564,31 @@ describe("Identity migration chain", () => {
       resource
     });
     const accountId = randomUUID();
+    const subject = randomUUID();
+    const mismatchedAccountId = randomUUID();
     const credentialId = randomUUID();
     const sessionId = randomUUID();
     const interactionCredential = "I".repeat(43);
     const providerCredential = "S".repeat(43);
     const providerUid = "U".repeat(43);
+    const idTokenHint = [
+      Buffer.from(JSON.stringify({ alg: "ES256", typ: "JWT" })).toString("base64url"),
+      Buffer.from(JSON.stringify({ sub: subject })).toString("base64url"),
+      "H".repeat(86)
+    ].join(".");
     const now = Math.floor(Date.now() / 1_000);
     try {
       await pool.query(
         `insert into identity_accounts
            (id, subject, webauthn_user_handle, display_name)
          values ($1, $2, $3, $4)`,
-        [accountId, randomUUID(), randomBytes(32), "OAuth adapter account"]
+        [accountId, subject, randomBytes(32), "OAuth adapter account"]
+      );
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [mismatchedAccountId, randomUUID(), randomBytes(32), "Other OAuth account"]
       );
       await pool.query(
         `insert into webauthn_credentials
@@ -612,6 +629,7 @@ describe("Identity migration chain", () => {
             client_id: "chatgpt",
             code_challenge: "P".repeat(43),
             code_challenge_method: "S256",
+            id_token_hint: idTokenHint,
             redirect_uri: "https://chatgpt.com/connector/oauth/new-callback-id",
             resource,
             response_type: "code",
@@ -623,6 +641,16 @@ describe("Identity migration chain", () => {
         },
         600
       );
+      const persistedHint = await pool.query<{ id_token_hint_subject: string | null }>(
+        `select id_token_hint_subject
+           from oauth_interactions
+          where credential_hash = $1`,
+        [createHash("sha256").update(interactionCredential).digest()]
+      );
+      expect(persistedHint.rows[0]?.id_token_hint_subject).toBe(subject);
+      await expect(interaction.find(interactionCredential)).resolves.toMatchObject({
+        params: expect.not.objectContaining({ id_token_hint: expect.anything() })
+      });
       await pool.query(
         `update oauth_interactions
             set account_id = $2, session_id = $3
@@ -653,6 +681,33 @@ describe("Identity migration chain", () => {
       await expect(session.findByUid(providerUid)).resolves.toMatchObject({
         accountId,
         uid: providerUid
+      });
+      const pendingInteraction = (await interaction.find(interactionCredential))!;
+      await expect(
+        interaction.upsert(interactionCredential, {
+          ...pendingInteraction,
+          result: {
+            login: {
+              accountId: mismatchedAccountId,
+              acr: "urn:soy:passkey",
+              amr: ["passkey"],
+              remember: true,
+              ts: now
+            }
+          }
+        })
+      ).rejects.toThrow("does not match the ID token hint subject");
+      await interaction.upsert(interactionCredential, {
+        ...pendingInteraction,
+        result: {
+          login: {
+            accountId,
+            acr: "urn:soy:passkey",
+            amr: ["passkey"],
+            remember: true,
+            ts: now
+          }
+        }
       });
       await expect(
         session.upsert("N".repeat(43), {
@@ -713,6 +768,13 @@ describe("Identity migration chain", () => {
         scope: "person:read",
         sessionUid: providerUid
       });
+      await pool.query(
+        `update oauth_authorization_codes
+            set created_at = now() + interval '5 seconds',
+                expires_at = now() + interval '10 minutes'
+          where code_hash = $1`,
+        [createHash("sha256").update(authorizationCodeValue).digest()]
+      );
       await expect(authorizationCode.find(authorizationCodeValue)).resolves.toMatchObject({
         accountId,
         consumed: undefined,
@@ -882,7 +944,7 @@ describe("Identity migration chain", () => {
         clientId: "chatgpt-runtime",
         displayName: "ChatGPT runtime",
         redirectUris: ["https://chatgpt.com/connector/oauth/runtime-callback"],
-        allowedScopes: ["person:read"],
+        allowedScopes: ["openid", "person:read"],
         refreshTokensEnabled: true
       });
       await pool.query(
@@ -969,7 +1031,7 @@ describe("Identity migration chain", () => {
         redirect_uri: "https://chatgpt.com/connector/oauth/runtime-callback",
         resource,
         response_type: "code",
-        scope: "person:read",
+        scope: "openid person:read",
         state: "runtime-state",
         ui_locales: "ru-RU en"
       };
@@ -985,7 +1047,8 @@ describe("Identity migration chain", () => {
         ["redirect", { redirect_uri: "https://attacker.example.test/callback" }],
         ["pkce", { code_challenge_method: "plain" }],
         ["scope", { scope: "weight:write" }],
-        ["resource", { resource: "https://unsupported.example.test/mcp" }]
+        ["resource", { resource: "https://unsupported.example.test/mcp" }],
+        ["id-token-hint", { id_token_hint: "not-a-compact-jwt" }]
       ]) {
         const rejected = await fetch(authorizationUrl(invalid as Record<string, string>), {
           redirect: "manual"
@@ -1114,9 +1177,11 @@ describe("Identity migration chain", () => {
       const tokenBody = await token.json() as {
         access_token: string;
         expires_in: number;
+        id_token: string;
         refresh_token: string;
       };
       expect(tokenBody.expires_in).toBe(600);
+      expect(tokenBody.id_token.split(".")).toHaveLength(3);
       expect(tokenBody.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
       const accessPayload = JSON.parse(
         Buffer.from(tokenBody.access_token.split(".")[1]!, "base64url").toString("utf8")
@@ -1124,7 +1189,7 @@ describe("Identity migration chain", () => {
       expect(accessPayload).toMatchObject({
         aud: resource,
         client_id: "chatgpt-runtime",
-        scope: "person:read",
+        scope: "openid person:read",
         sub: subject
       });
 
@@ -1132,21 +1197,17 @@ describe("Identity migration chain", () => {
       const repeatChallenge = createHash("sha256")
         .update(repeatVerifier)
         .digest("base64url");
-      const authorizationCookies = [...cookies]
-        .filter(([name]) =>
-          name === identitySessionCookieName ||
-          name === identityCsrfCookieName ||
-          name.startsWith("shape_of_you_oidc_session")
-        )
-        .map(([name, value]) => `${name}=${value}`)
-        .join("; ");
+      for (const name of [...cookies.keys()]) {
+        if (name.startsWith("shape_of_you_oidc_session")) cookies.delete(name);
+      }
       const repeatedAuthorization = await fetch(
         authorizationUrl({
           code_challenge: repeatChallenge,
+          id_token_hint: tokenBody.id_token,
           state: "repeat-runtime-state"
         }),
         {
-          headers: { cookie: authorizationCookies },
+          headers: { cookie: cookieHeader() },
           redirect: "manual"
         }
       );
@@ -1154,7 +1215,79 @@ describe("Identity migration chain", () => {
         ? ""
         : await repeatedAuthorization.text();
       expect(repeatedAuthorization.status, repeatedAuthorizationBody).toBe(303);
-      const repeatedCallback = new URL(repeatedAuthorization.headers.get("location")!);
+      applyCookies(repeatedAuthorization);
+      const reconnectLocation = repeatedAuthorization.headers.get("location");
+      expect(reconnectLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
+      const reconnectPage = await fetch(new URL(reconnectLocation!, issuer), {
+        headers: { cookie: cookieHeader() }
+      });
+      expect(reconnectPage.status).toBe(200);
+      expect(await reconnectPage.text()).toContain("Continue as Runtime account");
+      const reconnectLogin = await fetch(new URL(`${reconnectLocation}/login`, issuer), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          cookie: cookieHeader(),
+          origin: issuer
+        },
+        body: JSON.stringify({ csrfToken }),
+        redirect: "manual"
+      });
+      const reconnectLoginBody = reconnectLogin.status === 303
+        ? ""
+        : await reconnectLogin.text();
+      expect(reconnectLogin.status, reconnectLoginBody).toBe(303);
+      applyCookies(reconnectLogin);
+      const reconnectResume = await fetch(
+        new URL(reconnectLogin.headers.get("location")!, issuer),
+        {
+          headers: { cookie: cookieHeader() },
+          redirect: "manual"
+        }
+      );
+      const reconnectResumeBody = reconnectResume.status === 303
+        ? ""
+        : await reconnectResume.text();
+      expect(reconnectResume.status, reconnectResumeBody).toBe(303);
+      applyCookies(reconnectResume);
+      const reconnectConsentLocation = reconnectResume.headers.get("location");
+      expect(reconnectConsentLocation).toMatch(
+        /^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/
+      );
+      const reconnectConsentPage = await fetch(
+        new URL(reconnectConsentLocation!, issuer),
+        { headers: { cookie: cookieHeader() } }
+      );
+      expect(reconnectConsentPage.status).toBe(200);
+      expect(await reconnectConsentPage.text()).toContain("Authorize access");
+      const reconnectConsent = await fetch(
+        new URL(`${reconnectConsentLocation}/consent`, issuer),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: cookieHeader(),
+            origin: issuer
+          },
+          body: new URLSearchParams({ action: "allow", csrfToken }),
+          redirect: "manual"
+        }
+      );
+      expect(reconnectConsent.status).toBe(303);
+      applyCookies(reconnectConsent);
+      const reconnectConsentResume = await fetch(
+        new URL(reconnectConsent.headers.get("location")!, issuer),
+        {
+          headers: { cookie: cookieHeader() },
+          redirect: "manual"
+        }
+      );
+      expect(reconnectConsentResume.status).toBe(303);
+      applyCookies(reconnectConsentResume);
+      const repeatedCallback = new URL(
+        reconnectConsentResume.headers.get("location")!,
+        issuer
+      );
       expect(repeatedCallback.origin + repeatedCallback.pathname).toBe(
         "https://chatgpt.com/connector/oauth/runtime-callback"
       );
@@ -1199,6 +1332,13 @@ describe("Identity migration chain", () => {
       expect(refreshed.status).toBe(200);
       const refreshedBody = await refreshed.json() as { refresh_token: string };
       expect(refreshedBody.refresh_token).not.toBe(repeatedTokenBody.refresh_token);
+      const activeGrants = await pool.query<{ count: string }>(
+        `select count(*)::text as count from oauth_grants
+          where account_id = $1 and client_id = 'chatgpt-runtime'
+            and revoked_at is null`,
+        [accountId]
+      );
+      expect(activeGrants.rows[0]?.count).toBe("1");
       const audit = await pool.query<{ event_type: string }>(
         `select event_type from identity_security_events
           where account_id = $1 and client_id = 'chatgpt-runtime'
@@ -1207,10 +1347,75 @@ describe("Identity migration chain", () => {
       );
       expect(audit.rows.map((row) => row.event_type)).toEqual([
         "oauth_authorization",
+        "oauth_authorization",
         "oauth_code_exchange",
         "oauth_code_exchange",
         "oauth_refresh_rotation"
       ]);
+      const grantBeforeRenewal = await pool.query<{ id: string }>(
+        `update oauth_grants
+            set created_at = now() - interval '2 days',
+                expires_at = now() - interval '1 day'
+          where account_id = $1 and client_id = 'chatgpt-runtime'
+            and revoked_at is null
+        returning id`,
+        [accountId]
+      );
+      await clients.provisionPublicClient({
+        clientId: "grant-race-runtime",
+        displayName: "Grant race runtime",
+        redirectUris: ["https://chatgpt.com/connector/oauth/grant-race-callback"],
+        allowedScopes: ["openid", "person:read"],
+        refreshTokensEnabled: true
+      });
+      const constrainedPool = new Pool({
+        connectionString: container.getConnectionUri(),
+        connectionTimeoutMillis: 1_000,
+        max: 1
+      });
+      try {
+        const constrainedRuntime = new OAuthRuntime({
+          pool: constrainedPool,
+          issuer,
+          resource,
+          signingKeys,
+          cookieKeys: [randomBytes(32).toString("base64url")]
+        });
+        const renewedGrantIds = await Promise.all(
+          Array.from({ length: 4 }, () => constrainedRuntime.grantResourceScopes({
+            accountId,
+            clientId: "chatgpt-runtime",
+            scopes: ["openid", "person:read"]
+          }))
+        );
+        expect(new Set(renewedGrantIds)).toEqual(
+          new Set([grantBeforeRenewal.rows[0]!.id])
+        );
+        const racedGrantIds = await Promise.all(
+          Array.from({ length: 4 }, () => constrainedRuntime.grantResourceScopes({
+            accountId,
+            clientId: "grant-race-runtime",
+            scopes: ["openid", "person:read"]
+          }))
+        );
+        expect(new Set(racedGrantIds).size).toBe(1);
+      } finally {
+        await constrainedPool.end();
+      }
+      const renewedGrant = await pool.query<{ count: string }>(
+        `select count(*)::text as count from oauth_grants
+          where account_id = $1 and client_id = 'chatgpt-runtime'
+            and revoked_at is null and expires_at > now()`,
+        [accountId]
+      );
+      expect(renewedGrant.rows[0]?.count).toBe("1");
+      const racedGrant = await pool.query<{ count: string }>(
+        `select count(*)::text as count from oauth_grants
+          where account_id = $1 and client_id = 'grant-race-runtime'
+            and revoked_at is null and expires_at > now()`,
+        [accountId]
+      );
+      expect(racedGrant.rows[0]?.count).toBe("1");
       await pool.query(
         "update identity_accounts set status = 'disabled', disabled_at = now() where id = $1",
         [accountId]

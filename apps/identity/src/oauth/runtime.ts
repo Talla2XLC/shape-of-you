@@ -213,25 +213,52 @@ export class OAuthRuntime {
     });
   }
 
-  /** Creates or extends the consent grant used by an approved interaction. */
+  /** Creates, reuses, or extends the consent grant used by an approved interaction. */
   public async grantResourceScopes(input: {
     readonly accountId: string;
     readonly clientId: string;
     readonly existingGrantId?: string | undefined;
     readonly scopes: readonly string[];
   }): Promise<string> {
-    const grant = input.existingGrantId
-      ? await this.provider.Grant.find(input.existingGrantId)
-      : new this.provider.Grant({
+    for (const retry of [false, true]) {
+      const persistedGrant = input.existingGrantId
+        ? { id: input.existingGrantId }
+        : (await this.dependencies.pool.query<{ id: string }>(
+            `select id from oauth_grants
+              where account_id = $1 and client_id = $2 and revoked_at is null`,
+            [input.accountId, input.clientId]
+          )).rows[0];
+      let grant = persistedGrant
+        ? await this.provider.Grant.find(persistedGrant.id)
+        : undefined;
+      if (!grant && input.existingGrantId) {
+        throw new Error("OAuth grant is unavailable");
+      }
+      if (!grant) {
+        grant = new this.provider.Grant({
           accountId: input.accountId,
           clientId: input.clientId
-    });
-    if (!grant) throw new Error("OAuth grant is unavailable");
-    if (!grant.jti) grant.jti = randomUUID();
-    grant.addOIDCScope([...input.scopes]);
-    grant.addResourceScope(this.dependencies.resource, [...input.scopes]);
-    await grant.save();
-    return grant.jti;
+        });
+        grant.jti = persistedGrant?.id ?? randomUUID();
+      }
+      if (!grant.jti) grant.jti = randomUUID();
+      grant.addOIDCScope([...input.scopes]);
+      grant.addResourceScope(this.dependencies.resource, [...input.scopes]);
+      try {
+        await grant.save();
+        return grant.jti;
+      } catch (error) {
+        if (
+          retry ||
+          input.existingGrantId !== undefined ||
+          persistedGrant !== undefined ||
+          !isActiveGrantConflict(error)
+        ) {
+          throw error;
+        }
+      }
+    }
+    throw new Error("OAuth grant retry is exhausted");
   }
 
   private delegate(request: IncomingMessage, response: ServerResponse): void {
@@ -244,6 +271,15 @@ export class OAuthRuntime {
       }
     });
   }
+}
+
+/** Identifies the exact one-active-grant race that is safe to retry once. */
+function isActiveGrantConflict(error: unknown): boolean {
+  const databaseError = error as { code?: unknown; constraint?: unknown };
+  return (
+    databaseError.code === "23505" &&
+    databaseError.constraint === "oauth_grants_active_account_client_uq"
+  );
 }
 
 function escapeHtml(value: string): string {

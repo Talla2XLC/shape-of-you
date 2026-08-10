@@ -186,7 +186,7 @@ async function consumeAuthorizationCode(pool: Pool, credential: string): Promise
       session_id: string;
     }>(
       `update oauth_authorization_codes
-          set consumed_at = now()
+          set consumed_at = greatest(now(), created_at)
         where code_hash = $1 and consumed_at is null and expires_at >= now()
       returning account_id, client_id, grant_id, session_id`,
       [hashBearerValue(credential)]
@@ -358,6 +358,7 @@ async function upsertInteraction(
     "client_id",
     "code_challenge",
     "code_challenge_method",
+    "id_token_hint",
     "nonce",
     "redirect_uri",
     "resource",
@@ -370,6 +371,7 @@ async function upsertInteraction(
   const redirectUri = requireString(params.redirect_uri, "OAuth redirect URI");
   const codeChallenge = requireString(params.code_challenge, "OAuth PKCE challenge");
   optionalString(params.ui_locales, "OAuth UI locales");
+  const idTokenHintSubject = validatedIdTokenHintSubject(params.id_token_hint);
   if (params.code_challenge_method !== "S256" || params.response_type !== "code") {
     throw new Error("OAuth Interaction must use authorization code with S256 PKCE");
   }
@@ -408,6 +410,13 @@ async function upsertInteraction(
   }
 
   const session = await resolveInteractionSession(dependencies, payload.session);
+  if (session && idTokenHintSubject) {
+    await assertIdTokenHintAccount(
+      dependencies.pool,
+      idTokenHintSubject,
+      session.accountId
+    );
+  }
   const grantId = payload.grantId === undefined
     ? null
     : requireUuid(payload.grantId, "OAuth Interaction grant id");
@@ -420,9 +429,9 @@ async function upsertInteraction(
          (id, credential_hash, client_id, account_id, session_id, grant_id,
           prompt, status, provider_cid, provider_return_to, redirect_uri,
           code_challenge, code_challenge_method, client_state, oidc_nonce,
-          created_at, expires_at)
+          id_token_hint_subject, created_at, expires_at)
        values ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9, $10,
-               $11, 'S256', $12, $13, $14, $15)`,
+               $11, 'S256', $12, $13, $14, $15, $16)`,
       [
         internalId,
         hashBearerValue(credential),
@@ -437,6 +446,7 @@ async function upsertInteraction(
         codeChallenge,
         optionalString(params.state, "OAuth state"),
         optionalString(params.nonce, "OIDC nonce"),
+        idTokenHintSubject,
         new Date(iat * 1_000),
         new Date(exp * 1_000)
       ]
@@ -487,6 +497,10 @@ async function completeInteraction(
     const login = requireRecord(result.login, "OAuth login result");
     assertRecordFields(login, ["accountId", "acr", "amr", "remember", "ts"], "OAuth login result");
     const accountId = requireUuid(login.accountId, "OAuth login account id");
+    const idTokenHintSubject = await loadIdTokenHintSubject(pool, credential);
+    if (idTokenHintSubject) {
+      await assertIdTokenHintAccount(pool, idTokenHintSubject, accountId);
+    }
     const updated = await pool.query(
       `update oauth_interactions i
           set status = 'completed', completed_at = now()
@@ -561,6 +575,7 @@ async function findInteraction(
     created_at: Date;
     expires_at: Date;
     grant_id: string | null;
+    id_token_hint_subject: string | null;
     oidc_nonce: string | null;
     prompt: "login" | "consent";
     provider_credential_hash: Buffer | null;
@@ -573,7 +588,7 @@ async function findInteraction(
     `select i.client_id, i.account_id, i.grant_id, i.prompt, i.status,
             i.provider_cid, i.provider_return_to, i.redirect_uri,
             i.code_challenge, i.client_state, i.oidc_nonce, i.created_at,
-            i.expires_at, i.completed_at, s.provider_uid,
+            i.id_token_hint_subject, i.expires_at, i.completed_at, s.provider_uid,
             s.provider_credential_hash, s.authenticated_at, s.acr, s.amr
        from oauth_interactions i
        left join oauth_sessions s on s.id = i.session_id and s.account_id = i.account_id
@@ -623,7 +638,8 @@ async function findInteraction(
     row.provider_uid &&
     row.account_id &&
     row.acr &&
-    row.amr
+    row.amr &&
+    row.id_token_hint_subject === null
   ) {
     payload.session = {
       accountId: row.account_id,
@@ -1466,6 +1482,72 @@ function requireString(value: unknown, label: string): string {
 
 function optionalString(value: unknown, label: string): string | null {
   return value === undefined ? null : requireString(value, label);
+}
+
+/**
+ * Extracts only the subject from an ID token already validated by
+ * `oidc-provider` before Interaction persistence.
+ */
+function validatedIdTokenHintSubject(value: unknown): string | null {
+  const hint = optionalString(value, "OIDC ID token hint");
+  if (hint === null) return null;
+  if (hint.length > 16_384) throw new Error("OIDC ID token hint is too large");
+  const parts = hint.split(".");
+  if (
+    parts.length !== 3 ||
+    parts.some((part) => !part || !/^[A-Za-z0-9_-]+$/.test(part))
+  ) {
+    throw new Error("OIDC ID token hint is not a compact JWT");
+  }
+  let claims: Record<string, unknown>;
+  try {
+    claims = requireRecord(
+      JSON.parse(Buffer.from(parts[1]!, "base64url").toString("utf8")),
+      "OIDC ID token hint claims"
+    );
+  } catch (error) {
+    throw new Error("OIDC ID token hint claims are invalid", { cause: error });
+  }
+  return requireUuid(claims.sub, "OIDC ID token hint subject");
+}
+
+/** Loads the non-sensitive expected subject without rehydrating the raw hint. */
+async function loadIdTokenHintSubject(
+  pool: Pool,
+  credential: string
+): Promise<string | null> {
+  const result = await pool.query<{ id_token_hint_subject: string | null }>(
+    `select id_token_hint_subject
+       from oauth_interactions
+      where credential_hash = $1 and status = 'pending' and expires_at >= now()`,
+    [hashBearerValue(credential)]
+  );
+  return result.rows[0]?.id_token_hint_subject ?? null;
+}
+
+/**
+ * Requires a hinted OIDC subject to match the exact active account.
+ *
+ * Existing ID tokens use the provider account id while access tokens use the
+ * distinct public subject. Both identifiers are account-local and exact; no
+ * cross-account lookup or fallback is permitted.
+ */
+async function assertIdTokenHintAccount(
+  pool: Pool,
+  expectedSubject: string,
+  accountId: string
+): Promise<void> {
+  const result = await pool.query<{ id: string; subject: string }>(
+    "select id, subject from identity_accounts where id = $1 and status = 'active'",
+    [accountId]
+  );
+  const account = result.rows[0];
+  if (
+    account === undefined ||
+    (account.id !== expectedSubject && account.subject !== expectedSubject)
+  ) {
+    throw new Error("OAuth login does not match the ID token hint subject");
+  }
 }
 
 function requireEpoch(value: unknown, label: string): number {

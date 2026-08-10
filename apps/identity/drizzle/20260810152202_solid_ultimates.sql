@@ -1,0 +1,2 @@
+ALTER TABLE "oauth_interactions" ADD COLUMN "id_token_hint_subject" varchar(512);--> statement-breakpoint
+ALTER TABLE "oauth_interactions" ADD CONSTRAINT "oauth_interactions_id_token_hint_subject_nonempty" CHECK ("oauth_interactions"."id_token_hint_subject" IS NULL OR length(btrim("oauth_interactions"."id_token_hint_subject")) > 0);
