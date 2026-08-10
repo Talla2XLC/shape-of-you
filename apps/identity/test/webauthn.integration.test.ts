@@ -75,6 +75,7 @@ class FakeWebAuthnAdapter implements WebAuthnAdapter {
     expect(input.credential.credentialId).toEqual(
       Buffer.from(input.response.id, "base64url")
     );
+    expect(input.credential.transports).toEqual(["internal"]);
     return { counter: 0, backedUp: true };
   }
 }

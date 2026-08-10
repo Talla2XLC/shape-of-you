@@ -397,7 +397,8 @@ export class IdentityAuthenticationService {
     const credentialId = this.decodeCredentialId(input.response.id);
     const credentialResult = await this.pool.query<CredentialRow>(
       `select c.id as credential_row_id, c.credential_id, c.public_key,
-              c.counter::text, c.device_type, c.backed_up, c.transports,
+              c.counter::text, c.device_type, c.backed_up,
+              c.transports::text[] as transports,
               a.id, a.subject, a.webauthn_user_handle, a.display_name
          from webauthn_credentials c
          join identity_accounts a on a.id = c.account_id
