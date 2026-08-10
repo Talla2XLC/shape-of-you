@@ -926,7 +926,8 @@ describe("Identity migration chain", () => {
         resource,
         response_type: "code",
         scope: "person:read",
-        state: "runtime-state"
+        state: "runtime-state",
+        ui_locales: "ru-RU en"
       };
       const authorizationUrl = (overrides: Record<string, string> = {}): URL => {
         const authorization = new URL(`${issuer}/oauth/authorize`);

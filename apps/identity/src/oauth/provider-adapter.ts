@@ -363,11 +363,13 @@ async function upsertInteraction(
     "resource",
     "response_type",
     "scope",
-    "state"
+    "state",
+    "ui_locales"
   ], "OAuth Interaction params");
   const clientId = requireString(params.client_id, "OAuth client id");
   const redirectUri = requireString(params.redirect_uri, "OAuth redirect URI");
   const codeChallenge = requireString(params.code_challenge, "OAuth PKCE challenge");
+  optionalString(params.ui_locales, "OAuth UI locales");
   if (params.code_challenge_method !== "S256" || params.response_type !== "code") {
     throw new Error("OAuth Interaction must use authorization code with S256 PKCE");
   }
