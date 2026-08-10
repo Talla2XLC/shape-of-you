@@ -288,6 +288,157 @@ describe("API migration chain", () => {
     }
   });
 
+  it("revokes and restores Identity access idempotently with append-only history", async () => {
+    const database = createDatabase(databaseConfig(container.getConnectionUri()));
+    const repository = new IdentityAccessProvisioningRepository(database);
+    const mappings = new IdentitySubjectMappingRepository(database);
+    const issuer = "https://identity.lifecycle.example.test";
+    const subject = "lifecycle-subject";
+    let userId: string | undefined;
+    let personId: string | undefined;
+    try {
+      const provisioned = await repository.provisionOwnerAccess(issuer, subject);
+      userId = provisioned.userId;
+      personId = provisioned.personId;
+
+      const revokeResults = await Promise.all([
+        repository.revokeOwnerAccess(issuer, subject),
+        repository.revokeOwnerAccess(issuer, subject)
+      ]);
+      expect(revokeResults.map((result) => result.status).sort()).toEqual([
+        "existing",
+        "revoked"
+      ]);
+      expect(new Set(revokeResults.map((result) => result.grantId)).size).toBe(1);
+      const revokedGrantId = revokeResults[0]!.grantId;
+      await expect(
+        mappings.resolveAuthorizedPersons(issuer, subject)
+      ).resolves.toEqual([]);
+
+      const restoreResults = await Promise.all([
+        repository.restoreOwnerAccess(issuer, subject),
+        repository.restoreOwnerAccess(issuer, subject)
+      ]);
+      expect(restoreResults.map((result) => result.status).sort()).toEqual([
+        "existing",
+        "restored"
+      ]);
+      expect(new Set(restoreResults.map((result) => result.grantId)).size).toBe(1);
+      const restored = restoreResults[0]!;
+      expect(restored).toMatchObject({
+        personId,
+        userId
+      });
+      expect(restored.grantId).not.toBe(revokedGrantId);
+      await expect(
+        mappings.resolveAuthorizedPersons(issuer, subject)
+      ).resolves.toEqual([{ personId, roles: ["owner"] }]);
+
+      const rows = await database.pool.query<{
+        active_count: string;
+        grant_count: string;
+        revoked_count: string;
+      }>(
+        `select count(*)::text as grant_count,
+                count(*) filter (where status = 'active')::text as active_count,
+                count(*) filter (where status = 'revoked')::text as revoked_count
+           from person_access_grants
+          where user_id = $1`,
+        [userId]
+      );
+      expect(rows.rows[0]).toEqual({
+        active_count: "1",
+        grant_count: "2",
+        revoked_count: "1"
+      });
+    } finally {
+      if (userId && personId) {
+        await database.pool.query(
+          "delete from identity_subject_mappings where issuer = $1 and subject = $2",
+          [issuer, subject]
+        );
+        await database.pool.query(
+          "delete from person_access_grants where user_id = $1",
+          [userId]
+        );
+        await database.pool.query("delete from persons where id = $1", [personId]);
+        await database.pool.query("delete from users where id = $1", [userId]);
+      }
+      await database.pool.end();
+    }
+  });
+
+  it("rejects unsafe Identity access lifecycle states without mutation", async () => {
+    const database = createDatabase(databaseConfig(container.getConnectionUri()));
+    const repository = new IdentityAccessProvisioningRepository(database);
+    const issuer = "https://identity.lifecycle-conflict.example.test";
+    const subject = "lifecycle-conflict-subject";
+    let userId: string | undefined;
+    let personId: string | undefined;
+    try {
+      await expect(
+        repository.revokeOwnerAccess(issuer, subject)
+      ).rejects.toBeInstanceOf(IdentityAccessProvisioningConflictError);
+      await expect(
+        repository.restoreOwnerAccess(issuer, subject)
+      ).rejects.toBeInstanceOf(IdentityAccessProvisioningConflictError);
+
+      const provisioned = await repository.provisionOwnerAccess(issuer, subject);
+      userId = provisioned.userId;
+      personId = provisioned.personId;
+      await database.pool.query(
+        `insert into person_access_grants
+           (person_id, user_id, role, status)
+         values ($1, $2, 'viewer', 'active')`,
+        [personId, userId]
+      );
+      await expect(
+        repository.revokeOwnerAccess(issuer, subject)
+      ).rejects.toBeInstanceOf(IdentityAccessProvisioningConflictError);
+      const activeBeforeCleanup = await database.pool.query<{ count: string }>(
+        `select count(*)::text as count
+           from person_access_grants
+          where user_id = $1 and status = 'active'`,
+        [userId]
+      );
+      expect(activeBeforeCleanup.rows[0]?.count).toBe("2");
+
+      await database.pool.query(
+        "delete from person_access_grants where user_id = $1 and role = 'viewer'",
+        [userId]
+      );
+      await repository.revokeOwnerAccess(issuer, subject);
+      await database.pool.query(
+        "update persons set status = 'archived' where id = $1",
+        [personId]
+      );
+      await expect(
+        repository.restoreOwnerAccess(issuer, subject)
+      ).rejects.toBeInstanceOf(IdentityAccessProvisioningConflictError);
+      const activeAfterConflict = await database.pool.query<{ count: string }>(
+        `select count(*)::text as count
+           from person_access_grants
+          where user_id = $1 and status = 'active'`,
+        [userId]
+      );
+      expect(activeAfterConflict.rows[0]?.count).toBe("0");
+    } finally {
+      if (userId && personId) {
+        await database.pool.query(
+          "delete from identity_subject_mappings where issuer = $1 and subject = $2",
+          [issuer, subject]
+        );
+        await database.pool.query(
+          "delete from person_access_grants where user_id = $1",
+          [userId]
+        );
+        await database.pool.query("delete from persons where id = $1", [personId]);
+        await database.pool.query("delete from users where id = $1", [userId]);
+      }
+      await database.pool.end();
+    }
+  });
+
   it("upgrades every committed journal prefix through the production runner", async () => {
     const adminPool = new Pool({ connectionString: container.getConnectionUri() });
     try {

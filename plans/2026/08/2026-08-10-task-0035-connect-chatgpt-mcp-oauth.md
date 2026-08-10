@@ -355,3 +355,30 @@ management UI и WebAuthn user-presence остаются минимальным�
 tests. Developer и независимый quality review выполняются до любых staging
 mutations. Затем DevOps получает отдельное разрешение на точный provisioning и
 external ChatGPT E2E scope.
+
+## Одобренное дополнение: безопасная проверка revocation
+
+После успешного external evaluation 2026-08-10 обнаружено, что Identity
+session можно отозвать через существующий Security UI, но API не имеет
+service-owned operator contract для отзыва `PersonAccessGrant`. Ручной SQL
+остаётся запрещённым.
+
+Одобрено добавить две узкие API operator-команды без изменения schema,
+публичного HTTP API или deployment topology:
+
+1. `identity-access:revoke --issuer --subject` атомарно находит exact binding
+   и единственный active real Person owner grant, переводит grant в `revoked`
+   и устанавливает `revoked_at`. Безопасный повтор возвращает `existing`.
+2. `identity-access:restore --issuer --subject` требует exact binding,
+   active User, active real Person и отсутствие active grants, после чего
+   создаёт новый active owner grant. Отозванная строка не реактивируется, чтобы
+   сохранить историю lifecycle. Безопасный повтор возвращает `existing`.
+3. Частичное, неоднозначное, disabled, archived или synthetic состояние
+   завершается fail-closed без неявного ремонта.
+4. External pin test: после revoke MCP read немедленно теряет Person context;
+   после restore тот же authenticated subject снова получает доступ. Identity
+   session/refresh revocation проверяется отдельно через существующий UI.
+
+Дополнение требует TSDoc для новых contracts/helpers, integration tests для
+revoke, повторного revoke, restore, повторного restore и конфликтов, полного
+developer gate и независимого Quality review до staging mutation.

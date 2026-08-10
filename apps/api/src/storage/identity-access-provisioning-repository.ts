@@ -11,6 +11,14 @@ export interface IdentityAccessProvisioningResult {
   readonly userId: string;
 }
 
+/** Result of changing one provisioned Identity subject's Person access. */
+export interface IdentityAccessLifecycleResult {
+  readonly grantId: string;
+  readonly personId: string;
+  readonly status: "existing" | "restored" | "revoked";
+  readonly userId: string;
+}
+
 /** Fail-closed error for partial or ambiguous authorization state. */
 export class IdentityAccessProvisioningConflictError extends Error {
   public constructor(message: string) {
@@ -29,6 +37,18 @@ interface ActiveGrantRow {
   readonly person_kind: "real" | "synthetic";
   readonly person_status: "active" | "archived";
   readonly role: "owner" | "editor" | "viewer" | "coach";
+}
+
+interface GrantLifecycleRow extends ActiveGrantRow {
+  readonly grant_id: string;
+  readonly grant_status: "active" | "revoked";
+}
+
+interface IdentityAccessLifecycleState {
+  readonly activeGrant: GrantLifecycleRow | undefined;
+  readonly latestGrant: GrantLifecycleRow;
+  readonly personId: string;
+  readonly userId: string;
 }
 
 /**
@@ -98,6 +118,99 @@ export class IdentityAccessProvisioningRepository {
       client.release();
     }
   }
+
+  /**
+   * Revokes the sole active real Person owner grant for an Identity subject.
+   *
+   * Calls are serialized with provisioning and restoration. A safe repeat
+   * returns the latest revoked grant without changing lifecycle history.
+   *
+   * @param issuer Exact external Identity origin that issued the subject.
+   * @param subject Opaque public subject owned by the Identity service.
+   * @returns API-owned ids and whether the active grant was revoked.
+   * @throws {IdentityAccessProvisioningConflictError} When the binding or
+   * grant history is missing, partial, disabled, synthetic, or ambiguous.
+   */
+  public async revokeOwnerAccess(
+    issuer: string,
+    subject: string
+  ): Promise<IdentityAccessLifecycleResult> {
+    validateIdentityReference(issuer, subject);
+    const client = await this.database.pool.connect();
+    try {
+      await client.query("begin");
+      await lockIdentityAccess(client, issuer, subject);
+      const state = await loadLifecycleState(client, issuer, subject);
+      if (!state.activeGrant) {
+        await client.query("commit");
+        return lifecycleResult(state, state.latestGrant.grant_id, "existing");
+      }
+
+      const revoked = await client.query<{ id: string }>(
+        `update person_access_grants
+            set status = 'revoked', revoked_at = now()
+          where id = $1 and status = 'active'
+        returning id`,
+        [state.activeGrant.grant_id]
+      );
+      if (revoked.rowCount !== 1 || !revoked.rows[0]) {
+        throw new IdentityAccessProvisioningConflictError(
+          "Identity access active grant changed concurrently"
+        );
+      }
+      await client.query("commit");
+      return lifecycleResult(state, revoked.rows[0].id, "revoked");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Restores a revoked Identity subject by creating a new active owner grant.
+   *
+   * Revoked rows remain immutable lifecycle history. A safe repeat returns
+   * the current active grant instead of creating another grant.
+   *
+   * @param issuer Exact external Identity origin that issued the subject.
+   * @param subject Opaque public subject owned by the Identity service.
+   * @returns API-owned ids and whether a new active grant was created.
+   * @throws {IdentityAccessProvisioningConflictError} When the binding or
+   * grant history is missing, partial, disabled, synthetic, or ambiguous.
+   */
+  public async restoreOwnerAccess(
+    issuer: string,
+    subject: string
+  ): Promise<IdentityAccessLifecycleResult> {
+    validateIdentityReference(issuer, subject);
+    const client = await this.database.pool.connect();
+    try {
+      await client.query("begin");
+      await lockIdentityAccess(client, issuer, subject);
+      const state = await loadLifecycleState(client, issuer, subject);
+      if (state.activeGrant) {
+        await client.query("commit");
+        return lifecycleResult(state, state.activeGrant.grant_id, "existing");
+      }
+
+      const grantId = randomUUID();
+      await client.query(
+        `insert into person_access_grants
+           (id, person_id, user_id, role, status)
+         values ($1, $2, $3, 'owner', 'active')`,
+        [grantId, state.personId, state.userId]
+      );
+      await client.query("commit");
+      return lifecycleResult(state, grantId, "restored");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
 }
 
 /** Validates the exact external Identity reference stored by the API. */
@@ -109,6 +222,98 @@ function validateIdentityReference(issuer: string, subject: string): void {
   if (!subject.trim() || subject.length > 512) {
     throw new Error("Identity subject is invalid");
   }
+}
+
+/** Serializes all lifecycle changes for one exact external identity. */
+async function lockIdentityAccess(
+  client: PoolClient,
+  issuer: string,
+  subject: string
+): Promise<void> {
+  await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    JSON.stringify([issuer, subject])
+  ]);
+}
+
+/** Resolves a complete, unambiguous owner-grant lifecycle for mutation. */
+async function loadLifecycleState(
+  client: PoolClient,
+  issuer: string,
+  subject: string
+): Promise<IdentityAccessLifecycleState> {
+  const binding = await client.query<ExistingBindingRow>(
+    `select m.user_id, u.status as user_status
+       from identity_subject_mappings m
+       join users u on u.id = m.user_id
+      where m.issuer = $1 and m.subject = $2`,
+    [issuer, subject]
+  );
+  const existing = binding.rows[0];
+  if (binding.rows.length !== 1 || !existing) {
+    throw new IdentityAccessProvisioningConflictError(
+      "Identity access binding does not exist"
+    );
+  }
+  if (existing.user_status !== "active") {
+    throw new IdentityAccessProvisioningConflictError(
+      "Identity access is bound to a disabled API User"
+    );
+  }
+
+  const grants = await client.query<GrantLifecycleRow>(
+    `select g.id as grant_id,
+            g.person_id,
+            g.role,
+            g.status as grant_status,
+            p.kind as person_kind,
+            p.status as person_status
+       from person_access_grants g
+       join persons p on p.id = g.person_id
+      where g.user_id = $1
+      order by g.granted_at desc, g.id desc`,
+    [existing.user_id]
+  );
+  const latestGrant = grants.rows[0];
+  if (!latestGrant) {
+    throw new IdentityAccessProvisioningConflictError(
+      "Identity access grant history does not exist"
+    );
+  }
+  const activeGrants = grants.rows.filter(
+    (grant) => grant.grant_status === "active"
+  );
+  const invalidHistory = grants.rows.some(
+    (grant) =>
+      grant.person_id !== latestGrant.person_id ||
+      grant.role !== "owner" ||
+      grant.person_kind !== "real" ||
+      grant.person_status !== "active"
+  );
+  if (invalidHistory || activeGrants.length > 1) {
+    throw new IdentityAccessProvisioningConflictError(
+      "Identity access does not have one unambiguous real Person owner lifecycle"
+    );
+  }
+  return {
+    activeGrant: activeGrants[0],
+    latestGrant,
+    personId: latestGrant.person_id,
+    userId: existing.user_id
+  };
+}
+
+/** Builds credential-free output state from a validated lifecycle. */
+function lifecycleResult(
+  state: IdentityAccessLifecycleState,
+  grantId: string,
+  status: IdentityAccessLifecycleResult["status"]
+): IdentityAccessLifecycleResult {
+  return {
+    grantId,
+    personId: state.personId,
+    status,
+    userId: state.userId
+  };
 }
 
 /** Resolves and validates a previously provisioned authorization shape. */
