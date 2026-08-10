@@ -1020,16 +1020,22 @@ describe("Identity migration chain", () => {
         headers: { cookie: cookieHeader() }
       });
       expect(consentPage.status).toBe(200);
-      await expect(consentPage.text()).resolves.toContain("Read your profile");
+      expect(consentPage.headers.get("content-security-policy")).toContain(
+        "form-action 'self' https://chatgpt.com"
+      );
+      const consentPageHtml = await consentPage.text();
+      expect(consentPageHtml).toContain("Read your profile");
+      expect(consentPageHtml).toContain('method="post"');
+      expect(consentPageHtml).toContain(`${consentLocation}/consent`);
 
       const consent = await fetch(new URL(`${consentLocation}/consent`, issuer), {
         method: "POST",
         headers: {
-          "content-type": "application/json",
+          "content-type": "application/x-www-form-urlencoded",
           cookie: cookieHeader(),
           origin: issuer
         },
-        body: JSON.stringify({ action: "allow", csrfToken }),
+        body: new URLSearchParams({ action: "allow", csrfToken }),
         redirect: "manual"
       });
       expect(consent.status).toBe(303);

@@ -69,6 +69,7 @@ export class OAuthBrowserUi {
     const details = await this.dependencies.runtime.interactionDetails(request, response);
     if (details.uid !== interactionCredential) throw new Error("OAuth interaction cookie mismatch");
     const clientId = requireString(details.params.client_id, "OAuth client id");
+    const redirectOrigin = requireRedirectOrigin(details.params.redirect_uri);
     const client = await this.dependencies.clients.findProviderClient(clientId);
     if (!client) throw new Error("OAuth client is unavailable");
     const scopes = splitScope(requireString(details.params.scope, "OAuth scope"));
@@ -92,7 +93,7 @@ export class OAuthBrowserUi {
       session
     });
     response.writeHead(200, {
-      "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+      "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${redirectOrigin}`,
       "content-type": "text/html; charset=utf-8",
       "referrer-policy": "no-referrer",
       "x-content-type-options": "nosniff",
@@ -107,7 +108,7 @@ export class OAuthBrowserUi {
     interactionCredential: string,
     route: "login" | "consent"
   ): Promise<void> {
-    const body = submissionSchema.parse(await readJson(request));
+    const body = submissionSchema.parse(await readSubmission(request));
     const details = await this.dependencies.runtime.interactionDetails(request, response);
     if (details.uid !== interactionCredential || details.prompt.name !== route) {
       throw new IdentityAuthenticationError(400, "invalid_oauth_interaction", "OAuth interaction is invalid");
@@ -167,7 +168,8 @@ async function optionalSession(
   }
 }
 
-async function readJson(request: IncomingMessage): Promise<unknown> {
+/** Reads a bounded JSON or native-form OAuth interaction submission. */
+async function readSubmission(request: IncomingMessage): Promise<unknown> {
   const chunks: Buffer[] = [];
   let length = 0;
   for await (const chunk of request) {
@@ -176,8 +178,16 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
     if (length > 16 * 1_024) throw new IdentityAuthenticationError(413, "payload_too_large", "Request body is too large");
     chunks.push(buffer);
   }
+  const body = Buffer.concat(chunks).toString("utf8");
+  const contentType = request.headers["content-type"]?.split(";", 1)[0]?.trim();
+  if (contentType === "application/x-www-form-urlencoded") {
+    return Object.fromEntries(new URLSearchParams(body));
+  }
+  if (contentType !== "application/json") {
+    throw new IdentityAuthenticationError(415, "unsupported_media_type", "Request body type is not supported");
+  }
   try {
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as unknown;
+    return JSON.parse(body) as unknown;
   } catch {
     throw new IdentityAuthenticationError(400, "invalid_json", "Request body must be valid JSON");
   }
@@ -202,7 +212,7 @@ function renderPage(input: {
   const authenticatedAction = input.session && input.csrfToken
     ? input.prompt === "login"
       ? `<button id="continue" type="button">Continue as ${escapeHtml(input.session.displayName)}</button>`
-      : `<button id="allow" type="button">Allow</button><button id="deny" class="secondary" type="button">Deny</button>`
+      : `<form method="post" action="/oauth/interaction/${escapeHtml(input.interactionCredential)}/consent"><input type="hidden" name="csrfToken" value="${escapeHtml(input.csrfToken)}"><button name="action" value="allow" type="submit">Allow</button><button name="action" value="deny" type="submit" class="secondary">Deny</button></form>`
     : `<button id="passkey" type="button">Sign in with a passkey</button>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -216,7 +226,7 @@ const to64=v=>btoa(String.fromCharCode(...new Uint8Array(v))).replace(/\\+/g,'-'
 const fail=e=>{document.getElementById('error').textContent=e instanceof Error?e.message:'Request failed'};
 async function submit(route,action){const r=await fetch('/oauth/interaction/'+interaction+'/'+route,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({csrfToken:csrf,action}),redirect:'follow'});if(r.redirected){location.assign(r.url);return}if(!r.ok)throw new Error('Authorization request failed')}
 async function passkey(){const o=await fetch('/v1/webauthn/authentication/options',{method:'POST'}).then(r=>r.json());const p=o.options;p.challenge=from64(p.challenge);if(p.allowCredentials)p.allowCredentials=p.allowCredentials.map(x=>({...x,id:from64(x.id)}));const c=await navigator.credentials.get({publicKey:p});const response={id:c.id,rawId:to64(c.rawId),type:c.type,response:{authenticatorData:to64(c.response.authenticatorData),clientDataJSON:to64(c.response.clientDataJSON),signature:to64(c.response.signature),userHandle:c.response.userHandle?to64(c.response.userHandle):undefined},clientExtensionResults:c.getClientExtensionResults(),authenticatorAttachment:c.authenticatorAttachment};const r=await fetch('/v1/webauthn/authentication/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({challengeId:o.challengeId,response})});const body=await r.json();if(!r.ok)throw new Error(body.message||'Passkey sign-in failed');csrf=body.csrfToken;await submit('login')}
-document.getElementById('passkey')?.addEventListener('click',()=>passkey().catch(fail));document.getElementById('continue')?.addEventListener('click',()=>submit('login').catch(fail));document.getElementById('allow')?.addEventListener('click',()=>submit('consent','allow').catch(fail));document.getElementById('deny')?.addEventListener('click',()=>submit('consent','deny').catch(fail));
+document.getElementById('passkey')?.addEventListener('click',()=>passkey().catch(fail));document.getElementById('continue')?.addEventListener('click',()=>submit('login').catch(fail));
 </script></body></html>`;
 }
 
@@ -251,6 +261,14 @@ function readCookie(header: string | undefined, name: string): string | null {
 function requireString(value: unknown, label: string): string {
   if (typeof value !== "string" || !value) throw new Error(`${label} is invalid`);
   return value;
+}
+
+/** Returns the CSP source origin of the provider-validated redirect URI. */
+function requireRedirectOrigin(value: unknown): string {
+  const redirectUri = requireString(value, "OAuth redirect URI");
+  const origin = new URL(redirectUri).origin;
+  if (origin === "null") throw new Error("OAuth redirect URI origin is invalid");
+  return origin;
 }
 
 function splitScope(value: string): string[] {
