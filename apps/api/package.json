@@ -20,7 +20,8 @@
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts",
-    "identity-subject:bind": "tsx src/commands/bind-identity-subject.ts"
+    "identity-subject:bind": "tsx src/commands/bind-identity-subject.ts",
+    "identity-access:provision": "tsx src/commands/provision-identity-access.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

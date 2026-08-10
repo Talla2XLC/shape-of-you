@@ -21,6 +21,7 @@
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts",
     "account:bootstrap": "tsx src/commands/bootstrap-account.ts",
+    "account:subject": "tsx src/commands/show-account-subject.ts",
     "oauth-client:provision": "tsx src/commands/provision-oauth-client.ts"
   },
   "dependencies": {

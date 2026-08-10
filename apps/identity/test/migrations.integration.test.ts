@@ -24,6 +24,10 @@ import {
   identityCsrfCookieName,
   identitySessionCookieName
 } from "../src/authentication/service.js";
+import {
+  IdentityAccountSubjectNotFoundError,
+  IdentityAccountSubjectStore
+} from "../src/authentication/account-subject-store.js";
 import { SimpleWebAuthnAdapter } from "../src/authentication/webauthn-adapter.js";
 import {
   checkIdentityDatabaseReadiness,
@@ -153,6 +157,32 @@ describe("Identity migration chain", () => {
       );
       expect(result.rows).toEqual(expected);
     } finally {
+      await pool.end();
+    }
+  });
+
+  it("resolves only the immutable public subject for an exact account", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const store = new IdentityAccountSubjectStore(pool);
+    const accountId = randomUUID();
+    const subject = randomUUID();
+    try {
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [accountId, subject, randomBytes(32), "Subject lookup fixture"]
+      );
+
+      await expect(store.findExact(accountId)).resolves.toEqual({
+        accountId,
+        subject
+      });
+      await expect(store.findExact(randomUUID())).rejects.toBeInstanceOf(
+        IdentityAccountSubjectNotFoundError
+      );
+    } finally {
+      await pool.query("delete from identity_accounts where id = $1", [accountId]);
       await pool.end();
     }
   });

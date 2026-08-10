@@ -16,6 +16,10 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { createDatabase } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
 import { personAccessGrants, users } from "../src/database/schema.js";
+import {
+  IdentityAccessProvisioningConflictError,
+  IdentityAccessProvisioningRepository
+} from "../src/storage/identity-access-provisioning-repository.js";
 import { IdentitySubjectMappingRepository } from "../src/storage/identity-subject-mapping-repository.js";
 
 interface MigrationJournalEntry {
@@ -183,6 +187,103 @@ describe("API migration chain", () => {
         )
       ).resolves.toEqual([]);
     } finally {
+      await database.pool.end();
+    }
+  });
+
+  it("provisions one complete Identity access shape idempotently", async () => {
+    const database = createDatabase(databaseConfig(container.getConnectionUri()));
+    const repository = new IdentityAccessProvisioningRepository(database);
+    const mappings = new IdentitySubjectMappingRepository(database);
+    const issuer = "https://identity.provisioning.example.test";
+    const subject = "provisioning-subject";
+    let userId: string | undefined;
+    let personId: string | undefined;
+    try {
+      const created = await repository.provisionOwnerAccess(issuer, subject);
+      userId = created.userId;
+      personId = created.personId;
+      expect(created.status).toBe("created");
+      await expect(repository.provisionOwnerAccess(issuer, subject)).resolves.toEqual({
+        personId,
+        status: "existing",
+        userId
+      });
+      await expect(
+        mappings.resolveAuthorizedPersons(issuer, subject)
+      ).resolves.toEqual([{ personId, roles: ["owner"] }]);
+
+      const rows = await database.pool.query<{
+        grant_count: string;
+        mapping_count: string;
+        person_count: string;
+        user_count: string;
+      }>(
+        `select
+           (select count(*)::text from users where id = $1) as user_count,
+           (select count(*)::text from persons where id = $2 and kind = 'real') as person_count,
+           (select count(*)::text from person_access_grants where user_id = $1 and status = 'active') as grant_count,
+           (select count(*)::text from identity_subject_mappings where issuer = $3 and subject = $4) as mapping_count`,
+        [userId, personId, issuer, subject]
+      );
+      expect(rows.rows[0]).toEqual({
+        grant_count: "1",
+        mapping_count: "1",
+        person_count: "1",
+        user_count: "1"
+      });
+    } finally {
+      if (userId && personId) {
+        await database.pool.query(
+          "delete from identity_subject_mappings where issuer = $1 and subject = $2",
+          [issuer, subject]
+        );
+        await database.pool.query("delete from person_access_grants where user_id = $1", [
+          userId
+        ]);
+        await database.pool.query("delete from persons where id = $1", [personId]);
+        await database.pool.query("delete from users where id = $1", [userId]);
+      }
+      await database.pool.end();
+    }
+  });
+
+  it("rejects partial and ambiguous Identity access without repairing it", async () => {
+    const database = createDatabase(databaseConfig(container.getConnectionUri()));
+    const repository = new IdentityAccessProvisioningRepository(database);
+    const mappings = new IdentitySubjectMappingRepository(database);
+    const issuer = "https://identity.conflict.example.test";
+    const subject = "partial-subject";
+    const userId = "00000000-0000-4000-8000-000000000301";
+    try {
+      await database.db.insert(users).values({ id: userId });
+      await mappings.bind(issuer, subject, userId);
+
+      await expect(repository.provisionOwnerAccess(issuer, subject)).rejects.toBeInstanceOf(
+        IdentityAccessProvisioningConflictError
+      );
+      const state = await database.pool.query<{
+        grant_count: string;
+        mapping_count: string;
+        person_count: string;
+      }>(
+        `select
+           (select count(*)::text from person_access_grants where user_id = $1) as grant_count,
+           (select count(*)::text from identity_subject_mappings where issuer = $2 and subject = $3) as mapping_count,
+           (select count(*)::text from persons p join person_access_grants g on g.person_id = p.id where g.user_id = $1) as person_count`,
+        [userId, issuer, subject]
+      );
+      expect(state.rows[0]).toEqual({
+        grant_count: "0",
+        mapping_count: "1",
+        person_count: "0"
+      });
+    } finally {
+      await database.pool.query(
+        "delete from identity_subject_mappings where issuer = $1 and subject = $2",
+        [issuer, subject]
+      );
+      await database.pool.query("delete from users where id = $1", [userId]);
       await database.pool.end();
     }
   });
