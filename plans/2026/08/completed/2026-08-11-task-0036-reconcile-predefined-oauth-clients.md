@@ -1,9 +1,9 @@
 # TASK-0036 — Автоматическая сверка predefined OAuth clients при deployment
 
-Статус: Quality принят; код и canonical docs готовы к release packaging.
+Статус: завершён 2026-08-11.
 
 Архитектурная основа: accepted ADR
-[`docs/adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md`](../../../docs/adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md).
+[`docs/adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md`](../../../../docs/adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md).
 
 ADR и этот план утверждены оператором 2026-08-11. GitHub configuration,
 staging database и OAuth clients остаются отдельными operational gates.
@@ -172,7 +172,7 @@ operator-created clients и не перенося provisioning в normal server 
   API+Identity Docker E2E.
 - Canonical docs validation: 52 Wiki, 42 ADR, 94 unique IDs; docs tests 3/3 и
   `git diff --check` прошли.
-- GitHub variables, staging state, commit и push не изменялись.
+- До release gate GitHub variables, staging state, commit и push не изменялись.
 
 ## Итоговый Architecture Review
 
@@ -188,5 +188,16 @@ operator-created clients и не перенося provisioning в normal server 
    требуемой пользы; выбранный вариант сохраняет horizontal scalability и
    fail-closed deployment.
 
-Независимый Quality re-review принят без P0/P1/P2. GitHub Environment variable,
-commit, push и первый staging reconciliation остаются отдельными approvals.
+Независимый Quality re-review принят без P0/P1/P2.
+
+## Release evidence
+
+- Оператор настроил `STAGING_IDENTITY_CHATGPT_REDIRECT_URI`, не записывая его
+  значение в timeline или deployment logs.
+- Commit `c0d47808146e75fcb9d4f01c7659f3bdb7f84644` опубликован в `main`.
+- GitHub Actions run `31488101052` прошёл Quality, публикацию и automatic
+  staging deployment.
+- Identity migrations завершились до one-shot reconcile; reserved client
+  получил status `updated`, после чего runtime replacement и smoke прошли.
+- Публичные Identity liveness/readiness, OAuth discovery и MCP protected
+  resource metadata подтверждены read-only проверками.

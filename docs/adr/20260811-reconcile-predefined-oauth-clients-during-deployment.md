@@ -148,4 +148,4 @@ callback.
 - [Typed Identity protocol state](20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
 - [Durable OAuth connections](20260810-require-offline-access-for-durable-oauth-connections.md)
 - [Temporary VM deployment](../wiki/operations/temporary-vm-deployment.md)
-- [TASK-0036 implementation plan](../../plans/2026/08/2026-08-11-task-0036-reconcile-predefined-oauth-clients.md)
+- [TASK-0036 implementation plan](../../plans/2026/08/completed/2026-08-11-task-0036-reconcile-predefined-oauth-clients.md)
