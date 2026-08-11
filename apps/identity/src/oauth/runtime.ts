@@ -14,14 +14,20 @@ import { createOAuthProviderAdapterFactory } from "./provider-adapter.js";
 import { OAuthRequestContext } from "./request-context.js";
 import type { OAuthSigningKeyRing } from "./signing-keys.js";
 
-/** Initial resource scopes exposed to the ChatGPT OAuth client. */
-export const initialOAuthScopes = [
+/** OIDC protocol scopes supported by the initial external-client profile. */
+export const initialOAuthProtocolScopes = ["openid", "offline_access"] as const;
+
+/** Resource permissions exposed by the initial Shape of You MCP server. */
+export const initialOAuthResourceScopes = [
   "body-measurement:write",
   "meal:write",
   "person:read",
   "weight:write",
   "workout:write"
 ] as const;
+
+const initialOAuthProtocolScopeSet = new Set<string>(initialOAuthProtocolScopes);
+const initialOAuthResourceScopeSet = new Set<string>(initialOAuthResourceScopes);
 
 /** Inputs required to create the Identity-owned OAuth protocol runtime. */
 export interface OAuthRuntimeDependencies {
@@ -78,7 +84,7 @@ export class OAuthRuntime {
               accessTokenTTL: 600,
               audience: dependencies.resource,
               jwt: { sign: { alg: "ES256", kid: dependencies.signingKeys.activeKeyId } },
-              scope: initialOAuthScopes.join(" ")
+              scope: initialOAuthResourceScopes.join(" ")
             };
           }
         },
@@ -119,7 +125,8 @@ export class OAuthRuntime {
         url: async (_context, interaction) =>
           `/oauth/interaction/${interaction.uid}`
       },
-      issueRefreshToken: async (_context, client) =>
+      issueRefreshToken: async (_context, client, code) =>
+        code.scopes.has("offline_access") &&
         this.clients.isRefreshTokenEnabled(client.clientId),
       jwks: { keys: dependencies.signingKeys.jwks as readonly JWK[] },
       pkce: { required: () => true },
@@ -143,7 +150,7 @@ export class OAuthRuntime {
         revocation: "/oauth/revoke",
         token: "/oauth/token"
       },
-      scopes: initialOAuthScopes,
+      scopes: [...initialOAuthProtocolScopes, ...initialOAuthResourceScopes],
       subjectTypes: ["public"],
       ttl: {
         AccessToken: 600,
@@ -186,6 +193,9 @@ export class OAuthRuntime {
     response: ServerResponse,
     pathname: string
   ): void {
+    if (pathname === "/oauth/authorize") {
+      ensureOfflineAccessConsentPrompt(request, this.dependencies.issuer);
+    }
     const resume = pathname.match(/^\/oauth\/authorize\/([A-Za-z0-9_-]{43})$/);
     if (resume) {
       this.requestContext.run(resume[1]!, () => this.delegate(request, response));
@@ -213,13 +223,43 @@ export class OAuthRuntime {
     });
   }
 
-  /** Creates, reuses, or extends the consent grant used by an approved interaction. */
-  public async grantResourceScopes(input: {
+  /** Creates, reuses, or extends one consent grant with disjoint protocol and resource scopes. */
+  public async grantConsentScopes(input: {
     readonly accountId: string;
     readonly clientId: string;
     readonly existingGrantId?: string | undefined;
     readonly scopes: readonly string[];
   }): Promise<string> {
+    const uniqueScopes = [...new Set(input.scopes)];
+    const allowedScopes = await this.clients.listAllowedScopes(input.clientId);
+    if (uniqueScopes.some((scope) => !allowedScopes.has(scope))) {
+      throw new errors.InvalidScope(
+        "OAuth consent exceeds the client scope allowlist",
+        uniqueScopes.join(" ")
+      );
+    }
+    if (
+      uniqueScopes.includes("offline_access") &&
+      !(await this.clients.isRefreshTokenEnabled(input.clientId))
+    ) {
+      throw new errors.InvalidScope(
+        "OAuth client cannot receive offline access",
+        "offline_access"
+      );
+    }
+    const oidcScopes = uniqueScopes.filter((scope) =>
+      initialOAuthProtocolScopeSet.has(scope)
+    );
+    const resourceScopes = uniqueScopes.filter((scope) =>
+      initialOAuthResourceScopeSet.has(scope)
+    );
+    if (oidcScopes.length + resourceScopes.length !== uniqueScopes.length) {
+      throw new errors.InvalidScope(
+        "OAuth consent contains an unsupported scope",
+        uniqueScopes.join(" ")
+      );
+    }
+
     for (const retry of [false, true]) {
       const persistedGrant = input.existingGrantId
         ? { id: input.existingGrantId }
@@ -242,8 +282,9 @@ export class OAuthRuntime {
         grant.jti = persistedGrant?.id ?? randomUUID();
       }
       if (!grant.jti) grant.jti = randomUUID();
-      grant.addOIDCScope([...input.scopes]);
-      grant.addResourceScope(this.dependencies.resource, [...input.scopes]);
+      grant.addOIDCScope(oidcScopes);
+      grant.rejectOIDCScope(resourceScopes);
+      grant.addResourceScope(this.dependencies.resource, resourceScopes);
       try {
         await grant.save();
         return grant.jti;
@@ -271,6 +312,23 @@ export class OAuthRuntime {
       }
     });
   }
+}
+
+/** Forces explicit consent when a client requests OIDC offline access without a prompt. */
+function ensureOfflineAccessConsentPrompt(
+  request: IncomingMessage,
+  issuer: string
+): void {
+  if (request.method !== "GET" || !request.url) return;
+  const authorization = new URL(request.url, issuer);
+  const scopes = new Set(
+    authorization.searchParams.get("scope")?.split(" ").filter(Boolean) ?? []
+  );
+  if (!scopes.has("offline_access") || authorization.searchParams.has("prompt")) {
+    return;
+  }
+  authorization.searchParams.set("prompt", "consent");
+  request.url = `${authorization.pathname}${authorization.search}`;
 }
 
 /** Identifies the exact one-active-grant race that is safe to retry once. */

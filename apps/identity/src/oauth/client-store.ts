@@ -49,6 +49,7 @@ export class OAuthClientStore {
       client_name: row.display_name,
       redirect_uris: [...row.redirect_uris].sort(),
       response_types: ["code"],
+      scope: [...row.allowed_scopes].sort().join(" "),
       grant_types: row.refresh_tokens_enabled
         ? ["authorization_code", "refresh_token"]
         : ["authorization_code"],
@@ -138,6 +139,12 @@ function validatePublicClient(input: OAuthPublicClientInput): void {
   }
   if (input.allowedScopes.some((scope) => !/^[A-Za-z0-9:._-]{1,200}$/.test(scope))) {
     throw new Error("OAuth client scope is invalid");
+  }
+  if (
+    input.allowedScopes.includes("offline_access") &&
+    !input.refreshTokensEnabled
+  ) {
+    throw new Error("OAuth offline access requires refresh tokens");
   }
 }
 

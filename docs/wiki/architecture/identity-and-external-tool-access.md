@@ -24,8 +24,10 @@ the first-passkey bootstrap, passkey registration/login HTTP flow, secure
 browser session, exact-Origin validation, and session-bound CSRF defense are
 implemented. TOTP emergency recovery and passkey/session management are also
 implemented. The OAuth HTTP profile and the API-owned MCP resource server are
-implemented; staging key provisioning, subject binding, ChatGPT client
-provisioning, and an external OAuth/MCP smoke remain operational steps.
+implemented. The first staging key/client provisioning, subject binding, and
+external OAuth/MCP smoke are complete. Deployment and reprovisioning of the
+durable `offline_access` profile plus an external access-token-expiry check
+remain operational steps.
 The accepted first Nuxt client preserves this exact Identity origin: edge serves
 the static browser shell on otherwise unreserved paths, while Identity keeps
 ownership of its metadata, OAuth, `/v1/`, and probe routes.
@@ -78,7 +80,10 @@ payload.
 
 The initial profile uses authorization code with S256 PKCE, OIDC discovery, a
 predefined ChatGPT public client, ten-minute audience-bound ES256 JWT access
-tokens, hashed rotating refresh credentials, and public JWKS. Open DCR and CIMD
+tokens, hashed rotating refresh credentials, and public JWKS. Durable clients
+must request the allowlisted OIDC `offline_access` scope and have refresh-token
+issuance enabled. Protocol scopes remain separate from resource permissions;
+MCP access tokens contain only the approved resource scopes. Open DCR and CIMD
 are deferred for the first single-operator connection.
 
 Local development and staging supply private ES256 keys through a versioned
@@ -159,8 +164,9 @@ that one session row. Rotating the provider cookie replaces only its hash and
 does not revoke the passkey session; explicit session revocation remains the
 shared lifecycle boundary.
 
-Initial scopes are `person:read`, `weight:write`,
-`body-measurement:write`, `meal:write`, and `workout:write`.
+The initial protocol scopes are `openid` and `offline_access`. Resource scopes
+are `person:read`, `weight:write`, `body-measurement:write`, `meal:write`, and
+`workout:write`.
 
 ### ChatGPT and MCP
 
@@ -221,6 +227,7 @@ lifecycle.
 - [TOTP emergency recovery](../../adr/20260806-use-totp-for-emergency-passkey-recovery.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
+- [Durable OAuth connections](../../adr/20260810-require-offline-access-for-durable-oauth-connections.md)
 
 ## Open questions
 

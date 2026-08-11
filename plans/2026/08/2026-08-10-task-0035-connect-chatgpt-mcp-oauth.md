@@ -416,3 +416,109 @@ commit, push и deployment остаются отдельными gates.
 Выравнивание ID-token `sub` с отдельным public subject требует сквозного
 изменения provider Session/Grant/AuthorizationCode/RefreshToken contracts и не
 входит в это совместимое исправление reconnect.
+
+## Одобренное дополнение: `offline_access` для долгоживущего подключения
+
+После принятого исправления OIDC `id_token_hint` новый authorization flow
+завершается успешно, однако после истечения access token ChatGPT снова требует
+интерактивное подключение. За тот же период Identity и API не получили refresh
+request и не зарегистрировали token/authentication error. В фактическом
+authorization request присутствуют `openid` и пять resource scopes, но нет
+`offline_access`; Identity также не рекламирует и не разрешает этот protocol
+scope.
+
+Дополнение опирается на accepted ADR
+[`docs/adr/20260810-require-offline-access-for-durable-oauth-connections.md`](../../../docs/adr/20260810-require-offline-access-for-durable-oauth-connections.md)
+и разрешает исходный код в точной границе этого дополнения после утверждения
+оператором 2026-08-10.
+
+### Выбранное изменение
+
+1. Добавить `offline_access` в OIDC discovery `scopes_supported` Identity и в
+   exact allowlist predefined client `shape-of-you-chatgpt-staging`.
+2. Разделить запрошенные scopes при создании/обновлении consent grant:
+   `openid` и `offline_access` хранить только в
+   `oauth_grant_oidc_scopes`; пять MCP resource scopes — только в
+   `oauth_grant_resource_scopes` для exact
+   `https://staging.shape-of-you.ru/api/mcp` resource.
+3. Не рекламировать protocol scopes в MCP protected-resource metadata и не
+   считать их API permissions. API продолжает проверять только exact audience,
+   subject mapping, active Person grant и требуемый per-tool resource scope.
+4. Сохранить десятиминутный access token, 30-дневный rotating refresh token,
+   family reuse detection, session/client/resource binding и существующую
+   revocation model.
+5. После deployment обновить predefined client только штатным
+   `oauth-client:provision`, без ручного SQL, затем пересоздать ChatGPT
+   application connection для повторного чтения discovery metadata.
+
+### Scope и ограничения
+
+- Входит: `apps/identity` OAuth runtime/consent scope classification, exact
+  client validation, tests, proposed ADR и последующее current-state Wiki
+  alignment после accepted Quality.
+- Не входит: новые tables/migrations, API/MCP tools, новые resource scopes,
+  access-token TTL changes, DCR, CIMD, новый deployable, новая БД или изменения
+  WebAuthn/Identity origin.
+- Staging client reprovision, ChatGPT application recreation, deployment и
+  external expiry smoke остаются отдельными explicit operator gates.
+- Tokens, cookies, authorization codes, PKCE verifier, passkey material,
+  database URLs и `.env` values не читаются, не печатаются и не фиксируются.
+
+### Критерии приёмки
+
+1. Authorization-server и OpenID discovery рекламируют `offline_access`, а MCP
+   protected-resource metadata по-прежнему содержит только пять resource
+   scopes.
+2. Клиент без exact allowlist или без включённых refresh tokens не может
+   запросить `offline_access`; остальные неизвестные scopes также отклоняются.
+3. Consent grant хранит `openid`/`offline_access` только как OIDC scopes и пять
+   MCP permissions только как resource scopes exact MCP resource.
+4. Полный Authorization Code + S256 PKCE flow с `openid offline_access` и
+   resource scopes выдаёт short-lived access token и rotating refresh-token
+   family без расширения API authority.
+5. После simulated access-token expiry refresh rotation проходит, reuse старого
+   refresh token отклоняется, новый access token выполняет read MCP action без
+   нового интерактивного authorization flow.
+6. Repeated/concurrent consent сохраняет один active grant; reconnect с
+   `id_token_hint` продолжает проходить, mismatch остаётся fail-closed.
+7. Integration coverage проходит и при `DATABASE_POOL_MAX=1`; PostgreSQL
+   identifiers проверены на лимит 63 UTF-8 bytes, `git diff --check` и canonical
+   docs validation зелёные.
+8. External staging pin после отдельного approval подтверждает refresh request
+   и последующий read без вывода credentials или sensitive protocol values.
+
+### План реализации и проверки
+
+1. [x] После утверждения ADR перевести его в `accepted` и зафиксировать это
+   дополнение как одобренное.
+2. [x] Ввести явные OIDC protocol scopes и resource scopes в Identity runtime,
+   не создавая второй источник истины для per-tool permissions.
+3. [x] Разделить grant persistence и добавить fail-closed client checks для
+   `offline_access`.
+4. [x] Добавить metadata, adapter, consent, refresh rotation/reuse, concurrency и
+   pool-size integration tests; документировать новые exported contracts и
+   non-obvious invariants concise English TSDoc/JSDoc.
+5. [x] Прогнать `pnpm lint`, `pnpm typecheck`, `pnpm build`, Identity unit и полный
+   integration suite, `node scripts/validate-docs.mjs`, identifier check и
+   `git diff --check`.
+6. Перед implementation completion провести независимый Quality review и
+   Architecture Review. До их принятия не выполнять staging mutations.
+7. После отдельного DevOps approval дождаться auto-deploy, штатно
+   reprovision client, пересоздать ChatGPT application connection и выполнить
+   expiry-boundary E2E.
+
+### Architecture Review до реализации
+
+1. Решение использует стандартный OIDC scope вместо специального reconnect
+   endpoint или ChatGPT-specific token policy.
+2. Новых deployables, databases, credentials и service-to-service contracts
+   нет; Identity остаётся единственным владельцем OAuth lifecycle.
+3. DDD сохраняется: protocol scope разрешает только durable OAuth session, а
+   API-owned User/PersonAccessGrant и resource scopes продолжают определять
+   доступ к fitness data.
+4. ADR владеет архитектурным решением, Wiki — current state после принятого
+   результата, plan — execution/gates; решение не дублируется как competing
+   source of truth.
+5. Увеличение access-token TTL или нестандартная выдача refresh credential без
+   `offline_access` проще только локально, но хуже масштабируется и ослабляет
+   явный interoperability/security contract.

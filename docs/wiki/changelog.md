@@ -16,6 +16,19 @@ parsing, shared day lifecycle, and real-data migration remain separate stages.
 
 ## Content
 
+### 2026-08-11 — Durable OAuth connections for external clients
+
+- Added the standard OIDC `offline_access` contract to Identity discovery and
+  exact administrator-managed client allowlists while retaining ten-minute
+  audience-bound access tokens and rotating refresh-token families.
+- Kept `openid` and `offline_access` in typed OIDC grant scopes and kept MCP
+  resource permissions separate in protected-resource metadata, grants, and
+  access tokens.
+- Added expiry-boundary refresh, MCP read, reuse rejection, concurrent
+  revocation, exactly-once security audit, and bounded-pool regression coverage.
+- Deployment, predefined-client reprovisioning, ChatGPT connection recreation,
+  and the external expiry-boundary verification remain separately gated.
+
 ### 2026-08-07 — Minimal passkey-first Nuxt client
 
 - Added a static Nuxt 4 client with a public landing page, fragment-only

@@ -528,7 +528,7 @@ describe("Identity migration chain", () => {
         clientId: "chatgpt",
         displayName: "ChatGPT connector",
         redirectUris: ["https://chatgpt.com/connector/oauth/new-callback-id"],
-        allowedScopes: ["person:read"],
+        allowedScopes: ["openid", "person:read"],
         refreshTokensEnabled: true
       });
 
@@ -540,11 +540,19 @@ describe("Identity migration chain", () => {
         id_token_signed_response_alg: "ES256",
         redirect_uris: ["https://chatgpt.com/connector/oauth/new-callback-id"],
         response_types: ["code"],
+        scope: "openid person:read",
         token_endpoint_auth_method: "none"
       });
       await expect(store.listAllowedScopes("chatgpt")).resolves.toEqual(
-        new Set(["person:read"])
+        new Set(["openid", "person:read"])
       );
+      await expect(store.provisionPublicClient({
+        clientId: "invalid-offline-client",
+        displayName: "Invalid offline client",
+        redirectUris: ["https://chatgpt.com/connector/oauth/invalid-offline"],
+        allowedScopes: ["openid", "offline_access"],
+        refreshTokensEnabled: false
+      })).rejects.toThrow("offline access requires refresh tokens");
     } finally {
       await pool.end();
     }
@@ -633,7 +641,7 @@ describe("Identity migration chain", () => {
             redirect_uri: "https://chatgpt.com/connector/oauth/new-callback-id",
             resource,
             response_type: "code",
-            scope: "person:read",
+            scope: "openid person:read",
             state: "state"
           },
           prompt: { name: "login", reasons: ["no_session"], details: {} },
@@ -731,7 +739,8 @@ describe("Identity migration chain", () => {
         iat: now,
         jti: grantId,
         kind: "Grant",
-        openid: { scope: "person:read" },
+        openid: { scope: "openid" },
+        rejected: { openid: { scope: "person:read" } },
         resources: { [resource]: "person:read" }
       });
       await session.upsert(providerCredential, {
@@ -944,7 +953,7 @@ describe("Identity migration chain", () => {
         clientId: "chatgpt-runtime",
         displayName: "ChatGPT runtime",
         redirectUris: ["https://chatgpt.com/connector/oauth/runtime-callback"],
-        allowedScopes: ["openid", "person:read"],
+        allowedScopes: ["openid", "offline_access", "person:read"],
         refreshTokensEnabled: true
       });
       await pool.query(
@@ -1015,6 +1024,24 @@ describe("Identity migration chain", () => {
         authorization_endpoint: `${issuer}/oauth/authorize`,
         issuer,
         jwks_uri: `${issuer}/oauth/jwks`,
+        scopes_supported: expect.arrayContaining([
+          "openid",
+          "offline_access",
+          "person:read"
+        ]),
+        token_endpoint: `${issuer}/oauth/token`
+      });
+      const openIdDiscovery = await fetch(`${issuer}/.well-known/openid-configuration`);
+      expect(openIdDiscovery.status).toBe(200);
+      await expect(openIdDiscovery.json()).resolves.toMatchObject({
+        authorization_endpoint: `${issuer}/oauth/authorize`,
+        issuer,
+        jwks_uri: `${issuer}/oauth/jwks`,
+        scopes_supported: expect.arrayContaining([
+          "openid",
+          "offline_access",
+          "person:read"
+        ]),
         token_endpoint: `${issuer}/oauth/token`
       });
       const jwks = await fetch(`${issuer}/oauth/jwks`);
@@ -1031,7 +1058,7 @@ describe("Identity migration chain", () => {
         redirect_uri: "https://chatgpt.com/connector/oauth/runtime-callback",
         resource,
         response_type: "code",
-        scope: "openid person:read",
+        scope: "openid offline_access person:read",
         state: "runtime-state",
         ui_locales: "ru-RU en"
       };
@@ -1077,7 +1104,8 @@ describe("Identity migration chain", () => {
 
       const authorization = authorizationUrl();
       const start = await fetch(authorization, { redirect: "manual" });
-      expect(start.status).toBe(303);
+      const startBody = start.status === 303 ? "" : await start.text();
+      expect(start.status, startBody).toBe(303);
       const location = start.headers.get("location");
       expect(location).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
       const cookies = new Map<string, string>([
@@ -1093,6 +1121,61 @@ describe("Identity migration chain", () => {
       };
       const cookieHeader = (): string =>
         [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
+      /** Completes exactly one provider consent round and returns the client callback. */
+      const completeConsent = async (initialLocation: string): Promise<URL> => {
+        expect(initialLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
+        const consentPage = await fetch(new URL(initialLocation, issuer), {
+          headers: { cookie: cookieHeader() }
+        });
+        expect(consentPage.status).toBe(200);
+        expect(consentPage.headers.get("content-security-policy")).toContain(
+          "form-action 'self' https://chatgpt.com"
+        );
+        const consentPageHtml = await consentPage.text();
+        expect(consentPageHtml).toContain("Authorize access");
+        expect(consentPageHtml).toContain("Read your profile");
+        expect(consentPageHtml).toContain("Keep this connection active");
+        expect(consentPageHtml).toContain('method="post"');
+        expect(consentPageHtml).toContain(`${initialLocation}/consent`);
+
+        const consent = await fetch(new URL(`${initialLocation}/consent`, issuer), {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: cookieHeader(),
+            origin: issuer
+          },
+          body: new URLSearchParams({ action: "allow", csrfToken }),
+          redirect: "manual"
+        });
+        expect(consent.status).toBe(303);
+        applyCookies(consent);
+        const interactionCredential = initialLocation.split("/").at(-1)!;
+        const storedConsent = await createOAuthProviderAdapterFactory({
+          pool,
+          clients,
+          requestContext: new OAuthRequestContext(),
+          issuer,
+          resource
+        })("Interaction").find(interactionCredential);
+        expect(storedConsent).toMatchObject({
+          result: { consent: { grantId: expect.any(String) } }
+        });
+        const consentResume = await fetch(
+          new URL(consent.headers.get("location")!, issuer),
+          {
+            headers: { cookie: cookieHeader() },
+            redirect: "manual"
+          }
+        );
+        expect(consentResume.status).toBe(303);
+        applyCookies(consentResume);
+        const callback = new URL(consentResume.headers.get("location")!, issuer);
+        expect(callback.origin + callback.pathname).toBe(
+          "https://chatgpt.com/connector/oauth/runtime-callback"
+        );
+        return callback;
+      };
       applyCookies(start);
       const page = await fetch(new URL(location!, issuer), {
         headers: { cookie: cookieHeader() }
@@ -1122,42 +1205,7 @@ describe("Identity migration chain", () => {
       expect(loginResume.status, loginResumeBody).toBe(303);
       applyCookies(loginResume);
       const consentLocation = loginResume.headers.get("location");
-      expect(consentLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
-      const consentPage = await fetch(new URL(consentLocation!, issuer), {
-        headers: { cookie: cookieHeader() }
-      });
-      expect(consentPage.status).toBe(200);
-      expect(consentPage.headers.get("content-security-policy")).toContain(
-        "form-action 'self' https://chatgpt.com"
-      );
-      const consentPageHtml = await consentPage.text();
-      expect(consentPageHtml).toContain("Read your profile");
-      expect(consentPageHtml).toContain('method="post"');
-      expect(consentPageHtml).toContain(`${consentLocation}/consent`);
-
-      const consent = await fetch(new URL(`${consentLocation}/consent`, issuer), {
-        method: "POST",
-        headers: {
-          "content-type": "application/x-www-form-urlencoded",
-          cookie: cookieHeader(),
-          origin: issuer
-        },
-        body: new URLSearchParams({ action: "allow", csrfToken }),
-        redirect: "manual"
-      });
-      expect(consent.status).toBe(303);
-      applyCookies(consent);
-      const consentResume = await fetch(new URL(consent.headers.get("location")!, issuer), {
-        headers: { cookie: cookieHeader() },
-        redirect: "manual"
-      });
-      expect(consentResume.status).toBe(303);
-      applyCookies(consentResume);
-      const consentResumeLocation = consentResume.headers.get("location");
-      const callback = new URL(consentResumeLocation!);
-      expect(callback.origin + callback.pathname).toBe(
-        "https://chatgpt.com/connector/oauth/runtime-callback"
-      );
+      const callback = await completeConsent(consentLocation!);
       expect(callback.searchParams.get("state")).toBe("runtime-state");
       const code = callback.searchParams.get("code");
       expect(code).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -1189,9 +1237,37 @@ describe("Identity migration chain", () => {
       expect(accessPayload).toMatchObject({
         aud: resource,
         client_id: "chatgpt-runtime",
-        scope: "openid person:read",
+        scope: "person:read",
         sub: subject
       });
+      const persistedGrantScopes = await pool.query<{
+        kind: "oidc" | "resource";
+        resource: string | null;
+        scope: string;
+      }>(
+        `select 'oidc'::text as kind, null::text as resource, scope
+           from oauth_grant_oidc_scopes
+          where grant_id in (
+            select id from oauth_grants
+             where account_id = $1 and client_id = 'chatgpt-runtime'
+               and revoked_at is null
+          )
+         union all
+         select 'resource'::text as kind, resource, scope
+           from oauth_grant_resource_scopes
+          where grant_id in (
+            select id from oauth_grants
+             where account_id = $1 and client_id = 'chatgpt-runtime'
+               and revoked_at is null
+          )
+         order by kind, scope`,
+        [accountId]
+      );
+      expect(persistedGrantScopes.rows).toEqual([
+        { kind: "oidc", resource: null, scope: "offline_access" },
+        { kind: "oidc", resource: null, scope: "openid" },
+        { kind: "resource", resource, scope: "person:read" }
+      ]);
 
       const repeatVerifier = "R".repeat(43);
       const repeatChallenge = createHash("sha256")
@@ -1251,46 +1327,7 @@ describe("Identity migration chain", () => {
       expect(reconnectResume.status, reconnectResumeBody).toBe(303);
       applyCookies(reconnectResume);
       const reconnectConsentLocation = reconnectResume.headers.get("location");
-      expect(reconnectConsentLocation).toMatch(
-        /^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/
-      );
-      const reconnectConsentPage = await fetch(
-        new URL(reconnectConsentLocation!, issuer),
-        { headers: { cookie: cookieHeader() } }
-      );
-      expect(reconnectConsentPage.status).toBe(200);
-      expect(await reconnectConsentPage.text()).toContain("Authorize access");
-      const reconnectConsent = await fetch(
-        new URL(`${reconnectConsentLocation}/consent`, issuer),
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/x-www-form-urlencoded",
-            cookie: cookieHeader(),
-            origin: issuer
-          },
-          body: new URLSearchParams({ action: "allow", csrfToken }),
-          redirect: "manual"
-        }
-      );
-      expect(reconnectConsent.status).toBe(303);
-      applyCookies(reconnectConsent);
-      const reconnectConsentResume = await fetch(
-        new URL(reconnectConsent.headers.get("location")!, issuer),
-        {
-          headers: { cookie: cookieHeader() },
-          redirect: "manual"
-        }
-      );
-      expect(reconnectConsentResume.status).toBe(303);
-      applyCookies(reconnectConsentResume);
-      const repeatedCallback = new URL(
-        reconnectConsentResume.headers.get("location")!,
-        issuer
-      );
-      expect(repeatedCallback.origin + repeatedCallback.pathname).toBe(
-        "https://chatgpt.com/connector/oauth/runtime-callback"
-      );
+      const repeatedCallback = await completeConsent(reconnectConsentLocation!);
       expect(repeatedCallback.searchParams.get("state")).toBe("repeat-runtime-state");
       const repeatedCode = repeatedCallback.searchParams.get("code");
       expect(repeatedCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
@@ -1307,8 +1344,27 @@ describe("Identity migration chain", () => {
       });
       expect(repeatedToken.status).toBe(200);
       const repeatedTokenBody = await repeatedToken.json() as {
+        access_token: string;
         refresh_token: string;
       };
+      const repeatedAccessPayload = JSON.parse(
+        Buffer.from(
+          repeatedTokenBody.access_token.split(".")[1]!,
+          "base64url"
+        ).toString("utf8")
+      ) as Record<string, unknown>;
+      expect(repeatedAccessPayload).toMatchObject({
+        aud: resource,
+        client_id: "chatgpt-runtime",
+        scope: "person:read",
+        sub: subject
+      });
+      expect(repeatedAccessPayload.iat).toEqual(expect.any(Number));
+      expect(repeatedAccessPayload.exp).toEqual(expect.any(Number));
+      expect(
+        (repeatedAccessPayload.exp as number) -
+        (repeatedAccessPayload.iat as number)
+      ).toBe(600);
 
       const supersededRefresh = await fetch(`${issuer}/oauth/token`, {
         method: "POST",
@@ -1321,17 +1377,35 @@ describe("Identity migration chain", () => {
       });
       expect(supersededRefresh.status).toBe(400);
       const refreshed = await fetch(`${issuer}/oauth/token`, {
-        method: "POST",
-        headers: { "content-type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({
-          client_id: "chatgpt-runtime",
-          grant_type: "refresh_token",
-          refresh_token: repeatedTokenBody.refresh_token
-        })
-      });
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: "chatgpt-runtime",
+            grant_type: "refresh_token",
+            refresh_token: repeatedTokenBody.refresh_token
+          })
+        });
       expect(refreshed.status).toBe(200);
-      const refreshedBody = await refreshed.json() as { refresh_token: string };
+      const refreshedBody = await refreshed.json() as {
+        access_token: string;
+        refresh_token: string;
+      };
       expect(refreshedBody.refresh_token).not.toBe(repeatedTokenBody.refresh_token);
+      const refreshedAccessPayload = JSON.parse(
+        Buffer.from(refreshedBody.access_token.split(".")[1]!, "base64url").toString("utf8")
+      ) as Record<string, unknown>;
+      expect(refreshedAccessPayload).toMatchObject({
+        aud: resource,
+        client_id: "chatgpt-runtime",
+        scope: "person:read",
+        sub: subject
+      });
+      expect(refreshedAccessPayload.iat).toEqual(expect.any(Number));
+      expect(refreshedAccessPayload.exp).toEqual(expect.any(Number));
+      expect(
+        (refreshedAccessPayload.exp as number) -
+        (refreshedAccessPayload.iat as number)
+      ).toBe(600);
       const activeGrants = await pool.query<{ count: string }>(
         `select count(*)::text as count from oauth_grants
           where account_id = $1 and client_id = 'chatgpt-runtime'
@@ -1365,8 +1439,41 @@ describe("Identity migration chain", () => {
         clientId: "grant-race-runtime",
         displayName: "Grant race runtime",
         redirectUris: ["https://chatgpt.com/connector/oauth/grant-race-callback"],
+        allowedScopes: ["openid", "offline_access", "person:read"],
+        refreshTokensEnabled: true
+      });
+      await clients.provisionPublicClient({
+        clientId: "no-offline-runtime",
+        displayName: "No offline runtime",
+        redirectUris: ["https://chatgpt.com/connector/oauth/no-offline-callback"],
         allowedScopes: ["openid", "person:read"],
         refreshTokensEnabled: true
+      });
+      await expect(runtime.grantConsentScopes({
+        accountId,
+        clientId: "no-offline-runtime",
+        scopes: ["openid", "offline_access", "person:read"]
+      })).rejects.toMatchObject({
+        error: "invalid_scope",
+        error_description: "OAuth consent exceeds the client scope allowlist"
+      });
+      await pool.query(
+        `insert into oauth_clients (id, display_name, refresh_tokens_enabled)
+         values ('inconsistent-offline-runtime', 'Inconsistent offline runtime', false)`
+      );
+      await pool.query(
+        `insert into oauth_client_allowed_scopes (client_id, scope)
+         values ('inconsistent-offline-runtime', 'openid'),
+                ('inconsistent-offline-runtime', 'offline_access'),
+                ('inconsistent-offline-runtime', 'person:read')`
+      );
+      await expect(runtime.grantConsentScopes({
+        accountId,
+        clientId: "inconsistent-offline-runtime",
+        scopes: ["openid", "offline_access", "person:read"]
+      })).rejects.toMatchObject({
+        error: "invalid_scope",
+        error_description: "OAuth client cannot receive offline access"
       });
       const constrainedPool = new Pool({
         connectionString: container.getConnectionUri(),
@@ -1382,20 +1489,20 @@ describe("Identity migration chain", () => {
           cookieKeys: [randomBytes(32).toString("base64url")]
         });
         const renewedGrantIds = await Promise.all(
-          Array.from({ length: 4 }, () => constrainedRuntime.grantResourceScopes({
+          Array.from({ length: 4 }, () => constrainedRuntime.grantConsentScopes({
             accountId,
             clientId: "chatgpt-runtime",
-            scopes: ["openid", "person:read"]
+            scopes: ["openid", "offline_access", "person:read"]
           }))
         );
         expect(new Set(renewedGrantIds)).toEqual(
           new Set([grantBeforeRenewal.rows[0]!.id])
         );
         const racedGrantIds = await Promise.all(
-          Array.from({ length: 4 }, () => constrainedRuntime.grantResourceScopes({
+          Array.from({ length: 4 }, () => constrainedRuntime.grantConsentScopes({
             accountId,
             clientId: "grant-race-runtime",
-            scopes: ["openid", "person:read"]
+            scopes: ["openid", "offline_access", "person:read"]
           }))
         );
         expect(new Set(racedGrantIds).size).toBe(1);
@@ -1448,6 +1555,73 @@ describe("Identity migration chain", () => {
         })
       });
       expect(revokedSession.status).toBe(400);
+      await pool.query(
+        "update oauth_sessions set revoked_at = null where id = $1",
+        [sessionId]
+      );
+      const replayConsumedRefresh = (): Promise<Response> =>
+        fetch(`${issuer}/oauth/token`, {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: "chatgpt-runtime",
+            grant_type: "refresh_token",
+            refresh_token: repeatedTokenBody.refresh_token
+          })
+        });
+      const reusedRefreshes = await Promise.all([
+        replayConsumedRefresh(),
+        replayConsumedRefresh()
+      ]);
+      expect(reusedRefreshes.map((response) => response.status)).toEqual([400, 400]);
+      const refreshTokenAdapter = createOAuthProviderAdapterFactory({
+        pool,
+        clients,
+        requestContext: new OAuthRequestContext(),
+        issuer,
+        resource
+      })("RefreshToken");
+      await Promise.all([
+        refreshTokenAdapter.destroy(repeatedTokenBody.refresh_token),
+        refreshTokenAdapter.destroy(repeatedTokenBody.refresh_token)
+      ]);
+      const reuseAudit = await pool.query<{ count: string }>(
+        `select count(*)::text as count from identity_security_events
+          where account_id = $1 and client_id = 'chatgpt-runtime'
+            and event_type = 'oauth_refresh_reuse_detected'`,
+        [accountId]
+      );
+      expect(reuseAudit.rows[0]?.count).toBe("1");
+      const replayedFamilyState = await pool.query<{
+        all_tokens_revoked: boolean;
+        family_revoked: boolean;
+        grant_revoked: boolean;
+        reuse_detected: boolean;
+        token_count: string;
+      }>(
+        `select bool_and(t.revoked_at is not null) as all_tokens_revoked,
+                f.revoked_at is not null as family_revoked,
+                g.revoked_at is not null as grant_revoked,
+                f.reuse_detected_at is not null as reuse_detected,
+                count(t.id)::text as token_count
+           from oauth_refresh_token_families f
+           join oauth_grants g on g.id = f.grant_id
+           join oauth_refresh_tokens t on t.family_id = f.id
+          where f.id = (
+            select family_id
+              from oauth_refresh_tokens
+             where token_hash = $1
+          )
+          group by f.id, g.id`,
+        [createHash("sha256").update(repeatedTokenBody.refresh_token).digest()]
+      );
+      expect(replayedFamilyState.rows[0]).toMatchObject({
+        all_tokens_revoked: true,
+        family_revoked: true,
+        grant_revoked: true,
+        reuse_detected: true,
+        token_count: "2"
+      });
     } finally {
       if (server) {
         await new Promise<void>((resolve) => server!.close(() => resolve()));

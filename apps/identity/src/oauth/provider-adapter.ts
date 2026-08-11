@@ -14,6 +14,7 @@ import type { OAuthClientStore } from "./client-store.js";
 import type { OAuthRequestContext } from "./request-context.js";
 
 type SupportedModel =
+  | "AccessToken"
   | "AuthorizationCode"
   | "Client"
   | "Grant"
@@ -55,6 +56,8 @@ class RelationalOAuthProviderAdapter implements Adapter {
     expiresIn?: number
   ): Promise<void> {
     switch (this.model) {
+      case "AccessToken":
+        throw new Error("OAuth JWT access tokens are stateless");
       case "AuthorizationCode":
         await upsertAuthorizationCode(this.dependencies, id, payload);
         return;
@@ -76,6 +79,8 @@ class RelationalOAuthProviderAdapter implements Adapter {
 
   public async find(id: string): Promise<AdapterPayload | undefined> {
     switch (this.model) {
+      case "AccessToken":
+        return undefined;
       case "AuthorizationCode":
         return findAuthorizationCode(this.dependencies, id);
       case "Client":
@@ -116,6 +121,8 @@ class RelationalOAuthProviderAdapter implements Adapter {
 
   public async destroy(id: string): Promise<void> {
     switch (this.model) {
+      case "AccessToken":
+        return;
       case "AuthorizationCode":
         await this.dependencies.pool.query(
           "delete from oauth_authorization_codes where code_hash = $1",
@@ -149,6 +156,9 @@ class RelationalOAuthProviderAdapter implements Adapter {
   }
 
   public async revokeByGrantId(grantId: string): Promise<void> {
+    if (this.model === "AccessToken") {
+      return;
+    }
     if (this.model === "AuthorizationCode") {
       await this.dependencies.pool.query(
         "delete from oauth_authorization_codes where grant_id = $1",
@@ -157,18 +167,7 @@ class RelationalOAuthProviderAdapter implements Adapter {
       return;
     }
     if (this.model === "RefreshToken") {
-      await this.dependencies.pool.query(
-        `with revoked as (
-           update oauth_refresh_token_families
-              set revoked_at = coalesce(revoked_at, now())
-            where grant_id = $1
-          returning id
-         )
-         update oauth_refresh_tokens
-            set revoked_at = coalesce(revoked_at, now())
-          where family_id in (select id from revoked)`,
-        [grantId]
-      );
+      await revokeRefreshFamiliesByGrant(this.dependencies.pool, grantId);
       return;
     }
     throw new Error(`OAuth adapter model ${this.model} has no grant-bound artifacts`);
@@ -225,19 +224,37 @@ async function consumeRefreshToken(pool: Pool, credential: string): Promise<void
     );
     if (consumed.rowCount === 0) {
       invalid = true;
-      const target = await client.query<{
-        account_id: string;
-        client_id: string;
-        family_id: string;
-        session_id: string;
-      }>(
-        `select account_id, client_id, family_id, session_id
+      const located = await client.query<{ family_id: string }>(
+        `select family_id
            from oauth_refresh_tokens
-          where token_hash = $1 and consumed_at is not null
-          for update`,
+          where token_hash = $1 and consumed_at is not null`,
         [hashBearerValue(credential)]
       );
-      const row = target.rows[0];
+      const familyId = located.rows[0]?.family_id;
+      if (familyId) {
+        await client.query(
+          `select id
+             from oauth_refresh_token_families
+            where id = $1
+            for update`,
+          [familyId]
+        );
+      }
+      const target = familyId
+        ? await client.query<{
+            account_id: string;
+            client_id: string;
+            family_id: string;
+            session_id: string;
+          }>(
+            `select account_id, client_id, family_id, session_id
+               from oauth_refresh_tokens
+              where token_hash = $1 and consumed_at is not null and family_id = $2
+              for update`,
+            [hashBearerValue(credential), familyId]
+          )
+        : undefined;
+      const row = target?.rows[0];
       if (row) {
         const revoked = await client.query(
           `update oauth_refresh_token_families
@@ -293,6 +310,7 @@ async function destroyProviderSessionBinding(pool: Pool, providerCredential: str
 function assertSupportedModel(model: string): SupportedModel {
   if (
     [
+      "AccessToken",
       "AuthorizationCode",
       "Client",
       "Grant",
@@ -360,6 +378,7 @@ async function upsertInteraction(
     "code_challenge_method",
     "id_token_hint",
     "nonce",
+    "prompt",
     "redirect_uri",
     "resource",
     "response_type",
@@ -370,6 +389,7 @@ async function upsertInteraction(
   const clientId = requireString(params.client_id, "OAuth client id");
   const redirectUri = requireString(params.redirect_uri, "OAuth redirect URI");
   const codeChallenge = requireString(params.code_challenge, "OAuth PKCE challenge");
+  optionalString(params.prompt, "OAuth prompt");
   optionalString(params.ui_locales, "OAuth UI locales");
   const idTokenHintSubject = validatedIdTokenHintSubject(params.id_token_hint);
   if (params.code_challenge_method !== "S256" || params.response_type !== "code") {
@@ -876,6 +896,7 @@ async function upsertGrant(
     "jti",
     "kind",
     "openid",
+    "rejected",
     "resources"
   ]);
   requireUuid(id, "OAuth Grant id");
@@ -891,6 +912,14 @@ async function upsertGrant(
   const resourceScope = requireString(resources[dependencies.resource], "OAuth Grant resource scope");
   if (Object.keys(resources).length !== 1) throw new Error("OAuth Grant has unsupported resources");
   const scopes = splitScope(resourceScope);
+  const rejectedScopes = validatedRejectedOidcScopes(payload.rejected);
+  const sortedScopes = [...scopes].sort();
+  if (
+    rejectedScopes.length !== sortedScopes.length ||
+    rejectedScopes.some((scope, index) => scope !== sortedScopes[index])
+  ) {
+    throw new Error("OAuth Grant resource scopes must be rejected as OIDC scopes");
+  }
   const allowed = await dependencies.clients.listAllowedScopes(clientId);
   if ([...oidcScopes, ...scopes].some((scope) => !allowed.has(scope))) {
     throw new Error("OAuth Grant exceeds client scope allowlist");
@@ -970,8 +999,21 @@ async function findGrant(pool: Pool, id: string): Promise<AdapterPayload | undef
     jti: id,
     kind: "Grant",
     openid: { scope: oidcScopes.rows.map((item) => item.scope).join(" ") },
+    rejected: scopes.rows.length === 0
+      ? undefined
+      : { openid: { scope: scopes.rows.map((item) => item.scope).join(" ") } },
     resources
   };
+}
+
+/** Validates the provider marker that resource permissions are not OIDC grants. */
+function validatedRejectedOidcScopes(value: AdapterPayload["rejected"]): string[] {
+  if (value === undefined) return [];
+  const rejected = requireRecord(value, "OAuth Grant rejected scopes");
+  assertRecordFields(rejected, ["openid"], "OAuth Grant rejected scopes");
+  const openid = requireRecord(rejected.openid, "OAuth Grant rejected OIDC scopes");
+  assertRecordFields(openid, ["scope"], "OAuth Grant rejected OIDC scopes");
+  return splitScope(requireString(openid.scope, "OAuth Grant rejected OIDC scope")).sort();
 }
 
 async function upsertAuthorizationCode(
@@ -1344,6 +1386,28 @@ async function revokeRefreshFamilyByToken(pool: Pool, credential: string): Promi
   const client = await pool.connect();
   try {
     await client.query("begin");
+    const located = await client.query<{ family_id: string }>(
+      `select family_id
+         from oauth_refresh_tokens
+        where token_hash = $1`,
+      [hashBearerValue(credential)]
+    );
+    const familyId = located.rows[0]?.family_id;
+    if (!familyId) {
+      await client.query("commit");
+      return;
+    }
+    const lockedFamily = await client.query<{ id: string }>(
+      `select id
+         from oauth_refresh_token_families
+        where id = $1
+        for update`,
+      [familyId]
+    );
+    if (!lockedFamily.rows[0]) {
+      await client.query("commit");
+      return;
+    }
     const target = await client.query<{
       account_id: string;
       client_id: string;
@@ -1353,29 +1417,35 @@ async function revokeRefreshFamilyByToken(pool: Pool, credential: string): Promi
     }>(
       `select account_id, client_id, consumed_at, family_id, session_id
          from oauth_refresh_tokens
-        where token_hash = $1
+        where token_hash = $1 and family_id = $2
         for update`,
-      [hashBearerValue(credential)]
+      [hashBearerValue(credential), familyId]
     );
     const row = target.rows[0];
     if (row) {
-      await client.query(
-        `update oauth_refresh_token_families
-            set revoked_at = coalesce(revoked_at, now()),
-                reuse_detected_at = case
-                  when $2::boolean then coalesce(reuse_detected_at, now())
-                  else reuse_detected_at
-                end
-          where id = $1`,
-        [row.family_id, row.consumed_at !== null]
-      );
+      const reuseTransition = row.consumed_at
+        ? await client.query(
+            `update oauth_refresh_token_families
+                set revoked_at = coalesce(revoked_at, now()),
+                    reuse_detected_at = now()
+              where id = $1 and reuse_detected_at is null
+            returning id`,
+            [row.family_id]
+          )
+        : await client.query(
+            `update oauth_refresh_token_families
+                set revoked_at = coalesce(revoked_at, now())
+              where id = $1
+            returning id`,
+            [row.family_id]
+          );
       await client.query(
         `update oauth_refresh_tokens
             set revoked_at = coalesce(revoked_at, now())
           where family_id = $1`,
         [row.family_id]
       );
-      if (row.consumed_at) {
+      if (row.consumed_at && reuseTransition.rowCount === 1) {
         await insertOAuthSecurityEvent(client, {
           eventType: "oauth_refresh_reuse_detected",
           actorKind: "oauth_client",
@@ -1385,6 +1455,46 @@ async function revokeRefreshFamilyByToken(pool: Pool, credential: string): Promi
           correlationId: row.family_id
         });
       }
+    }
+    await client.query("commit");
+  } catch (error) {
+    await client.query("rollback");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * Revokes every refresh-token family for a grant while preserving the global
+ * family-before-token lock order used by single-token reuse handling.
+ */
+async function revokeRefreshFamiliesByGrant(pool: Pool, grantId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const lockedFamilies = await client.query<{ id: string }>(
+      `select id
+         from oauth_refresh_token_families
+        where grant_id = $1
+        order by id
+        for update`,
+      [grantId]
+    );
+    const familyIds = lockedFamilies.rows.map((row) => row.id);
+    if (familyIds.length > 0) {
+      await client.query(
+        `update oauth_refresh_token_families
+            set revoked_at = coalesce(revoked_at, now())
+          where id = any($1::uuid[])`,
+        [familyIds]
+      );
+      await client.query(
+        `update oauth_refresh_tokens
+            set revoked_at = coalesce(revoked_at, now())
+          where family_id = any($1::uuid[])`,
+        [familyIds]
+      );
     }
     await client.query("commit");
   } catch (error) {

@@ -144,7 +144,7 @@ export class OAuthBrowserUi {
     }
     const clientId = requireString(details.params.client_id, "OAuth client id");
     const scopes = splitScope(requireString(details.params.scope, "OAuth scope"));
-    const grantId = await this.dependencies.runtime.grantResourceScopes({
+    const grantId = await this.dependencies.runtime.grantConsentScopes({
       accountId: session.accountId,
       clientId,
       existingGrantId: details.grantId,
@@ -234,6 +234,8 @@ function scopeLabel(scope: string): string {
   return {
     "body-measurement:write": "Record body measurements",
     "meal:write": "Record meals",
+    "offline_access": "Keep this connection active",
+    "openid": "Sign you in",
     "person:read": "Read your profile",
     "weight:write": "Record weight",
     "workout:write": "Record workouts"
