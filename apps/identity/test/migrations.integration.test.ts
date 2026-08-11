@@ -1291,12 +1291,16 @@ describe("Identity migration chain", () => {
       const cookieHeader = (): string =>
         [...cookies].map(([name, value]) => `${name}=${value}`).join("; ");
       /** Completes exactly one provider consent round and returns the client callback. */
-      const completeConsent = async (initialLocation: string): Promise<URL> => {
+      const completeConsent = async (
+        initialLocation: string,
+        action: "allow" | "deny" = "allow"
+      ): Promise<URL> => {
         expect(initialLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
         const consentPage = await fetch(new URL(initialLocation, issuer), {
           headers: { cookie: cookieHeader() }
         });
         expect(consentPage.status).toBe(200);
+        expect(consentPage.headers.get("referrer-policy")).toBe("same-origin");
         expect(consentPage.headers.get("content-security-policy")).toContain(
           "form-action 'self' https://chatgpt.com"
         );
@@ -1304,8 +1308,36 @@ describe("Identity migration chain", () => {
         expect(consentPageHtml).toContain("Authorize access");
         expect(consentPageHtml).toContain("Read your profile");
         expect(consentPageHtml).toContain("Keep this connection active");
+        expect(consentPageHtml).toContain('id="consent"');
         expect(consentPageHtml).toContain('method="post"');
         expect(consentPageHtml).toContain(`${initialLocation}/consent`);
+        expect(consentPageHtml).toContain("consentPending=true");
+
+        for (const rejectedOrigin of [undefined, "null", "https://attacker.example.test"]) {
+          const rejectedConsent = await fetch(new URL(`${initialLocation}/consent`, issuer), {
+            method: "POST",
+            headers: {
+              "content-type": "application/x-www-form-urlencoded",
+              cookie: cookieHeader(),
+              ...(rejectedOrigin === undefined ? {} : { origin: rejectedOrigin })
+            },
+            body: new URLSearchParams({ action, csrfToken }),
+            redirect: "manual"
+          });
+          expect(rejectedConsent.status, rejectedOrigin ?? "missing origin").toBe(403);
+        }
+
+        const rejectedCsrf = await fetch(new URL(`${initialLocation}/consent`, issuer), {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: cookieHeader(),
+            origin: issuer
+          },
+          body: new URLSearchParams({ action, csrfToken: "X".repeat(43) }),
+          redirect: "manual"
+        });
+        expect(rejectedCsrf.status).toBe(401);
 
         const consent = await fetch(new URL(`${initialLocation}/consent`, issuer), {
           method: "POST",
@@ -1314,7 +1346,7 @@ describe("Identity migration chain", () => {
             cookie: cookieHeader(),
             origin: issuer
           },
-          body: new URLSearchParams({ action: "allow", csrfToken }),
+          body: new URLSearchParams({ action, csrfToken }),
           redirect: "manual"
         });
         expect(consent.status).toBe(303);
@@ -1327,9 +1359,9 @@ describe("Identity migration chain", () => {
           issuer,
           resource
         })("Interaction").find(interactionCredential);
-        expect(storedConsent).toMatchObject({
-          result: { consent: { grantId: expect.any(String) } }
-        });
+        expect(storedConsent).toMatchObject(action === "allow"
+          ? { result: { consent: { grantId: expect.any(String) } } }
+          : { result: { error: "access_denied" } });
         const consentResume = await fetch(
           new URL(consent.headers.get("location")!, issuer),
           {
@@ -1400,6 +1432,27 @@ describe("Identity migration chain", () => {
       expect(tokenBody.expires_in).toBe(600);
       expect(tokenBody.id_token.split(".")).toHaveLength(3);
       expect(tokenBody.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+      const deniedVerifier = "N".repeat(43);
+      const deniedChallenge = createHash("sha256")
+        .update(deniedVerifier)
+        .digest("base64url");
+      const deniedAuthorization = await fetch(authorizationUrl({
+        code_challenge: deniedChallenge,
+        state: "denied-runtime-state"
+      }), {
+        headers: { cookie: cookieHeader() },
+        redirect: "manual"
+      });
+      expect(deniedAuthorization.status).toBe(303);
+      applyCookies(deniedAuthorization);
+      const deniedLocation = deniedAuthorization.headers.get("location");
+      expect(deniedLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
+      const deniedCallback = await completeConsent(deniedLocation!, "deny");
+      expect(deniedCallback.searchParams.get("state")).toBe("denied-runtime-state");
+      expect(deniedCallback.searchParams.get("error")).toBe("access_denied");
+      expect(deniedCallback.searchParams.has("code")).toBe(false);
+
       const accessPayload = JSON.parse(
         Buffer.from(tokenBody.access_token.split(".")[1]!, "base64url").toString("utf8")
       ) as Record<string, unknown>;

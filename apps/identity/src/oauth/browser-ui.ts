@@ -95,7 +95,7 @@ export class OAuthBrowserUi {
     response.writeHead(200, {
       "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${redirectOrigin}`,
       "content-type": "text/html; charset=utf-8",
-      "referrer-policy": "no-referrer",
+      "referrer-policy": "same-origin",
       "x-content-type-options": "nosniff",
       "x-frame-options": "DENY"
     });
@@ -212,7 +212,7 @@ function renderPage(input: {
   const authenticatedAction = input.session && input.csrfToken
     ? input.prompt === "login"
       ? `<button id="continue" type="button">Continue as ${escapeHtml(input.session.displayName)}</button>`
-      : `<form method="post" action="/oauth/interaction/${escapeHtml(input.interactionCredential)}/consent"><input type="hidden" name="csrfToken" value="${escapeHtml(input.csrfToken)}"><button name="action" value="allow" type="submit">Allow</button><button name="action" value="deny" type="submit" class="secondary">Deny</button></form>`
+      : `<form id="consent" method="post" action="/oauth/interaction/${escapeHtml(input.interactionCredential)}/consent"><input type="hidden" name="csrfToken" value="${escapeHtml(input.csrfToken)}"><button name="action" value="allow" type="submit">Allow</button><button name="action" value="deny" type="submit" class="secondary">Deny</button></form>`
     : `<button id="passkey" type="button">Sign in with a passkey</button>`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -227,6 +227,7 @@ const fail=e=>{document.getElementById('error').textContent=e instanceof Error?e
 async function submit(route,action){const r=await fetch('/oauth/interaction/'+interaction+'/'+route,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({csrfToken:csrf,action}),redirect:'follow'});if(r.redirected){location.assign(r.url);return}if(!r.ok)throw new Error('Authorization request failed')}
 async function passkey(){const o=await fetch('/v1/webauthn/authentication/options',{method:'POST'}).then(r=>r.json());const p=o.options;p.challenge=from64(p.challenge);if(p.allowCredentials)p.allowCredentials=p.allowCredentials.map(x=>({...x,id:from64(x.id)}));const c=await navigator.credentials.get({publicKey:p});const response={id:c.id,rawId:to64(c.rawId),type:c.type,response:{authenticatorData:to64(c.response.authenticatorData),clientDataJSON:to64(c.response.clientDataJSON),signature:to64(c.response.signature),userHandle:c.response.userHandle?to64(c.response.userHandle):undefined},clientExtensionResults:c.getClientExtensionResults(),authenticatorAttachment:c.authenticatorAttachment};const r=await fetch('/v1/webauthn/authentication/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({challengeId:o.challengeId,response})});const body=await r.json();if(!r.ok)throw new Error(body.message||'Passkey sign-in failed');csrf=body.csrfToken;await submit('login')}
 document.getElementById('passkey')?.addEventListener('click',()=>passkey().catch(fail));document.getElementById('continue')?.addEventListener('click',()=>submit('login').catch(fail));
+let consentPending=false;document.getElementById('consent')?.addEventListener('submit',event=>{if(consentPending){event.preventDefault();return}consentPending=true});
 </script></body></html>`;
 }
 

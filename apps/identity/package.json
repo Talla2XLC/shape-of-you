@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:e2e": "playwright test",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts",
@@ -33,6 +34,7 @@
     "zod": "^4.1.12"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
     "@testcontainers/postgresql": "^11.7.2",
     "@types/oidc-provider": "9.11.0",
     "@types/pg": "^8.15.5",

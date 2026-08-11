@@ -69,6 +69,9 @@ jobs:
       - name: Install frontend E2E browser
         run: pnpm --filter @shape-of-you/web exec playwright install --with-deps chromium
 
+      - name: Test Identity OAuth browser contracts
+        run: pnpm test:e2e:identity
+
       - name: Test frontend browser contracts
         run: pnpm test:e2e:web
 
