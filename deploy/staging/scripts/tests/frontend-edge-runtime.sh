@@ -41,7 +41,7 @@ docker run --detach --name "$API_CONTAINER" --network "$NETWORK" \
   >/dev/null
 docker run --detach --name "$IDENTITY_CONTAINER" --network "$NETWORK" \
   --network-alias identity node:24-alpine node -e \
-  'require("node:http").createServer((request,response)=>{response.setHeader("content-type","application/json");response.end(JSON.stringify({owner:"identity",path:request.url}))}).listen(3000,"0.0.0.0")' \
+  'require("node:http").createServer((request,response)=>{if(request.url.startsWith("/oauth/interaction/")){response.setHeader("Referrer-Policy","same-origin")}else if(request.url==="/oauth/provider-policy"){response.setHeader("Referrer-Policy","no-referrer")}response.setHeader("content-type","application/json");response.end(JSON.stringify({owner:"identity",path:request.url}))}).listen(3000,"0.0.0.0")' \
   >/dev/null
 
 docker run --detach --name "$EDGE_CONTAINER" --network "$NETWORK" \
@@ -110,6 +110,33 @@ edge_url identity.staging.shape-of-you.ru /.well-known | \
 edge_url identity.staging.shape-of-you.ru /oauth/not-a-route | \
   grep -F '"owner":"identity"' >/dev/null
 
+curl --silent --show-error --fail --insecure \
+  --resolve "identity.staging.shape-of-you.ru:$EDGE_PORT:127.0.0.1" \
+  --dump-header "$WORK_ROOT/oauth-interaction.headers" \
+  --output /dev/null \
+  "https://identity.staging.shape-of-you.ru:$EDGE_PORT/oauth/interaction/test"
+tr -d '\r' < "$WORK_ROOT/oauth-interaction.headers" | \
+  grep -i -x 'referrer-policy: same-origin' >/dev/null
+if tr -d '\r' < "$WORK_ROOT/oauth-interaction.headers" | \
+  grep -i '^referrer-policy: no-referrer$' >/dev/null; then
+  printf '%s\n' 'Edge overrode the Identity OAuth interaction Referrer-Policy.' >&2
+  exit 1
+fi
+INTERACTION_POLICY_COUNT=$(tr -d '\r' < "$WORK_ROOT/oauth-interaction.headers" | \
+  grep -i -c '^referrer-policy:')
+if [ "$INTERACTION_POLICY_COUNT" -ne 1 ]; then
+  printf '%s\n' 'OAuth interaction response must contain one Referrer-Policy.' >&2
+  exit 1
+fi
+
+curl --silent --show-error --fail --insecure \
+  --resolve "identity.staging.shape-of-you.ru:$EDGE_PORT:127.0.0.1" \
+  --dump-header "$WORK_ROOT/oauth-provider.headers" \
+  --output /dev/null \
+  "https://identity.staging.shape-of-you.ru:$EDGE_PORT/oauth/provider-policy"
+tr -d '\r' < "$WORK_ROOT/oauth-provider.headers" | \
+  grep -i -x 'referrer-policy: no-referrer' >/dev/null
+
 ASSET_PATH=$(printf '%s' "$PRODUCT_HTML" | grep -o '/_nuxt/[^" ]*\.js' | head -n 1)
 if [ -z "$ASSET_PATH" ]; then
   printf '%s\n' 'The generated HTML did not reference a Nuxt JavaScript asset.' >&2
@@ -133,6 +160,7 @@ curl --silent --show-error --fail --insecure \
   "https://identity.staging.shape-of-you.ru:$EDGE_PORT/sign-in"
 grep -i '^content-security-policy:' "$WORK_ROOT/html.headers" >/dev/null
 grep -i '^cache-control: no-store' "$WORK_ROOT/html.headers" >/dev/null
+grep -i '^referrer-policy: no-referrer' "$WORK_ROOT/html.headers" >/dev/null
 
 docker stop "$IDENTITY_CONTAINER" >/dev/null
 UPSTREAM_STATUS=$(curl --silent --show-error --insecure \

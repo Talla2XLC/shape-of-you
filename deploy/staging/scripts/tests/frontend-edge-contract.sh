@@ -51,6 +51,19 @@ assert_contains "$NGINX" 'add_header Referrer-Policy "no-referrer" always;'
 assert_contains "$NGINX" 'proxy_pass http://identity:3000;'
 assert_contains "$NGINX" 'proxy_pass http://api:3000/;'
 
+IDENTITY_SERVER=$(sed -n '/server_name identity\.staging\.shape-of-you\.ru;/,$p' "$NGINX")
+if printf '%s\n' "$IDENTITY_SERVER" | \
+  grep '^        add_header Referrer-Policy "no-referrer" always;$' >/dev/null; then
+  printf '%s\n' 'Identity proxy responses must preserve the upstream Referrer-Policy.' >&2
+  exit 1
+fi
+IDENTITY_STATIC_POLICY_COUNT=$(printf '%s\n' "$IDENTITY_SERVER" | \
+  grep -c '^            add_header Referrer-Policy "no-referrer" always;$')
+if [ "$IDENTITY_STATIC_POLICY_COUNT" -ne 2 ]; then
+  printf '%s\n' 'Identity static HTML and assets must retain no-referrer.' >&2
+  exit 1
+fi
+
 if find "$REPOSITORY_ROOT/apps/web" \
   \( -name node_modules -o -name .nuxt -o -name .output \) -prune -o \
   -type d -name server -print | grep . >/dev/null; then

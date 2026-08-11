@@ -164,7 +164,6 @@ http {
         add_header Strict-Transport-Security "max-age=86400" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Frame-Options "DENY" always;
-        add_header Referrer-Policy "no-referrer" always;
 
         client_max_body_size 64k;
 
