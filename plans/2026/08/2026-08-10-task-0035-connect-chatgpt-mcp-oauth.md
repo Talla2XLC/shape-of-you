@@ -522,3 +522,49 @@ scope.
 5. Увеличение access-token TTL или нестандартная выдача refresh credential без
    `offline_access` проще только локально, но хуже масштабируется и ослабляет
    явный interoperability/security contract.
+
+## Одобренное дополнение: account-less provider Session до login
+
+Оператор утвердил это дополнение 2026-08-11 до изменения исходного кода.
+
+### Контекст
+
+После успешного auto-deploy `7b2839b` новый внешний authorization request с
+`id_token_hint` стабильно возвращает `500`. Identity фиксирует только
+`OAuth Session account id is invalid`. `oidc-provider` 9.11.1 допускает
+временную Session без `accountId` до обязательного login interaction и
+пытается сохранить её, когда request коснулся session state. Текущий adapter
+ошибочно требует account-bound Session для любого `upsert`.
+
+### Одобренное решение
+
+1. Не создавать строку `oauth_sessions` для строго пустой provider Session без
+   `accountId`; считать её неперсистентным protocol placeholder до login.
+2. Разрешать этот no-op только при отсутствии `acr`, `amr`, `loginTs` и
+   `authorizations`. Любая account-like или authorization state без exact
+   `accountId` остаётся fail-closed.
+3. После passkey login сохранять Session существующим способом: exact account,
+   interaction/session binding, provider UID/credential hash и typed
+   authorizations остаются обязательными.
+4. Не добавлять nullable account ownership, новую table, cookie type, endpoint,
+   migration или второй источник session state.
+
+### Проверка
+
+1. Integration test воспроизводит authorization с `id_token_hint`, отсутствующим
+   provider-session binding и scope set без forced `offline_access`; результат —
+   login interaction, а не `500`.
+2. До login в `oauth_sessions` не появляется account-less строка.
+3. Account-like placeholder без `accountId` отклоняется.
+4. Login → consent → callback/token и существующие reconnect/mismatch,
+   revocation, refresh, concurrency и `DATABASE_POOL_MAX=1` tests остаются
+   зелёными.
+
+### Architecture Review
+
+Новый ADR не требуется: изменение уточняет adapter compatibility внутри уже
+принятой typed-session архитектуры. PostgreSQL продолжает хранить только
+account-bound Identity sessions; ephemeral provider placeholder не становится
+новой domain entity или источником истины. Альтернатива с nullable
+`oauth_sessions.account_id` потребовала бы migration, ослабила ownership
+invariant и дублировала Interaction lifecycle, поэтому отклоняется.

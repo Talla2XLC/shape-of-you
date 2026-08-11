@@ -667,6 +667,32 @@ describe("Identity migration chain", () => {
       );
 
       const session = adapters("Session");
+      const sessionCountBeforePlaceholder = await pool.query<{ count: string }>(
+        "select count(*)::text as count from oauth_sessions"
+      );
+      await session.upsert("U".repeat(43), {
+        exp: now + 3_600,
+        iat: now,
+        jti: "U".repeat(43),
+        kind: "Session",
+        uid: randomUUID()
+      });
+      const sessionCountAfterPlaceholder = await pool.query<{ count: string }>(
+        "select count(*)::text as count from oauth_sessions"
+      );
+      expect(sessionCountAfterPlaceholder.rows[0]?.count).toBe(
+        sessionCountBeforePlaceholder.rows[0]?.count
+      );
+      await expect(
+        session.upsert("V".repeat(43), {
+          acr: "urn:soy:passkey",
+          exp: now + 3_600,
+          iat: now,
+          jti: "V".repeat(43),
+          kind: "Session",
+          uid: randomUUID()
+        })
+      ).rejects.toThrow("OAuth Session without an account contains bound state");
       await requestContext.run(interactionCredential, () =>
         session.upsert(providerCredential, {
           accountId,
@@ -1268,6 +1294,58 @@ describe("Identity migration chain", () => {
         { kind: "oidc", resource: null, scope: "openid" },
         { kind: "resource", resource, scope: "person:read" }
       ]);
+
+      const sessionsBeforeStaleCookie = await pool.query<{ count: string }>(
+        "select count(*)::text as count from oauth_sessions"
+      );
+      await pool.query(
+        "update oauth_sessions set provider_credential_hash = null where id = $1",
+        [sessionId]
+      );
+      const staleCookieAuthorization = await fetch(
+        authorizationUrl({
+          code_challenge: createHash("sha256")
+            .update("S".repeat(43))
+            .digest("base64url"),
+          id_token_hint: tokenBody.id_token,
+          scope: "openid person:read",
+          state: "stale-cookie-runtime-state"
+        }),
+        {
+          headers: { cookie: cookieHeader() },
+          redirect: "manual"
+        }
+      );
+      const staleCookieAuthorizationBody = staleCookieAuthorization.status === 303
+        ? ""
+        : await staleCookieAuthorization.text();
+      expect(staleCookieAuthorization.status, staleCookieAuthorizationBody).toBe(303);
+      const staleCookieLocation = staleCookieAuthorization.headers.get("location");
+      expect(staleCookieLocation).toMatch(
+        /^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/
+      );
+      applyCookies(staleCookieAuthorization);
+      const staleCookieInteraction = await createOAuthProviderAdapterFactory({
+        pool,
+        clients,
+        requestContext: new OAuthRequestContext(),
+        issuer,
+        resource
+      })("Interaction").find(staleCookieLocation!.split("/").at(-1)!);
+      expect(staleCookieInteraction).toMatchObject({
+        prompt: { name: "login" }
+      });
+      const staleCookieLoginPage = await fetch(new URL(staleCookieLocation!, issuer), {
+        headers: { cookie: cookieHeader() }
+      });
+      expect(staleCookieLoginPage.status).toBe(200);
+      expect(await staleCookieLoginPage.text()).toContain("Continue as Runtime account");
+      const sessionsAfterStaleCookie = await pool.query<{ count: string }>(
+        "select count(*)::text as count from oauth_sessions"
+      );
+      expect(sessionsAfterStaleCookie.rows[0]?.count).toBe(
+        sessionsBeforeStaleCookie.rows[0]?.count
+      );
 
       const repeatVerifier = "R".repeat(43);
       const repeatChallenge = createHash("sha256")

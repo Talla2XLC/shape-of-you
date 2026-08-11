@@ -755,6 +755,10 @@ async function upsertSession(
   if (payload.jti !== providerCredential || payload.kind !== "Session") {
     throw new Error("OAuth Session identity is inconsistent");
   }
+  if (payload.accountId === undefined) {
+    assertPristineProviderSession(payload);
+    return;
+  }
   const accountId = requireUuid(payload.accountId, "OAuth Session account id");
   const uid = requireString(payload.uid, "OAuth Session uid");
   const resumeIdentifier = dependencies.requestContext.getResumeIdentifier();
@@ -806,6 +810,24 @@ async function upsertSession(
     throw error;
   } finally {
     client.release();
+  }
+}
+
+/**
+ * Accepts only the empty session placeholder emitted when oidc-provider sees
+ * a stale provider cookie before the required login interaction.
+ */
+function assertPristineProviderSession(payload: AdapterPayload): void {
+  requireString(payload.uid, "OAuth Session uid");
+  requireEpoch(payload.iat, "OAuth Session iat");
+  requireEpoch(payload.exp, "OAuth Session exp");
+  if (
+    payload.acr !== undefined ||
+    payload.amr !== undefined ||
+    payload.authorizations !== undefined ||
+    payload.loginTs !== undefined
+  ) {
+    throw new Error("OAuth Session without an account contains bound state");
   }
 }
 
