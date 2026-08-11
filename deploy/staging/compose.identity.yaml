@@ -89,5 +89,41 @@ services:
         max-size: 10m
         max-file: "3"
 
+  identity-reconcile-oauth-clients:
+    image: "${IDENTITY_IMAGE:?IDENTITY_IMAGE is required}@${IDENTITY_DIGEST:?IDENTITY_DIGEST is required}"
+    command: ["node", "dist/commands/reconcile-predefined-oauth-clients.js"]
+    env_file:
+      - path: /etc/shape-of-you/staging/identity.env
+        format: raw
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 3000
+      IDENTITY_PUBLIC_ORIGIN: https://identity.staging.shape-of-you.ru
+      WEBAUTHN_RP_ID: identity.staging.shape-of-you.ru
+      WEBAUTHN_RP_NAME: Shape of You
+      IDENTITY_OAUTH_RESOURCE: https://staging.shape-of-you.ru/api/mcp
+      LOG_LEVEL: info
+      SHUTDOWN_TIMEOUT_MS: 10000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - identity_database_access
+    profiles:
+      - operations
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
 networks:
   identity_database_access:

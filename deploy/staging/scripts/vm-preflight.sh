@@ -29,7 +29,8 @@ test -f "$RELEASE_ENV"
 
 identity_enabled=false
 if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
-  [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ]; then
+  [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ] ||
+  [ -n "${IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE:-}" ]; then
   : "${IDENTITY_IMAGE:?IDENTITY_IMAGE is required when Identity deployment is enabled}"
   : "${IDENTITY_DIGEST:?IDENTITY_DIGEST is required when Identity deployment is enabled}"
   : "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:?IDENTITY_SCHEMA_BACKWARD_COMPATIBLE is required when Identity deployment is enabled}"
@@ -37,6 +38,14 @@ if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
     true|false) ;;
     *)
       printf '%s\n' 'Invalid Identity schema compatibility declaration.' >&2
+      exit 2
+      ;;
+  esac
+  : "${IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE:?IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE is required when Identity deployment is enabled}"
+  case "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" in
+    true|false) ;;
+    *)
+      printf '%s\n' 'Invalid predefined OAuth client compatibility declaration.' >&2
       exit 2
       ;;
   esac

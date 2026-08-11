@@ -59,6 +59,15 @@ if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
       exit 2
       ;;
   esac
+  if [ -n "${IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE:-}" ]; then
+    case "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" in
+      true|false) ;;
+      *)
+        printf '%s\n' 'Invalid predefined OAuth client compatibility declaration.' >&2
+        exit 2
+        ;;
+    esac
+  fi
   printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
   test -f "$IDENTITY_COMPOSE_FILE"
   identity_enabled=true

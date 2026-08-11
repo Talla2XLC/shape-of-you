@@ -22,7 +22,8 @@
     "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts",
     "account:bootstrap": "tsx src/commands/bootstrap-account.ts",
     "account:subject": "tsx src/commands/show-account-subject.ts",
-    "oauth-client:provision": "tsx src/commands/provision-oauth-client.ts"
+    "oauth-client:provision": "tsx src/commands/provision-oauth-client.ts",
+    "oauth-client:reconcile-predefined": "tsx src/commands/reconcile-predefined-oauth-clients.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",

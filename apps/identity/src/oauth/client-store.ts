@@ -12,6 +12,9 @@ export interface OAuthPublicClientInput {
   readonly refreshTokensEnabled: boolean;
 }
 
+/** Outcome of reconciling one public OAuth client with its desired state. */
+export type OAuthClientReconcileStatus = "created" | "updated" | "unchanged";
+
 /**
  * Loads and provisions predefined public OAuth clients in typed Identity tables.
  *
@@ -90,25 +93,56 @@ export class OAuthClientStore {
    * removed. Existing grants are not mutated.
    */
   public async provisionPublicClient(input: OAuthPublicClientInput): Promise<void> {
+    await this.reconcilePublicClient(input);
+  }
+
+  /**
+   * Reconciles one public client exactly and reports whether persistent state changed.
+   *
+   * Calls for the same client ID are serialized inside PostgreSQL. An exact repeat
+   * performs no writes, preserving the client's existing `updated_at` value.
+   * Existing grants, sessions, and authorization history are never mutated.
+   */
+  public async reconcilePublicClient(
+    input: OAuthPublicClientInput
+  ): Promise<OAuthClientReconcileStatus> {
     validatePublicClient(input);
     const client = await this.pool.connect();
     try {
       await client.query("begin");
       await client.query(
-        `insert into oauth_clients (
-           id, display_name, status, refresh_tokens_enabled, created_at, updated_at, disabled_at
-         ) values ($1, $2, 'active', $3, now(), now(), null)
-         on conflict (id) do update
-           set display_name = excluded.display_name,
-               status = 'active',
-               refresh_tokens_enabled = excluded.refresh_tokens_enabled,
-               updated_at = now(),
-               disabled_at = null`,
-        [input.clientId, input.displayName, input.refreshTokensEnabled]
+        "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+        [`oauth-client:${input.clientId}`]
       );
+      const current = await loadClientState(client, input.clientId);
+      if (current && clientStatesMatch(current, input)) {
+        await client.query("commit");
+        return "unchanged";
+      }
+
+      if (current) {
+        await client.query(
+          `update oauth_clients
+              set display_name = $2,
+                  status = 'active',
+                  refresh_tokens_enabled = $3,
+                  updated_at = now(),
+                  disabled_at = null
+            where id = $1`,
+          [input.clientId, input.displayName, input.refreshTokensEnabled]
+        );
+      } else {
+        await client.query(
+          `insert into oauth_clients (
+             id, display_name, status, refresh_tokens_enabled, created_at, updated_at, disabled_at
+           ) values ($1, $2, 'active', $3, now(), now(), null)`,
+          [input.clientId, input.displayName, input.refreshTokensEnabled]
+        );
+      }
       await reconcileRedirectUris(client, input);
       await reconcileScopes(client, input);
       await client.query("commit");
+      return current ? "updated" : "created";
     } catch (error) {
       await client.query("rollback");
       throw error;
@@ -116,6 +150,69 @@ export class OAuthClientStore {
       client.release();
     }
   }
+}
+
+interface OAuthClientState {
+  readonly displayName: string;
+  readonly status: "active" | "disabled";
+  readonly refreshTokensEnabled: boolean;
+  readonly disabledAt: Date | null;
+  readonly redirectUris: readonly string[];
+  readonly allowedScopes: readonly string[];
+}
+
+async function loadClientState(
+  client: PoolClient,
+  clientId: string
+): Promise<OAuthClientState | undefined> {
+  const clientResult = await client.query<{
+    display_name: string;
+    status: "active" | "disabled";
+    refresh_tokens_enabled: boolean;
+    disabled_at: Date | null;
+  }>(
+    `select display_name, status, refresh_tokens_enabled, disabled_at
+       from oauth_clients
+      where id = $1
+      for update`,
+    [clientId]
+  );
+  const row = clientResult.rows[0];
+  if (!row) {
+    return undefined;
+  }
+  const redirectUris = await client.query<{ redirect_uri: string }>(
+    "select redirect_uri from oauth_client_redirect_uris where client_id = $1 order by redirect_uri",
+    [clientId]
+  );
+  const allowedScopes = await client.query<{ scope: string }>(
+    "select scope from oauth_client_allowed_scopes where client_id = $1 order by scope",
+    [clientId]
+  );
+  return {
+    displayName: row.display_name,
+    status: row.status,
+    refreshTokensEnabled: row.refresh_tokens_enabled,
+    disabledAt: row.disabled_at,
+    redirectUris: redirectUris.rows.map((value) => value.redirect_uri),
+    allowedScopes: allowedScopes.rows.map((value) => value.scope)
+  };
+}
+
+function clientStatesMatch(
+  current: OAuthClientState,
+  desired: OAuthPublicClientInput
+): boolean {
+  return current.displayName === desired.displayName &&
+    current.status === "active" &&
+    current.refreshTokensEnabled === desired.refreshTokensEnabled &&
+    current.disabledAt === null &&
+    arraysEqual(current.redirectUris, [...desired.redirectUris].sort()) &&
+    arraysEqual(current.allowedScopes, [...desired.allowedScopes].sort());
+}
+
+function arraysEqual(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
 function validatePublicClient(input: OAuthPublicClientInput): void {

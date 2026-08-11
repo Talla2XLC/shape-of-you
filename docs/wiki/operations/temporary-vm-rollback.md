@@ -45,9 +45,15 @@ Or target a release:
 
 The script pulls previous images, updates API/edge, and reruns smoke without
 migrations. Automatic application rollback is allowed only when
-`SCHEMA_BACKWARD_COMPATIBLE=true`; otherwise stop for roll-forward or an
-approved restore decision. Direct rollback shares the deployment/certificate
-renewal lock and refuses to start while either operation is active.
+`SCHEMA_BACKWARD_COMPATIBLE=true`, Identity schema compatibility is true when
+Identity is enabled, and the current release declares its reconciled
+predefined-client contract backward-compatible. Otherwise stop for
+roll-forward or an approved restore decision. The compatibility decision
+belongs to the release that changed persistent state, so the first compatible
+release may target an older manifest that predates the new declaration.
+Direct rollback shares the deployment/certificate renewal lock and refuses to
+start while either operation is active. It does not reconstruct or change the
+environment-owned external callback.
 
 The HTTPS topology is a one-way operational cutover. A release created before
 the release manifest gained `CERTBOT_IMAGE` and `CERTBOT_DIGEST` cannot be
@@ -70,6 +76,7 @@ separate approval.
 
 - Application rolls back by immutable digest; database rollback is separate.
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
+- [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)
 
 ## Open questions
 

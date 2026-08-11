@@ -42,6 +42,7 @@ printf '%s\n' \
   'set -eu' \
   'printf "%s\\n" "$*" >> "$FAKE_DOCKER_LOG"' \
   'case "$*" in' \
+  '  *" ps --quiet "*) printf "%s\\n" fake-container ;;' \
   '  *"up --detach --wait --wait-timeout 90 --remove-orphans api edge"*) touch "$FAKE_WAIT_MARKER" ;;' \
   '  *"up --detach --wait --wait-timeout 90 --remove-orphans api identity edge"*) touch "$FAKE_WAIT_MARKER" ;;' \
   'esac' \
@@ -91,5 +92,73 @@ if PATH="$TEST_ROOT/fake-bin:$PATH" \
   printf '%s\n' 'Cross-topology automatic rollback was not rejected.' >&2
   exit 1
 fi
+
+GATE_PACKAGE="$TEST_ROOT/gate-package"
+GATE_DEPLOY_ROOT="$TEST_ROOT/gate-deploy"
+GATE_RELEASE_ID=fedcba9876543210fedcba9876543210fedcba98
+GATE_PREVIOUS_ID=1111111111111111111111111111111111111111
+GATE_ROLLBACK_LOG="$TEST_ROOT/gate-rollback.log"
+export GATE_ROLLBACK_LOG
+mkdir -p "$GATE_PACKAGE/scripts" "$GATE_DEPLOY_ROOT/releases/$GATE_PREVIOUS_ID"
+cp "$REPOSITORY_ROOT/deploy/staging/scripts/deploy.sh" "$GATE_PACKAGE/scripts/deploy.sh"
+touch "$GATE_PACKAGE/compose.yaml" "$GATE_PACKAGE/compose.identity.yaml" \
+  "$GATE_PACKAGE/compose.shared-ingress.yaml"
+ln -s "$GATE_DEPLOY_ROOT/releases/$GATE_PREVIOUS_ID" "$GATE_DEPLOY_ROOT/current"
+
+printf '%s\n' '#!/bin/sh' 'exit 0' > "$GATE_PACKAGE/scripts/vm-preflight.sh"
+printf '%s\n' '#!/bin/sh' 'exit 1' > "$GATE_PACKAGE/scripts/smoke.sh"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'printf "%s\n" "$1" >> "$GATE_ROLLBACK_LOG"' \
+  > "$GATE_PACKAGE/scripts/rollback.sh"
+chmod 0755 "$GATE_PACKAGE/scripts/"*.sh
+
+run_automatic_rollback_case() {
+  api_schema_compatible=$1
+  identity_schema_compatible=$2
+  client_compatible=$3
+  expected_rollback=$4
+  gate_release_env="$TEST_ROOT/gate-release.env"
+  rm -f "$GATE_ROLLBACK_LOG"
+  printf '%s\n' \
+    "RELEASE_ID=$GATE_RELEASE_ID" \
+    'API_IMAGE=ghcr.io/example/shape-of-you-api' \
+    'API_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' \
+    'IDENTITY_IMAGE=ghcr.io/example/shape-of-you-identity' \
+    'IDENTITY_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' \
+    "IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=$identity_schema_compatible" \
+    "IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=$client_compatible" \
+    'EDGE_IMAGE=ghcr.io/example/shape-of-you-edge' \
+    'EDGE_DIGEST=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' \
+    'CERTBOT_IMAGE=ghcr.io/example/shape-of-you-certbot' \
+    'CERTBOT_DIGEST=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd' \
+    'ACME_EMAIL=operator@example.com' \
+    'PUBLIC_IPV4=203.0.113.10' \
+    'DEPLOYMENT_TOPOLOGY=shared-ingress' \
+    "SCHEMA_BACKWARD_COMPATIBLE=$api_schema_compatible" \
+    > "$gate_release_env"
+
+  if PATH="$TEST_ROOT/fake-bin:$PATH" \
+    DEPLOY_ROOT="$GATE_DEPLOY_ROOT" \
+    COMPOSE_FILE="$GATE_PACKAGE/compose.yaml" \
+    IDENTITY_COMPOSE_FILE="$GATE_PACKAGE/compose.identity.yaml" \
+    sh "$GATE_PACKAGE/scripts/deploy.sh" "$gate_release_env" >/dev/null 2>&1; then
+    printf '%s\n' 'A smoke-failed deployment unexpectedly succeeded.' >&2
+    exit 1
+  fi
+
+  if [ "$expected_rollback" = true ]; then
+    grep -Fx "$GATE_PREVIOUS_ID" "$GATE_ROLLBACK_LOG" >/dev/null
+  elif [ -e "$GATE_ROLLBACK_LOG" ]; then
+    printf '%s\n' 'Automatic rollback ran without both compatibility declarations.' >&2
+    exit 1
+  fi
+}
+
+run_automatic_rollback_case true true true true
+run_automatic_rollback_case true true false false
+run_automatic_rollback_case false true true false
+run_automatic_rollback_case true false true false
 
 printf '%s\n' 'rollback readiness regression test passed.'

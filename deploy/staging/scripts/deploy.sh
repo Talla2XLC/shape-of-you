@@ -17,6 +17,7 @@ CERT_NAME=shape-of-you-staging
 bootstrap_started=false
 identity_enabled=false
 rollback_schema_compatible=false
+rollback_client_compatible=false
 
 if [ -z "$RELEASE_ENV_INPUT" ] || [ ! -f "$RELEASE_ENV_INPUT" ]; then
   printf '%s\n' "Usage: deploy.sh <release-env-file>" >&2
@@ -41,7 +42,8 @@ fi
 : "${DEPLOYMENT_TOPOLOGY:?DEPLOYMENT_TOPOLOGY is required}"
 
 if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
-  [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ]; then
+  [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ] ||
+  [ -n "${IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE:-}" ]; then
   : "${IDENTITY_IMAGE:?IDENTITY_IMAGE is required when Identity deployment is enabled}"
   : "${IDENTITY_DIGEST:?IDENTITY_DIGEST is required when Identity deployment is enabled}"
   printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
@@ -54,6 +56,14 @@ if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
       exit 2
       ;;
   esac
+  : "${IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE:?IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE is required when Identity deployment is enabled}"
+  case "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" in
+    true|false) ;;
+    *)
+      printf '%s\n' 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE must be true or false.' >&2
+      exit 2
+      ;;
+  esac
   identity_enabled=true
 fi
 
@@ -62,6 +72,11 @@ if [ "$SCHEMA_BACKWARD_COMPATIBLE" = "true" ]; then
     [ "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" = "true" ]; then
     rollback_schema_compatible=true
   fi
+fi
+
+if [ "$identity_enabled" = "false" ] ||
+  [ "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" = "true" ]; then
+  rollback_client_compatible=true
 fi
 
 case "$DEPLOYMENT_TOPOLOGY" in
@@ -173,6 +188,7 @@ fi
 compose --profile operations run --rm migrate
 if [ "$identity_enabled" = "true" ]; then
   compose --profile operations run --rm identity-migrate
+  compose --profile operations run --rm identity-reconcile-oauth-clients
   compose up --detach --wait --wait-timeout 90 api identity
 else
   compose up --detach --wait --wait-timeout 90 api
@@ -208,14 +224,15 @@ if ! RELEASE_ID="$RELEASE_ID" \
   sh "$SCRIPT_DIR/smoke.sh"; then
   printf '%s\n' "Deployment smoke failed." >&2
 
-  if [ "$rollback_schema_compatible" = "true" ] && [ -L "$CURRENT_LINK" ]; then
+  if [ "$rollback_schema_compatible" = "true" ] &&
+    [ "$rollback_client_compatible" = "true" ] && [ -L "$CURRENT_LINK" ]; then
     previous_release=$(basename "$(readlink -f "$CURRENT_LINK")")
     printf '%s\n' "Attempting application rollback to $previous_release." >&2
     EXPECTED_DEPLOYMENT_TOPOLOGY="$DEPLOYMENT_TOPOLOGY" \
       RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/rollback.sh" "$previous_release"
   else
     printf '%s\n' \
-      "Automatic rollback is disabled because schema compatibility is not confirmed." >&2
+      "Automatic rollback is disabled because schema or predefined OAuth client compatibility is not confirmed." >&2
   fi
 
   exit 1

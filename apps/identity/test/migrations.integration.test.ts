@@ -558,6 +558,149 @@ describe("Identity migration chain", () => {
     }
   });
 
+  it("reconciles predefined client state idempotently under concurrent repeats", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri(), max: 1 });
+    const store = new OAuthClientStore(pool);
+    const clientId = "predefined-reconcile-test";
+    const accountId = randomUUID();
+    const grantId = randomUUID();
+    const initial = {
+      clientId,
+      displayName: "Initial client",
+      redirectUris: ["https://chatgpt.com/connector/oauth/initial-callback"],
+      allowedScopes: ["openid", "person:read"],
+      refreshTokensEnabled: false
+    } as const;
+    const desired = {
+      clientId,
+      displayName: "Managed client",
+      redirectUris: ["https://chatgpt.com/connector/oauth/managed-callback"],
+      allowedScopes: ["openid", "offline_access", "person:read"],
+      refreshTokensEnabled: true
+    } as const;
+    try {
+      await expect(store.reconcilePublicClient(initial)).resolves.toBe("created");
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [accountId, randomUUID(), randomBytes(32), "Reconcile grant owner"]
+      );
+      await pool.query(
+        `insert into oauth_grants (id, account_id, client_id)
+         values ($1, $2, $3)`,
+        [grantId, accountId, clientId]
+      );
+      await pool.query(
+        `insert into oauth_grant_oidc_scopes (grant_id, client_id, scope)
+         values ($1, $2, 'openid')`,
+        [grantId, clientId]
+      );
+      await expect(store.reconcilePublicClient(desired)).resolves.toBe("updated");
+      const beforeRepeat = await pool.query<{ updated_at: Date }>(
+        "select updated_at from oauth_clients where id = $1",
+        [clientId]
+      );
+      const results = await Promise.all([
+        store.reconcilePublicClient(desired),
+        store.reconcilePublicClient(desired)
+      ]);
+      expect(results).toEqual(["unchanged", "unchanged"]);
+      const afterRepeat = await pool.query<{
+        display_name: string;
+        refresh_tokens_enabled: boolean;
+        updated_at: Date;
+      }>(
+        "select display_name, refresh_tokens_enabled, updated_at from oauth_clients where id = $1",
+        [clientId]
+      );
+      expect(afterRepeat.rows[0]).toMatchObject({
+        display_name: "Managed client",
+        refresh_tokens_enabled: true,
+        updated_at: beforeRepeat.rows[0]?.updated_at
+      });
+      await expect(store.findProviderClient(clientId)).resolves.toMatchObject({
+        redirect_uris: desired.redirectUris,
+        scope: "offline_access openid person:read"
+      });
+      await expect(
+        pool.query<{ grant_id: string }>(
+          "select grant_id from oauth_grant_oidc_scopes where grant_id = $1",
+          [grantId]
+        )
+      ).resolves.toMatchObject({ rows: [{ grant_id: grantId }] });
+
+      const beforeRejectedRemoval = await pool.query<{
+        display_name: string;
+        updated_at: Date;
+      }>(
+        "select display_name, updated_at from oauth_clients where id = $1",
+        [clientId]
+      );
+      const lifecycleCountsBefore = await pool.query<{
+        grants: string;
+        sessions: string;
+        history: string;
+      }>(
+        `select (select count(*)::text from oauth_grants) as grants,
+                (select count(*)::text from oauth_sessions) as sessions,
+                (select count(*)::text from identity_security_events) as history`
+      );
+      await expect(
+        store.reconcilePublicClient({
+          ...desired,
+          displayName: "Unsafe partial drift",
+          redirectUris: ["https://chatgpt.com/connector/oauth/unsafe-removal"],
+          allowedScopes: ["offline_access", "person:read"]
+        })
+      ).rejects.toThrow();
+      const afterRejectedRemoval = await pool.query<{
+        display_name: string;
+        updated_at: Date;
+      }>(
+        "select display_name, updated_at from oauth_clients where id = $1",
+        [clientId]
+      );
+      expect(afterRejectedRemoval.rows).toEqual(beforeRejectedRemoval.rows);
+      const lifecycleCountsAfter = await pool.query<{
+        grants: string;
+        sessions: string;
+        history: string;
+      }>(
+        `select (select count(*)::text from oauth_grants) as grants,
+                (select count(*)::text from oauth_sessions) as sessions,
+                (select count(*)::text from identity_security_events) as history`
+      );
+      expect(lifecycleCountsAfter.rows).toEqual(lifecycleCountsBefore.rows);
+      await expect(store.findProviderClient(clientId)).resolves.toMatchObject({
+        redirect_uris: desired.redirectUris,
+        scope: "offline_access openid person:read"
+      });
+      await expect(
+        pool.query<{ grant_id: string }>(
+          "select grant_id from oauth_grant_oidc_scopes where grant_id = $1",
+          [grantId]
+        )
+      ).resolves.toMatchObject({ rows: [{ grant_id: grantId }] });
+
+      const concurrentClientId = "predefined-concurrent-create-test";
+      const concurrentDesired = { ...desired, clientId: concurrentClientId };
+      const concurrentResults = await Promise.all([
+        store.reconcilePublicClient(concurrentDesired),
+        store.reconcilePublicClient(concurrentDesired)
+      ]);
+      expect(concurrentResults.sort()).toEqual(["created", "unchanged"]);
+      await expect(
+        pool.query<{ count: string }>(
+          "select count(*)::text as count from oauth_clients where id = $1",
+          [concurrentClientId]
+        )
+      ).resolves.toMatchObject({ rows: [{ count: "1" }] });
+    } finally {
+      await pool.end();
+    }
+  });
+
   it("persists provider interactions and binds the exact passkey session", async () => {
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     const clients = new OAuthClientStore(pool);

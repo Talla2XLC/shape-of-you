@@ -24,6 +24,9 @@ on:
       identity_schema_backward_compatible:
         required: true
         type: boolean
+      identity_oauth_clients_backward_compatible:
+        required: true
+        type: boolean
       run_write_smoke:
         required: true
         type: boolean
@@ -56,6 +59,11 @@ on:
         type: boolean
       identity_schema_backward_compatible:
         description: Previous Identity image can run after this migration
+        required: true
+        default: false
+        type: boolean
+      identity_oauth_clients_backward_compatible:
+        description: Previous Identity image supports the reconciled predefined OAuth clients
         required: true
         default: false
         type: boolean
@@ -96,6 +104,7 @@ jobs:
       DEPLOYMENT_TOPOLOGY: ${{ vars.STAGING_DEPLOYMENT_TOPOLOGY || 'shared-ingress' }}
       SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.schema_backward_compatible }}
       IDENTITY_SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.identity_schema_backward_compatible }}
+      IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE: ${{ inputs.identity_oauth_clients_backward_compatible }}
       RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
 
     steps:
@@ -138,6 +147,7 @@ jobs:
           IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: ${{ vars.STAGING_IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID }}
           IDENTITY_OAUTH_SIGNING_KEYS: ${{ secrets.STAGING_IDENTITY_OAUTH_SIGNING_KEYS }}
           IDENTITY_OAUTH_COOKIE_KEYS: ${{ secrets.STAGING_IDENTITY_OAUTH_COOKIE_KEYS }}
+          IDENTITY_CHATGPT_REDIRECT_URI: ${{ vars.STAGING_IDENTITY_CHATGPT_REDIRECT_URI }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
@@ -148,6 +158,9 @@ jobs:
           test -n "$IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID"
           test -n "$IDENTITY_OAUTH_SIGNING_KEYS"
           test -n "$IDENTITY_OAUTH_COOKIE_KEYS"
+          test -n "$IDENTITY_CHATGPT_REDIRECT_URI"
+          printf '%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI" |
+            grep -Eq '^https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{8,200}$'
           test -n "$GHCR_TOKEN"
           target="$VM_USER@$VM_HOST"
           {
@@ -161,6 +174,7 @@ jobs:
             printf 'DEPLOYMENT_TOPOLOGY=%s\n' "$DEPLOYMENT_TOPOLOGY"
             printf 'SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$SCHEMA_BACKWARD_COMPATIBLE"
             printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE"
+            printf 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=%s\n' "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE"
             printf 'RUN_WRITE_SMOKE=%s\n' "$RUN_WRITE_SMOKE"
             printf 'GHCR_NAMESPACE=%s\n' "$GHCR_NAMESPACE"
             printf 'GHCR_ACTOR=%s\n' "$GITHUB_ACTOR"
@@ -172,6 +186,7 @@ jobs:
             printf 'IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID=%s\n' "$IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID"
             printf 'IDENTITY_OAUTH_SIGNING_KEYS=%s\n' "$IDENTITY_OAUTH_SIGNING_KEYS"
             printf 'IDENTITY_OAUTH_COOKIE_KEYS=%s\n' "$IDENTITY_OAUTH_COOKIE_KEYS"
+            printf 'IDENTITY_CHATGPT_REDIRECT_URI=%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } | ssh -p "$VM_PORT" "$target" \
             -o BatchMode=yes \

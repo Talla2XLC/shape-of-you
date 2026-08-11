@@ -4,3 +4,6 @@ services:
 
   identity-migrate:
     env_file: !reset []
+
+  identity-reconcile-oauth-clients:
+    env_file: !reset []

@@ -105,10 +105,14 @@ VM resources are limited and swap is in use. Current limits (`384m` API,
 Identity runs from its independently published digest through the staging
 overlay. The versioned deployment controller writes its database URL only to
 root-owned `/etc/shape-of-you/staging/identity.env`, applies Identity-owned migrations,
-waits for database-aware readiness, and then starts edge. API and Identity
-schema compatibility are declared independently; automatic rollback of an
-Identity release requires both declarations to be true. Edge/ACME owns TLS
-certificates; Identity owns OAuth signing keys.
+reconciles the versioned predefined OAuth client policy through an
+operations-only process, waits for database-aware readiness, and then starts
+edge. The exact ChatGPT callback comes from the protected staging Environment
+as non-secret external configuration and is never stored in the manifest or
+deployment logs. API schema, Identity schema, and predefined-client
+compatibility are declared independently; automatic rollback of an Identity
+release requires all applicable declarations to be true. Edge/ACME owns TLS
+certificates; Identity owns OAuth signing keys and OAuth client policy.
 
 The root-owned runtime handoff also requires the Identity TOTP key ring, OAuth
 active signing-key identifier, OAuth signing-key ring, and provider cookie key
@@ -134,6 +138,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
+- [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)
 
 ## Open questions
 

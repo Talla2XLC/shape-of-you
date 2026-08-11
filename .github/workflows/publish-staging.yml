@@ -337,5 +337,6 @@ jobs:
       certbot_digest: ${{ needs.publish-certbot.outputs.digest }}
       schema_backward_compatible: false
       identity_schema_backward_compatible: false
+      identity_oauth_clients_backward_compatible: true
       run_write_smoke: true
     secrets: inherit

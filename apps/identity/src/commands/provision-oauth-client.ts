@@ -3,6 +3,7 @@ import { z } from "zod";
 import { loadIdentityConfig } from "../config.js";
 import { createIdentityDatabase } from "../database/context.js";
 import { OAuthClientStore } from "../oauth/client-store.js";
+import { assertOAuthClientIdIsOperatorManaged } from "../oauth/predefined-clients.js";
 
 const argumentsSchema = z.object({
   clientId: z.string().min(1).max(200),
@@ -27,6 +28,7 @@ function readArguments(arguments_: readonly string[]) {
 
 async function main(): Promise<void> {
   const input = readArguments(process.argv.slice(2));
+  assertOAuthClientIdIsOperatorManaged(input.clientId);
   const config = loadIdentityConfig();
   const database = createIdentityDatabase(config.DATABASE_URL, 1);
   try {

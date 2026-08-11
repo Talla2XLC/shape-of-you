@@ -16,6 +16,19 @@ parsing, shared day lifecycle, and real-data migration remain separate stages.
 
 ## Content
 
+### 2026-08-11 — Deployment-managed predefined OAuth clients
+
+- Added a typed, versioned Identity manifest for reserved OAuth client policy
+  while keeping the exact ChatGPT callback in validated staging Environment
+  configuration.
+- Added transactional `created`/`updated`/`unchanged` reconciliation after
+  Identity migrations and before runtime replacement, with timestamp-stable
+  repeats, reserved-ID protection, and fail-closed referenced-scope drift.
+- Added schema-plus-client automatic rollback compatibility and executable
+  controller, injection, concurrency, grant-preservation, and rollback gates.
+- GitHub Environment configuration and the first staging reconciliation remain
+  separate operational approvals.
+
 ### 2026-08-11 — Durable OAuth connections for external clients
 
 - Added the standard OIDC `offline_access` contract to Identity discovery and
@@ -26,8 +39,8 @@ parsing, shared day lifecycle, and real-data migration remain separate stages.
   access tokens.
 - Added expiry-boundary refresh, MCP read, reuse rejection, concurrent
   revocation, exactly-once security audit, and bounded-pool regression coverage.
-- Deployment, predefined-client reprovisioning, ChatGPT connection recreation,
-  and the external expiry-boundary verification remain separately gated.
+- ChatGPT connection recreation and the external expiry-boundary verification
+  remain separately gated.
 
 ### 2026-08-07 — Minimal passkey-first Nuxt client
 

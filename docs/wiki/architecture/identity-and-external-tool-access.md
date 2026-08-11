@@ -86,6 +86,13 @@ issuance enabled. Protocol scopes remain separate from resource permissions;
 MCP access tokens contain only the approved resource scopes. Open DCR and CIMD
 are deferred for the first single-operator connection.
 
+The Identity release owns a typed, versioned manifest for reserved predefined
+client IDs, display names, refresh-token capability, and exact scope
+allowlists. Environment configuration owns the exact external callback.
+Deployment applies that split authority through a one-shot transactional
+reconcile after Identity migrations; ordinary runtime startup performs no
+client writes, and the general operator command cannot manage reserved IDs.
+
 Local development and staging supply private ES256 keys through a versioned
 runtime secret key ring. PostgreSQL stores only public SPKI material, lifecycle
 metadata, and an opaque handle. Key rotation publishes an overlap key before

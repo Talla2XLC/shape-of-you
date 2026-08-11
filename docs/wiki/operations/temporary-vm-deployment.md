@@ -148,8 +148,9 @@ before the digest, database URL, and Identity schema-compatibility declaration
 became one mandatory input group. The controller writes
 `/etc/shape-of-you/staging/identity.env` independently from `api.env`. An
 Identity release can automatically roll back only when both API and Identity
-schema compatibility are explicitly true. Older releases remain renderable
-without the optional Identity overlay and expect the historical edge `503`.
+schema compatibility and predefined-client compatibility are explicitly true.
+Older releases remain renderable without the optional Identity overlay and
+expect the historical edge `503`.
 
 Before the first OAuth/MCP-capable deployment, add the two OAuth secrets and
 active signing-key variable listed above, perform the one-time replacement of
@@ -157,11 +158,16 @@ the old field-aware wrapper with the reviewed stable bootstrap, and deploy the
 accepted release. Stage that exact commit through a non-`main` preparation ref
 so the VM installation completes before updating `main`; this avoids an
 automatic deployment racing the old wrapper. All later controller protocol
-changes use the normal automatic `main` flow. After migrations, create the exact
-API subject binding through the provided operator CLI and provision the
-predefined ChatGPT client with the exact callback copied from ChatGPT. These
-are explicit operations; deployment does not guess or auto-create either
-relationship.
+changes use the normal automatic `main` flow. Create the exact API subject
+binding through the provided operator CLI. For the reserved ChatGPT client,
+set the non-secret staging Environment variable
+`STAGING_IDENTITY_CHATGPT_REDIRECT_URI` to the exact credential-free callback
+copied from ChatGPT. Every Identity deployment validates it, runs migrations,
+then executes `oauth-client:reconcile-predefined` before replacing runtime.
+Missing or invalid configuration and database drift that cannot be reconciled
+abort before replacement. Subject binding remains an explicit operation;
+reserved client reconciliation is automatic and never deletes clients absent
+from the manifest.
 
 The initial HTTP-to-HTTPS cutover used a temporary deployment gate. With
 separate approval, the operator:
