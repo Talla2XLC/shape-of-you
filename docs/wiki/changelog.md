@@ -11,10 +11,25 @@ tags: []
 ## Summary
 
 The project knowledge baseline was created on 2026-07-28. Core DEV-023 backend
-verticals and asynchronous Intake foundations are implemented. Production
-parsing, shared day lifecycle, and real-data migration remain separate stages.
+verticals, asynchronous Intake foundations, and an explicit shared day
+lifecycle are implemented. Production parsing and real-data migration remain
+separate stages.
 
 ## Content
+
+### 2026-08-12 — Versioned Person-local daily closures
+
+- Added API-owned versioned `DayClosure` snapshots for an explicit local date
+  and IANA timezone without introducing a broad `DayRecord` or mutable
+  `JournalDay` aggregate.
+- Open daily reads are composed live through module-owned application services;
+  closed reads return the immutable snapshot and become stale when current
+  evidence differs.
+- Added idempotent close/reopen commands, typed immutable fact/decision
+  manifests, append-only reclose history, API contracts, OpenAPI, clean and
+  upgrade migration checks, and lifecycle integration coverage.
+- No scheduler, new deployable, cross-service SQL, frontend UI, or automatic
+  midnight closure was added.
 
 ### 2026-08-11 — Deployment-managed predefined OAuth clients
 

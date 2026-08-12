@@ -49,6 +49,11 @@ export class CoachingService {
     return this.store.list(this.personContext.getPersonId(), query);
   }
 
+  /** Reads all recommendations for a local date for a coordinating projection. */
+  public listForLocalDate(localDate: string, timezone: string): Promise<readonly CoachingRecommendation[]> {
+    return this.store.listForLocalDate(this.personContext.getPersonId(), localDate, timezone);
+  }
+
   public async history(id: string): Promise<CoachingRecommendationHistory> {
     const history = await this.store.history(this.personContext.getPersonId(), id);
     if (!history) throw new NotFoundError("Coaching recommendation was not found");

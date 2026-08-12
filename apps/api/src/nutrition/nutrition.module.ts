@@ -7,6 +7,7 @@ import { NutritionService } from "./nutrition.service.js";
 /** Encapsulates Nutrition catalog, Meal facts, and read projections. */
 @Module({
   controllers: [NutritionCatalogController, MealController],
-  providers: [NutritionService]
+  providers: [NutritionService],
+  exports: [NutritionService]
 })
 export class NutritionModule {}

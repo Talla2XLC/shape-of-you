@@ -94,6 +94,16 @@ export class WeightMeasurementService {
     );
   }
 
+  /** Reads every current measurement for one exact Person-local date. */
+  public listForLocalDate(
+    localDate: string
+  ): Promise<readonly WeightMeasurement[]> {
+    return this.store.listForLocalDate(
+      this.personContext.getPersonId(),
+      localDate
+    );
+  }
+
   /**
    * Returns the complete ordered correction chain containing a fact.
    *

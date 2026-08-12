@@ -14,6 +14,7 @@ import type { RecoveryStore } from "../storage/recovery-repository.js";
 import type { CoachingStore } from "../storage/coaching-repository.js";
 import type { IntakeStore } from "../storage/intake-repository.js";
 import type { IntakeParser } from "../domain/intake.js";
+import type { DayClosureStore } from "../storage/day-closure-repository.js";
 import { BodyMeasurementSessionModule } from "../body-measurement-sessions/body-measurement-session.module.js";
 import { PhysicalGoalModule } from "../physical-goals/physical-goal.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
@@ -22,6 +23,7 @@ import { TrainingModule } from "../training/training.module.js";
 import { RecoveryModule } from "../recovery/recovery.module.js";
 import { CoachingModule } from "../coaching/coaching.module.js";
 import { IntakeModule } from "../intake/intake.module.js";
+import { DayClosureModule } from "../day-closures/day-closure.module.js";
 import {
   PERSON_CONTEXT,
   BODY_MEASUREMENT_SESSION_STORE,
@@ -33,7 +35,8 @@ import {
   INTAKE_PARSER,
   INTAKE_STORE,
   READINESS_PROBE,
-  WEIGHT_MEASUREMENT_STORE
+  WEIGHT_MEASUREMENT_STORE,
+  DAY_CLOSURE_STORE
 } from "./tokens.js";
 
 /** Explicit runtime dependencies composed before Nest creates the module graph. */
@@ -58,6 +61,8 @@ export interface AppModuleOptions {
   readonly intakeStore: IntakeStore;
   /** Optional provider adapter; null leaves queued work durable but unclaimed. */
   readonly intakeParser: IntakeParser | null;
+  /** Persistence boundary for versioned Person-local daily closures. */
+  readonly dayClosureStore: DayClosureStore;
   /** Probe that resolves only when required dependencies are ready. */
   readonly readinessProbe: ReadinessProbe;
   /** Database context available to the application, when configured. */
@@ -114,6 +119,10 @@ class RuntimeDependenciesModule {
           useValue: options.intakeParser
         },
         {
+          provide: DAY_CLOSURE_STORE,
+          useValue: options.dayClosureStore
+        },
+        {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
@@ -135,6 +144,7 @@ class RuntimeDependenciesModule {
         COACHING_STORE,
         INTAKE_STORE,
         INTAKE_PARSER,
+        DAY_CLOSURE_STORE,
         WEIGHT_MEASUREMENT_STORE,
         READINESS_PROBE,
         DatabaseLifecycle
@@ -165,7 +175,8 @@ export class AppModule {
         TrainingModule,
         RecoveryModule,
         CoachingModule,
-        IntakeModule
+        IntakeModule,
+        DayClosureModule
       ]
     };
   }

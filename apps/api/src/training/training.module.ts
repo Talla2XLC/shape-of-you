@@ -14,6 +14,7 @@ import { TrainingService } from "./training.service.js";
     TrainingProgramController,
     WorkoutSessionController
   ],
-  providers: [TrainingService]
+  providers: [TrainingService],
+  exports: [TrainingService]
 })
 export class TrainingModule {}

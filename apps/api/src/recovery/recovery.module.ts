@@ -10,6 +10,7 @@ import { RecoveryService } from "./recovery.service.js";
 /** Recovery observations, consent and assessment module. */
 @Module({
   controllers: [RecoveryConnectionController, RecoveryObservationController, RecoveryAssessmentController],
-  providers: [RecoveryService]
+  providers: [RecoveryService],
+  exports: [RecoveryService]
 })
 export class RecoveryModule {}

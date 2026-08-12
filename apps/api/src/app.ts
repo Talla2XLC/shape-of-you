@@ -53,6 +53,10 @@ import {
   IntakeRepository,
   type IntakeStore
 } from "./storage/intake-repository.js";
+import {
+  DayClosureRepository,
+  type DayClosureStore
+} from "./storage/day-closure-repository.js";
 import type { IntakeParser } from "./domain/intake.js";
 import { WeightMeasurementService } from "./weight-measurements/weight-measurement.service.js";
 import { BodyMeasurementSessionService } from "./body-measurement-sessions/body-measurement-session.service.js";
@@ -86,6 +90,8 @@ export interface BuildAppOptions {
   readonly coachingStore?: CoachingStore;
   /** Optional Intake persistence used for isolated application tests. */
   readonly intakeStore?: IntakeStore;
+  /** Optional daily-closure persistence used for isolated application tests. */
+  readonly dayClosureStore?: DayClosureStore;
   /** Optional provider-neutral parser that enables the background worker. */
   readonly intakeParser?: IntakeParser;
   /** Optional Person resolution boundary, primarily for isolated tests. */
@@ -152,6 +158,9 @@ export async function buildApp(
   const intakeStore =
     options.intakeStore ??
     (database ? new IntakeRepository(database) : undefined);
+  const dayClosureStore =
+    options.dayClosureStore ??
+    (database ? new DayClosureRepository(database) : undefined);
 
   if (
     !store ||
@@ -161,7 +170,8 @@ export async function buildApp(
     !trainingStore ||
     !recoveryStore ||
     !coachingStore ||
-    !intakeStore
+    !intakeStore ||
+    !dayClosureStore
   ) {
     throw new Error("All application persistence stores are required");
   }
@@ -197,6 +207,7 @@ export async function buildApp(
       recoveryStore,
       coachingStore,
       intakeStore,
+      dayClosureStore,
       intakeParser: options.intakeParser ?? null,
       personContext,
       readinessProbe,

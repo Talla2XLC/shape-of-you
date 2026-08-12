@@ -29,6 +29,7 @@ import {
   trainingProgramVersions,
   trainingProgramWorkouts
 } from "../database/schema.js";
+import { deriveLocalDate } from "../domain/weight-measurement.js";
 import {
   deriveCoachingRecommendationState,
   evaluateTrainingAdjustment,
@@ -74,6 +75,8 @@ export interface CoachingStore {
     personId: string,
     query: ListCoachingRecommendationsQuery
   ): Promise<CoachingRecommendationList>;
+  /** Reads every recommendation whose local projection date matches the supplied context. */
+  listForLocalDate(personId: string, localDate: string, timezone: string): Promise<readonly CoachingRecommendation[]>;
   history(
     personId: string,
     id: string
@@ -428,6 +431,26 @@ export class CoachingRepository implements CoachingStore {
           .filter((item) => query.state === undefined || item.state === query.state)
           .slice(0, query.limit ?? 50)
       };
+    });
+  }
+
+  /** {@inheritDoc CoachingStore.listForLocalDate} */
+  public listForLocalDate(
+    personId: string,
+    localDate: string,
+    timezone: string
+  ): Promise<readonly CoachingRecommendation[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const rows = await transaction
+        .select()
+        .from(coachingRecommendations)
+        .where(eq(coachingRecommendations.personId, personId))
+        .orderBy(desc(coachingRecommendations.asOf), desc(coachingRecommendations.id));
+      const now = this.clock();
+      const hydrated = await Promise.all(rows.map((row) => this.hydrate(transaction, row, now)));
+      return hydrated.filter(
+        (item) => deriveLocalDate(new Date(item.asOf), timezone) === localDate
+      );
     });
   }
 

@@ -27,6 +27,7 @@ import type { TrainingStore } from "../src/storage/training-repository.js";
 import type { RecoveryStore } from "../src/storage/recovery-repository.js";
 import type { CoachingStore } from "../src/storage/coaching-repository.js";
 import type { IntakeStore } from "../src/storage/intake-repository.js";
+import type { DayClosureStore } from "../src/storage/day-closure-repository.js";
 import type {
   CreateWeightMeasurementResult,
   WeightMeasurementStore
@@ -140,6 +141,10 @@ class FakeStore implements WeightMeasurementStore {
     return { items: [baselineMeasurement], nextCursor: null };
   }
 
+  public async listForLocalDate(): Promise<readonly WeightMeasurement[]> {
+    return [baselineMeasurement];
+  }
+
   public async history(): Promise<WeightMeasurementHistory> {
     return { items: [baselineMeasurement] };
   }
@@ -154,6 +159,7 @@ const bodyMeasurementSessionStore: BodyMeasurementSessionStore = {
   correct: unreachable,
   findById: unreachable,
   list: unreachable,
+  listForLocalDate: unreachable,
   history: unreachable
 };
 
@@ -183,6 +189,7 @@ const nutritionStore: NutritionStore = {
   correctMeal: unreachable,
   findMeal: unreachable,
   listMeals: unreachable,
+  listMealsForLocalDate: unreachable,
   mealHistory: unreachable,
   dailyTotals: unreachable
 };
@@ -202,6 +209,7 @@ const trainingStore: TrainingStore = {
   correctWorkoutSession: unreachable,
   findWorkoutSession: unreachable,
   listWorkoutSessions: unreachable,
+  listWorkoutSessionsForLocalDate: unreachable,
   workoutSessionHistory: unreachable,
   personalRecords: unreachable,
   progressionCandidates: unreachable,
@@ -217,11 +225,13 @@ const recoveryStore: RecoveryStore = {
   correctObservation: unreachable,
   findObservation: unreachable,
   listObservations: unreachable,
+  listObservationsForLocalDate: unreachable,
   observationHistory: unreachable,
   registerPolicyVersion: unreachable,
   createAssessment: unreachable,
   findAssessment: unreachable,
-  listAssessments: unreachable
+  listAssessments: unreachable,
+  listAssessmentsForLocalDate: unreachable
 };
 
 const coachingStore: CoachingStore = {
@@ -230,6 +240,7 @@ const coachingStore: CoachingStore = {
   decide: unreachable,
   find: unreachable,
   list: unreachable,
+  listForLocalDate: unreachable,
   history: unreachable
 };
 
@@ -247,6 +258,13 @@ const intakeStore: IntakeStore = {
   failJob: unreachable
 };
 
+const dayClosureStore: DayClosureStore = {
+  findActive: unreachable,
+  history: unreachable,
+  close: unreachable,
+  reopen: unreachable
+};
+
 const physicalStateStores = {
   bodyMeasurementSessionStore,
   physicalGoalStore,
@@ -254,7 +272,8 @@ const physicalStateStores = {
   trainingStore,
   recoveryStore,
   coachingStore,
-  intakeStore
+  intakeStore,
+  dayClosureStore
 };
 
 describe("API bootstrap", () => {
@@ -300,6 +319,7 @@ describe("API bootstrap", () => {
       "/v1/coaching/recommendations/training-adjustments"
     );
     expect(openapi.json().paths).toHaveProperty("/v1/intake/requests");
+    expect(openapi.json().paths).toHaveProperty("/v1/day-projections");
 
     await app.close();
   });

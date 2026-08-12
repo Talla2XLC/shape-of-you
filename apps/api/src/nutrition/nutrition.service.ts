@@ -183,6 +183,11 @@ export class NutritionService {
     );
   }
 
+  /** Reads all current meals for a single local date for a coordinating projection. */
+  public listMealsForLocalDate(localDate: string): Promise<readonly Meal[]> {
+    return this.store.listMealsForLocalDate(this.personContext.getPersonId(), localDate);
+  }
+
   /** Reads the append-only correction chain containing one Meal. */
   public async mealHistory(id: string): Promise<MealHistory> {
     const history = await this.store.mealHistory(

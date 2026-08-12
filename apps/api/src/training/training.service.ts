@@ -179,6 +179,11 @@ export class TrainingService {
     );
   }
 
+  /** Reads all current workout sessions for a single local date for a coordinating projection. */
+  public listWorkoutSessionsForLocalDate(localDate: string): Promise<readonly WorkoutSession[]> {
+    return this.store.listWorkoutSessionsForLocalDate(this.personContext.getPersonId(), localDate);
+  }
+
   /** Reads the complete append-only correction chain for one session. */
   public async workoutSessionHistory(
     id: string

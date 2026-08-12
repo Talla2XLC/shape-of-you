@@ -71,6 +71,20 @@
       "when": 1786085720765,
       "tag": "20260807065520_wide_butterfly",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786482382717,
+      "tag": "20260811210622_parched_shocker",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786484474158,
+      "tag": "20260811214114_puzzling_magus",
+      "breakpoints": true
     }
   ]
 }

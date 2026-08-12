@@ -148,6 +148,8 @@ export interface TrainingStore {
     limit: number,
     localDate?: string
   ): Promise<WorkoutSessionList>;
+  /** Reads every current workout session for one exact Person-local date. */
+  listWorkoutSessionsForLocalDate(personId: string, localDate: string): Promise<readonly WorkoutSession[]>;
   workoutSessionHistory(
     personId: string,
     id: string
@@ -1175,6 +1177,19 @@ export class TrainingRepository implements TrainingStore {
           rows.map((row) => this.serializeSession(transaction, row))
         )
       };
+    });
+  }
+
+  /** {@inheritDoc TrainingStore.listWorkoutSessionsForLocalDate} */
+  public async listWorkoutSessionsForLocalDate(personId: string, localDate: string): Promise<readonly WorkoutSession[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const successor = alias(workoutSessions, "daily_workout_successor");
+      const rows = await transaction.select().from(workoutSessions).where(and(
+        eq(workoutSessions.personId, personId),
+        eq(workoutSessions.localDate, localDate),
+        notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, workoutSessions.id)))
+      )).orderBy(desc(workoutSessions.occurredAt), desc(workoutSessions.id));
+      return Promise.all(rows.map((row) => this.serializeSession(transaction, row)));
     });
   }
 

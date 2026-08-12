@@ -113,6 +113,12 @@ export interface WeightMeasurementStore {
     cursor?: string
   ): Promise<WeightMeasurementList>;
 
+  /** Reads every current measurement for one exact Person-local calendar date. */
+  listForLocalDate(
+    personId: string,
+    localDate: string
+  ): Promise<readonly WeightMeasurement[]>;
+
   /**
    * Returns the complete ordered correction chain containing a fact.
    *
@@ -434,6 +440,32 @@ export class WeightMeasurementRepository
             })
           : null
     };
+  }
+
+  /** {@inheritDoc WeightMeasurementStore.listForLocalDate} */
+  public async listForLocalDate(
+    personId: string,
+    localDate: string
+  ): Promise<readonly WeightMeasurement[]> {
+    const successor = alias(weightMeasurements, "daily_weight_successor");
+    const rows = await this.database.db
+      .select({ measurement: weightMeasurements, sourceReference: sourceReferences })
+      .from(weightMeasurements)
+      .innerJoin(sourceReferences, eq(weightMeasurements.sourceReferenceId, sourceReferences.id))
+      .where(
+        and(
+          eq(weightMeasurements.personId, personId),
+          eq(weightMeasurements.localDate, localDate),
+          notExists(
+            this.database.db
+              .select({ id: successor.id })
+              .from(successor)
+              .where(eq(successor.supersedesId, weightMeasurements.id))
+          )
+        )
+      )
+      .orderBy(desc(weightMeasurements.measuredAt), desc(weightMeasurements.id));
+    return rows.map(serializeJoined);
   }
 
   /** {@inheritDoc WeightMeasurementStore.history} */

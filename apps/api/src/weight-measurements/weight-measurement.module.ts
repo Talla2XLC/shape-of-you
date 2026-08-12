@@ -6,6 +6,7 @@ import { WeightMeasurementService } from "./weight-measurement.service.js";
 /** Encapsulates the current Physical State measurement vertical. */
 @Module({
   controllers: [WeightMeasurementController],
-  providers: [WeightMeasurementService]
+  providers: [WeightMeasurementService],
+  exports: [WeightMeasurementService]
 })
 export class WeightMeasurementModule {}

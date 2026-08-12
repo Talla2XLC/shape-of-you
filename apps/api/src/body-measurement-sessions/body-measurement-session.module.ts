@@ -6,6 +6,7 @@ import { BodyMeasurementSessionService } from "./body-measurement-session.servic
 /** Encapsulates body measurement session commands and queries. */
 @Module({
   controllers: [BodyMeasurementSessionController],
-  providers: [BodyMeasurementSessionService]
+  providers: [BodyMeasurementSessionService],
+  exports: [BodyMeasurementSessionService]
 })
 export class BodyMeasurementSessionModule {}

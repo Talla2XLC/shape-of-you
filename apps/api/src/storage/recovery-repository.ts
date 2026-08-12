@@ -114,11 +114,15 @@ export interface RecoveryStore {
   correctObservation(personId: string, id: string, input: CorrectRecoveryObservation): Promise<CreatedRecoveryObservation>;
   findObservation(personId: string, id: string): Promise<RecoveryObservation | null>;
   listObservations(personId: string, query: ListRecoveryObservationsQuery): Promise<RecoveryObservationList>;
+  /** Reads every current observation for one exact Person-local calendar date. */
+  listObservationsForLocalDate(personId: string, localDate: string): Promise<readonly RecoveryObservation[]>;
   observationHistory(personId: string, id: string): Promise<RecoveryObservationHistory | null>;
   registerPolicyVersion(input: RegisterRecoveryPolicyVersion): Promise<string>;
   createAssessment(personId: string, input: CreateRecoveryAssessment): Promise<CreatedRecoveryAssessment>;
   findAssessment(personId: string, id: string): Promise<RecoveryAssessment | null>;
   listAssessments(personId: string, limit: number): Promise<RecoveryAssessmentList>;
+  /** Reads every assessment for one exact Person-local calendar date. */
+  listAssessmentsForLocalDate(personId: string, localDate: string): Promise<readonly RecoveryAssessment[]>;
 }
 
 async function lockPerson(transaction: DatabaseTransaction, personId: string): Promise<void> {
@@ -451,6 +455,19 @@ export class RecoveryRepository implements RecoveryStore {
     });
   }
 
+  /** {@inheritDoc RecoveryStore.listObservationsForLocalDate} */
+  public listObservationsForLocalDate(personId: string, localDate: string): Promise<readonly RecoveryObservation[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const successor = alias(recoveryObservations, "daily_recovery_successor");
+      const rows = await transaction.select().from(recoveryObservations).where(and(
+        eq(recoveryObservations.personId, personId),
+        eq(recoveryObservations.localDate, localDate),
+        notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
+      )).orderBy(desc(recoveryObservations.observedUntil), desc(recoveryObservations.id));
+      return Promise.all(rows.map((row) => this.hydrateObservation(transaction, row)));
+    });
+  }
+
   public observationHistory(personId: string, id: string): Promise<RecoveryObservationHistory | null> {
     return this.database.db.transaction(async (transaction) => {
       const all = await transaction.select().from(recoveryObservations)
@@ -668,6 +685,17 @@ export class RecoveryRepository implements RecoveryStore {
     return this.database.db.transaction(async (transaction) => {
       const rows = await transaction.select().from(recoveryAssessments).where(eq(recoveryAssessments.personId, personId)).orderBy(desc(recoveryAssessments.asOf), desc(recoveryAssessments.id)).limit(limit);
       return { items: await Promise.all(rows.map((row) => this.hydrateAssessment(transaction, row))) };
+    });
+  }
+
+  /** {@inheritDoc RecoveryStore.listAssessmentsForLocalDate} */
+  public listAssessmentsForLocalDate(personId: string, localDate: string): Promise<readonly RecoveryAssessment[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const rows = await transaction.select().from(recoveryAssessments).where(and(
+        eq(recoveryAssessments.personId, personId),
+        eq(recoveryAssessments.localDate, localDate)
+      )).orderBy(desc(recoveryAssessments.asOf), desc(recoveryAssessments.id));
+      return Promise.all(rows.map((row) => this.hydrateAssessment(transaction, row)));
     });
   }
 

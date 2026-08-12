@@ -78,6 +78,11 @@ export interface BodyMeasurementSessionStore {
     cursor?: string,
     metric?: BodyMeasurementValueInput["metric"]
   ): Promise<BodyMeasurementSessionList>;
+  /** Reads every current session for one exact Person-local calendar date. */
+  listForLocalDate(
+    personId: string,
+    localDate: string
+  ): Promise<readonly BodyMeasurementSession[]>;
   history(
     personId: string,
     id: string
@@ -379,6 +384,35 @@ export class BodyMeasurementSessionRepository
             })
           : null
     };
+  }
+
+  /** {@inheritDoc BodyMeasurementSessionStore.listForLocalDate} */
+  public async listForLocalDate(
+    personId: string,
+    localDate: string
+  ): Promise<readonly BodyMeasurementSession[]> {
+    const successor = alias(bodyMeasurementSessions, "daily_body_successor");
+    const rows = await this.database.db
+      .select({ session: bodyMeasurementSessions, sourceReference: sourceReferences })
+      .from(bodyMeasurementSessions)
+      .innerJoin(
+        sourceReferences,
+        eq(bodyMeasurementSessions.sourceReferenceId, sourceReferences.id)
+      )
+      .where(
+        and(
+          eq(bodyMeasurementSessions.personId, personId),
+          eq(bodyMeasurementSessions.localDate, localDate),
+          notExists(
+            this.database.db
+              .select({ id: successor.id })
+              .from(successor)
+              .where(eq(successor.supersedesId, bodyMeasurementSessions.id))
+          )
+        )
+      )
+      .orderBy(desc(bodyMeasurementSessions.measuredAt), desc(bodyMeasurementSessions.id));
+    return Promise.all(rows.map((row) => this.hydrate(row, this.database.db)));
   }
 
   public async history(

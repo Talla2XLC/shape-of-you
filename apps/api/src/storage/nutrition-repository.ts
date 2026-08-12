@@ -136,6 +136,8 @@ export interface NutritionStore {
     cursor?: string,
     localDate?: string
   ): Promise<MealList>;
+  /** Reads every current meal for one exact Person-local calendar date. */
+  listMealsForLocalDate(personId: string, localDate: string): Promise<readonly Meal[]>;
   mealHistory(
     personId: string,
     id: string
@@ -1228,6 +1230,19 @@ export class NutritionRepository implements NutritionStore {
               })
             : null
       };
+    });
+  }
+
+  /** {@inheritDoc NutritionStore.listMealsForLocalDate} */
+  public listMealsForLocalDate(personId: string, localDate: string): Promise<readonly Meal[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const successor = alias(meals, "daily_meal_successor");
+      const rows = await transaction.select().from(meals).where(and(
+        eq(meals.personId, personId),
+        eq(meals.localDate, localDate),
+        notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
+      )).orderBy(desc(meals.occurredAt), desc(meals.id));
+      return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row)));
     });
   }
 

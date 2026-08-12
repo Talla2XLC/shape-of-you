@@ -22,9 +22,17 @@ Workflows use explicit states, idempotency keys, validation, read-back, and
 append-only audit entries. Implement these as small state machines in owning
 modules, not separate services.
 
-A Person-local day may be open/closed, but closure cannot own Nutrition,
-Training, Physical State, Recovery, or Coaching facts. Corrections remain
-explicit and provenance-preserving.
+A Person-local day is open when no active `DayClosure` exists. Closing creates
+an immutable versioned summary and typed fact/decision references; reopening
+supersedes rather than mutates or deletes that version. A later close appends a
+new version. The closure cannot own Nutrition, Training, Physical State,
+Recovery, or Coaching facts, and changed late evidence makes a closed daily
+projection stale instead of silently rewriting its snapshot.
+
+The closure records its IANA timezone, Person actor, and source channel. A
+closed date is read only in its recorded timezone; a different timezone is a
+conflict. Its coordinating read ports select every current fact for that exact
+local date and do not depend on public-list pagination.
 
 ## Evidence
 
@@ -34,17 +42,17 @@ explicit and provenance-preserving.
 
 ## Decisions
 
-- Model lifecycle inside modules. Health/safety gates and closed-day protection
-  need explicit approval before implementation.
+- Model lifecycle inside owning modules; `DayClosure` only coordinates an
+  explicit Person-local close/reopen boundary.
 
 ## Open questions
 
-- Reopening closed days, retention of source text/photos/device evidence,
-  user-visible versus retryable errors, and legacy multi-sheet transaction
-  semantics.
+- Retention of source text/photos/device evidence, user-visible versus
+  retryable errors, and legacy multi-sheet transaction semantics.
 
 ## Related material
 
 - [Authority](source-of-truth-and-authority.md)
 - [Domain invariants](../domain/invariants.md)
 - [Open questions](../domain/open-modeling-questions.md)
+- [Versioned Person-local day closures](../../adr/20260811-model-versioned-person-local-day-closures.md)

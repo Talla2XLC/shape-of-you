@@ -32,3 +32,6 @@ export const INTAKE_STORE = Symbol("INTAKE_STORE");
 
 /** Injection token for the optional provider-neutral Intake parser. */
 export const INTAKE_PARSER = Symbol("INTAKE_PARSER");
+
+/** Injection token for versioned Person-local day closure persistence. */
+export const DAY_CLOSURE_STORE = Symbol("DAY_CLOSURE_STORE");

@@ -31,9 +31,11 @@ and RecommendationDecision. Daily projections reference but do not own them.
 - CoachingRecommendation has typed detail; policy/evidence are references;
   RecommendationDecision and execution remain separate facts.
 
-`DayClosure` or `JournalDay` remains a narrow candidate for Person-local date,
-timezone, open/closed lifecycle, closure time, explicit corrections,
-fact references, and daily projection creation. Name and invariants are open.
+`DayClosure` is a narrow Person-owned coordination artifact for explicit local
+date/timezone closure. An open day has no active closure; a closed day holds an
+immutable typed summary snapshot and a typed reference manifest. Reopen
+supersedes the active version with a reason, and reclose appends a new version.
+It does not own or mutate the referenced facts.
 
 `Daily_Log` is primarily a legacy read model/migration projection, not evidence
 for a broad aggregate.
@@ -50,11 +52,12 @@ for a broad aggregate.
 
 ## Open questions
 
-- DayClosure snapshot semantics, initial unit vocabulary, and external matching
-  moderation. Multiple weight measurements per day are allowed.
+- Initial unit vocabulary and external matching moderation. Multiple weight
+  measurements per day are allowed.
 
 ## Related material
 
 - [Extraction map](domain-extraction-map.md)
 - [Invariants](invariants.md)
 - [Open questions](open-modeling-questions.md)
+- [Versioned Person-local day closures](../../adr/20260811-model-versioned-person-local-day-closures.md)

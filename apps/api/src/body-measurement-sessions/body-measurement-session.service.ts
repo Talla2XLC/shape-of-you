@@ -77,6 +77,16 @@ export class BodyMeasurementSessionService {
     );
   }
 
+  /** Reads every current body-measurement session for one Person-local date. */
+  public listForLocalDate(
+    localDate: string
+  ): Promise<readonly BodyMeasurementSession[]> {
+    return this.store.listForLocalDate(
+      this.personContext.getPersonId(),
+      localDate
+    );
+  }
+
   /**
    * Reads a complete body session correction chain.
    *
