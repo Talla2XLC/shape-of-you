@@ -1,11 +1,3 @@
-<script setup lang="ts">
-import { identityRoute } from "~/lib/browser-security";
-
-const config = useRuntimeConfig();
-const identityOrigin = String(config.public.identityOrigin);
-const signInUrl = identityRoute(identityOrigin, "/sign-in");
-</script>
-
 <template>
   <section class="hero">
     <div>
@@ -20,7 +12,7 @@ const signInUrl = identityRoute(identityOrigin, "/sign-in");
       <div class="hero-actions">
         <a
           class="button"
-          :href="signInUrl"
+          href="/api/browser-auth/sign-in"
         >Continue with a passkey</a>
         <a
           class="quiet-link"

@@ -162,6 +162,14 @@ first request, held only in tab memory, and sent only in the Authorization
 header. TOTP/recovery UI and replacement of the narrow Identity-owned OAuth
 interaction page remain outside the first frontend release.
 
+For product API calls, the browser starts a top-level Authorization Code + S256
+PKCE navigation at the API. The API exchanges the code server-side, validates
+the Identity token and resolves one API-owned Person grant, then sets its own
+short-lived host-only session and CSRF cookies. Relative `/api/...` reads use
+that API session; writes also require the exact API Origin and matching CSRF
+header. The static Web client never receives access or refresh tokens. MCP
+continues to use its separate bearer-token contract.
+
 OAuth interaction correlation and resume targets are stored as narrow typed
 columns. Authorization resume explicitly binds the interaction's authenticated
 passkey session to the provider Session UID; Identity does not create duplicate
@@ -234,6 +242,7 @@ lifecycle.
 - [TOTP emergency recovery](../../adr/20260806-use-totp-for-emergency-passkey-recovery.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
+- [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
 - [Durable OAuth connections](../../adr/20260810-require-offline-access-for-durable-oauth-connections.md)
 
 ## Open questions

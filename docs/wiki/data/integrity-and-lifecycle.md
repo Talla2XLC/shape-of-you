@@ -29,6 +29,11 @@ new version. The closure cannot own Nutrition, Training, Physical State,
 Recovery, or Coaching facts, and changed late evidence makes a closed daily
 projection stale instead of silently rewriting its snapshot.
 
+The authenticated day screen reads the composed projection and append-only
+closure history through the API. It asks for an explicit browser confirmation
+before close and requires a non-empty reopen reason; it does not calculate or
+mutate lifecycle state locally.
+
 The closure records its IANA timezone, Person actor, and source channel. A
 closed date is read only in its recorded timezone; a different timezone is a
 conflict. Its coordinating read ports select every current fact for that exact

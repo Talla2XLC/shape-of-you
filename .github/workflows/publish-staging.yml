@@ -338,5 +338,5 @@ jobs:
       schema_backward_compatible: false
       identity_schema_backward_compatible: false
       identity_oauth_clients_backward_compatible: true
-      run_write_smoke: true
+      run_write_smoke: false
     secrets: inherit

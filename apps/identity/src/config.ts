@@ -37,6 +37,7 @@ const identityEnvironmentSchema = z
   IDENTITY_OAUTH_COOKIE_KEYS: z.string().min(1).optional(),
   IDENTITY_OAUTH_RESOURCE: z.string().url().optional(),
   IDENTITY_CHATGPT_REDIRECT_URI: z.string().min(1).optional(),
+  IDENTITY_WEB_REDIRECT_URI: z.string().url().optional(),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),

@@ -20,6 +20,20 @@ const environmentSchema = z.object({
   IDENTITY_OAUTH_ISSUER: z.string().url().optional(),
   IDENTITY_OAUTH_JWKS_URI: z.string().url().optional(),
   IDENTITY_OAUTH_RESOURCE: z.string().url().optional(),
+  API_BROWSER_ORIGIN: z.string().url().optional(),
+  API_BROWSER_OAUTH_CLIENT_ID: z.string().min(1).max(128).optional(),
+  API_BROWSER_SESSION_KEYS: z
+    .string()
+    .min(32)
+    .refine(
+      (value) =>
+        value
+          .split(",")
+          .map((key) => key.trim())
+          .every((key) => key.length >= 32),
+      "API_BROWSER_SESSION_KEYS must contain one or more keys of at least 32 characters"
+    )
+    .optional(),
   SHUTDOWN_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -54,6 +68,25 @@ const environmentSchema = z.object({
       code: "custom",
       path: ["IDENTITY_OAUTH_ISSUER"],
       message: "Identity OAuth settings are required in authenticated mode"
+    });
+  }
+  const browserSettings = [
+    environment.API_BROWSER_ORIGIN,
+    environment.API_BROWSER_OAUTH_CLIENT_ID,
+    environment.API_BROWSER_SESSION_KEYS
+  ];
+  if (browserSettings.some(Boolean) && !browserSettings.every(Boolean)) {
+    context.addIssue({
+      code: "custom",
+      path: ["API_BROWSER_ORIGIN"],
+      message: "Browser origin, OAuth client id, and session keys must be supplied together"
+    });
+  }
+  if (environment.PERSON_CONTEXT_MODE === "authenticated" && !browserSettings.every(Boolean)) {
+    context.addIssue({
+      code: "custom",
+      path: ["API_BROWSER_ORIGIN"],
+      message: "Browser OAuth settings are required in authenticated mode"
     });
   }
 });

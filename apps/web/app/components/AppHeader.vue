@@ -1,9 +1,3 @@
-<script setup lang="ts">
-const config = useRuntimeConfig();
-const identityOrigin = String(config.public.identityOrigin);
-const signInUrl = computed(() => new URL("/sign-in", identityOrigin).toString());
-</script>
-
 <template>
   <header class="site-header">
     <NuxtLink
@@ -19,7 +13,7 @@ const signInUrl = computed(() => new URL("/sign-in", identityOrigin).toString())
     </NuxtLink>
     <a
       class="quiet-link"
-      :href="signInUrl"
-    >Sign in</a>
+      href="/day"
+    >My day</a>
   </header>
 </template>

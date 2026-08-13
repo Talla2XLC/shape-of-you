@@ -16,8 +16,14 @@ export interface PredefinedOAuthClientManifest {
 
 /** Predefined client manifest owned by the Identity release. */
 export const predefinedOAuthClientManifest: PredefinedOAuthClientManifest = {
-  version: 1,
+  version: 2,
   clients: [
+    {
+      clientId: "shape-of-you-web-staging",
+      displayName: "Shape of You Web Staging",
+      allowedScopes: ["openid"],
+      refreshTokensEnabled: false
+    },
     {
       clientId: "shape-of-you-chatgpt-staging",
       displayName: "Shape of You ChatGPT Staging",
@@ -90,14 +96,42 @@ export function parseChatGptRedirectUri(value: string | undefined): string {
 /** Resolves versioned predefined policies with their environment-owned callback. */
 export function resolvePredefinedOAuthClients(
   chatGptRedirectUri: string | undefined,
+  webRedirectUri: string | undefined,
   manifest: PredefinedOAuthClientManifest = predefinedOAuthClientManifest
 ): readonly OAuthPublicClientInput[] {
-  if (manifest.version !== 1) {
+  if (manifest.version !== 2) {
     throw new Error("Predefined OAuth client manifest version is unsupported");
   }
-  const redirectUri = parseChatGptRedirectUri(chatGptRedirectUri);
+  const chatGptUri = parseChatGptRedirectUri(chatGptRedirectUri);
+  const webUri = parseWebRedirectUri(webRedirectUri);
   return manifest.clients.map((policy) => ({
     ...policy,
-    redirectUris: [redirectUri]
+    redirectUris: [
+      policy.clientId === "shape-of-you-web-staging"
+        ? webUri
+        : chatGptUri
+    ]
   }));
+}
+
+/** Validates an exact credential-free HTTPS callback owned by the staging Web/API origin. */
+export function parseWebRedirectUri(value: string | undefined): string {
+  if (!value) throw new Error("Predefined Web OAuth redirect URI is required");
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error("Predefined Web OAuth redirect URI is invalid");
+  }
+  if (
+    url.origin !== "https://staging.shape-of-you.ru" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    url.pathname !== "/api/browser-auth/callback"
+  ) {
+    throw new Error("Predefined Web OAuth redirect URI is invalid");
+  }
+  return value;
 }

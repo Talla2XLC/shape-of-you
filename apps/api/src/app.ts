@@ -65,6 +65,7 @@ import { TrainingService } from "./training/training.service.js";
 import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
 import { McpAuthorizer } from "./mcp/oauth.js";
 import { registerMcpRoutes } from "./mcp/server.js";
+import { BrowserAuth } from "./browser-auth/browser-auth.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -192,7 +193,30 @@ export async function buildApp(
         }
       : async () => {
           throw new Error("Database is not configured");
-        });
+      });
+  const identitySubjectMappings = database
+    ? new IdentitySubjectMappingRepository(database)
+    : null;
+  const browserAuth =
+    identitySubjectMappings &&
+    personContext instanceof RequestPersonContext &&
+    options.config.PERSON_CONTEXT_MODE === "authenticated"
+      ? new BrowserAuth({
+          origin: options.config.API_BROWSER_ORIGIN!,
+          issuer: options.config.IDENTITY_OAUTH_ISSUER!,
+          jwksUri: options.config.IDENTITY_OAUTH_JWKS_URI!,
+          resource: options.config.IDENTITY_OAUTH_RESOURCE!,
+          clientId: options.config.API_BROWSER_OAUTH_CLIENT_ID!,
+          cookieKeys: options.config.API_BROWSER_SESSION_KEYS!
+            .split(",")
+            .map((key) => key.trim())
+            .filter(Boolean),
+          resolveAuthorizedPersons:
+            identitySubjectMappings.resolveAuthorizedPersons.bind(
+              identitySubjectMappings
+            )
+        })
+      : null;
   const logger =
     options.config.NODE_ENV === "test"
       ? false
@@ -243,6 +267,10 @@ export async function buildApp(
         training: app.get(TrainingService)
       }
     });
+  }
+  if (browserAuth && personContext instanceof RequestPersonContext) {
+    browserAuth.register(getFastifyInstance(app));
+    browserAuth.guardApiRoutes(getFastifyInstance(app), personContext);
   }
 
   app.useGlobalFilters(new ApplicationExceptionFilter());

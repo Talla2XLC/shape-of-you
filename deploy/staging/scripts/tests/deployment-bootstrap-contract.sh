@@ -62,6 +62,8 @@ write_identity_request() {
     printf '%s\n' 'IDENTITY_OAUTH_SIGNING_KEYS=fixture-signing-key-ring'
     printf '%s\n' 'IDENTITY_OAUTH_COOKIE_KEYS=fixture-cookie-key-ring'
     printf 'IDENTITY_CHATGPT_REDIRECT_URI=%s\n' "$callback"
+    printf '%s\n' 'IDENTITY_WEB_REDIRECT_URI=https://staging.shape-of-you.ru/api/browser-auth/callback'
+    printf '%s\n' 'API_BROWSER_SESSION_KEYS=fixture-browser-session-key-ring'
     printf '%s\n' 'GHCR_TOKEN=fixture-token'
   } > "$request_file"
 }
@@ -105,6 +107,7 @@ assert_contains "$CONTROLLER" 'Unexpected deployment input:'
 assert_contains "$CONTROLLER" 'Duplicate input:'
 assert_contains "$CONTROLLER" 'DATABASE_URL'
 assert_contains "$CONTROLLER" 'GHCR_TOKEN'
+assert_contains "$CONTROLLER" 'API_BROWSER_SESSION_KEYS'
 assert_contains "$CONTROLLER" 'docker login ghcr.io'
 assert_contains "$CONTROLLER" 'Deployment controller must be invoked by the root-owned bootstrap.'
 assert_not_contains "$CONTROLLER" 'git clone'

@@ -90,8 +90,9 @@ use SSH tunneling.
 
 ### Security and portability
 
-Without authentication, authorization, HTTPS, and a real-data gate, staging
-uses only synthetic data/test credentials with request limits and rate limits.
+Staging uses HTTPS and browser/API authentication. Its normal API runtime runs
+in authenticated Person-context mode; the synthetic context remains limited to
+one-shot operational migrations and explicitly selected test flows.
 
 API remains stateless with environment configuration, probes, graceful
 shutdown, and stdout/stderr logs. Migrations run as a one-shot service from the
@@ -122,6 +123,11 @@ URI plus the external MCP resource
 `https://staging.shape-of-you.ru/api/mcp`. Identity uses that same resource
 identifier when issuing audience-bound access tokens.
 
+The same root-owned API runtime handoff carries its browser-session signing key
+ring. The key ring is a protected staging secret, is never exposed to the
+static Web artifact, and lets the API verify a retained key during a bounded
+rotation overlap.
+
 The edge exposes the API-owned MCP endpoint at `/api/mcp` while its internal
 route remains `/mcp`. Deploying the endpoint does not itself authorize a user:
 the API migration, explicit Identity subject-to-User binding, registered
@@ -139,6 +145,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)
+- [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
 
 ## Open questions
 

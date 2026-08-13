@@ -68,9 +68,9 @@ on:
         default: false
         type: boolean
       run_write_smoke:
-        description: Create a synthetic WeightMeasurement during smoke
+        description: Create a synthetic WeightMeasurement during smoke (disabled for authenticated browser staging)
         required: true
-        default: true
+        default: false
         type: boolean
 
 concurrency:
@@ -148,6 +148,8 @@ jobs:
           IDENTITY_OAUTH_SIGNING_KEYS: ${{ secrets.STAGING_IDENTITY_OAUTH_SIGNING_KEYS }}
           IDENTITY_OAUTH_COOKIE_KEYS: ${{ secrets.STAGING_IDENTITY_OAUTH_COOKIE_KEYS }}
           IDENTITY_CHATGPT_REDIRECT_URI: ${{ vars.STAGING_IDENTITY_CHATGPT_REDIRECT_URI }}
+          IDENTITY_WEB_REDIRECT_URI: ${{ vars.STAGING_IDENTITY_WEB_REDIRECT_URI }}
+          API_BROWSER_SESSION_KEYS: ${{ secrets.STAGING_API_BROWSER_SESSION_KEYS }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
@@ -159,8 +161,11 @@ jobs:
           test -n "$IDENTITY_OAUTH_SIGNING_KEYS"
           test -n "$IDENTITY_OAUTH_COOKIE_KEYS"
           test -n "$IDENTITY_CHATGPT_REDIRECT_URI"
+          test -n "$IDENTITY_WEB_REDIRECT_URI"
+          test -n "$API_BROWSER_SESSION_KEYS"
           printf '%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI" |
             grep -Eq '^https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{8,200}$'
+          test "$IDENTITY_WEB_REDIRECT_URI" = 'https://staging.shape-of-you.ru/api/browser-auth/callback'
           test -n "$GHCR_TOKEN"
           target="$VM_USER@$VM_HOST"
           {
@@ -187,6 +192,8 @@ jobs:
             printf 'IDENTITY_OAUTH_SIGNING_KEYS=%s\n' "$IDENTITY_OAUTH_SIGNING_KEYS"
             printf 'IDENTITY_OAUTH_COOKIE_KEYS=%s\n' "$IDENTITY_OAUTH_COOKIE_KEYS"
             printf 'IDENTITY_CHATGPT_REDIRECT_URI=%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI"
+            printf 'IDENTITY_WEB_REDIRECT_URI=%s\n' "$IDENTITY_WEB_REDIRECT_URI"
+            printf 'API_BROWSER_SESSION_KEYS=%s\n' "$API_BROWSER_SESSION_KEYS"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } | ssh -p "$VM_PORT" "$target" \
             -o BatchMode=yes \

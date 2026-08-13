@@ -5,14 +5,23 @@ import {
   assertOAuthClientIdIsOperatorManaged,
   isPredefinedOAuthClientId,
   parseChatGptRedirectUri,
+  parseWebRedirectUri,
   resolvePredefinedOAuthClients
 } from "../src/oauth/predefined-clients.js";
 
 describe("predefined OAuth clients", () => {
   const callback = "https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh";
+  const webCallback = "https://staging.shape-of-you.ru/api/browser-auth/callback";
 
-  it("resolves the reserved ChatGPT policy with its exact environment callback", () => {
-    expect(resolvePredefinedOAuthClients(callback)).toEqual([
+  it("resolves the reserved first-party and ChatGPT policies with exact callbacks", () => {
+    expect(resolvePredefinedOAuthClients(callback, webCallback)).toEqual([
+      {
+        clientId: "shape-of-you-web-staging",
+        displayName: "Shape of You Web Staging",
+        redirectUris: [webCallback],
+        allowedScopes: ["openid"],
+        refreshTokensEnabled: false
+      },
       {
         clientId: "shape-of-you-chatgpt-staging",
         displayName: "Shape of You ChatGPT Staging",
@@ -44,6 +53,18 @@ describe("predefined OAuth clients", () => {
     );
   });
 
+  it.each([
+    undefined,
+    "http://staging.shape-of-you.ru/api/browser-auth/callback",
+    "https://staging.shape-of-you.ru/other",
+    "https://other.shape-of-you.ru/api/browser-auth/callback",
+    "https://staging.shape-of-you.ru/api/browser-auth/callback?state=leak"
+  ])("rejects an invalid Web callback", (value) => {
+    expect(() => parseWebRedirectUri(value)).toThrow(
+      /^Predefined Web OAuth redirect URI (is required|is invalid)$/
+    );
+  });
+
   it("reserves release-managed IDs from the general operator command", () => {
     expect(isPredefinedOAuthClientId("shape-of-you-chatgpt-staging")).toBe(true);
     expect(() =>
@@ -54,7 +75,7 @@ describe("predefined OAuth clients", () => {
 
   it("fails closed for an unsupported manifest version", () => {
     expect(() =>
-      resolvePredefinedOAuthClients(callback, { version: 2, clients: [] })
+      resolvePredefinedOAuthClients(callback, webCallback, { version: 1, clients: [] })
     ).toThrow("manifest version is unsupported");
   });
 

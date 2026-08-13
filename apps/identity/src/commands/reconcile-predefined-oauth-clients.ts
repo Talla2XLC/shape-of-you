@@ -7,7 +7,8 @@ import { formatOAuthClientReconcileResult } from "./oauth-client-reconcile-outpu
 async function main(): Promise<void> {
   const config = loadIdentityConfig();
   const clients = resolvePredefinedOAuthClients(
-    config.IDENTITY_CHATGPT_REDIRECT_URI
+    config.IDENTITY_CHATGPT_REDIRECT_URI,
+    config.IDENTITY_WEB_REDIRECT_URI
   );
   const database = createIdentityDatabase(config.DATABASE_URL, 1);
   try {
