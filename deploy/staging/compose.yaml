@@ -178,6 +178,8 @@ services:
       IDENTITY_OAUTH_ISSUER: https://identity.staging.shape-of-you.ru
       IDENTITY_OAUTH_JWKS_URI: https://identity.staging.shape-of-you.ru/oauth/jwks
       IDENTITY_OAUTH_RESOURCE: https://staging.shape-of-you.ru/api/mcp
+      API_BROWSER_ORIGIN: https://staging.shape-of-you.ru
+      API_BROWSER_OAUTH_CLIENT_ID: shape-of-you-web-staging
       SHUTDOWN_TIMEOUT_MS: 10000
     extra_hosts:
       - "host.docker.internal:host-gateway"
