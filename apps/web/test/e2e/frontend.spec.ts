@@ -67,12 +67,12 @@ async function fulfillJson(route: Route, body: unknown, status = 200): Promise<v
   });
 }
 
-test("landing links to same-origin passkey sign-in", async ({ page }) => {
+test("landing starts the API-owned browser authorization flow", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Your signals/ })).toBeVisible();
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveAttribute(
     "href",
-    "http://localhost:4173/sign-in"
+    "/api/browser-auth/sign-in"
   );
 });
 
@@ -85,12 +85,12 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
   ).toBe(true);
   const brand = page.getByRole("link", { name: "Shape of You home" });
-  const headerSignIn = page.getByRole("banner").getByRole("link", { name: "Sign in" });
+  const myDay = page.getByRole("banner").getByRole("link", { name: "My day" });
   const continueLink = page.getByRole("link", { name: "Continue with a passkey" });
   await page.keyboard.press("Tab");
   await expect(brand).toBeFocused();
   await page.keyboard.press("Tab");
-  await expect(headerSignIn).toBeFocused();
+  await expect(myDay).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(continueLink).toBeFocused();
 
