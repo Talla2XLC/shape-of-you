@@ -60,7 +60,9 @@ profile and translates provider state into typed relational tables. Unknown
 payload fields fail compatibility tests. OAuth state does not use JSON blobs.
 
 Identity state is organized by lifecycle rather than a generic provider
-artifact table. Accounts have a distinct immutable public subject. Passkeys,
+artifact table. The immutable account UUID is the public OAuth `sub`; the
+separate account `subject` value is an account-local WebAuthn username, not a
+second OAuth identifier. Passkeys,
 hashed challenges, recovery-code batches, grants, sessions, interactions,
 hashed authorization codes, and refresh-token families have dedicated typed
 tables. Small immutable protocol snapshots may use constrained PostgreSQL

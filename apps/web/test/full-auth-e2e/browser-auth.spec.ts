@@ -1,0 +1,48 @@
+import { readFile } from "node:fs/promises";
+
+import { expect, test } from "@playwright/test";
+
+interface BrowserAuthority {
+  readonly enrollmentToken: string;
+}
+
+test("enrolled passkey completes OAuth and opens the authorized Person", async ({
+  context,
+  page
+}) => {
+  const authorityPath = process.env.BROWSER_AUTH_E2E_AUTHORITY_FILE;
+  if (!authorityPath) throw new Error("BROWSER_AUTH_E2E_AUTHORITY_FILE is required");
+  const authority = JSON.parse(await readFile(authorityPath, "utf8")) as BrowserAuthority;
+
+  const client = await context.newCDPSession(page);
+  await client.send("WebAuthn.enable");
+  await client.send("WebAuthn.addVirtualAuthenticator", {
+    options: {
+      protocol: "ctap2",
+      transport: "internal",
+      hasResidentKey: true,
+      hasUserVerification: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true
+    }
+  });
+
+  await page.goto(`/enroll#${authority.enrollmentToken}`);
+  await expect(page).toHaveURL(/\/enroll$/);
+  await page.getByRole("button", { name: "Create passkey" }).click();
+  await expect(page.getByText("Your passkey is ready.")).toBeVisible();
+
+  await page.goto("/");
+  await page.getByRole("link", { name: "Continue with a passkey" }).click();
+  await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+  await page.getByRole("button", { name: "Allow" }).click();
+  await expect(page).toHaveURL(/\/$/);
+
+  await page.goto("/day");
+  await expect(page.getByRole("heading", { name: "Your day, with its context intact." })).toBeVisible();
+  await expect(page.getByText("Status:")).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+
+  const cookies = await context.cookies();
+  expect(cookies.some((cookie) => cookie.name === "__Host-shape_of_you_api_session")).toBe(true);
+});

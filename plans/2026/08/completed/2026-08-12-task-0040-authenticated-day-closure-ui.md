@@ -2,7 +2,8 @@
 
 ## Статус и граница разрешения
 
-- Статус: approved for implementation 2026-08-12.
+- Статус: completed 2026-08-17; commit, push и deployment остаются отдельными
+  explicit gates.
 - Архитектура: [`docs/adr/20260812-use-api-owned-browser-session-cookies.md`](../../../docs/adr/20260812-use-api-owned-browser-session-cookies.md).
 - Разрешены изменения API, Identity и Web, нужные для browser OAuth-code
   exchange, API-owned cookie/CSRF и минимального DayClosure UI. Commit, push,
@@ -77,3 +78,28 @@ projection, явного закрытия дня, видимого `stale` и re
 - Точный integration flow проверяет consent, authorization code, ID token и
   отсутствие resource scopes; неожиданные ошибки Identity логируются только
   обезличенным маршрутом, типом/SQLSTATE и fingerprint без credentials.
+
+## Одобренный corrective scope: provisioning и настоящий browser E2E
+
+- Одобрено оператором 2026-08-17 после того, как реальный callback завершил
+  OAuth, но получил `403` из-за отсутствующего или неоднозначного соответствия
+  Identity subject ровно одному active Person.
+- Архитектура:
+  [`docs/adr/20260817-use-stable-oauth-account-subjects-and-full-browser-acceptance.md`](../../../docs/adr/20260817-use-stable-oauth-account-subjects-and-full-browser-acceptance.md).
+- Добавить API-owned CLI с действиями `inspect`, `ensure`, `revoke`, `restore`
+  по exact OAuth issuer и subject. Bootstrap запускается оператором через
+  контролируемое соединение только с API database.
+- CI/CD не проверяет и не меняет Person authorization; никаких account-specific
+  variables или access operations в deployment controller нет.
+- `ensure` сохраняет существующие fitness facts: при одном active real Person
+  новый API User получает owner grant к нему; новый Person создаётся только на
+  действительно пустом real-Person состоянии. Revoked/partial/ambiguous state
+  не чинится неявно.
+- Добавить credential-free `/access-required` и redirect туда вместо сырого
+  browser callback `403`.
+- Реализовать disposable Playwright flow с отдельными API/Identity databases,
+  ephemeral TLS/keys, virtual WebAuthn, реальными OAuth redirects/code exchange,
+  API cookie и чтением day projection.
+- Исправить ошибочное утверждение ADR о существующем полном browser E2E только
+  после того, как новый тест действительно пройдёт Quality.
+- Commit, push и deployment остаются отдельными explicit gates.

@@ -14,7 +14,7 @@ export class IdentityAccountSubjectNotFoundError extends Error {
   }
 }
 
-/** Reads public account subjects from the Identity-owned database. */
+/** Resolves the immutable public OAuth identifier owned by Identity. */
 export class IdentityAccountSubjectStore {
   public constructor(private readonly pool: Pool) {}
 
@@ -26,8 +26,8 @@ export class IdentityAccountSubjectStore {
    * @throws {IdentityAccountSubjectNotFoundError} When the account is unknown.
    */
   public async findExact(accountId: string): Promise<IdentityAccountSubject> {
-    const result = await this.pool.query<{ id: string; subject: string }>(
-      `select id, subject
+    const result = await this.pool.query<{ id: string }>(
+      `select id
          from identity_accounts
         where id = $1
         limit 1`,
@@ -37,6 +37,6 @@ export class IdentityAccountSubjectStore {
     if (!row) {
       throw new IdentityAccountSubjectNotFoundError();
     }
-    return { accountId: row.id, subject: row.subject };
+    return { accountId: row.id, subject: row.id };
   }
 }

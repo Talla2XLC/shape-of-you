@@ -101,7 +101,7 @@ export class OAuthRuntime {
         if (!row) return undefined;
         return {
           accountId,
-          claims: async () => ({ sub: row.subject })
+          claims: async () => ({ sub: accountId })
         };
       },
       formats: {
@@ -110,13 +110,13 @@ export class OAuthRuntime {
             if (!("accountId" in token) || !token.accountId) {
               throw new Error("OAuth access token has no account");
             }
-            const result = await dependencies.pool.query<{ subject: string }>(
-              "select subject from identity_accounts where id = $1 and status = 'active'",
+            const result = await dependencies.pool.query<{ id: string }>(
+              "select id from identity_accounts where id = $1 and status = 'active'",
               [token.accountId]
             );
             const row = result.rows[0];
             if (!row) throw new Error("OAuth access-token account is unavailable");
-            structured.payload.sub = row.subject;
+            structured.payload.sub = row.id;
             return structured;
           }
         }

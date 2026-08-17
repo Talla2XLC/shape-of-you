@@ -7,8 +7,13 @@ import type { DatabaseContext } from "../database/context.js";
 /** Result of provisioning one externally authenticated API principal. */
 export interface IdentityAccessProvisioningResult {
   readonly personId: string;
-  readonly status: "created" | "existing";
+  readonly status: "created" | "existing" | "linked";
   readonly userId: string;
+}
+
+/** Credential-free inspection state for one external Identity subject. */
+export interface IdentityAccessInspectionResult {
+  readonly status: "active" | "conflict" | "revoked" | "unbound";
 }
 
 /** Result of changing one provisioned Identity subject's Person access. */
@@ -117,6 +122,143 @@ export class IdentityAccessProvisioningRepository {
     } finally {
       client.release();
     }
+  }
+
+  /**
+   * Ensures an operator-selected subject owns the sole real Person.
+   *
+   * Empty API state creates the first real Person. An existing sole active
+   * real Person is reused through a new API User and owner grant so its facts
+   * are not duplicated. Existing revoked, disabled, partial, archived, or
+   * ambiguous state is never repaired implicitly.
+   *
+   * @param issuer Exact external Identity origin that issued the subject.
+   * @param subject Opaque public subject owned by the Identity service.
+   * @returns API-owned ids and whether access was created, linked, or existing.
+   * @throws {IdentityAccessProvisioningConflictError} When state cannot be
+   * safely resolved without an explicit lifecycle decision.
+   */
+  public async ensureSolePersonOwnerAccess(
+    issuer: string,
+    subject: string
+  ): Promise<IdentityAccessProvisioningResult> {
+    validateIdentityReference(issuer, subject);
+    const client = await this.database.pool.connect();
+    try {
+      await client.query("begin");
+      await client.query(
+        "select pg_advisory_xact_lock(hashtextextended($1, 0))",
+        ["identity-access:ensure-sole-person"]
+      );
+      const existing = await loadExistingAccess(client, issuer, subject);
+      if (existing) {
+        await client.query("commit");
+        return existing;
+      }
+
+      const realPersons = await client.query<{
+        readonly id: string;
+        readonly status: "active" | "archived";
+      }>(
+        `select id, status
+           from persons
+          where kind = 'real'
+          order by id`
+      );
+      if (
+        realPersons.rows.length > 1 ||
+        realPersons.rows[0]?.status === "archived"
+      ) {
+        throw new IdentityAccessProvisioningConflictError(
+          "Identity access cannot select one active real Person"
+        );
+      }
+
+      const userId = randomUUID();
+      const personId = realPersons.rows[0]?.id ?? randomUUID();
+      await client.query("insert into users (id, status) values ($1, 'active')", [
+        userId
+      ]);
+      if (realPersons.rows.length === 0) {
+        await client.query(
+          "insert into persons (id, kind, status) values ($1, 'real', 'active')",
+          [personId]
+        );
+      }
+      await client.query(
+        `insert into person_access_grants (id, person_id, user_id, role, status)
+         values ($1, $2, $3, 'owner', 'active')`,
+        [randomUUID(), personId, userId]
+      );
+      await client.query(
+        `insert into identity_subject_mappings (id, issuer, subject, user_id)
+         values ($1, $2, $3, $4)`,
+        [randomUUID(), issuer, subject, userId]
+      );
+      await client.query("commit");
+      return {
+        personId,
+        status: realPersons.rows.length === 0 ? "created" : "linked",
+        userId
+      };
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  /**
+   * Inspects access without changing authorization state.
+   *
+   * @param issuer Exact external Identity origin that issued the subject.
+   * @param subject Opaque public subject owned by the Identity service.
+   * @returns A bounded state without API or Identity identifiers.
+   */
+  public async inspectOwnerAccess(
+    issuer: string,
+    subject: string
+  ): Promise<IdentityAccessInspectionResult> {
+    validateIdentityReference(issuer, subject);
+    const binding = await this.database.pool.query<ExistingBindingRow>(
+      `select m.user_id, u.status as user_status
+         from identity_subject_mappings m
+         join users u on u.id = m.user_id
+        where m.issuer = $1 and m.subject = $2`,
+      [issuer, subject]
+    );
+    const existing = binding.rows[0];
+    if (!existing) return { status: "unbound" };
+    if (binding.rows.length !== 1 || existing.user_status !== "active") {
+      return { status: "conflict" };
+    }
+
+    const grants = await this.database.pool.query<GrantLifecycleRow>(
+      `select g.id as grant_id,
+              g.person_id,
+              g.role,
+              g.status as grant_status,
+              p.kind as person_kind,
+              p.status as person_status
+         from person_access_grants g
+         join persons p on p.id = g.person_id
+        where g.user_id = $1
+        order by g.granted_at desc, g.id desc`,
+      [existing.user_id]
+    );
+    const latest = grants.rows[0];
+    if (!latest) return { status: "conflict" };
+    const active = grants.rows.filter((grant) => grant.grant_status === "active");
+    const invalid = grants.rows.some(
+      (grant) =>
+        grant.person_id !== latest.person_id ||
+        grant.role !== "owner" ||
+        grant.person_kind !== "real" ||
+        grant.person_status !== "active"
+    );
+    if (invalid || active.length > 1) return { status: "conflict" };
+    return { status: active.length === 1 ? "active" : "revoked" };
   }
 
   /**

@@ -88,7 +88,7 @@ export class BrowserAuth {
         if (!payload.sub) throw new BrowserAuthorizationError("Browser authorization was not accepted");
         const persons = await this.options.resolveAuthorizedPersons(this.options.issuer, payload.sub);
         if (persons.length !== 1) {
-          reply.code(403).send({ statusCode: 403, error: "FORBIDDEN", message: "Identity subject has no single authorized Person" });
+          reply.redirect(new URL("/access-required", this.origin).toString());
           return;
         }
         const person = persons[0]!;

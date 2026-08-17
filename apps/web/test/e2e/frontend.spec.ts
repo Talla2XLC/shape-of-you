@@ -100,6 +100,14 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
   expect(transitionSeconds).toBeLessThanOrEqual(0.001);
 });
 
+test("access-required explains an unlinked account without credential details", async ({ page }) => {
+  await page.goto("/access-required");
+  await expect(page.getByRole("heading", { name: "This account is not linked yet." })).toBeVisible();
+  await expect(page.getByText("No fitness data was changed.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Return home" })).toHaveAttribute("href", "/");
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+});
+
 test("enrollment strips the fragment and sends the bearer only as authority", async ({ page }) => {
   await addVirtualPasskeyAuthenticator(page);
   const bearer = opaqueValue();

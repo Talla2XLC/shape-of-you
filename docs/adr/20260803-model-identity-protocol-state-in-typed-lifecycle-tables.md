@@ -35,6 +35,14 @@ for immutable protocol snapshots.
 
 ## Decision
 
+> Amendment (2026-08-17): the typed lifecycle model remains accepted, but the
+> earlier interpretation of the separate `identity_accounts.subject` as the
+> OAuth `sub` is superseded by
+> [Use stable OAuth account subjects and full browser acceptance](20260817-use-stable-oauth-account-subjects-and-full-browser-acceptance.md).
+> `oidc-provider` public-subject semantics bind `sub` to its account identifier,
+> so the account UUID is the OAuth `sub` and the separate value is retained as
+> the account-local WebAuthn username.
+
 Use dedicated PostgreSQL lifecycle tables with narrow SQL-native columns. Do
 not create a generic `oauth_artifacts` table and do not persist JSON. Use child
 tables when a value has independent identity, cardinality, revocation, or
@@ -49,9 +57,10 @@ is never silently discarded or serialized as a fallback.
 
 ### Account and WebAuthn foundation
 
-- `identity_accounts` owns the internal UUID, a distinct immutable public
-  `subject`, a stable binary WebAuthn user handle, display name, status, and
-  timestamps. The public subject is not a foreign key into another service.
+- `identity_accounts` owns the immutable UUID used as public OAuth `sub`, a
+  distinct account-local WebAuthn `subject`, a stable binary WebAuthn user
+  handle, display name, status, and timestamps. Neither identifier is a
+  foreign key into another service.
 - `webauthn_credentials` owns the binary credential ID, COSE public key,
   signature counter, device type, backup state, transports, user label, and
   use/revocation timestamps. Credential IDs are globally unique. An account is
@@ -150,9 +159,10 @@ Implement the model through three reproducible migration increments:
 - **Store opaque access tokens and introspect every API request:** centralizes
   access-token state but adds a synchronous Identity dependency to each domain
   request. Deferred by the parent Identity ADR.
-- **Expose the account primary key as OIDC subject:** removes one column but
-  couples a public security identifier to internal persistence identity.
-  Rejected.
+- **Expose the account primary key as OIDC subject:** originally rejected, then
+  accepted by the 2026-08-17 amendment after full-browser acceptance proved
+  that `oidc-provider` public subject semantics use its account identifier.
+  The UUID is immutable and opaque, so it is safe for this contract.
 
 ## Consequences
 
@@ -163,8 +173,8 @@ Implement the model through three reproducible migration increments:
 - Scope snapshots intentionally duplicate the exact authority issued to an
   artifact. They are historical security evidence, not shared reference data
   that should be deduplicated.
-- The separate public subject permits internal key changes and future pairwise
-  subject support without changing existing API mappings.
+- A future move to pairwise subjects would require an explicit mapping and
+  migration decision; it cannot reinterpret the current public UUID silently.
 - Recovery codes must be generated with sufficient entropy because their
   hashes are intentionally verifiable without storing plaintext.
 - Readiness becomes database-aware when the first persistence increment is

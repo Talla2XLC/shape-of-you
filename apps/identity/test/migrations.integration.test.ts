@@ -162,7 +162,7 @@ describe("Identity migration chain", () => {
     }
   });
 
-  it("resolves only the immutable public subject for an exact account", async () => {
+  it("resolves the exact account id as the immutable public OAuth subject", async () => {
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     const store = new IdentityAccountSubjectStore(pool);
     const accountId = randomUUID();
@@ -177,7 +177,7 @@ describe("Identity migration chain", () => {
 
       await expect(store.findExact(accountId)).resolves.toEqual({
         accountId,
-        subject
+        subject: accountId
       });
       await expect(store.findExact(randomUUID())).rejects.toBeInstanceOf(
         IdentityAccountSubjectNotFoundError
@@ -1446,6 +1446,11 @@ describe("Identity migration chain", () => {
       };
       expect(tokenBody.expires_in).toBe(600);
       expect(tokenBody.id_token.split(".")).toHaveLength(3);
+      expect(
+        JSON.parse(
+          Buffer.from(tokenBody.id_token.split(".")[1]!, "base64url").toString("utf8")
+        )
+      ).toMatchObject({ sub: accountId });
       expect(tokenBody.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
       const deniedVerifier = "N".repeat(43);
@@ -1475,7 +1480,7 @@ describe("Identity migration chain", () => {
         aud: resource,
         client_id: "chatgpt-runtime",
         scope: "person:read",
-        sub: subject
+        sub: accountId
       });
       const persistedGrantScopes = await pool.query<{
         kind: "oidc" | "resource";
@@ -1547,6 +1552,11 @@ describe("Identity migration chain", () => {
       };
       expect(webToken.status, JSON.stringify(webTokenBody)).toBe(200);
       expect(webTokenBody.id_token?.split(".")).toHaveLength(3);
+      expect(
+        JSON.parse(
+          Buffer.from(webTokenBody.id_token!.split(".")[1]!, "base64url").toString("utf8")
+        )
+      ).toMatchObject({ sub: accountId });
       expect(webTokenBody.refresh_token).toBeUndefined();
       const webGrantScopes = await pool.query<{
         kind: "oidc" | "resource";
@@ -1712,7 +1722,7 @@ describe("Identity migration chain", () => {
         aud: resource,
         client_id: "chatgpt-runtime",
         scope: "person:read",
-        sub: subject
+        sub: accountId
       });
       expect(repeatedAccessPayload.iat).toEqual(expect.any(Number));
       expect(repeatedAccessPayload.exp).toEqual(expect.any(Number));
@@ -1753,7 +1763,7 @@ describe("Identity migration chain", () => {
         aud: resource,
         client_id: "chatgpt-runtime",
         scope: "person:read",
-        sub: subject
+        sub: accountId
       });
       expect(refreshedAccessPayload.iat).toEqual(expect.any(Number));
       expect(refreshedAccessPayload.exp).toEqual(expect.any(Number));

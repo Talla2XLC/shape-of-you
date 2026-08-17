@@ -22,6 +22,7 @@
     "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts",
     "identity-subject:bind": "tsx src/commands/bind-identity-subject.ts",
     "identity-access:provision": "tsx src/commands/provision-identity-access.ts",
+    "identity-access:manage": "tsx src/commands/manage-identity-access.ts",
     "identity-access:restore": "tsx src/commands/change-identity-access.ts --action restore",
     "identity-access:revoke": "tsx src/commands/change-identity-access.ts --action revoke"
   },

@@ -17,6 +17,20 @@ separate stages.
 
 ## Content
 
+### 2026-08-17 — Stable OAuth identity and full browser acceptance
+
+- Added an API-owned operational CLI for explicit Person-access bootstrap and
+  lifecycle changes outside build and deployment flows.
+- Reused the sole active real Person during bootstrap and retained fail-closed
+  handling for revoked or ambiguous state.
+- Standardized ID-token, access-token, and API mapping identity on the immutable
+  Identity account UUID used as OAuth `sub`.
+- Added a disposable HTTPS browser acceptance path with separate databases,
+  ephemeral keys, virtual WebAuthn, real OAuth redirects/code exchange, the
+  API-owned session cookie, and an authorized daily projection read.
+- Added a credential-free access-required page for authenticated accounts that
+  have not been authorized to a Person.
+
 ### 2026-08-12 — Versioned Person-local daily closures
 
 - Added API-owned versioned `DayClosure` snapshots for an explicit local date

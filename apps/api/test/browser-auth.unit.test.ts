@@ -1,6 +1,6 @@
-import { SignJWT } from "jose";
+import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import Fastify from "fastify";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   BrowserAuth,
@@ -43,6 +43,10 @@ function request(cookie: string, headers: Record<string, string> = {}) {
 }
 
 describe("API browser session boundary", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("accepts a valid host-only API session without exposing an OAuth token", async () => {
     await expect(auth().requireRead(request(`__Host-shape_of_you_api_session=${await session()}`))).resolves.toEqual({
       personId: "00000000-0000-4000-8000-000000000001",
@@ -98,6 +102,47 @@ describe("API browser session boundary", () => {
     expect(Array.isArray(setCookie) ? setCookie.join(";") : setCookie ?? "").toContain(
       "__Host-shape_of_you_api_oauth="
     );
+    await fastify.close();
+  });
+
+  it("redirects an authenticated but unbound subject without exposing OAuth material", async () => {
+    const { privateKey, publicKey } = await generateKeyPair("ES256");
+    const publicJwk = await exportJWK(publicKey);
+    const idToken = await new SignJWT({})
+      .setProtectedHeader({ alg: "ES256", kid: "browser-test" })
+      .setIssuer("https://identity.example.test")
+      .setAudience("shape-of-you-web-test")
+      .setSubject("unbound-subject")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      if (url.pathname === "/oauth/token") {
+        return Response.json({ id_token: idToken });
+      }
+      if (url.pathname === "/oauth/jwks") {
+        return Response.json({ keys: [{ ...publicJwk, alg: "ES256", kid: "browser-test", use: "sig" }] });
+      }
+      return new Response(null, { status: 404 });
+    }));
+    const fastify = Fastify();
+    auth().register(fastify);
+    const start = await fastify.inject({ method: "GET", url: "/browser-auth/sign-in" });
+    const authorize = new URL(start.headers.location!);
+    const setCookie = start.headers["set-cookie"];
+    const transactionCookie = (Array.isArray(setCookie) ? setCookie[0] : setCookie)!
+      .split(";", 1)[0]!;
+    const response = await fastify.inject({
+      method: "GET",
+      url: `/browser-auth/callback?code=one-time-code&state=${authorize.searchParams.get("state")}`,
+      headers: { cookie: transactionCookie }
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://staging.example.test/access-required");
+    expect(response.headers.location).not.toContain("unbound-subject");
+    expect(response.headers.location).not.toContain("one-time-code");
     await fastify.close();
   });
 

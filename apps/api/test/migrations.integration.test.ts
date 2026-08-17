@@ -248,6 +248,111 @@ describe("API migration chain", () => {
     }
   });
 
+  it("ensures concurrent subjects share the sole real Person without implicit restore", async () => {
+    const database = createDatabase(databaseConfig(container.getConnectionUri()));
+    const repository = new IdentityAccessProvisioningRepository(database);
+    const mappings = new IdentitySubjectMappingRepository(database);
+    const issuer = "https://identity.sole-person.example.test";
+    const subjects = ["sole-person-subject-1", "sole-person-subject-2"] as const;
+    const userIds: string[] = [];
+    let personId: string | undefined;
+    try {
+      const results = await Promise.all(
+        subjects.map((subject) =>
+          repository.ensureSolePersonOwnerAccess(issuer, subject)
+        )
+      );
+      expect(results.map((result) => result.status).sort()).toEqual([
+        "created",
+        "linked"
+      ]);
+      expect(new Set(results.map((result) => result.personId)).size).toBe(1);
+      expect(new Set(results.map((result) => result.userId)).size).toBe(2);
+      personId = results[0]!.personId;
+      userIds.push(...results.map((result) => result.userId));
+
+      for (const subject of subjects) {
+        await expect(repository.inspectOwnerAccess(issuer, subject)).resolves.toEqual({
+          status: "active"
+        });
+        await expect(
+          mappings.resolveAuthorizedPersons(issuer, subject)
+        ).resolves.toEqual([{ personId, roles: ["owner"] }]);
+      }
+      await expect(
+        repository.ensureSolePersonOwnerAccess(issuer, subjects[0])
+      ).resolves.toMatchObject({ personId, status: "existing" });
+
+      await repository.revokeOwnerAccess(issuer, subjects[0]);
+      await expect(repository.inspectOwnerAccess(issuer, subjects[0])).resolves.toEqual({
+        status: "revoked"
+      });
+      await expect(
+        repository.ensureSolePersonOwnerAccess(issuer, subjects[0])
+      ).rejects.toBeInstanceOf(IdentityAccessProvisioningConflictError);
+      await repository.restoreOwnerAccess(issuer, subjects[0]);
+      await expect(repository.inspectOwnerAccess(issuer, subjects[0])).resolves.toEqual({
+        status: "active"
+      });
+      await expect(repository.inspectOwnerAccess(issuer, "unknown-subject")).resolves.toEqual({
+        status: "unbound"
+      });
+    } finally {
+      await database.pool.query(
+        "delete from identity_subject_mappings where issuer = $1",
+        [issuer]
+      );
+      if (userIds.length > 0) {
+        await database.pool.query(
+          "delete from person_access_grants where user_id = any($1::uuid[])",
+          [userIds]
+        );
+        await database.pool.query("delete from users where id = any($1::uuid[])", [
+          userIds
+        ]);
+      }
+      if (personId) {
+        await database.pool.query("delete from persons where id = $1", [personId]);
+      }
+      await database.pool.end();
+    }
+  });
+
+  it("rejects sole-Person ensure when real Person state is archived or ambiguous", async () => {
+    const database = createDatabase(databaseConfig(container.getConnectionUri()));
+    const repository = new IdentityAccessProvisioningRepository(database);
+    const issuer = "https://identity.sole-person-conflict.example.test";
+    const archivedPersonId = "00000000-0000-4000-8000-000000000451";
+    const secondPersonId = "00000000-0000-4000-8000-000000000452";
+    try {
+      await database.pool.query(
+        "insert into persons (id, kind, status) values ($1, 'real', 'archived')",
+        [archivedPersonId]
+      );
+      await expect(
+        repository.ensureSolePersonOwnerAccess(issuer, "archived-subject")
+      ).rejects.toBeInstanceOf(IdentityAccessProvisioningConflictError);
+      await database.pool.query("update persons set status = 'active' where id = $1", [
+        archivedPersonId
+      ]);
+      await database.pool.query(
+        "insert into persons (id, kind, status) values ($1, 'real', 'active')",
+        [secondPersonId]
+      );
+      await expect(
+        repository.ensureSolePersonOwnerAccess(issuer, "ambiguous-subject")
+      ).rejects.toBeInstanceOf(IdentityAccessProvisioningConflictError);
+      await expect(repository.inspectOwnerAccess(issuer, "ambiguous-subject")).resolves.toEqual({
+        status: "unbound"
+      });
+    } finally {
+      await database.pool.query("delete from persons where id = any($1::uuid[])", [
+        [archivedPersonId, secondPersonId]
+      ]);
+      await database.pool.end();
+    }
+  });
+
   it("rejects partial and ambiguous Identity access without repairing it", async () => {
     const database = createDatabase(databaseConfig(container.getConnectionUri()));
     const repository = new IdentityAccessProvisioningRepository(database);

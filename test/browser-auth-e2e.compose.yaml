@@ -1,0 +1,28 @@
+services:
+  api-database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: shape_of_you_api
+      POSTGRES_USER: shape_of_you_api
+      POSTGRES_PASSWORD: shape_of_you_api
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shape_of_you_api -d shape_of_you_api"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:${BROWSER_E2E_API_DATABASE_PORT}:5432"
+
+  identity-database:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: shape_of_you_identity
+      POSTGRES_USER: shape_of_you_identity
+      POSTGRES_PASSWORD: shape_of_you_identity
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shape_of_you_identity -d shape_of_you_identity"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "127.0.0.1:${BROWSER_E2E_IDENTITY_DATABASE_PORT}:5432"

@@ -75,5 +75,8 @@ jobs:
       - name: Test frontend browser contracts
         run: pnpm test:e2e:web
 
+      - name: Test complete browser authentication flow
+        run: pnpm test:e2e:browser-auth
+
       - name: Validate canonical documentation
         run: node scripts/validate-docs.mjs

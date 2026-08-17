@@ -59,6 +59,8 @@ assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_OAUTH_COOKIE_KEYS'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_CHATGPT_REDIRECT_URI'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_WEB_REDIRECT_URI'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_API_BROWSER_SESSION_KEYS'
+assert_not_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_OWNER_ACCOUNT_ID'
+assert_not_contains "$DEPLOY_WORKFLOW" 'IDENTITY_ACCESS_ACTION'
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_DIGEST=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=%s"
@@ -78,6 +80,8 @@ assert_contains "$CONTROLLER" 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE'
 assert_contains "$CONTROLLER" 'IDENTITY_CHATGPT_REDIRECT_URI'
 assert_contains "$CONTROLLER" 'IDENTITY_WEB_REDIRECT_URI'
 assert_contains "$CONTROLLER" 'API_BROWSER_SESSION_KEYS'
+assert_not_contains "$CONTROLLER" 'IDENTITY_ACCESS_ACTION'
+assert_not_contains "$CONTROLLER" 'OPERATION=identity-access'
 assert_contains "$CONTROLLER" '/etc/shape-of-you/staging/identity.env'
 assert_contains "$CONTROLLER" 'shape-of-you-identity'
 assert_contains "$DEPLOY" 'rollback_schema_compatible'
