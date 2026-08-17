@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   createServer,
   type IncomingMessage,
@@ -40,6 +41,47 @@ export interface IdentityServerDependencies {
   readonly oauthBrowserUi?: OAuthBrowserUi;
   /** Optional OAuth protocol runtime when the full key configuration is present. */
   readonly oauthRuntime?: OAuthRuntime;
+}
+
+function reportUnexpectedRequestError(
+  request: IncomingMessage,
+  pathname: string,
+  error: unknown
+): void {
+  const rawErrorName = error instanceof Error ? error.name : "NonError";
+  const errorName = [
+    "Error",
+    "NonError",
+    "RangeError",
+    "SyntaxError",
+    "TypeError"
+  ].includes(rawErrorName)
+    ? rawErrorName
+    : "UnknownError";
+  const rawCode = typeof error === "object" && error !== null && "code" in error
+    ? (error as { readonly code?: unknown }).code
+    : undefined;
+  const errorCode = typeof rawCode === "string" && /^[0-9A-Z]{5}$/u.test(rawCode)
+    ? rawCode
+    : undefined;
+  const fingerprintSource = error instanceof Error
+    ? `${error.name}:${error.message}`
+    : typeof error;
+  const route = pathname
+    .replace(/[A-Za-z0-9_-]{43}/gu, ":credential")
+    .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}/giu, ":id")
+    .slice(0, 256);
+  process.stderr.write(
+    `${JSON.stringify({
+      level: "error",
+      message: "Identity request failed",
+      method: request.method ?? "UNKNOWN",
+      route,
+      errorName,
+      ...(errorCode ? { errorCode } : {}),
+      fingerprint: createHash("sha256").update(fingerprintSource).digest("hex").slice(0, 16)
+    })}\n`
+  );
 }
 
 const challengeSchema = z.object({ challengeId: z.string().uuid() });
@@ -267,6 +309,7 @@ export function createIdentityServer(
           });
           return;
         }
+        reportUnexpectedRequestError(request, pathname, error);
         writeJson(response, 500, {
           error: "internal_error",
           message: "Internal server error"

@@ -283,8 +283,10 @@ export class OAuthRuntime {
       }
       if (!grant.jti) grant.jti = randomUUID();
       grant.addOIDCScope(oidcScopes);
-      grant.rejectOIDCScope(resourceScopes);
-      grant.addResourceScope(this.dependencies.resource, resourceScopes);
+      if (resourceScopes.length > 0) {
+        grant.rejectOIDCScope(resourceScopes);
+        grant.addResourceScope(this.dependencies.resource, resourceScopes);
+      }
       try {
         await grant.save();
         return grant.jti;

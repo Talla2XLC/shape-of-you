@@ -1,8 +1,9 @@
 import type { AddressInfo } from "node:net";
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createIdentityServer } from "../src/app.js";
+import type { OAuthBrowserUi } from "../src/oauth/browser-ui.js";
 
 const servers = new Set<ReturnType<typeof createIdentityServer>>();
 
@@ -13,6 +14,7 @@ afterEach(async () => {
     )
   );
   servers.clear();
+  vi.restoreAllMocks();
 });
 
 describe("Identity health endpoints", () => {
@@ -73,5 +75,51 @@ describe("Identity health endpoints", () => {
       error: "not_found",
       message: "Route not found"
     });
+  });
+
+  it("logs an unexpected request failure without credentials or error text", async () => {
+    const credential = "A".repeat(43);
+    const sensitiveMessage = "database password and OAuth token must not leak";
+    const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const server = createIdentityServer({
+      readiness: { check: async () => undefined },
+      oauthBrowserUi: {
+        handle: async () => {
+          throw Object.assign(new Error(sensitiveMessage), {
+            code: "SECRET_KEY",
+            name: "PASSWORD"
+          });
+        }
+      } as unknown as OAuthBrowserUi
+    });
+    servers.add(server);
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+    const address = server.address() as AddressInfo;
+
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/oauth/interaction/${credential}/consent`
+    );
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: "internal_error",
+      message: "Internal server error"
+    });
+    const log = stderr.mock.calls.flatMap((call) => call).join("");
+    expect(log).toContain('"message":"Identity request failed"');
+    expect(log).toContain('"route":"/oauth/interaction/:credential/consent"');
+    expect(log).toContain('"fingerprint":');
+    expect(log).toContain('"errorName":"UnknownError"');
+    expect(log).not.toContain(credential);
+    expect(log).not.toContain(sensitiveMessage);
+    expect(log).not.toContain("SECRET_KEY");
+    expect(log).not.toContain("PASSWORD");
+    stderr.mockRestore();
   });
 });

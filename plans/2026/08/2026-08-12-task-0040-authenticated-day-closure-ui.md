@@ -67,3 +67,13 @@ projection, явного закрытия дня, видимого `stale` и re
 3. Disposable browser E2E full flow.
 4. `node scripts/validate-docs.mjs`, PostgreSQL identifier check (если schema
    не меняется — миграции отсутствуют), generated static artifact check.
+
+## Корректирующий проход после staging-проверки
+
+- 2026-08-17: реальный Web OAuth consent выявил, что строгий Identity adapter
+  ошибочно требовал непустые resource scopes даже для OIDC-only клиента.
+- Исправление сохраняет минимальные права Web-клиента: только `openid`, без
+  `person:read`, refresh token или другого API-разрешения.
+- Точный integration flow проверяет consent, authorization code, ID token и
+  отсутствие resource scopes; неожиданные ошибки Identity логируются только
+  обезличенным маршрутом, типом/SQLSTATE и fingerprint без credentials.

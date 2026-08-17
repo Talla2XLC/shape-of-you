@@ -924,16 +924,28 @@ async function upsertGrant(
   requireUuid(id, "OAuth Grant id");
   const accountId = requireUuid(payload.accountId, "OAuth Grant account id");
   const clientId = requireString(payload.clientId, "OAuth Grant client id");
-  const resources = requireRecord(payload.resources, "OAuth Grant resources");
+  const resources = payload.resources === undefined
+    ? {}
+    : requireRecord(payload.resources, "OAuth Grant resources");
   const openid = requireRecord(payload.openid, "OAuth Grant OIDC scopes");
   assertRecordFields(openid, ["claims", "scope"], "OAuth Grant OIDC scopes");
   if (openid.claims !== undefined) {
     throw new Error("OAuth Grant OIDC claims are unsupported");
   }
   const oidcScopes = splitScope(requireString(openid.scope, "OAuth Grant OIDC scope"));
-  const resourceScope = requireString(resources[dependencies.resource], "OAuth Grant resource scope");
-  if (Object.keys(resources).length !== 1) throw new Error("OAuth Grant has unsupported resources");
-  const scopes = splitScope(resourceScope);
+  const resourceKeys = Object.keys(resources);
+  if (
+    resourceKeys.length > 1 ||
+    (resourceKeys.length === 1 && resourceKeys[0] !== dependencies.resource)
+  ) {
+    throw new Error("OAuth Grant has unsupported resources");
+  }
+  const scopes = resourceKeys.length === 0
+    ? []
+    : splitScope(requireString(
+        resources[dependencies.resource],
+        "OAuth Grant resource scope"
+      ));
   const rejectedScopes = validatedRejectedOidcScopes(payload.rejected);
   const sortedScopes = [...scopes].sort();
   if (
