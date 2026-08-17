@@ -31,6 +31,10 @@ remain operational steps.
 The accepted first Nuxt client preserves this exact Identity origin: edge serves
 the static browser shell on otherwise unreserved paths, while Identity keeps
 ownership of its metadata, OAuth, `/v1/`, and probe routes.
+Browser OAuth now defaults to `/day` and restores only a validated same-origin
+path and query from the signed API-owned transaction. The static client learns
+only whether its API session is active; it never receives session identity or
+credential material.
 
 ## Content
 
@@ -172,6 +176,21 @@ that API session; writes also require the exact API Origin and matching CSRF
 header. The static Web client never receives access or refresh tokens. MCP
 continues to use its separate bearer-token contract.
 
+Protected Web routes pass only their path and query to the API sign-in route.
+The API rejects external, protocol-relative, backslash, fragment, control-
+character, and oversized return targets, then stores the accepted route inside
+the signed, short-lived, HttpOnly OAuth transaction cookie with state and PKCE.
+The callback ignores any return target in its own query and redirects only from
+the verified transaction; absent, invalid, expired, or legacy route state falls
+back to `/day`.
+
+`GET /browser-auth/session` reuses the API session verifier and returns an empty,
+non-cacheable `204` or `401` without Person, subject, role, expiry, token, or
+cookie details. The static client uses that boolean-equivalent result for its
+landing action and reusable protected-route middleware. Missing or expired
+authority starts top-level OAuth and returns to the original path and query;
+the client does not retain authentication or return state in browser storage.
+
 OAuth interaction correlation and resume targets are stored as narrow typed
 columns. Authorization resume explicitly binds the interaction's authenticated
 passkey session to the provider Session UID; Identity does not create duplicate
@@ -232,6 +251,9 @@ lifecycle.
   2026-08-03; the operator accepted `oidc-provider` and SimpleWebAuthn.
 - Current OpenAI plugin authentication requirements were re-verified on
   2026-08-07 during independent quality review.
+- TASK-0041 browser acceptance completed real WebAuthn and OAuth, authenticated
+  landing revisit, API-session loss, reconnect, and protected path-and-query
+  restoration on 2026-08-17.
 
 ## Decisions
 
@@ -245,6 +267,7 @@ lifecycle.
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
+- [Same-origin browser return routes](../../adr/20260817-preserve-same-origin-browser-return-routes-through-oauth.md)
 - [Durable OAuth connections](../../adr/20260810-require-offline-access-for-durable-oauth-connections.md)
 
 ## Open questions

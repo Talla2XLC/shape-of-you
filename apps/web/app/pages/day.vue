@@ -1,13 +1,40 @@
 <script setup lang="ts">
+import { beginBrowserSignIn } from "~/lib/browser-auth";
 import { dayApi, type DailyProjection, type DayClosureHistory, DayApiError } from "~/lib/day-api";
 
-const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-const localDate = ref(new Date().toLocaleDateString("en-CA", { timeZone: timezone }));
+definePageMeta({ middleware: "api-session" });
+useHead({ bodyAttrs: { class: "page-day" } });
+
+const route = useRoute();
+
+const browserTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+const requestedTimezone = typeof route.query.timezone === "string"
+  && route.query.timezone.length <= 128
+  && isValidTimezone(route.query.timezone)
+  ? route.query.timezone
+  : null;
+const timezone = requestedTimezone ?? browserTimezone;
+const requestedDate = typeof route.query.date === "string"
+  && /^\d{4}-\d{2}-\d{2}$/u.test(route.query.date)
+  ? route.query.date
+  : null;
+const localDate = ref(
+  requestedDate ?? new Date().toLocaleDateString("en-CA", { timeZone: timezone })
+);
 const projection = ref<DailyProjection | null>(null);
 const history = ref<DayClosureHistory | null>(null);
 const reason = ref("");
 const error = ref<string | null>(null);
 const busy = ref(false);
+
+function isValidTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function load(): Promise<void> {
   busy.value = true; error.value = null;
@@ -18,30 +45,44 @@ async function load(): Promise<void> {
     ]);
     projection.value = nextProjection;
     history.value = nextHistory;
-  } catch (caught) { error.value = caught instanceof DayApiError && caught.status === 401 ? "Sign in to view your day." : "The daily projection is unavailable."; }
+  } catch (caught) {
+    if (caught instanceof DayApiError && caught.status === 401) {
+      beginBrowserSignIn(route.fullPath);
+      return;
+    }
+    error.value = "The daily projection is unavailable.";
+  }
   finally { busy.value = false; }
 }
 async function closeDay(): Promise<void> {
   if (!confirm("Close this day? Its current summary will be saved as an immutable version.")) return;
   busy.value = true; error.value = null;
-  try { await dayApi.close(localDate.value, timezone); await load(); } catch { error.value = "The day could not be closed. Refresh and try again."; } finally { busy.value = false; }
+  try { await dayApi.close(localDate.value, timezone); await load(); } catch (caught) {
+    if (caught instanceof DayApiError && caught.status === 401) beginBrowserSignIn(route.fullPath);
+    else error.value = "The day could not be closed. Refresh and try again.";
+  } finally { busy.value = false; }
 }
 async function reopenDay(): Promise<void> {
   if (!reason.value.trim()) { error.value = "Explain why this day is being reopened."; return; }
   busy.value = true; error.value = null;
-  try { await dayApi.reopen(localDate.value, reason.value.trim()); reason.value = ""; await load(); } catch { error.value = "The day could not be reopened."; } finally { busy.value = false; }
+  try { await dayApi.reopen(localDate.value, reason.value.trim()); reason.value = ""; await load(); } catch (caught) {
+    if (caught instanceof DayApiError && caught.status === 401) beginBrowserSignIn(route.fullPath);
+    else error.value = "The day could not be reopened.";
+  } finally { busy.value = false; }
 }
 onMounted(load);
 </script>
 
 <template>
-  <section class="hero">
-    <div>
+  <section class="hero day-view">
+    <div class="day-content">
       <p class="eyebrow">
         Daily record
       </p>
-      <h1>Your day, with its context intact.</h1>
-      <label class="field">Date
+      <h1 class="day-heading">
+        Your day, with its context intact.
+      </h1>
+      <label class="field day-date">Date
         <input
           v-model="localDate"
           type="date"
@@ -66,7 +107,7 @@ onMounted(load);
           Status: <strong>{{ projection.state }}</strong>.
           {{ projection.isStale ? "New or corrected data needs your review." : "" }}
         </p>
-        <div class="signal-card">
+        <div class="signal-card day-card">
           <div class="signal-copy">
             <strong>Weight</strong>
             <span>{{ projection.snapshot.physical.weightMeasurements.at(0)?.weightKg ?? "No measurement" }}</span>
@@ -76,7 +117,7 @@ onMounted(load);
         </div>
         <button
           v-if="projection.state === 'open'"
-          class="button"
+          class="button day-action"
           :disabled="busy"
           @click="closeDay"
         >
@@ -90,7 +131,7 @@ onMounted(load);
             >
           </label>
           <button
-            class="button"
+            class="button day-action"
             :disabled="busy"
             @click="reopenDay"
           >
@@ -99,7 +140,7 @@ onMounted(load);
         </template>
         <section
           v-if="history?.items.length"
-          class="signal-card"
+          class="signal-card day-card"
           aria-label="Day closure history"
         >
           <div class="signal-copy">
@@ -111,13 +152,6 @@ onMounted(load);
           </div>
         </section>
       </template>
-      <a
-        v-if="error?.startsWith('Sign in')"
-        class="button"
-        href="/api/browser-auth/sign-in"
-      >
-        Sign in
-      </a>
     </div>
   </section>
 </template>

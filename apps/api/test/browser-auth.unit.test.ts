@@ -1,4 +1,4 @@
-import { exportJWK, generateKeyPair, SignJWT } from "jose";
+import { exportJWK, generateKeyPair, jwtVerify, SignJWT } from "jose";
 import Fastify from "fastify";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,9 @@ const origin = "https://staging.example.test";
 const key = "test-browser-cookie-key-that-is-long-enough-for-validation";
 const resource = "https://staging.example.test/api/mcp";
 
-function auth(): BrowserAuth {
+function auth(
+  resolveAuthorizedPersons: BrowserAuthOptions["resolveAuthorizedPersons"] = async () => []
+): BrowserAuth {
   return new BrowserAuth({
     origin,
     issuer: "https://identity.example.test",
@@ -20,8 +22,25 @@ function auth(): BrowserAuth {
     resource,
     clientId: "shape-of-you-web-test",
     cookieKeys: [key],
-    resolveAuthorizedPersons: async () => []
+    resolveAuthorizedPersons
   });
+}
+
+type BrowserAuthOptions = ConstructorParameters<typeof BrowserAuth>[0];
+
+function transactionCookie(response: { headers: Record<string, unknown> }): string {
+  const setCookie = response.headers["set-cookie"] as string | string[] | undefined;
+  return (Array.isArray(setCookie) ? setCookie[0] : setCookie)!.split(";", 1)[0]!;
+}
+
+async function transactionReturnTo(response: { headers: Record<string, unknown> }): Promise<string> {
+  const encoded = transactionCookie(response).split("=", 2)[1]!;
+  const { payload } = await jwtVerify(
+    decodeURIComponent(encoded),
+    new TextEncoder().encode(key),
+    { issuer: origin, audience: origin, algorithms: ["HS256"] }
+  );
+  return String(payload.returnTo);
 }
 
 async function session(expires = "5m", signingKey = key): Promise<string> {
@@ -102,6 +121,120 @@ describe("API browser session boundary", () => {
     expect(Array.isArray(setCookie) ? setCookie.join(";") : setCookie ?? "").toContain(
       "__Host-shape_of_you_api_oauth="
     );
+    await expect(transactionReturnTo(response)).resolves.toBe("/day");
+    await fastify.close();
+  });
+
+  it.each([
+    ["/day?date=2026-08-17&timezone=Europe%2FMoscow", "/day?date=2026-08-17&timezone=Europe%2FMoscow"],
+    ["https://evil.example.test/day", "/day"],
+    ["//evil.example.test/day", "/day"],
+    ["/\\evil.example.test/day", "/day"],
+    ["/day#private", "/day"],
+    ["/day\nredirect", "/day"],
+    [`/${"a".repeat(2_048)}`, "/day"]
+  ])("stores only a bounded same-origin return route for %s", async (returnTo, expected) => {
+    const fastify = Fastify();
+    auth().register(fastify);
+    const response = await fastify.inject({
+      method: "GET",
+      url: `/browser-auth/sign-in?returnTo=${encodeURIComponent(returnTo)}`
+    });
+    await expect(transactionReturnTo(response)).resolves.toBe(expected);
+    await fastify.close();
+  });
+
+  it("reports only credential-free session presence without caching", async () => {
+    const fastify = Fastify();
+    auth().register(fastify);
+    const missing = await fastify.inject({ method: "GET", url: "/browser-auth/session" });
+    expect(missing.statusCode).toBe(401);
+    expect(missing.body).toBe("");
+    expect(missing.headers["cache-control"]).toBe("no-store");
+
+    const active = await fastify.inject({
+      method: "GET",
+      url: "/browser-auth/session",
+      headers: { cookie: `__Host-shape_of_you_api_session=${await session()}` }
+    });
+    expect(active.statusCode).toBe(204);
+    expect(active.body).toBe("");
+    expect(active.headers["cache-control"]).toBe("no-store");
+
+    const expired = await fastify.inject({
+      method: "GET",
+      url: "/browser-auth/session",
+      headers: { cookie: `__Host-shape_of_you_api_session=${await session("-1s")}` }
+    });
+    expect(expired.statusCode).toBe(401);
+    expect(expired.body).toBe("");
+    expect(expired.headers["cache-control"]).toBe("no-store");
+    await fastify.close();
+  });
+
+  it("redirects an authorized callback to the signed path and query", async () => {
+    const { privateKey, publicKey } = await generateKeyPair("ES256");
+    const publicJwk = await exportJWK(publicKey);
+    const idToken = await new SignJWT({})
+      .setProtectedHeader({ alg: "ES256", kid: "browser-return-test" })
+      .setIssuer("https://identity.example.test")
+      .setAudience("shape-of-you-web-test")
+      .setSubject("authorized-subject")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      if (url.pathname === "/oauth/token") return Response.json({ id_token: idToken });
+      if (url.pathname === "/oauth/jwks") {
+        return Response.json({
+          keys: [{ ...publicJwk, alg: "ES256", kid: "browser-return-test", use: "sig" }]
+        });
+      }
+      return new Response(null, { status: 404 });
+    }));
+    const fastify = Fastify();
+    auth(async () => [{
+      personId: "00000000-0000-4000-8000-000000000001",
+      roles: ["owner"]
+    }]).register(fastify);
+    const returnTo = "/day?date=2026-08-17&timezone=Europe%2FMoscow";
+    const start = await fastify.inject({
+      method: "GET",
+      url: `/browser-auth/sign-in?returnTo=${encodeURIComponent(returnTo)}`
+    });
+    const authorize = new URL(start.headers.location!);
+    const response = await fastify.inject({
+      method: "GET",
+      url: `/browser-auth/callback?code=one-time-code&state=${authorize.searchParams.get("state")}&returnTo=${encodeURIComponent("https://evil.example.test")}`,
+      headers: { cookie: transactionCookie(start) }
+    });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe(`${origin}${returnTo}`);
+    expect(response.headers.location).not.toContain("one-time-code");
+
+    const legacyState = "legacy-state";
+    const legacyTransaction = await new SignJWT({
+      state: legacyState,
+      verifier: "legacy-verifier"
+    })
+      .setProtectedHeader({ alg: "HS256", typ: "JWT" })
+      .setIssuer(origin)
+      .setAudience(origin)
+      .setSubject("oauth-transaction")
+      .setIssuedAt()
+      .setExpirationTime("10m")
+      .sign(new TextEncoder().encode(key));
+    const legacyResponse = await fastify.inject({
+      method: "GET",
+      url: `/browser-auth/callback?code=legacy-code&state=${legacyState}`,
+      headers: {
+        cookie: `__Host-shape_of_you_api_oauth=${encodeURIComponent(legacyTransaction)}`
+      }
+    });
+    expect(legacyResponse.statusCode).toBe(302);
+    expect(legacyResponse.headers.location).toBe(`${origin}/day`);
     await fastify.close();
   });
 

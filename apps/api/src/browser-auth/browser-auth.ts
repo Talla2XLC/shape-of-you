@@ -12,6 +12,8 @@ const csrfCookieName = "__Host-shape_of_you_api_csrf";
 const transactionCookieName = "__Host-shape_of_you_api_oauth";
 const transactionTtlSeconds = 600;
 const sessionTtlSeconds = 3600;
+const defaultReturnTo = "/day";
+const maxReturnToLength = 2_048;
 
 /** Verified browser authority suitable for the request Person context. */
 export interface BrowserSession {
@@ -31,7 +33,11 @@ export interface BrowserAuthOptions {
   readonly resolveAuthorizedPersons: (issuer: string, subject: string) => Promise<readonly AuthorizedPerson[]>;
 }
 
-interface TransactionClaims { readonly state: string; readonly verifier: string }
+interface TransactionClaims {
+  readonly returnTo: string;
+  readonly state: string;
+  readonly verifier: string;
+}
 
 /**
  * Registers top-level OAuth navigation and validates API-owned browser cookies.
@@ -52,10 +58,15 @@ export class BrowserAuth {
   }
 
   public register(fastify: FastifyInstance): void {
-    fastify.get("/browser-auth/sign-in", async (_request, reply) => {
+    fastify.get("/browser-auth/sign-in", async (request, reply) => {
       const state = randomToken();
       const verifier = randomToken();
-      const transaction = await this.sign({ state, verifier }, transactionTtlSeconds, "oauth-transaction");
+      const returnTo = safeReturnTo(readQuery(request, "returnTo"), this.origin);
+      const transaction = await this.sign(
+        { returnTo, state, verifier },
+        transactionTtlSeconds,
+        "oauth-transaction"
+      );
       setCookie(reply, transactionCookieName, transaction, { httpOnly: true, maxAge: transactionTtlSeconds });
       const authorize = new URL("/oauth/authorize", this.options.issuer);
       authorize.searchParams.set("client_id", this.options.clientId);
@@ -96,7 +107,7 @@ export class BrowserAuth {
         const csrf = randomToken();
         setCookie(reply, sessionCookieName, session, { httpOnly: true, maxAge: sessionTtlSeconds });
         setCookie(reply, csrfCookieName, csrf, { httpOnly: false, maxAge: sessionTtlSeconds });
-        reply.redirect(new URL("/", this.origin).toString());
+        reply.redirect(new URL(transaction.returnTo, this.origin).toString());
       } catch (error) {
         if (error instanceof BrowserAuthorizationError) {
           reply.code(error.statusCode).send({ statusCode: error.statusCode, error: error.code, message: error.message });
@@ -111,6 +122,20 @@ export class BrowserAuth {
       clearCookie(reply, sessionCookieName);
       clearCookie(reply, csrfCookieName);
       reply.code(204).send();
+    });
+
+    fastify.get("/browser-auth/session", async (request, reply) => {
+      reply.header("cache-control", "no-store");
+      try {
+        await this.requireRead(request);
+        reply.code(204).send();
+      } catch (error) {
+        if (error instanceof BrowserAuthorizationError) {
+          reply.code(401).send();
+          return;
+        }
+        throw error;
+      }
     });
   }
 
@@ -167,7 +192,14 @@ export class BrowserAuth {
     try {
       const payload = await this.verifyApiToken(raw);
       return typeof payload.state === "string" && typeof payload.verifier === "string"
-        ? { state: payload.state, verifier: payload.verifier }
+        ? {
+            returnTo: safeReturnTo(
+              typeof payload.returnTo === "string" ? payload.returnTo : null,
+              this.origin
+            ),
+            state: payload.state,
+            verifier: payload.verifier
+          }
         : null;
     } catch { return null; }
   }
@@ -218,6 +250,27 @@ export class BrowserAuthorizationError extends ApplicationError {
 function randomToken(): string { return randomBytes(32).toString("base64url"); }
 function sha256Base64Url(value: string): string { return createHash("sha256").update(value).digest("base64url"); }
 function safeEqual(left: string, right: string): boolean { const a = Buffer.from(left); const b = Buffer.from(right); return a.length === b.length && timingSafeEqual(a, b); }
+function safeReturnTo(value: string | null, origin: URL): string {
+  if (
+    !value ||
+    value.length > maxReturnToLength ||
+    !value.startsWith("/") ||
+    value.startsWith("//") ||
+    value.includes("\\") ||
+    value.includes("#") ||
+    /[\u0000-\u001f\u007f]/u.test(value)
+  ) {
+    return defaultReturnTo;
+  }
+  try {
+    const target = new URL(value, origin);
+    return target.origin === origin.origin
+      ? `${target.pathname}${target.search}`
+      : defaultReturnTo;
+  } catch {
+    return defaultReturnTo;
+  }
+}
 function readCookie(header: string | undefined, name: string): string | null { const pair = header?.split(";").map((item) => item.trim()).find((item) => item.startsWith(`${name}=`)); return pair ? decodeURIComponent(pair.slice(name.length + 1)) : null; }
 function readQuery(request: FastifyRequest, name: string): string | null { const value = (request.query as Record<string, unknown>)[name]; return typeof value === "string" ? value : null; }
 function setCookie(reply: FastifyReply, name: string, value: string, options: { httpOnly: boolean; maxAge: number }): void { appendCookie(reply, `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${options.maxAge}; Secure; SameSite=Lax${options.httpOnly ? "; HttpOnly" : ""}`); }

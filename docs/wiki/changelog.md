@@ -17,6 +17,20 @@ separate stages.
 
 ## Content
 
+### 2026-08-17 — Safe browser return routes and session-aware navigation
+
+- Changed successful browser OAuth to open `/day` by default and restore only
+  a validated same-origin path and query bound to the signed HttpOnly OAuth
+  transaction.
+- Added an empty, non-cacheable `204/401` API session-presence contract so the
+  static landing page can show **Open my day** without receiving credentials or
+  Person authorization details.
+- Added reusable protected-route reauthentication, responsive content-sized
+  `/day` layout, and browser coverage for default login, authenticated landing
+  revisit, session loss, and exact protected-route restoration.
+- Preserved the static Nuxt delivery, API/Identity ownership boundary, MCP
+  bearer contract, Person mapping, schemas, and deployable topology.
+
 ### 2026-08-17 — Stable OAuth identity and full browser acceptance
 
 - Added an API-owned operational CLI for explicit Person-access bootstrap and

@@ -67,16 +67,32 @@ async function fulfillJson(route: Route, body: unknown, status = 200): Promise<v
   });
 }
 
+async function mockApiSession(page: Page, status: 204 | 401): Promise<void> {
+  await page.route("**/api/browser-auth/session", (route) =>
+    route.fulfill({ status, headers: { "cache-control": "no-store" }, body: "" })
+  );
+}
+
 test("landing starts the API-owned browser authorization flow", async ({ page }) => {
+  await mockApiSession(page, 401);
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /Your signals/ })).toBeVisible();
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveAttribute(
     "href",
-    "/api/browser-auth/sign-in"
+    "/api/browser-auth/sign-in?returnTo=%2Fday"
   );
 });
 
+test("landing offers the daily view when the API session is active", async ({ page }) => {
+  await mockApiSession(page, 204);
+  await page.goto("/");
+
+  await expect(page.getByRole("link", { name: "Open my day" })).toHaveAttribute("href", "/day");
+  await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveCount(0);
+});
+
 test("landing keeps keyboard focus, reduced motion, and mobile width usable", async ({ page }) => {
+  await mockApiSession(page, 401);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
@@ -87,6 +103,7 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
   const brand = page.getByRole("link", { name: "Shape of You home" });
   const myDay = page.getByRole("banner").getByRole("link", { name: "My day" });
   const continueLink = page.getByRole("link", { name: "Continue with a passkey" });
+  await expect(continueLink).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(brand).toBeFocused();
   await page.keyboard.press("Tab");
@@ -98,6 +115,60 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
     Number.parseFloat(getComputedStyle(element).transitionDuration)
   );
   expect(transitionSeconds).toBeLessThanOrEqual(0.001);
+});
+
+test("protected day route starts sign-in with its path and query", async ({ page }) => {
+  await mockApiSession(page, 401);
+  await page.goto("/day?date=2026-08-17&timezone=Europe%2FMoscow");
+
+  await expect(page).toHaveURL(/\/api\/browser-auth\/sign-in\?/);
+  const signInUrl = new URL(page.url());
+  expect(signInUrl.pathname).toBe("/api/browser-auth/sign-in");
+  expect(signInUrl.searchParams.get("returnTo")).toBe(
+    "/day?date=2026-08-17&timezone=Europe/Moscow"
+  );
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+});
+
+test("day layout remains content-sized across phone, tablet, and desktop", async ({ page }) => {
+  await mockApiSession(page, 204);
+  await page.route("**/api/v1/day-projections?*", (route) =>
+    fulfillJson(route, {
+      localDate: "2026-08-17",
+      timezone: "Europe/Moscow",
+      state: "open",
+      closure: null,
+      isStale: false,
+      snapshot: {
+        physical: { weightMeasurements: [{ weightKg: 77.7 }] },
+        nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } }
+      }
+    })
+  );
+  await page.route("**/api/v1/day-closures/history?*", (route) =>
+    fulfillJson(route, { items: [] })
+  );
+
+  for (const viewport of [
+    { width: 320, height: 720 },
+    { width: 768, height: 1_024 },
+    { width: 1_440, height: 900 }
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/day");
+    await expect(page.getByRole("heading", { name: "Your day, with its context intact." })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    const headingSize = await page.locator(".day-heading").evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).fontSize)
+    );
+    expect(headingSize).toBeLessThanOrEqual(viewport.width <= 320 ? 52 : 87);
+    const card = page.locator(".day-card").first();
+    const cardBox = await card.boundingBox();
+    const copyBox = await card.locator(".signal-copy").boundingBox();
+    expect(cardBox).not.toBeNull();
+    expect(copyBox).not.toBeNull();
+    expect(cardBox!.height - copyBox!.height).toBeLessThan(70);
+  }
 });
 
 test("access-required explains an unlinked account without credential details", async ({ page }) => {

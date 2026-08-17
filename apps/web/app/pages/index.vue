@@ -1,3 +1,20 @@
+<script setup lang="ts">
+import { browserAuth } from "~/lib/browser-auth";
+
+type SessionState = "active" | "checking" | "inactive" | "unavailable";
+
+const sessionState = ref<SessionState>("checking");
+const signInHref = browserAuth.signInUrl("/day");
+
+onMounted(async () => {
+  try {
+    sessionState.value = await browserAuth.hasSession() ? "active" : "inactive";
+  } catch {
+    sessionState.value = "unavailable";
+  }
+});
+</script>
+
 <template>
   <section class="hero">
     <div>
@@ -11,9 +28,20 @@
       </p>
       <div class="hero-actions">
         <a
+          v-if="sessionState === 'active'"
           class="button"
-          href="/api/browser-auth/sign-in"
+          href="/day"
+        >Open my day</a>
+        <a
+          v-else-if="sessionState === 'inactive'"
+          class="button"
+          :href="signInHref"
         >Continue with a passkey</a>
+        <span
+          v-else
+          class="session-status"
+          role="status"
+        >{{ sessionState === "checking" ? "Checking your session…" : "Session status is temporarily unavailable." }}</span>
         <a
           class="quiet-link"
           href="#privacy"
