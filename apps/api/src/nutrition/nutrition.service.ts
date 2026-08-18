@@ -188,6 +188,11 @@ export class NutritionService {
     return this.store.listMealsForLocalDate(this.personContext.getPersonId(), localDate);
   }
 
+  /** Reads current meal facts across an inclusive Person-local date range. */
+  public listMealsForLocalDateRange(from: string, to: string): Promise<readonly Meal[]> {
+    return this.store.listMealsForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
   /** Reads the append-only correction chain containing one Meal. */
   public async mealHistory(id: string): Promise<MealHistory> {
     const history = await this.store.mealHistory(

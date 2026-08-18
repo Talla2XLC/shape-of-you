@@ -5,7 +5,7 @@ title: "Preserve same-origin browser return routes through OAuth"
 status: accepted
 date: 2026-08-17
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260818-make-progress-overview-the-authenticated-default"
 tags:
   - "authentication"
   - "browser"

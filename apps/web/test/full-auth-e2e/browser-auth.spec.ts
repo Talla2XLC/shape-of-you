@@ -6,7 +6,7 @@ interface BrowserAuthority {
   readonly enrollmentToken: string;
 }
 
-test("browser OAuth opens the day, reflects its session, and restores a protected route", async ({
+test("browser OAuth opens progress, reflects its session, and restores a protected route", async ({
   context,
   page
 }) => {
@@ -36,22 +36,20 @@ test("browser OAuth opens the day, reflects its session, and restores a protecte
   await page.getByRole("link", { name: "Continue with a passkey" }).click();
   await page.getByRole("button", { name: "Sign in with a passkey" }).click();
   await page.getByRole("button", { name: "Allow" }).click();
-  await expect(page).toHaveURL(/\/day$/);
-  await expect(page.getByRole("heading", { name: "Your day, with its context intact." })).toBeVisible();
-  await expect(page.getByText("Status:")).toBeVisible();
+  await expect(page).toHaveURL(/\/progress$/);
+  await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
   await expect(page.getByRole("alert")).toHaveCount(0);
 
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Open my day" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open progress" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveCount(0);
 
   await context.clearCookies({ name: "__Host-shape_of_you_api_session" });
   await context.clearCookies({ name: "__Host-shape_of_you_api_csrf" });
-  await page.goto("/day?date=2026-08-17&timezone=Europe%2FMoscow");
-  await expect(page).toHaveURL(/\/day\?/);
+  await page.goto("/days/2026-08-17?timezone=Europe%2FMoscow");
+  await expect(page).toHaveURL(/\/days\/2026-08-17\?/);
   const restoredUrl = new URL(page.url());
-  expect(restoredUrl.pathname).toBe("/day");
-  expect(restoredUrl.searchParams.get("date")).toBe("2026-08-17");
+  expect(restoredUrl.pathname).toBe("/days/2026-08-17");
   expect(restoredUrl.searchParams.get("timezone")).toBe("Europe/Moscow");
   await expect(page.getByRole("heading", { name: "Your day, with its context intact." })).toBeVisible();
   await expect(page.getByLabel("Date")).toHaveValue("2026-08-17");

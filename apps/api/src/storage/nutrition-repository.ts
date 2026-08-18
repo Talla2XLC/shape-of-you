@@ -2,8 +2,10 @@ import {
   and,
   desc,
   eq,
+  gte,
   inArray,
   lt,
+  lte,
   notExists,
   or,
   sql
@@ -138,6 +140,7 @@ export interface NutritionStore {
   ): Promise<MealList>;
   /** Reads every current meal for one exact Person-local calendar date. */
   listMealsForLocalDate(personId: string, localDate: string): Promise<readonly Meal[]>;
+  listMealsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly Meal[]>;
   mealHistory(
     personId: string,
     id: string
@@ -1242,6 +1245,20 @@ export class NutritionRepository implements NutritionStore {
         eq(meals.localDate, localDate),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
       )).orderBy(desc(meals.occurredAt), desc(meals.id));
+      return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row)));
+    });
+  }
+
+  /** {@inheritDoc NutritionStore.listMealsForLocalDateRange} */
+  public listMealsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly Meal[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const successor = alias(meals, "range_meal_successor");
+      const rows = await transaction.select().from(meals).where(and(
+        eq(meals.personId, personId),
+        gte(meals.localDate, from),
+        lte(meals.localDate, to),
+        notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
+      )).orderBy(desc(meals.localDate), desc(meals.occurredAt), desc(meals.id));
       return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row)));
     });
   }

@@ -87,6 +87,18 @@ export class BodyMeasurementSessionService {
     );
   }
 
+  /** Reads current body sessions for an inclusive Person-local date range. */
+  public listForLocalDateRange(
+    from: string,
+    to: string
+  ): Promise<readonly BodyMeasurementSession[]> {
+    return this.store.listForLocalDateRange(
+      this.personContext.getPersonId(),
+      from,
+      to
+    );
+  }
+
   /**
    * Reads a complete body session correction chain.
    *

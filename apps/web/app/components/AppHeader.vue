@@ -13,7 +13,7 @@
     </NuxtLink>
     <a
       class="quiet-link"
-      href="/day"
-    >My day</a>
+      href="/progress"
+    >Progress</a>
   </header>
 </template>

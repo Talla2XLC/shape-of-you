@@ -29,10 +29,16 @@ new version. The closure cannot own Nutrition, Training, Physical State,
 Recovery, or Coaching facts, and changed late evidence makes a closed daily
 projection stale instead of silently rewriting its snapshot.
 
-The authenticated day screen reads the composed projection and append-only
+The canonical authenticated `/days/:localDate` screen reads the composed projection and append-only
 closure history through the API. It asks for an explicit browser confirmation
 before close and requires a non-empty reopen reason; it does not calculate or
 mutate lifecycle state locally.
+
+The authenticated `/progress` overview is separate from closure lifecycle. It
+lists only dates with current module-owned facts and never treats a closure-only
+date as progress evidence. Missing metric facts remain absent points rather
+than synthetic zeros. Legacy `/day` routes safely replace themselves with the
+canonical dated route.
 
 The closure records its IANA timezone, Person actor, and source channel. A
 closed date is read only in its recorded timezone; a different timezone is a
@@ -61,3 +67,4 @@ local date and do not depend on public-list pagination.
 - [Domain invariants](../domain/invariants.md)
 - [Open questions](../domain/open-modeling-questions.md)
 - [Versioned Person-local day closures](../../adr/20260811-model-versioned-person-local-day-closures.md)
+- [Progress overview API](../api/progress-overview.md)

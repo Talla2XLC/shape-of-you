@@ -24,11 +24,13 @@ controlled data migration to web and mobile clients.
    transfer. Implemented: backend foundation, Person/access/provenance,
    WeightMeasurement corrections, Physical State/Goals, Nutrition, Training,
    Recovery, Coaching, and a PostgreSQL Intake queue with the Weight route.
-   Missing: production parser, remaining Intake routes, and shared day
-   lifecycle.
+   Versioned daily closure and the bounded progress overview are implemented.
+   Missing: production parser and remaining Intake routes.
 3. **DEV-024 — PostgreSQL migration and dual-run:** inventory, mapping,
    backfill, reconciliation, controlled coexistence, cutover, and rollback.
-4. **DEV-025 — Web MVP:** first web client over the stable backend contract.
+4. **DEV-025 — Web MVP — in progress:** static passkey-first Nuxt client,
+   API-owned browser session, bounded progress overview, and dated daily
+   drill-down are implemented; broader MVP workflow remains future scope.
 5. **DEV-026 — Mobile client:** mobile access through the same contract.
 
 Mandatory gates: product/context review before service design; ADR before

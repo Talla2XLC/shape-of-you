@@ -12,8 +12,8 @@ tags: []
 
 Shape of You is an architecture-first production platform in a modular
 monorepo. Current runtime is one NestJS API with `FastifyAdapter`, PostgreSQL,
-Drizzle, and typed domain modules. A future Nuxt client uses the same backend
-contract.
+Drizzle, typed domain modules, an independent Identity service, and a static
+Nuxt client using the same backend contract.
 
 ## Content
 
@@ -24,7 +24,7 @@ Current foundation:
 - PostgreSQL with Drizzle ORM/Kit;
 - Docker Compose for local development;
 - one backend authority for web/mobile business rules;
-- NestJS with FastifyAdapter; future Nuxt without duplicated domain logic;
+- NestJS with FastifyAdapter and static Nuxt without duplicated domain logic;
 - PostgreSQL queues/outbox before measured Kafka need;
 - PostgreSQL revocable sessions without mandatory Redis;
 - private S3-compatible storage for future user media;
@@ -41,6 +41,11 @@ Bounded contexts are logical modeling boundaries, not services. Current
 implementation remains one modular backend. Transport schemas, domain
 validation, and repositories are separated without generic CRUD abstractions.
 New deployables or Kafka require a confirmed driver and ADR.
+
+The authenticated default `/progress` uses one in-process API read-model
+coordinator over bounded module-owned range reads. It returns sparse current
+facts for at most 366 local dates without a materialized aggregate, new data
+owner, cross-service SQL, or expansion of the per-day `DayClosure` boundary.
 
 PostgreSQL stores API-created data, but Google Sheets remains authoritative for
 operational fitness data until dual-run and cutover.
@@ -68,4 +73,5 @@ operational fitness data until dual-run and cutover.
 - [Stateful infrastructure](stateful-infrastructure.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Migration strategy](migration-strategy.md)
+- [Progress overview API](../api/progress-overview.md)
 - [Bounded contexts](../domain/bounded-contexts.md)

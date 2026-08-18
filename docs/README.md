@@ -38,10 +38,14 @@ without duplicating index state.
 
 ## Language
 
-Plans under `plans/**/*.md` are written in Russian. Wiki pages, ADRs, guides,
-READMEs, templates, and other agent-facing repository documentation are written
-in English. Paths, identifiers, YAML keys, controlled `kind` and `status`
-values, commands, APIs, and other technical contracts are preserved exactly.
+Plans under `plans/**/*.md` and new or substantively changed ADRs under
+`adr/**/*.md` are written in Russian for direct operator approval. Wiki pages,
+guides, READMEs, general templates, and other agent-facing repository
+documentation are written in English; the ADR template is the intentional
+Russian-language exception. Historical accepted ADRs are not translated in
+bulk. Paths, identifiers, YAML keys, controlled `kind` and `status` values,
+commands, APIs, validator-required ADR section headings, and other technical
+contracts are preserved exactly. ADR titles and prose remain Russian.
 
 Operator-facing collaboration follows the operator's language. Localized
 application strings and realistic test fixtures are not documentation.

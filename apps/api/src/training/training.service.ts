@@ -184,6 +184,11 @@ export class TrainingService {
     return this.store.listWorkoutSessionsForLocalDate(this.personContext.getPersonId(), localDate);
   }
 
+  /** Reads current workout-session facts across an inclusive Person-local date range. */
+  public listWorkoutSessionsForLocalDateRange(from: string, to: string): Promise<readonly WorkoutSession[]> {
+    return this.store.listWorkoutSessionsForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
   /** Reads the complete append-only correction chain for one session. */
   public async workoutSessionHistory(
     id: string

@@ -121,18 +121,18 @@ describe("API browser session boundary", () => {
     expect(Array.isArray(setCookie) ? setCookie.join(";") : setCookie ?? "").toContain(
       "__Host-shape_of_you_api_oauth="
     );
-    await expect(transactionReturnTo(response)).resolves.toBe("/day");
+    await expect(transactionReturnTo(response)).resolves.toBe("/progress");
     await fastify.close();
   });
 
   it.each([
     ["/day?date=2026-08-17&timezone=Europe%2FMoscow", "/day?date=2026-08-17&timezone=Europe%2FMoscow"],
-    ["https://evil.example.test/day", "/day"],
-    ["//evil.example.test/day", "/day"],
-    ["/\\evil.example.test/day", "/day"],
-    ["/day#private", "/day"],
-    ["/day\nredirect", "/day"],
-    [`/${"a".repeat(2_048)}`, "/day"]
+    ["https://evil.example.test/day", "/progress"],
+    ["//evil.example.test/day", "/progress"],
+    ["/\\evil.example.test/day", "/progress"],
+    ["/day#private", "/progress"],
+    ["/day\nredirect", "/progress"],
+    [`/${"a".repeat(2_048)}`, "/progress"]
   ])("stores only a bounded same-origin return route for %s", async (returnTo, expected) => {
     const fastify = Fastify();
     auth().register(fastify);
@@ -234,7 +234,7 @@ describe("API browser session boundary", () => {
       }
     });
     expect(legacyResponse.statusCode).toBe(302);
-    expect(legacyResponse.headers.location).toBe(`${origin}/day`);
+    expect(legacyResponse.headers.location).toBe(`${origin}/progress`);
     await fastify.close();
   });
 

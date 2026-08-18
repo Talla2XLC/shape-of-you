@@ -64,6 +64,12 @@ Forbidden: cross-service SQL/foreign keys, shared multi-service schemas or
 migrations, and shared database credentials. Cross-boundary data uses APIs,
 events, or owned published read models with explicit freshness contracts.
 
+The progress overview is an API application read model, not a new owner. It
+coordinates bounded reads exported by the existing Physical State, Nutrition,
+Training, Recovery, and Coaching modules and derives no durable `DayRecord`.
+`DayClosure` remains an exact-date lifecycle artifact and is not historical
+progress authority.
+
 ## Evidence
 
 - Operator authority/boundary rules and linked ADRs.
@@ -88,3 +94,4 @@ events, or owned published read models with explicit freshness contracts.
 - [Identity ADR](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Shared-reference ADR](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
+- [Progress overview API](../api/progress-overview.md)

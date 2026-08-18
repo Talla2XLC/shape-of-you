@@ -29,7 +29,7 @@ describe("browser authorization adapter", () => {
   it("builds an encoded sign-in route and removes fragments", () => {
     const auth = createBrowserAuth(async () => new Response(null, { status: 204 }));
     expect(returnRoute("/day?date=2026-08-17#private")).toBe("/day?date=2026-08-17");
-    expect(returnRoute("https://evil.example.test")).toBe("/day");
+    expect(returnRoute("https://evil.example.test")).toBe("/progress");
     expect(auth.signInUrl("/day?date=2026-08-17")).toBe(
       "/api/browser-auth/sign-in?returnTo=%2Fday%3Fdate%3D2026-08-17"
     );

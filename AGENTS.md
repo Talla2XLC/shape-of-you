@@ -13,6 +13,19 @@ the installed `$4DreamTeam` workflow and its managed tools. Canonical Wiki and
 ADR documents are ordinary Markdown files in the repository and follow the
 rules below.
 
+## IDE-Visible Primary Working Tree
+
+- Make every source-code, test, plan, ADR, and canonical documentation change
+  directly in `/Users/MmM/WebstormProjects/shape-of-you`, which is the primary
+  working tree opened by the operator in the IDE.
+- Do not implement or retain project changes in `.codex/worktrees/**` or any
+  other hidden or secondary Git worktree.
+- If a Codex session starts in a generated secondary worktree, stop before the
+  first write and switch all repository operations to the primary working
+  tree.
+- The operator must be able to inspect every live change in the primary IDE
+  Git tree throughout implementation.
+
 ## Session Start
 
 At the start of a session, use the installed 4DreamTeam wrappers to:
@@ -65,10 +78,13 @@ Do not edit their internal storage directly.
 - If changing a decision within a year could be expensive, present alternatives
   and trade-offs before approval.
 - Record every architecture decision as a canonical ADR in `docs/adr/`.
-- Write plans in Russian. Write canonical Wiki pages, ADRs, guides, READMEs,
-  templates, and other agent-facing documentation in English.
+- Write plans and canonical ADRs in Russian so the operator can review and
+  approve decisions directly. Write canonical Wiki pages, guides, READMEs,
+  general templates, and other agent-facing documentation in English. The ADR
+  template is the intentional Russian-language exception.
 - Preserve technical names, API names, commands, paths, IDs, frontmatter keys,
-  and controlled enum values when translation would change the contract.
+  controlled enum values, and validator-required ADR section headings when
+  translation would change the contract.
 
 ## Planning
 
@@ -175,11 +191,13 @@ task explicitly requires it.
 
 ## Language and Communication
 
-Write all plans in Russian.
+Write all plans and canonical ADRs in Russian.
 
-Write canonical Wiki pages, ADRs, guides, READMEs, templates, runbooks,
+Write canonical Wiki pages, guides, READMEs, general templates, runbooks,
 onboarding material, and other agent-facing or repository documentation in
-English. Write all `AGENTS.md` files in English.
+English. The ADR template follows the Russian ADR language. Write all
+`AGENTS.md` files in English. Keep validator-required ADR section headings in
+English as structural keys while writing ADR titles and prose in Russian.
 
 Communicate with the operator in the operator's language. User-facing statuses,
 comparisons, questions, and decision summaries are currently written in

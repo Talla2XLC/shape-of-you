@@ -5,7 +5,7 @@ import { nextDisclosureState } from "~/lib/disclosure";
 type SessionState = "active" | "checking" | "inactive" | "unavailable";
 
 const sessionState = ref<SessionState>("checking");
-const signInHref = browserAuth.signInUrl("/day");
+const signInHref = browserAuth.signInUrl("/progress");
 const passkeyExplanationExpanded = ref(false);
 
 function togglePasskeyExplanation(): void {
@@ -36,8 +36,8 @@ onMounted(async () => {
         <a
           v-if="sessionState === 'active'"
           class="button"
-          href="/day"
-        >Open my day</a>
+          href="/progress"
+        >Open progress</a>
         <a
           v-else-if="sessionState === 'inactive'"
           class="button"

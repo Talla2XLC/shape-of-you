@@ -145,6 +145,10 @@ class FakeStore implements WeightMeasurementStore {
     return [baselineMeasurement];
   }
 
+  public async listForLocalDateRange(): Promise<readonly WeightMeasurement[]> {
+    return [baselineMeasurement];
+  }
+
   public async history(): Promise<WeightMeasurementHistory> {
     return { items: [baselineMeasurement] };
   }
@@ -160,6 +164,7 @@ const bodyMeasurementSessionStore: BodyMeasurementSessionStore = {
   findById: unreachable,
   list: unreachable,
   listForLocalDate: unreachable,
+  listForLocalDateRange: unreachable,
   history: unreachable
 };
 
@@ -190,6 +195,7 @@ const nutritionStore: NutritionStore = {
   findMeal: unreachable,
   listMeals: unreachable,
   listMealsForLocalDate: unreachable,
+  listMealsForLocalDateRange: unreachable,
   mealHistory: unreachable,
   dailyTotals: unreachable
 };
@@ -210,6 +216,7 @@ const trainingStore: TrainingStore = {
   findWorkoutSession: unreachable,
   listWorkoutSessions: unreachable,
   listWorkoutSessionsForLocalDate: unreachable,
+  listWorkoutSessionsForLocalDateRange: unreachable,
   workoutSessionHistory: unreachable,
   personalRecords: unreachable,
   progressionCandidates: unreachable,
@@ -226,12 +233,14 @@ const recoveryStore: RecoveryStore = {
   findObservation: unreachable,
   listObservations: unreachable,
   listObservationsForLocalDate: unreachable,
+  listObservationsForLocalDateRange: unreachable,
   observationHistory: unreachable,
   registerPolicyVersion: unreachable,
   createAssessment: unreachable,
   findAssessment: unreachable,
   listAssessments: unreachable,
-  listAssessmentsForLocalDate: unreachable
+  listAssessmentsForLocalDate: unreachable,
+  listAssessmentsForLocalDateRange: unreachable
 };
 
 const coachingStore: CoachingStore = {
@@ -241,6 +250,7 @@ const coachingStore: CoachingStore = {
   find: unreachable,
   list: unreachable,
   listForLocalDate: unreachable,
+  listForLocalDateRange: unreachable,
   history: unreachable
 };
 
@@ -320,6 +330,7 @@ describe("API bootstrap", () => {
     );
     expect(openapi.json().paths).toHaveProperty("/v1/intake/requests");
     expect(openapi.json().paths).toHaveProperty("/v1/day-projections");
+    expect(openapi.json().paths).toHaveProperty("/v1/progress-overview");
 
     await app.close();
   });
@@ -345,6 +356,45 @@ describe("API bootstrap", () => {
       database: "down"
     });
 
+    await app.close();
+  });
+
+  it("serves the bounded progress read model without exact-day reads", async () => {
+    const app = await buildApp({
+      config,
+      store: Object.assign(new FakeStore(), { listForLocalDateRange: async () => [] }),
+      ...physicalStateStores,
+      bodyMeasurementSessionStore: { ...bodyMeasurementSessionStore, listForLocalDateRange: async () => [] },
+      nutritionStore: { ...nutritionStore, listMealsForLocalDateRange: async () => [] },
+      trainingStore: { ...trainingStore, listWorkoutSessionsForLocalDateRange: async () => [] },
+      recoveryStore: { ...recoveryStore, listObservationsForLocalDateRange: async () => [], listAssessmentsForLocalDateRange: async () => [] },
+      coachingStore: { ...coachingStore, listForLocalDateRange: async () => [] },
+      readinessProbe: async () => undefined
+    });
+
+    const response = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/v1/progress-overview?from=2026-08-12&to=2026-08-18&timezone=Europe%2FMoscow"
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      from: "2026-08-12",
+      to: "2026-08-18",
+      timezone: "Europe/Moscow",
+      metricSetVersion: "progress-metrics-v1"
+    });
+    expect(response.json().metrics).toHaveLength(5);
+
+    const invalid = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/v1/progress-overview?from=2025-08-17&to=2026-08-18&timezone=UTC"
+    });
+    expect(invalid.statusCode).toBe(400);
+    const unknown = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/v1/progress-overview?from=2026-08-12&to=2026-08-18&timezone=UTC&extra=forbidden"
+    });
+    expect(unknown.statusCode).toBe(400);
     await app.close();
   });
 

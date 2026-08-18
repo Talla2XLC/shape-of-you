@@ -54,6 +54,11 @@ export class CoachingService {
     return this.store.listForLocalDate(this.personContext.getPersonId(), localDate, timezone);
   }
 
+  /** Reads coaching recommendations across an inclusive local-date range. */
+  public listForLocalDateRange(from: string, to: string, timezone: string): Promise<readonly CoachingRecommendation[]> {
+    return this.store.listForLocalDateRange(this.personContext.getPersonId(), from, to, timezone);
+  }
+
   public async history(id: string): Promise<CoachingRecommendationHistory> {
     const history = await this.store.history(this.personContext.getPersonId(), id);
     if (!history) throw new NotFoundError("Coaching recommendation was not found");

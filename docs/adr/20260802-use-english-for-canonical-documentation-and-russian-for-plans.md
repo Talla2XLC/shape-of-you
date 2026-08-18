@@ -5,7 +5,7 @@ title: "Use English for canonical documentation and Russian for plans"
 status: accepted
 date: 2026-08-02
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260818-use-russian-for-adrs-and-plans"
 tags:
   - "documentation"
   - "language"

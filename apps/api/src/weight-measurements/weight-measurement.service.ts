@@ -104,6 +104,18 @@ export class WeightMeasurementService {
     );
   }
 
+  /** Reads current measurements for an inclusive Person-local date range. */
+  public listForLocalDateRange(
+    from: string,
+    to: string
+  ): Promise<readonly WeightMeasurement[]> {
+    return this.store.listForLocalDateRange(
+      this.personContext.getPersonId(),
+      from,
+      to
+    );
+  }
+
   /**
    * Returns the complete ordered correction chain containing a fact.
    *

@@ -28,6 +28,8 @@ product slice, later scope, and explicit non-goals.
 - Create evidence-linked insights without claiming causality.
 - Reconcile data and perform only deterministic safe self-healing.
 - Support web and mobile clients through one backend contract.
+- Show bounded week/month/year factual progress with explicit gaps and dated
+  drill-down through one backend read model.
 - Provide passkey-only browser enrollment, sign-in, and account security
   management without moving Identity policy into the client.
 
@@ -56,6 +58,8 @@ exercise progression rules.
 - Independent business-rule implementations in clients.
 - Premature microservices or deployable decomposition.
 - Immediate Google Sheets shutdown before reconciliation and cutover.
+- Custom dashboards, saved layouts, arbitrary formulas, forecasts, and
+  persisted cross-domain progress aggregates.
 
 ## Evidence
 

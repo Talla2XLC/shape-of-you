@@ -2,8 +2,10 @@ import {
   and,
   desc,
   eq,
+  gte,
   inArray,
   lt,
+  lte,
   notExists,
   or,
   sql
@@ -117,6 +119,13 @@ export interface WeightMeasurementStore {
   listForLocalDate(
     personId: string,
     localDate: string
+  ): Promise<readonly WeightMeasurement[]>;
+
+  /** Reads every current measurement in one inclusive Person-local range. */
+  listForLocalDateRange(
+    personId: string,
+    from: string,
+    to: string
   ): Promise<readonly WeightMeasurement[]>;
 
   /**
@@ -464,6 +473,30 @@ export class WeightMeasurementRepository
           )
         )
       )
+      .orderBy(desc(weightMeasurements.measuredAt), desc(weightMeasurements.id));
+    return rows.map(serializeJoined);
+  }
+
+  /** {@inheritDoc WeightMeasurementStore.listForLocalDateRange} */
+  public async listForLocalDateRange(
+    personId: string,
+    from: string,
+    to: string
+  ): Promise<readonly WeightMeasurement[]> {
+    const successor = alias(weightMeasurements, "progress_weight_successor");
+    const rows = await this.database.db
+      .select({ measurement: weightMeasurements, sourceReference: sourceReferences })
+      .from(weightMeasurements)
+      .innerJoin(sourceReferences, eq(weightMeasurements.sourceReferenceId, sourceReferences.id))
+      .where(and(
+        eq(weightMeasurements.personId, personId),
+        gte(weightMeasurements.localDate, from),
+        lte(weightMeasurements.localDate, to),
+        notExists(
+          this.database.db.select({ id: successor.id }).from(successor)
+            .where(eq(successor.supersedesId, weightMeasurements.id))
+        )
+      ))
       .orderBy(desc(weightMeasurements.measuredAt), desc(weightMeasurements.id));
     return rows.map(serializeJoined);
   }

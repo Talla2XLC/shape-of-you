@@ -5,6 +5,7 @@ export * from "./body-measurement-session.js";
 export * from "./intake.js";
 export * from "./person.js";
 export * from "./physical-goal.js";
+export * from "./progress-overview.js";
 export * from "./recovery.js";
 export * from "./nutrition.js";
 export * from "./source-reference.js";

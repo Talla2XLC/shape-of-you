@@ -24,6 +24,7 @@ import { RecoveryModule } from "../recovery/recovery.module.js";
 import { CoachingModule } from "../coaching/coaching.module.js";
 import { IntakeModule } from "../intake/intake.module.js";
 import { DayClosureModule } from "../day-closures/day-closure.module.js";
+import { ProgressOverviewModule } from "../progress-overview/progress-overview.module.js";
 import {
   PERSON_CONTEXT,
   BODY_MEASUREMENT_SESSION_STORE,
@@ -176,7 +177,8 @@ export class AppModule {
         RecoveryModule,
         CoachingModule,
         IntakeModule,
-        DayClosureModule
+        DayClosureModule,
+        ProgressOverviewModule
       ]
     };
   }

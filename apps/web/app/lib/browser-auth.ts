@@ -28,7 +28,7 @@ export function createBrowserAuth(fetcher: Fetcher = globalThis.fetch.bind(globa
     },
 
     /** Builds the top-level sign-in URL for a path-and-query return route. */
-    signInUrl(returnTo = "/day"): string {
+    signInUrl(returnTo = "/progress"): string {
       const query = new URLSearchParams({ returnTo });
       return `/api/browser-auth/sign-in?${query.toString()}`;
     }
@@ -41,11 +41,11 @@ export const browserAuth = createBrowserAuth();
 /** Removes a fragment before a client route is sent to the API sign-in route. */
 export function returnRoute(fullPath: string): string {
   const withoutFragment = fullPath.split("#", 1)[0];
-  return withoutFragment?.startsWith("/") ? withoutFragment : "/day";
+  return withoutFragment?.startsWith("/") ? withoutFragment : "/progress";
 }
 
 /** Starts top-level OAuth without retaining navigation state in browser storage. */
-export function beginBrowserSignIn(fullPath = "/day"): void {
+export function beginBrowserSignIn(fullPath = "/progress"): void {
   window.location.assign(browserAuth.signInUrl(returnRoute(fullPath)));
 }
 

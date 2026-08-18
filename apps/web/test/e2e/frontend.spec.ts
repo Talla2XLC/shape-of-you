@@ -79,15 +79,15 @@ test("landing starts the API-owned browser authorization flow", async ({ page })
   await expect(page.getByRole("heading", { name: /Your signals/ })).toBeVisible();
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveAttribute(
     "href",
-    "/api/browser-auth/sign-in?returnTo=%2Fday"
+    "/api/browser-auth/sign-in?returnTo=%2Fprogress"
   );
 });
 
-test("landing offers the daily view when the API session is active", async ({ page }) => {
+test("landing offers progress when the API session is active", async ({ page }) => {
   await mockApiSession(page, 204);
   await page.goto("/");
 
-  await expect(page.getByRole("link", { name: "Open my day" })).toHaveAttribute("href", "/day");
+  await expect(page.getByRole("link", { name: "Open progress" })).toHaveAttribute("href", "/progress");
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveCount(0);
 });
 
@@ -126,7 +126,7 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
   ).toBe(true);
   const brand = page.getByRole("link", { name: "Shape of You home" });
-  const myDay = page.getByRole("banner").getByRole("link", { name: "My day" });
+  const myDay = page.getByRole("banner").getByRole("link", { name: "Progress" });
   const continueLink = page.getByRole("link", { name: "Continue with a passkey" });
   await expect(continueLink).toBeVisible();
   await page.keyboard.press("Tab");
@@ -152,15 +152,15 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
   expect(transitionSeconds).toBeLessThanOrEqual(0.001);
 });
 
-test("protected day route starts sign-in with its path and query", async ({ page }) => {
+test("protected dated day route starts sign-in with its path and query", async ({ page }) => {
   await mockApiSession(page, 401);
-  await page.goto("/day?date=2026-08-17&timezone=Europe%2FMoscow");
+  await page.goto("/days/2026-08-17?timezone=Europe%2FMoscow");
 
   await expect(page).toHaveURL(/\/api\/browser-auth\/sign-in\?/);
   const signInUrl = new URL(page.url());
   expect(signInUrl.pathname).toBe("/api/browser-auth/sign-in");
   expect(signInUrl.searchParams.get("returnTo")).toBe(
-    "/day?date=2026-08-17&timezone=Europe/Moscow"
+    "/days/2026-08-17?timezone=Europe/Moscow"
   );
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 });
@@ -190,7 +190,7 @@ test("day layout remains content-sized across phone, tablet, and desktop", async
     { width: 1_440, height: 900 }
   ]) {
     await page.setViewportSize(viewport);
-    await page.goto("/day");
+    await page.goto("/days/2026-08-17?timezone=Europe%2FMoscow");
     await expect(page.getByRole("heading", { name: "Your day, with its context intact." })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     const headingSize = await page.locator(".day-heading").evaluate((element) =>
@@ -204,6 +204,77 @@ test("day layout remains content-sized across phone, tablet, and desktop", async
     expect(copyBox).not.toBeNull();
     expect(cardBox!.height - copyBox!.height).toBeLessThan(70);
   }
+});
+
+test("progress renders sparse facts and dated drill-down without exact-day fanout", async ({ page }) => {
+  await mockApiSession(page, 204);
+  let overviewReads = 0;
+  const overviewUrls: string[] = [];
+  let dayReads = 0;
+  await page.route("**/api/v1/progress-overview?*", (route) => {
+    overviewReads += 1;
+    overviewUrls.push(route.request().url());
+    return fulfillJson(route, {
+      from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
+      metrics: [
+        { key: "weight_kg", label: "Weight", unit: "kg", points: [{ localDate: "2026-08-16", value: 78.2 }, { localDate: "2026-08-18", value: 77.8 }] },
+        { key: "calories_kcal", label: "Calories", unit: "kcal", points: [] },
+        { key: "protein_g", label: "Protein", unit: "g", points: [] },
+        { key: "workout_session_count", label: "Workout sessions", unit: "sessions", points: [] },
+        { key: "readiness_score", label: "Readiness", unit: "score", points: [] }
+      ],
+      days: [{ localDate: "2026-08-18", facts: { weightMeasurements: 1 } }, { localDate: "2026-08-16", facts: { weightMeasurements: 1 } }]
+    });
+  });
+  await page.route("**/api/v1/day-projections?*", (route) => { dayReads += 1; return route.abort(); });
+  await page.goto("/progress");
+  await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
+  await expect(page.getByRole("link", { name: /August 18, 2026/ })).toHaveAttribute("href", "/days/2026-08-18?timezone=Europe%2FMoscow");
+  await expect(page.getByLabel("Selected metric values")).toContainText("2026-08-18: 77.8 kg");
+  await page.getByRole("combobox", { name: "Metric" }).selectOption("calories_kcal");
+  await expect(page.getByText("No entries").first()).toBeVisible();
+  await page.getByRole("button", { name: "Week" }).click();
+  await Promise.all([
+    expect.poll(() => overviewReads).toBe(3),
+    page.getByRole("button", { name: "Year" }).click()
+  ]);
+  expect(overviewUrls.some((url) => url.includes("from=2026-08-12"))).toBe(true);
+  expect(overviewUrls.some((url) => url.includes("from=2025-08-19"))).toBe(true);
+  expect(dayReads).toBe(0);
+});
+
+test("legacy day query safely replaces itself with the canonical dated route", async ({ page }) => {
+  await mockApiSession(page, 204);
+  await page.route("**/api/v1/day-projections?*", (route) => fulfillJson(route, { localDate: "2026-08-17", timezone: "Europe/Moscow", state: "open", closure: null, isStale: false, snapshot: { physical: { weightMeasurements: [] }, nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } } } }));
+  await page.route("**/api/v1/day-closures/history?*", (route) => fulfillJson(route, { items: [] }));
+  await page.goto("/day?date=2026-08-17&timezone=Europe%2FMoscow&returnTo=https%3A%2F%2Fevil.test#private");
+  await expect(page).toHaveURL(/\/days\/2026-08-17\?timezone=Europe(?:%2F|\/)Moscow$/);
+});
+
+test("dated page reloads exact-day facts when the route date changes", async ({ page }) => {
+  await mockApiSession(page, 204);
+  const requestedDates: string[] = [];
+  await page.route("**/api/v1/day-projections?*", (route) => {
+    const date = new URL(route.request().url()).searchParams.get("localDate")!;
+    requestedDates.push(date);
+    return fulfillJson(route, { localDate: date, timezone: "Europe/Moscow", state: "open", closure: null, isStale: false, snapshot: { physical: { weightMeasurements: [{ weightKg: date === "2026-08-18" ? 78 : 79 }] }, nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } } } });
+  });
+  await page.route("**/api/v1/day-closures/history?*", (route) => fulfillJson(route, { items: [] }));
+  await page.goto("/days/2026-08-17?timezone=Europe%2FMoscow");
+  await page.getByLabel("Date").fill("2026-08-18");
+  await page.getByLabel("Date").dispatchEvent("change");
+  await expect(page).toHaveURL(/\/days\/2026-08-18/);
+  await expect(page.getByText("78", { exact: true })).toBeVisible();
+  expect(requestedDates).toEqual(["2026-08-17", "2026-08-18"]);
+});
+
+test("invalid dated route does not issue domain reads", async ({ page }) => {
+  await mockApiSession(page, 204);
+  let domainReads = 0;
+  await page.route("**/api/v1/day-*", (route) => { domainReads += 1; return route.abort(); });
+  await page.goto("/days/2026-02-30?timezone=Mars%2FOlympus&extra=discarded");
+  await expect(page.getByRole("alert")).toHaveText("Choose a valid calendar date.");
+  expect(domainReads).toBe(0);
 });
 
 test("access-required explains an unlinked account without credential details", async ({ page }) => {

@@ -2,7 +2,9 @@ import {
   and,
   desc,
   eq,
+  gte,
   lt,
+  lte,
   notExists,
   or,
   sql
@@ -82,6 +84,12 @@ export interface BodyMeasurementSessionStore {
   listForLocalDate(
     personId: string,
     localDate: string
+  ): Promise<readonly BodyMeasurementSession[]>;
+  /** Reads every current session in one inclusive Person-local range. */
+  listForLocalDateRange(
+    personId: string,
+    from: string,
+    to: string
   ): Promise<readonly BodyMeasurementSession[]>;
   history(
     personId: string,
@@ -411,6 +419,30 @@ export class BodyMeasurementSessionRepository
           )
         )
       )
+      .orderBy(desc(bodyMeasurementSessions.measuredAt), desc(bodyMeasurementSessions.id));
+    return Promise.all(rows.map((row) => this.hydrate(row, this.database.db)));
+  }
+
+  /** {@inheritDoc BodyMeasurementSessionStore.listForLocalDateRange} */
+  public async listForLocalDateRange(
+    personId: string,
+    from: string,
+    to: string
+  ): Promise<readonly BodyMeasurementSession[]> {
+    const successor = alias(bodyMeasurementSessions, "progress_body_successor");
+    const rows = await this.database.db
+      .select({ session: bodyMeasurementSessions, sourceReference: sourceReferences })
+      .from(bodyMeasurementSessions)
+      .innerJoin(sourceReferences, eq(bodyMeasurementSessions.sourceReferenceId, sourceReferences.id))
+      .where(and(
+        eq(bodyMeasurementSessions.personId, personId),
+        gte(bodyMeasurementSessions.localDate, from),
+        lte(bodyMeasurementSessions.localDate, to),
+        notExists(
+          this.database.db.select({ id: successor.id }).from(successor)
+            .where(eq(successor.supersedesId, bodyMeasurementSessions.id))
+        )
+      ))
       .orderBy(desc(bodyMeasurementSessions.measuredAt), desc(bodyMeasurementSessions.id));
     return Promise.all(rows.map((row) => this.hydrate(row, this.database.db)));
   }

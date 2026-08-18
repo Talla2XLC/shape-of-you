@@ -38,11 +38,13 @@ deployed Identity service provides passkey authentication, TOTP recovery, and
 the initial OAuth profile. The API contains the accepted OAuth-protected MCP
 resource server for weight, body measurement, meal, and workout operations;
 staging key/client/subject provisioning and external ChatGPT smoke remain
-separately approved operational work.
+separately approved operational work. The static Nuxt client now opens
+authenticated users on `/progress`, reads bounded factual trends, and drills
+down through canonical dated daily projections and closure history.
 
-A production Intake parser, remaining Intake routes, and the shared day
-lifecycle are not implemented. Google Sheets remains authoritative for
-operational fitness data until verified dual-run and approved cutover.
+A production Intake parser and remaining Intake routes are not implemented.
+Google Sheets remains authoritative for operational fitness data until
+verified dual-run and approved cutover.
 
 ## Evidence
 
@@ -65,4 +67,5 @@ operational fitness data until verified dual-run and approved cutover.
 - [Product](../product/overview.md)
 - [Domain](../domain/overview.md)
 - [Architecture](../architecture/overview.md)
+- [Progress overview API](../api/progress-overview.md)
 - [Roadmap](../roadmap/overview.md)

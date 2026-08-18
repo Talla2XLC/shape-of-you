@@ -27,6 +27,10 @@ intentionally deferred.
 The system should answer: what happened, what the evidence may mean, what
 action is safe today, why it is recommended, and what still needs confirmation.
 
+The authenticated Web entry point is `/progress`. It shows factual trends for
+the trailing week, month, or year, preserves missing data as gaps, and links
+only dates with current facts to the exact dated record.
+
 Safety position:
 
 - analyze trends rather than isolated measurements;
@@ -44,6 +48,7 @@ Safety position:
 ## Decisions
 
 - Product-first and domain-first discovery precede service design.
+- A focused progress overview precedes any customizable dashboard surface.
 
 ## Open questions
 

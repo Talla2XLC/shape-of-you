@@ -17,6 +17,30 @@ separate stages.
 
 ## Content
 
+### 2026-08-18 — Progress overview and dated day drill-down
+
+- Made `/progress` the authenticated landing and OAuth default while
+  preserving signed same-origin return to explicitly requested protected
+  routes.
+- Added week/month/year factual progress with a selectable accessible sparse
+  chart, explicit **No entries** behavior, newest-first factual dates, and
+  canonical `/days/:localDate?timezone=...` drill-down.
+- Added one API `GET /v1/progress-overview` read model bounded to 366 inclusive
+  local dates and constant-count module-owned range reads; missing facts remain
+  gaps rather than synthetic zeros.
+- Preserved `/day` compatibility through safe replacement, kept `DayClosure`
+  strictly per-day, and added no database, migration, cache, deployable, broad
+  `DayRecord`, or cross-service SQL.
+
+### 2026-08-18 — Russian ADR approval language
+
+- Changed the documentation language boundary so new or substantively changed
+  ADRs and plans are written in Russian for direct operator approval.
+- Kept canonical Wiki pages, guides, READMEs, runbooks, and `AGENTS.md` in
+  English and preserved exact technical identifiers in Russian artifacts.
+- Kept historical accepted ADRs unchanged instead of creating translated
+  mirrors or a second source of truth.
+
 ### 2026-08-17 — Safe browser return routes and session-aware navigation
 
 - Changed successful browser OAuth to open `/day` by default and restore only

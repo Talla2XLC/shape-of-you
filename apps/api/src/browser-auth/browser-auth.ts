@@ -12,7 +12,7 @@ const csrfCookieName = "__Host-shape_of_you_api_csrf";
 const transactionCookieName = "__Host-shape_of_you_api_oauth";
 const transactionTtlSeconds = 600;
 const sessionTtlSeconds = 3600;
-const defaultReturnTo = "/day";
+const defaultReturnTo = "/progress";
 const maxReturnToLength = 2_048;
 
 /** Verified browser authority suitable for the request Person context. */

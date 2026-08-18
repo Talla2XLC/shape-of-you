@@ -31,7 +31,7 @@ remain operational steps.
 The accepted first Nuxt client preserves this exact Identity origin: edge serves
 the static browser shell on otherwise unreserved paths, while Identity keeps
 ownership of its metadata, OAuth, `/v1/`, and probe routes.
-Browser OAuth now defaults to `/day` and restores only a validated same-origin
+Browser OAuth now defaults to `/progress` and restores only a validated same-origin
 path and query from the signed API-owned transaction. The static client learns
 only whether its API session is active; it never receives session identity or
 credential material.
@@ -182,7 +182,7 @@ character, and oversized return targets, then stores the accepted route inside
 the signed, short-lived, HttpOnly OAuth transaction cookie with state and PKCE.
 The callback ignores any return target in its own query and redirects only from
 the verified transaction; absent, invalid, expired, or legacy route state falls
-back to `/day`.
+back to `/progress`.
 
 `GET /browser-auth/session` reuses the API session verifier and returns an empty,
 non-cacheable `204` or `401` without Person, subject, role, expiry, token, or
@@ -268,6 +268,7 @@ lifecycle.
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
 - [Same-origin browser return routes](../../adr/20260817-preserve-same-origin-browser-return-routes-through-oauth.md)
+- [Progress overview authenticated default](../../adr/20260818-make-progress-overview-the-authenticated-default.md)
 - [Durable OAuth connections](../../adr/20260810-require-offline-access-for-durable-oauth-connections.md)
 
 ## Open questions

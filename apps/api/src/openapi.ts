@@ -100,7 +100,9 @@ import {
   DailyProjectionSchema,
   DayClosureHistorySchema,
   DayClosureSchema,
-  ReopenDaySchema
+  ReopenDaySchema,
+  ProgressOverviewQuerySchema,
+  ProgressOverviewSchema
 } from "@shape-of-you/contracts";
 
 function schemaParameter(
@@ -1172,6 +1174,26 @@ function dayClosurePaths(): Record<string, object> {
   };
 }
 
+function progressOverviewPaths(): Record<string, object> {
+  return {
+    "/v1/progress-overview": {
+      get: {
+        tags: ["progress-overview"],
+        summary: "Read a bounded sparse progress overview",
+        parameters: [
+          schemaParameter("from", "query", true, ProgressOverviewQuerySchema.properties.from),
+          schemaParameter("to", "query", true, ProgressOverviewQuerySchema.properties.to),
+          schemaParameter("timezone", "query", true, ProgressOverviewQuerySchema.properties.timezone)
+        ],
+        responses: {
+          "200": { description: "Progress overview", content: { "application/json": { schema: ProgressOverviewSchema } } },
+          "400": { description: "Invalid or unbounded range", content: { "application/json": { schema: ErrorResponseSchema } } }
+        }
+      }
+    }
+  };
+}
+
 function intakePaths(): Record<string, object> {
   const response = (schema: object, description: string): object => ({
     description,
@@ -1474,6 +1496,7 @@ export function createOpenApiDocument(): object {
       ...recoveryPaths(),
       ...coachingPaths(),
       ...dayClosurePaths(),
+      ...progressOverviewPaths(),
       ...intakePaths()
     }
   };

@@ -17,11 +17,12 @@ coupling or premature service decomposition.
 
 ## Content
 
-One Git/4DreamTeam workspace contains canonical Wiki in `docs/wiki/`, ADR in
-`docs/adr/`, and Russian plans in `plans/YYYY/MM/`. The pnpm workspace contains
-the API in `apps/api`, Identity in `apps/identity`, the static Nuxt client in
-`apps/web`, and shared transport/config packages in `packages/contracts` and
-`packages/config`.
+One Git/4DreamTeam workspace contains the English canonical Wiki in
+`docs/wiki/`, Russian canonical ADRs in `docs/adr/`, and Russian plans in
+`plans/YYYY/MM/`. Historical accepted ADRs are not translated in bulk. The pnpm
+workspace contains the API in `apps/api`, Identity in `apps/identity`, the
+static Nuxt client in `apps/web`, and shared transport/config packages in
+`packages/contracts` and `packages/config`.
 
 Canonical Wiki/ADR are ordinary Git Markdown. 4DreamTeam manages board, memory,
 sources, and workflow; its managed Wiki is frozen legacy state. The repository
@@ -74,5 +75,6 @@ origins or domain authority.
 - [Modular monorepo ADR](../../adr/20260728-modular-monorepo.md)
 - [Service autonomy ADR](../../adr/20260728-deployable-service-autonomy.md)
 - [Canonical Wiki ADR](../../adr/20260728-use-canonical-markdown-wiki-in-git.md)
+- [Documentation language ADR](../../adr/20260818-use-russian-for-adrs-and-plans.md)
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)

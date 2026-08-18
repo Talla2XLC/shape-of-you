@@ -77,6 +77,7 @@ export interface CoachingStore {
   ): Promise<CoachingRecommendationList>;
   /** Reads every recommendation whose local projection date matches the supplied context. */
   listForLocalDate(personId: string, localDate: string, timezone: string): Promise<readonly CoachingRecommendation[]>;
+  listForLocalDateRange(personId: string, from: string, to: string, timezone: string): Promise<readonly CoachingRecommendation[]>;
   history(
     personId: string,
     id: string
@@ -451,6 +452,28 @@ export class CoachingRepository implements CoachingStore {
       return hydrated.filter(
         (item) => deriveLocalDate(new Date(item.asOf), timezone) === localDate
       );
+    });
+  }
+
+  /** {@inheritDoc CoachingStore.listForLocalDateRange} */
+  public listForLocalDateRange(
+    personId: string,
+    from: string,
+    to: string,
+    timezone: string
+  ): Promise<readonly CoachingRecommendation[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const rows = await transaction
+        .select()
+        .from(coachingRecommendations)
+        .where(and(
+          eq(coachingRecommendations.personId, personId),
+          sql<boolean>`(${coachingRecommendations.asOf} at time zone ${timezone})::date >= ${from}::date`,
+          sql<boolean>`(${coachingRecommendations.asOf} at time zone ${timezone})::date <= ${to}::date`
+        ))
+        .orderBy(desc(coachingRecommendations.asOf), desc(coachingRecommendations.id));
+      const now = this.clock();
+      return Promise.all(rows.map((row) => this.hydrate(transaction, row, now)));
     });
   }
 

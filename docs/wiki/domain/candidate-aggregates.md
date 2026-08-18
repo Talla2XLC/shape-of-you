@@ -40,6 +40,11 @@ It does not own or mutate the referenced facts.
 `Daily_Log` is primarily a legacy read model/migration projection, not evidence
 for a broad aggregate.
 
+The progress overview is also a read model rather than an aggregate. It
+projects sparse current facts across a bounded date range through owning-module
+read ports and does not give `DayClosure` or a new `DayRecord` ownership of
+history.
+
 ## Evidence
 
 - Session grouping, Program prescriptions/derived fields, Meal snapshots,
@@ -61,3 +66,4 @@ for a broad aggregate.
 - [Invariants](invariants.md)
 - [Open questions](open-modeling-questions.md)
 - [Versioned Person-local day closures](../../adr/20260811-model-versioned-person-local-day-closures.md)
+- [Progress overview API](../api/progress-overview.md)

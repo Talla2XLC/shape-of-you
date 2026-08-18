@@ -69,6 +69,11 @@ export class RecoveryService {
     return this.store.listObservationsForLocalDate(this.personContext.getPersonId(), localDate);
   }
 
+  /** Reads current recovery observations across an inclusive Person-local date range. */
+  public listObservationsForLocalDateRange(from: string, to: string): Promise<readonly RecoveryObservation[]> {
+    return this.store.listObservationsForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
   public async observationHistory(id: string): Promise<RecoveryObservationHistory> {
     const history = await this.store.observationHistory(this.personContext.getPersonId(), id);
     if (!history) throw new NotFoundError("Recovery observation was not found");
@@ -92,5 +97,10 @@ export class RecoveryService {
   /** Reads all assessments for a single local date for a coordinating projection. */
   public listAssessmentsForLocalDate(localDate: string): Promise<readonly RecoveryAssessment[]> {
     return this.store.listAssessmentsForLocalDate(this.personContext.getPersonId(), localDate);
+  }
+
+  /** Reads recovery assessments across an inclusive Person-local date range. */
+  public listAssessmentsForLocalDateRange(from: string, to: string): Promise<readonly RecoveryAssessment[]> {
+    return this.store.listAssessmentsForLocalDateRange(this.personContext.getPersonId(), from, to);
   }
 }
