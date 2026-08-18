@@ -91,6 +91,31 @@ test("landing offers the daily view when the API session is active", async ({ pa
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveCount(0);
 });
 
+test("landing passkey explanation is a reversible disclosure", async ({ page }) => {
+  await mockApiSession(page, 401);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+
+  const disclosure = page.locator('[aria-controls="passkey-explanation"]');
+  const explanation = page.getByRole("region", { name: "Why Shape of You uses passkeys" });
+
+  await expect(disclosure).toHaveRole("button");
+  await expect(disclosure).toHaveAccessibleName("Why passkeys?");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(explanation).toBeHidden();
+  await disclosure.click();
+  await expect(disclosure).toHaveAccessibleName("Hide passkey details");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  await expect(explanation).toBeVisible();
+  await disclosure.click();
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(explanation).toBeHidden();
+  expect(await page.evaluate(() => location.hash)).toBe("");
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
+  ).toBe(true);
+});
+
 test("landing keeps keyboard focus, reduced motion, and mobile width usable", async ({ page }) => {
   await mockApiSession(page, 401);
   await page.setViewportSize({ width: 390, height: 844 });
@@ -110,8 +135,18 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
   await expect(myDay).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(continueLink).toBeFocused();
+  await page.keyboard.press("Tab");
+  const disclosure = page.locator('[aria-controls="passkey-explanation"]');
+  const explanation = page.getByRole("region", { name: "Why Shape of You uses passkeys" });
+  await expect(disclosure).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+  await expect(explanation).toBeVisible();
+  await page.keyboard.press("Space");
+  await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+  await expect(explanation).toBeHidden();
 
-  const transitionSeconds = await continueLink.evaluate((element) =>
+  const transitionSeconds = await disclosure.locator(".disclosure-indicator").evaluate((element) =>
     Number.parseFloat(getComputedStyle(element).transitionDuration)
   );
   expect(transitionSeconds).toBeLessThanOrEqual(0.001);

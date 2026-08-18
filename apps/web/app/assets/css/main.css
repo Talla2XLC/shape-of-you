@@ -104,6 +104,35 @@ input {
   color: var(--ink);
 }
 
+.disclosure-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  color: var(--muted);
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 5px;
+}
+
+.disclosure-indicator {
+  width: 1.35rem;
+  height: 1.35rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  line-height: 1;
+  text-decoration: none;
+  transition: transform 160ms ease;
+}
+
+.disclosure-trigger[aria-expanded="true"] .disclosure-indicator {
+  transform: rotate(180deg);
+}
+
 .main-content {
   width: min(1180px, calc(100% - 40px));
   margin: 0 auto;

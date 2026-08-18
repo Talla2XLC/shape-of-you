@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { browserAuth } from "~/lib/browser-auth";
+import { nextDisclosureState } from "~/lib/disclosure";
 
 type SessionState = "active" | "checking" | "inactive" | "unavailable";
 
 const sessionState = ref<SessionState>("checking");
 const signInHref = browserAuth.signInUrl("/day");
+const passkeyExplanationExpanded = ref(false);
+
+function togglePasskeyExplanation(): void {
+  passkeyExplanationExpanded.value = nextDisclosureState(passkeyExplanationExpanded.value);
+}
 
 onMounted(async () => {
   try {
@@ -42,10 +48,19 @@ onMounted(async () => {
           class="session-status"
           role="status"
         >{{ sessionState === "checking" ? "Checking your session…" : "Session status is temporarily unavailable." }}</span>
-        <a
-          class="quiet-link"
-          href="#privacy"
-        >Why passkeys?</a>
+        <button
+          class="quiet-link disclosure-trigger"
+          type="button"
+          aria-controls="passkey-explanation"
+          :aria-expanded="passkeyExplanationExpanded"
+          @click="togglePasskeyExplanation"
+        >
+          <span>{{ passkeyExplanationExpanded ? "Hide passkey details" : "Why passkeys?" }}</span>
+          <span
+            class="disclosure-indicator"
+            aria-hidden="true"
+          >{{ passkeyExplanationExpanded ? "−" : "+" }}</span>
+        </button>
       </div>
     </div>
     <aside
@@ -62,7 +77,12 @@ onMounted(async () => {
           Built around your authority
         </p>
         <strong>No password to remember.</strong>
-        <span>
+        <span
+          v-show="passkeyExplanationExpanded"
+          id="passkey-explanation"
+          role="region"
+          aria-label="Why Shape of You uses passkeys"
+        >
           Your passkey stays with your device. Shape of You keeps security and
           fitness decisions behind clear, separate boundaries.
         </span>
