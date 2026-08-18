@@ -151,4 +151,4 @@ outside this decision.
 - [Candidate aggregates](../wiki/domain/candidate-aggregates.md)
 - [Integrity and lifecycle](../wiki/data/integrity-and-lifecycle.md)
 - [DEV-023 completion plan](../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)
-- [TASK-0039 implementation plan](../../plans/2026/08/2026-08-11-task-0039-person-local-day-closures.md)
+- [TASK-0039 implementation plan](../../plans/2026/08/completed/2026-08-11-task-0039-person-local-day-closures.md)

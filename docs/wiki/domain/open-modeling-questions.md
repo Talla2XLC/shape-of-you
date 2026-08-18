@@ -20,7 +20,6 @@ migration design.
 
 High cost of change:
 
-- final name, ownership, and invariants for `DayClosure`/`JournalDay`;
 - wearable/health retention periods and authenticated erasure protocol before
   production ingestion.
 
@@ -39,7 +38,8 @@ Insufficient evidence:
 Resolved areas now live in ADRs: User/Person ownership, typed provenance and
 supersession, body sessions/goals/weight reconciliation, layered Nutrition,
 shared-reference ownership, Training versions/sessions, typed Recovery and
-policy-pinned assessments, and typed immutable Coaching lifecycle.
+policy-pinned assessments, typed immutable Coaching lifecycle, and versioned
+Person-local `DayClosure` snapshots without a broad `JournalDay` aggregate.
 
 Still open: production Coaching policy parameters, exercise difficulty/
 replacement contracts, and authenticated erasure.

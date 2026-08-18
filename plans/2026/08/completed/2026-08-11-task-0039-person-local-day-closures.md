@@ -2,10 +2,10 @@
 
 ## Статус и граница разрешения
 
-- Статус: implementation completed 2026-08-12; independent Quality Review
-  остаётся следующим обязательным этапом.
-- Канонический proposed ADR:
-  [`docs/adr/20260811-model-versioned-person-local-day-closures.md`](../../../docs/adr/20260811-model-versioned-person-local-day-closures.md).
+- Статус: завершено 2026-08-18. Реализация, независимый Quality Review,
+  Architecture Review, Wiki review, commit/push и проверка на staging выполнены.
+- Канонический accepted ADR:
+  [`docs/adr/20260811-model-versioned-person-local-day-closures.md`](../../../../docs/adr/20260811-model-versioned-person-local-day-closures.md).
 - ADR и scope утверждены оператором 2026-08-11. Документ разрешает реализацию
   только перечисленной границы; commit, push, migration execution и deployment
   требуют отдельных разрешений.
@@ -121,8 +121,8 @@ projection, append-only reopen/reclose и видимый статус поздн
 8. [x] Прогнать затронутые TypeScript, lint, unit/integration, clean/upgrade
    migration и docs validation. Deployment contracts не требуют изменений:
    topology и image coordinates не менялись.
-9. [ ] Провести независимый Quality Review и Architecture Review.
-10. [ ] После accepted quality обновить Wiki/changelog и отдельно запросить
+9. [x] Провести независимый Quality Review и Architecture Review.
+10. [x] После accepted quality обновить Wiki/changelog и отдельно запросить
    commit/push/deployment approvals.
 
 ## Критерии приёмки
@@ -157,9 +157,9 @@ projection, append-only reopen/reclose и видимый статус поздн
 - Passed API typecheck/build/lint, 42 unit tests, focused DayClosure PostgreSQL
   lifecycle tests, and the complete clean/upgrade migration suite. Canonical
   docs validation passed.
-- No migration has been executed outside disposable test databases. Commit,
-  push, staging migration, deployment, and independent Quality Review remain
-  separate gates.
+- Independent Quality Review accepted the implementation. Commit `6fb68db`
+  shipped it to `main`; subsequent staging delivery and the authenticated
+  `/day` flow exercised the daily projection and closure contracts.
 
 ## План проверки
 
@@ -185,6 +185,11 @@ projection, append-only reopen/reclose и видимый статус поздн
    snapshot не становится второй fact authority.
 5. Simplification: отсутствие отдельного mutable `JournalDay` сокращает state
    machine без потери open/closed semantics.
+
+Review completed: the delivered module preserves the approved narrow
+coordination boundary, introduces no deployable or cross-service transaction,
+does not duplicate domain-fact authority, and remains simpler than a broad
+mutable daily aggregate.
 
 ## Решение об утверждении
 
