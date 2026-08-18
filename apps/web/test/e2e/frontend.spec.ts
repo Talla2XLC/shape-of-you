@@ -229,7 +229,11 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   await page.route("**/api/v1/day-projections?*", (route) => { dayReads += 1; return route.abort(); });
   await page.goto("/progress");
   await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
-  await expect(page.getByRole("link", { name: /August 18, 2026/ })).toHaveAttribute("href", "/days/2026-08-18?timezone=Europe%2FMoscow");
+  const browserTimezone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
+  await expect(page.getByRole("link", { name: /August 18, 2026/ })).toHaveAttribute(
+    "href",
+    "/days/2026-08-18?timezone=" + encodeURIComponent(browserTimezone)
+  );
   await expect(page.getByLabel("Selected metric values")).toContainText("2026-08-18: 77.8 kg");
   await page.getByRole("combobox", { name: "Metric" }).selectOption("calories_kcal");
   await expect(page.getByText("No entries").first()).toBeVisible();
