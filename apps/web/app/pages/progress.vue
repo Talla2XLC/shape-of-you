@@ -15,6 +15,7 @@ const error = ref<string | null>(null);
 const requestGate = createLatestRequestGate();
 let requestController: AbortController | null = null;
 const selectedSeries = computed(() => overview.value?.metrics.find((metric) => metric.key === selectedMetric.value) ?? null);
+const latestPoint = computed(() => selectedSeries.value?.points.at(-1) ?? null);
 const chartSegments = computed(() => {
   const series = selectedSeries.value;
   if (!series?.points.length || !overview.value) return [];
@@ -24,7 +25,8 @@ const chartSegments = computed(() => {
   const min = Math.min(...values); const max = Math.max(...values); const spread = max - min || 1;
   const positioned = series.points.map((point) => {
     const day = Date.parse(`${point.localDate}T00:00:00Z`) / 86_400_000;
-    return { ...point, day, x: 24 + ((day - start) / Math.max(1, end - start)) * 552, y: 176 - ((point.value - min) / spread) * 144 };
+    const y = min === max ? 104 : 176 - ((point.value - min) / spread) * 144;
+    return { ...point, day, x: 32 + ((day - start) / Math.max(1, end - start)) * 696, y };
   });
   return splitConsecutiveDates(positioned);
 });
@@ -91,31 +93,65 @@ onMounted(load);
         class="progress-chart-card"
         aria-label="Progress chart"
       >
-        <label
-          id="metric-label"
-          class="field"
-        >Metric <select v-model="selectedMetric"><option
-          v-for="metric in overview.metrics"
-          :key="metric.key"
-          :value="metric.key"
-        >{{ metric.label }}</option></select></label>
+        <div class="progress-chart-toolbar">
+          <label
+            id="metric-label"
+            class="field"
+          >Metric <select v-model="selectedMetric"><option
+            v-for="metric in overview.metrics"
+            :key="metric.key"
+            :value="metric.key"
+          >{{ metric.label }}</option></select></label>
+          <div
+            v-if="latestPoint && selectedSeries"
+            class="latest-reading"
+            aria-label="Latest selected metric"
+          >
+            <span>Latest</span>
+            <strong>{{ latestPoint.value }} {{ selectedSeries.unit }}</strong>
+            <time :datetime="latestPoint.localDate">
+              {{ new Date(`${latestPoint.localDate}T12:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) }}
+            </time>
+          </div>
+        </div>
         <p
           v-if="!selectedSeries?.points.length"
           class="empty-state"
         >
           No entries
         </p>
+        <div
+          v-else-if="selectedSeries.points.length === 1"
+          class="single-entry-state"
+          role="status"
+        >
+          <span
+            class="single-entry-marker"
+            aria-hidden="true"
+          />
+          <p>
+            <strong>One entry in this period.</strong>
+            <span>Another recorded day will turn it into a trend.</span>
+          </p>
+        </div>
         <svg
-          v-else
+          v-else-if="selectedSeries.points.length > 1"
           class="progress-chart"
-          viewBox="0 0 600 210"
+          viewBox="0 0 760 220"
           role="img"
           :aria-label="`${selectedSeries?.label} over the selected period`"
         >
           <line
-            x1="24"
+            x1="32"
+            y1="104"
+            x2="728"
+            y2="104"
+            class="chart-grid"
+          />
+          <line
+            x1="32"
             y1="176"
-            x2="576"
+            x2="728"
             y2="176"
             class="chart-axis"
           />
@@ -126,6 +162,14 @@ onMounted(load);
             v-if="segment.length > 1"
             :points="segment.map(point => `${point.x},${point.y}`).join(' ')"
             class="chart-line"
+          /><line
+            v-for="point in segment"
+            :key="`${point.localDate}-guide`"
+            :x1="point.x"
+            :x2="point.x"
+            :y1="point.y"
+            y2="176"
+            class="chart-guide"
           /><circle
             v-for="point in segment"
             :key="point.localDate"
@@ -146,7 +190,8 @@ onMounted(load);
               v-for="point in selectedSeries.points"
               :key="point.localDate"
             >
-              <time :datetime="point.localDate">{{ point.localDate }}</time>: {{ point.value }} {{ selectedSeries.unit }}
+              <time :datetime="point.localDate">{{ point.localDate }}</time>
+              <strong>{{ point.value }} {{ selectedSeries.unit }}</strong>
             </li>
           </ul>
         </div>

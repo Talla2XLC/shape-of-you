@@ -208,6 +208,7 @@ test("day layout remains content-sized across phone, tablet, and desktop", async
 
 test("progress renders sparse facts and dated drill-down without exact-day fanout", async ({ page }) => {
   await mockApiSession(page, 204);
+  await page.clock.setFixedTime(new Date("2026-08-18T12:00:00.000Z"));
   let overviewReads = 0;
   const overviewUrls: string[] = [];
   let dayReads = 0;
@@ -217,13 +218,13 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
     return fulfillJson(route, {
       from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
       metrics: [
-        { key: "weight_kg", label: "Weight", unit: "kg", points: [{ localDate: "2026-08-16", value: 78.2 }, { localDate: "2026-08-18", value: 77.8 }] },
+        { key: "weight_kg", label: "Weight", unit: "kg", points: [{ localDate: "2026-08-18", value: 77.8 }] },
         { key: "calories_kcal", label: "Calories", unit: "kcal", points: [] },
         { key: "protein_g", label: "Protein", unit: "g", points: [] },
         { key: "workout_session_count", label: "Workout sessions", unit: "sessions", points: [] },
         { key: "readiness_score", label: "Readiness", unit: "score", points: [] }
       ],
-      days: [{ localDate: "2026-08-18", facts: { weightMeasurements: 1 } }, { localDate: "2026-08-16", facts: { weightMeasurements: 1 } }]
+      days: [{ localDate: "2026-08-18", facts: { weightMeasurements: 1 } }]
     });
   });
   await page.route("**/api/v1/day-projections?*", (route) => { dayReads += 1; return route.abort(); });
@@ -234,7 +235,17 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
     "href",
     "/days/2026-08-18?timezone=" + encodeURIComponent(browserTimezone)
   );
-  await expect(page.getByLabel("Selected metric values")).toContainText("2026-08-18: 77.8 kg");
+  await expect(page.getByLabel("Latest selected metric")).toContainText("77.8 kg");
+  await expect(page.getByText("One entry in this period.")).toBeVisible();
+  await expect(page.locator(".progress-chart")).toHaveCount(0);
+  const chartCard = page.getByLabel("Progress chart");
+  await expect(chartCard).toHaveCSS("background-color", "rgb(32, 34, 32)");
+  const chartCardBox = await chartCard.boundingBox();
+  expect(chartCardBox).not.toBeNull();
+  expect(chartCardBox!.height).toBeLessThan(460);
+  const selectedMetricValues = page.getByLabel("Selected metric values");
+  await expect(selectedMetricValues.getByText("2026-08-18")).toBeVisible();
+  await expect(selectedMetricValues.getByText("77.8 kg")).toBeVisible();
   await page.getByRole("combobox", { name: "Metric" }).selectOption("calories_kcal");
   await expect(page.getByText("No entries").first()).toBeVisible();
   await page.getByRole("button", { name: "Week" }).click();
@@ -245,6 +256,9 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   expect(overviewUrls.some((url) => url.includes("from=2026-08-12"))).toBe(true);
   expect(overviewUrls.some((url) => url.includes("from=2025-08-19"))).toBe(true);
   expect(dayReads).toBe(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await expect(page.getByRole("button", { name: "Year" })).toBeVisible();
 });
 
 test("legacy day query safely replaces itself with the canonical dated route", async ({ page }) => {
