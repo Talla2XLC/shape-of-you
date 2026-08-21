@@ -1,0 +1,304 @@
+import { decodeJwt, exportPKCS8, generateKeyPair } from "jose";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { runDryRun } from "../src/import/contracts.js";
+import {
+  FITNESS_TRACKER_SPREADSHEET_ID,
+  FitnessTrackerSheetsReader,
+  type FitnessTrackerWeightSnapshot
+} from "../src/import/fitness-tracker-sheets-reader.js";
+import {
+  WeightDryRunAdapter,
+  type WeightImportTarget
+} from "../src/import/weight-dry-run.js";
+import { PrivateJsonFileReportSink } from "../src/import/private-report-sink.js";
+
+const snapshot = (
+  weightRows: FitnessTrackerWeightSnapshot["weight"]["rows"],
+  mirrorRows: FitnessTrackerWeightSnapshot["dailyLog"]["rows"]
+): FitnessTrackerWeightSnapshot => ({
+  spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+  locale: "ru_RU",
+  timeZone: "Europe/Moscow",
+  manifestChecksum: "fixture-manifest",
+  weight: {
+    sheetId: 101,
+    title: "Weight",
+    headers: ["Date", "Weight_kg"],
+    rows: weightRows
+  },
+  dailyLog: {
+    sheetId: 202,
+    title: "Daily_Log",
+    headers: ["Date", "Weight", "Calories"],
+    rows: mirrorRows
+  }
+});
+
+describe("Weight import dry-run", () => {
+  it("classifies all four outcomes without a writer port", async () => {
+    const source = snapshot(
+      [
+        { locator: "Weight!2", values: ["21.08.2026", "82,125"] },
+        { locator: "Weight!3", values: ["2026-08-22", 81.5] },
+        { locator: "Weight!4", values: ["bad date", 80] }
+      ],
+      [
+        { locator: "Daily_Log!2", values: ["2026-08-21", 82.125] },
+        { locator: "Daily_Log!3", values: ["2026-08-22", 81.5] }
+      ]
+    );
+    const adapter = new WeightDryRunAdapter();
+    const first = adapter.classify(source, []);
+    const candidate = first.privateDetail.candidates[0]!;
+    const unchanged: WeightImportTarget = {
+      id: "target-1",
+      sourceIdentity: candidate.sourceIdentity,
+      checksum: candidate.checksum,
+      localDate: candidate.localDate,
+      temporalPrecision: "local_date",
+      weightKg: candidate.weightKg
+    };
+    const mismatchCandidate = first.privateDetail.candidates[1]!;
+    const mismatch: WeightImportTarget = {
+      id: "target-2",
+      sourceIdentity: mismatchCandidate.sourceIdentity,
+      checksum: "different",
+      localDate: mismatchCandidate.localDate,
+      temporalPrecision: "local_date",
+      weightKg: mismatchCandidate.weightKg
+    };
+
+    const result = await runDryRun(
+      "00000000-0000-4000-8000-000000000001",
+      { readSnapshot: async () => source },
+      { readTarget: async () => [unchanged, mismatch] },
+      adapter
+    );
+
+    expect(result.safeReport.counts).toEqual({
+      created: 0,
+      unchanged: 1,
+      conflict: 1,
+      invalid: 1
+    });
+    expect(result.safeReport.findings.map((item) => item.code)).toEqual([
+      "semantic_match",
+      "target_mismatch",
+      "invalid_authority_row"
+    ]);
+    expect(JSON.stringify(result.safeReport)).not.toContain("82.125");
+    expect(JSON.stringify(result.safeReport)).not.toContain("2026-08-21");
+  });
+
+  it("keeps identity stable when a row moves and produces byte-stable output", () => {
+    const adapter = new WeightDryRunAdapter();
+    const first = adapter.classify(
+      snapshot(
+        [{ locator: "Weight!2", values: [45525, 80] }],
+        [{ locator: "Daily_Log!2", values: [45525, 80] }]
+      ),
+      []
+    );
+    const movedSnapshot = snapshot(
+      [{ locator: "Weight!200", values: [45525, 80] }],
+      [{ locator: "Daily_Log!300", values: [45525, 80] }]
+    );
+    const moved = adapter.classify(movedSnapshot, []);
+    const repeated = adapter.classify(movedSnapshot, []);
+
+    expect(first.privateDetail.candidates[0]?.sourceIdentity).toEqual(
+      moved.privateDetail.candidates[0]?.sourceIdentity
+    );
+    expect(first.privateDetail.candidates[0]?.checksum).toBe(
+      moved.privateDetail.candidates[0]?.checksum
+    );
+    expect(JSON.stringify(moved.safeReport)).toBe(JSON.stringify(repeated.safeReport));
+  });
+
+  it("turns duplicates, mirror gaps/mismatches and target-only facts into conflicts", () => {
+    const adapter = new WeightDryRunAdapter();
+    const source = snapshot(
+      [
+        { locator: "Weight!2", values: ["2026-08-20", 82] },
+        { locator: "Weight!3", values: ["2026-08-20", 81] },
+        { locator: "Weight!4", values: ["2026-08-21", 80] },
+        { locator: "Weight!5", values: ["2026-08-23", 77] },
+        { locator: "Weight!6", values: ["2026-08-24", "not-a-weight"] }
+      ],
+      [
+        { locator: "Daily_Log!2", values: ["2026-08-20", 82] },
+        { locator: "Daily_Log!3", values: ["2026-08-21", 79] },
+        { locator: "Daily_Log!4", values: ["2026-08-22", 78] }
+      ]
+    );
+    const targetOnly: WeightImportTarget = {
+      id: "target-only",
+      sourceIdentity: {
+        spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+        sheetId: 101,
+        sourceKey: "2026-08-19"
+      },
+      checksum: "checksum",
+      localDate: "2026-08-19",
+      temporalPrecision: "instant",
+      weightKg: 83
+    };
+
+    const result = adapter.classify(source, [targetOnly]);
+    const codes = result.safeReport.findings.map((item) => item.code);
+    expect(codes).toContain("duplicate_authority");
+    expect(codes).toContain("value_mismatch");
+    expect(codes).toContain("orphan_mirror");
+    expect(codes).toContain("missing_mirror");
+    expect(codes).toContain("target_only");
+    expect(codes).toContain("invalid_authority_row");
+    expect(result.safeReport.counts.created).toBe(0);
+  });
+
+  it("does not overwrite changed values or invent a link for a changed date", () => {
+    const adapter = new WeightDryRunAdapter();
+    const original = adapter.classify(
+      snapshot(
+        [{ locator: "Weight!2", values: ["2026-08-20", 82] }],
+        [{ locator: "Daily_Log!2", values: ["2026-08-20", 82] }]
+      ),
+      []
+    ).privateDetail.candidates[0]!;
+    const target: WeightImportTarget = {
+      id: "original",
+      sourceIdentity: original.sourceIdentity,
+      checksum: original.checksum,
+      localDate: original.localDate,
+      temporalPrecision: "local_date",
+      weightKg: original.weightKg
+    };
+    const valueChanged = adapter.classify(
+      snapshot(
+        [{ locator: "Weight!9", values: ["2026-08-20", 81] }],
+        [{ locator: "Daily_Log!9", values: ["2026-08-20", 81] }]
+      ),
+      [target]
+    );
+    const dateChanged = adapter.classify(
+      snapshot(
+        [{ locator: "Weight!9", values: ["2026-08-21", 82] }],
+        [{ locator: "Daily_Log!9", values: ["2026-08-21", 82] }]
+      ),
+      [target]
+    );
+
+    expect(valueChanged.safeReport.findings.map((item) => item.code)).toEqual([
+      "target_mismatch"
+    ]);
+    expect(dateChanged.safeReport.findings.map((item) => item.code).sort()).toEqual([
+      "target_absent",
+      "target_only"
+    ]);
+  });
+});
+
+describe("Fitness Tracker read-only Sheets adapter", () => {
+  it("uses read-only scope, exact workbook, bounded ranges and metadata sheet ids", async () => {
+    const { privateKey } = await generateKeyPair("RS256", { extractable: true });
+    const pkcs8 = await exportPKCS8(privateKey);
+    const requests: Array<{ url: string; method: string; body?: string }> = [];
+    const fetcher: typeof fetch = async (input, init) => {
+      const url = String(input);
+      requests.push({
+        url,
+        method: init?.method ?? "GET",
+        ...(typeof init?.body === "string" || init?.body instanceof URLSearchParams
+          ? { body: String(init.body) }
+          : {})
+      });
+      if (url === "https://oauth2.googleapis.com/token") {
+        return Response.json({ access_token: "test-access-token" });
+      }
+      return Response.json({
+        spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+        properties: {
+          title: "Fitness Tracker",
+          locale: "ru_RU",
+          timeZone: "Europe/Moscow"
+        },
+        sheets: [
+          {
+            properties: { sheetId: 901, title: "Weight" },
+            data: [{ rowData: [
+              { values: [
+                { effectiveValue: { stringValue: "Date" } },
+                { effectiveValue: { stringValue: "Weight_kg" } }
+              ] },
+              { values: [
+                { effectiveValue: { stringValue: "2026-08-21" } },
+                { effectiveValue: { numberValue: 82 } }
+              ] }
+            ] }]
+          },
+          {
+            properties: { sheetId: 902, title: "Daily_Log" },
+            data: [{ rowData: [
+              { values: [
+                { effectiveValue: { stringValue: "Date" } },
+                { effectiveValue: { stringValue: "Weight" } }
+              ] },
+              { values: [
+                { effectiveValue: { stringValue: "2026-08-21" } },
+                { effectiveValue: { numberValue: 82 } }
+              ] }
+            ] }]
+          }
+        ]
+      });
+    };
+    const reader = new FitnessTrackerSheetsReader(
+      { clientEmail: "api-reader@example.test", privateKey: pkcs8 },
+      fetcher
+    );
+    const result = await reader.readSnapshot();
+    const assertion = new URLSearchParams(requests[0]?.body).get("assertion")!;
+    const payload = decodeJwt(assertion);
+    const readUrl = new URL(requests[1]!.url);
+
+    expect(payload.scope).toBe("https://www.googleapis.com/auth/spreadsheets.readonly");
+    expect(payload.sub).toBeUndefined();
+    expect(requests.map((request) => request.method)).toEqual(["POST", "GET"]);
+    expect(readUrl.pathname).toBe(
+      `/v4/spreadsheets/${FITNESS_TRACKER_SPREADSHEET_ID}`
+    );
+    expect(readUrl.searchParams.getAll("ranges")).toEqual([
+      "Weight!A1:B5000",
+      "Daily_Log!A1:AZ5000"
+    ]);
+    expect(result.weight.sheetId).toBe(901);
+    expect(result.dailyLog.sheetId).toBe(902);
+  });
+});
+
+describe("Private import report sink", () => {
+  it("uses private permissions and refuses to overwrite an existing report", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "weight-import-report-"));
+    const reportPath = path.join(directory, "detail.json");
+    const sink = new PrivateJsonFileReportSink(reportPath);
+    try {
+      await sink.write({ weightKg: 82.125 });
+
+      expect((await stat(reportPath)).mode & 0o777).toBe(0o600);
+      expect(await readFile(reportPath, "utf8")).toContain("82.125");
+      await expect(sink.write({ weightKg: 80 })).rejects.toThrow();
+
+      const existingPath = path.join(directory, "existing.json");
+      await writeFile(existingPath, "operator-owned");
+      await expect(
+        new PrivateJsonFileReportSink(existingPath).write({ weightKg: 79 })
+      ).rejects.toThrow();
+      expect(await readFile(existingPath, "utf8")).toBe("operator-owned");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+});

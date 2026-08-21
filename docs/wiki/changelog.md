@@ -11,11 +11,29 @@ tags: []
 ## Summary
 
 The project knowledge baseline was created on 2026-07-28. Core DEV-023 backend
-verticals, asynchronous Intake foundations, and an explicit shared day
-lifecycle are implemented. Production parsing and real-data migration remain
-separate stages.
+verticals, asynchronous Intake foundations, an explicit shared day lifecycle,
+and the first DEV-024 read-only migration slice are implemented. Production
+parsing, real-data apply, dual-run, and cutover remain separate stages.
 
 ## Content
+
+### 2026-08-21 — Controlled Weight import dry-run
+
+- Added a shared typed import dry-run kernel and Weight adapter inside the API,
+  with no writer port, persisted import state, new deployable, schema change,
+  or generic JSON fact model.
+- Added exact-workbook Google Sheets reads through a dedicated API-owned service
+  identity, `spreadsheets.readonly`, bounded `Weight`/`Daily_Log` ranges, and
+  metadata-derived sheet IDs; runtime secrets remain outside Git.
+- Preserved spreadsheet/sheet/date source identity separately from content
+  checksum, retained date-only `local_date` precision, and classified results
+  as `created`, `unchanged`, `conflict`, or `invalid` without overwrites.
+- Added Weight authority/mirror reconciliation, deterministic safe reporting,
+  private no-overwrite reports with mode `0600`, and PostgreSQL comparison in
+  `BEGIN READ ONLY` transactions with zero-write integration evidence.
+- Kept Google Sheets and the separate ChatGPT fitness project authoritative;
+  live credential execution, apply/backfill, Recovery/Garmin MCP coverage,
+  recurring dual-run, cutover, and rollback execution remain separately gated.
 
 ### 2026-08-18 — Progress overview and dated day drill-down
 

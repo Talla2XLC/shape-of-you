@@ -26,8 +26,16 @@ controlled data migration to web and mobile clients.
    Recovery, Coaching, and a PostgreSQL Intake queue with the Weight route.
    Versioned daily closure and the bounded progress overview are implemented.
    Missing: production parser and remaining Intake routes.
-3. **DEV-024 — PostgreSQL migration and dual-run:** inventory, mapping,
-   backfill, reconciliation, controlled coexistence, cutover, and rollback.
+3. **DEV-024 — PostgreSQL migration and dual-run:** pull-based typed import,
+   backfill, reconciliation, and controlled coexistence while the legacy
+   ChatGPT project writes only to Google Sheets. TASK-0044 implements the first
+   slice: a typed Weight dry-run with exact read-only Sheets access,
+   deterministic outcomes, source identity/checksum separation, mirror
+   reconciliation, safe reporting, and zero-write PostgreSQL comparison.
+   Apply/backfill and recurring dual-run remain future work. Cutover additionally
+   requires complete MCP writer coverage, including Recovery/Garmin, an
+   exclusive writer checkpoint, verification, authority approval, and
+   rehearsed rollback.
 4. **DEV-025 — Web MVP — in progress:** static passkey-first Nuxt client,
    API-owned browser session, bounded progress overview, and dated daily
    drill-down are implemented; broader MVP workflow remains future scope.
@@ -54,5 +62,6 @@ before authority transfer; Architecture Review before every major completion.
 
 - [Product scope](../product/scope.md)
 - [Migration strategy](../architecture/migration-strategy.md)
+- [Pull-based import and writer cutover](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Repository and runtime](../architecture/repository-and-runtime.md)
 - [DEV-023 plan](../../../plans/2026/07/2026-07-29-complete-dev-023-backend-domain-capabilities.md)

@@ -20,6 +20,13 @@ reversible, and transfers no authority before reconciliation and cutover.
 DEV-023 extracts backend contracts and domain logic. DEV-024 performs migration
 and dual-run. Web/mobile work cannot bypass the stable-backend gate.
 
+The active legacy writer is the separate ChatGPT project `Fitness Tracker`.
+It continues writing operational facts, including Garmin/Recovery evidence,
+only to Google Sheets until cutover. Direct ChatGPT dual-write to Sheets and
+PostgreSQL is forbidden. The backend migration path is pull-based: it reads
+bounded Sheets snapshots, imports through typed domain adapters, and compares
+PostgreSQL while Sheets remains authoritative.
+
 Required stages:
 
 1. Inventory sheets, columns, formulas, scripts, rules, identifiers, and
@@ -28,10 +35,40 @@ Required stages:
 3. Preserve provenance and raw source identity.
 4. Design and test backfill.
 5. Compare old/new representations through integrity reports.
-6. Run controlled dual-write or another explicitly designed dual-run.
+6. Run pull-based import and reconciliation without a second user-facing
+   writer.
 7. Define measurable cutover criteria and obtain approval.
 8. Transfer authority only after criteria pass.
 9. Preserve rollback and discrepancy-recovery procedures.
+
+TASK-0044 implements the first DEV-024 slice: a shared typed dry-run kernel and
+the Weight adapter inside the existing API. The one-shot command reads the
+exact workbook through bounded `Weight` and `Daily_Log` ranges, derives numeric
+sheet IDs from metadata, reconciles `Weight` authority with the legacy mirror,
+and compares current PostgreSQL facts inside a read-only transaction. It
+reports `created`, `unchanged`, `conflict`, and `invalid` without constructing a
+writer port or persisting run state.
+
+Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
+date; row position is locator evidence and content checksum remains separate.
+Date-only Weight evidence retains `local_date` precision. Current PostgreSQL
+Weight facts have `instant` precision and therefore cannot silently compare as
+equal until a separately approved relational precision contract exists.
+
+The reader uses a dedicated API-owned Google service identity with
+`spreadsheets.readonly`, access restricted operationally to the exact workbook,
+and secret delivery through the existing runtime mechanism. Credentials are
+not stored in Git or emitted in reports. Apply/backfill, recurring dual-run,
+live credential execution, and cutover require later approvals.
+
+Before cutover, Shape of You MCP must provide tested typed write tools for
+every fact type used by the ChatGPT project, including Garmin/Recovery
+observations. Cutover pauses the Sheets writer, captures a source checkpoint,
+runs final import/reconciliation, switches ChatGPT to MCP-only writes, verifies
+write/read-back, and transfers authority only through explicit approval.
+Rollback also uses one writer at a time; post-checkpoint PostgreSQL facts must
+be reconciled and replayed through a controlled one-time procedure before the
+Sheets writer can resume.
 
 Never invent missing data. Ambiguous mapping remains an open question.
 Self-healing begins in dry-run, records before/after, uses an allowlist,
@@ -40,20 +77,28 @@ automatically changes closed days or ambiguous facts.
 
 ## Evidence
 
+- TASK-0044 accepted Quality and Architecture Review evidence.
+- Synthetic Google Sheets adapter, outcome, reconciliation, safety, and
+  PostgreSQL zero-write tests.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
 
-- Baseline strategy is accepted; concrete mechanisms require plans and ADRs.
+- Pull-based import, typed adapters, exclusive-writer cutover, and rollback are
+  accepted in the linked ADR.
+- Weight dry-run is implemented; mutation and authority-transfer stages remain
+  separately gated.
 
 ## Open questions
 
 - Complete verified formula/validation/script/workflow catalog, identifier
-  quality, dual-run mechanism, reconciliation tolerances, cutover duration, and
-  rollback window.
+  quality, reconciliation tolerances, cutover duration, and rollback window.
+- Source checkpoint format for persisted apply/dual-run stages.
+- MCP coverage sequence for remaining fact types, including Recovery/Garmin.
 
 ## Related material
 
 - [Data ownership](data-ownership.md)
 - [Roadmap](../roadmap/overview.md)
 - [Glossary](../domain/glossary.md)
+- [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)

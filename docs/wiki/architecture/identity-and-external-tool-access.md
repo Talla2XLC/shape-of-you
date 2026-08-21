@@ -218,6 +218,21 @@ uses its domain-specific scope. Tools delegate to existing application
 contracts, so validation, idempotency, provenance, correction policy, and
 audit remain domain responsibilities rather than MCP-specific logic.
 
+The current MCP allowlist does not cover Recovery/Garmin observations and is
+therefore not sufficient for migration cutover of the active ChatGPT fitness
+writer. DEV-024 requires a source-backed fact-type coverage matrix and tested
+typed tools/scopes for every operation the legacy ChatGPT project performs.
+ChatGPT continues writing only to Google Sheets until that gate and the final
+reconciliation pass. Direct client dual-write is not an allowed transition;
+the project switches to MCP-only writes at an explicit cutover checkpoint.
+
+The migration reader uses a separate API-owned Google service identity, not
+the ChatGPT writer identity. Runtime configuration supplies its credential;
+the adapter requests only `spreadsheets.readonly`, is hard-bound to the exact
+`Fitness Tracker` spreadsheet ID, and exposes no Sheets mutation operation.
+Workbook sharing must grant that identity read-only access only to the approved
+workbook. Live credential use remains an explicit operational gate.
+
 Every tool call verifies the ES256 signature through Identity JWKS and checks
 the exact issuer, audience/resource, expiry, and required scope. The API then
 resolves an exact `(issuer, subject)` mapping to an active local User and an
@@ -264,6 +279,7 @@ lifecycle.
 - [Passkey-bound sliding sessions](../../adr/20260806-use-passkey-bound-sliding-identity-sessions.md)
 - [Initial passkey bootstrap and CSRF](../../adr/20260806-bootstrap-first-passkey-and-require-origin-csrf-defense.md)
 - [TOTP emergency recovery](../../adr/20260806-use-totp-for-emergency-passkey-recovery.md)
+- [Pull-based import and writer cutover](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)

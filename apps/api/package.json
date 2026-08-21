@@ -24,6 +24,7 @@
     "identity-access:provision": "tsx src/commands/provision-identity-access.ts",
     "identity-access:manage": "tsx src/commands/manage-identity-access.ts",
     "identity-access:restore": "tsx src/commands/change-identity-access.ts --action restore",
+    "fitness-tracker:weight:dry-run": "tsx src/commands/dry-run-fitness-tracker-weight-import.ts",
     "identity-access:revoke": "tsx src/commands/change-identity-access.ts --action revoke"
   },
   "dependencies": {
