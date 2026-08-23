@@ -26,6 +26,13 @@ const weightValueSchema = {
   multipleOf: 0.001
 } as const;
 
+const nullableInstantSchema = {
+  anyOf: [
+    { type: "string", format: "date-time" },
+    { type: "null" }
+  ]
+} as const;
+
 export const WeightMeasurementSchema = {
   $id: "WeightMeasurement",
   type: "object",
@@ -34,6 +41,7 @@ export const WeightMeasurementSchema = {
     "id",
     "personId",
     "measuredAt",
+    "temporalPrecision",
     "localDate",
     "timezone",
     "weightKg",
@@ -47,7 +55,8 @@ export const WeightMeasurementSchema = {
   properties: {
     id: { type: "string", format: "uuid" },
     personId: { type: "string", format: "uuid" },
-    measuredAt: { type: "string", format: "date-time" },
+    measuredAt: nullableInstantSchema,
+    temporalPrecision: { enum: ["instant", "local_date"] },
     localDate: { type: "string", format: "date" },
     timezone: { type: "string", minLength: 1, maxLength: 64 },
     weightKg: weightValueSchema,

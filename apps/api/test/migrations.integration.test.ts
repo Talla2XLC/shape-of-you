@@ -581,4 +581,59 @@ describe("API migration chain", () => {
       await adminPool.end();
     }
   }, 120_000);
+
+  it("preserves an existing Weight instant when adding temporal precision", async () => {
+    const databaseName = "shape_of_you_weight_precision_upgrade";
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    await adminPool.query(`create database ${databaseName}`);
+    await adminPool.end();
+    const url = databaseUrl(databaseName);
+    const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-weight-prefix-"));
+    await mkdir(path.join(prefixFolder, "meta"));
+    try {
+      for (const entry of journal.entries.slice(0, -1)) {
+        await cp(
+          new URL(`${entry.tag}.sql`, migrationsFolder),
+          path.join(prefixFolder, `${entry.tag}.sql`)
+        );
+      }
+      await writeFile(
+        path.join(prefixFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: journal.entries.slice(0, -1) })
+      );
+      const database = createDatabase(databaseConfig(url));
+      await migrate(database.db, { migrationsFolder: prefixFolder });
+      const source = await database.pool.query<{ id: string }>(
+        `insert into source_references (person_id, channel)
+         values ($1, 'manual') returning id`,
+        [syntheticPersonId]
+      );
+      await database.pool.query(
+        `insert into weight_measurements (
+           person_id, measured_at, local_date, timezone, weight_kg, source,
+           source_reference_id, dedupe_key
+         ) values ($1, '2026-08-20T06:00:00Z', '2026-08-20', 'UTC', 82,
+           'manual', $2, 'migration:precision')`,
+        [syntheticPersonId, source.rows[0]!.id]
+      );
+      await database.pool.end();
+
+      await runMigrations(url);
+      const verification = new Pool({ connectionString: url });
+      const result = await verification.query<{
+        measured_at: string;
+        temporal_precision: string;
+      }>(
+        `select measured_at::text, temporal_precision
+           from weight_measurements where dedupe_key = 'migration:precision'`
+      );
+      await verification.end();
+      expect(result.rows[0]).toEqual({
+        measured_at: "2026-08-20 06:00:00+00",
+        temporal_precision: "instant"
+      });
+    } finally {
+      await rm(prefixFolder, { force: true, recursive: true });
+    }
+  }, 120_000);
 });

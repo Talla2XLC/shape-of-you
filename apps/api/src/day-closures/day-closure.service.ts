@@ -175,6 +175,7 @@ export class DayClosureService {
           .map((item) => ({
             id: item.id,
             measuredAt: item.measuredAt,
+            temporalPrecision: item.temporalPrecision,
             weightKg: item.weightKg
           })),
         bodyMeasurementSessions: bodySessions

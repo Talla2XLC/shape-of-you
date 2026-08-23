@@ -78,6 +78,7 @@ export function toNewWeightMeasurement(
   return {
     personId,
     measuredAt,
+    temporalPrecision: "instant",
     localDate: deriveLocalDate(measuredAt, input.timezone),
     timezone: input.timezone,
     weightKg: input.weightKg.toFixed(3),
@@ -105,7 +106,8 @@ export function toWeightMeasurement(
   return {
     id: row.id,
     personId: row.personId,
-    measuredAt: row.measuredAt.toISOString(),
+    measuredAt: row.measuredAt?.toISOString() ?? null,
+    temporalPrecision: row.temporalPrecision,
     localDate: row.localDate,
     timezone: row.timezone,
     weightKg: Number(row.weightKg),

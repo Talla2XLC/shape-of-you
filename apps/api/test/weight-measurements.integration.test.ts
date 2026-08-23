@@ -186,12 +186,44 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
 
     expect(created.statusCode, created.body).toBe(201);
     expect(created.json().localDate).toBe("2026-07-28");
+    expect(created.json().temporalPrecision).toBe("instant");
     expect(created.json().personId).toBe(syntheticPersonId);
     expect(duplicate.statusCode).toBe(200);
     expect(duplicate.json().id).toBe(created.json().id);
     expect(read.statusCode).toBe(200);
     expect(read.json().id).toBe(created.json().id);
     expect(count.rows[0]?.count).toBe("1");
+  });
+
+  it("serializes and orders imported date-only facts without inventing an instant", async () => {
+    const source = await database.pool.query<{ id: string }>(
+      `insert into source_references (
+         person_id, channel, external_system, external_record_id, checksum
+       ) values ($1, 'google_sheets', 'integration-fixture', 'date-only-1', 'checksum')
+       returning id`,
+      [syntheticPersonId]
+    );
+    const inserted = await database.pool.query<{ id: string }>(
+      `insert into weight_measurements (
+         person_id, measured_at, temporal_precision, local_date, timezone,
+         weight_kg, source, source_reference_id, dedupe_key
+       ) values ($1, null, 'local_date', '2026-09-01', 'Europe/Moscow',
+         80.500, 'google_sheets', $2, 'integration:date-only')
+       returning id`,
+      [syntheticPersonId, source.rows[0]!.id]
+    );
+    const response = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/v1/weight-measurements?limit=1"
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().items[0]).toEqual(expect.objectContaining({
+      id: inserted.rows[0]!.id,
+      measuredAt: null,
+      temporalPrecision: "local_date",
+      localDate: "2026-09-01"
+    }));
   });
 
   it("serializes concurrent retries into one fact", async () => {
@@ -264,15 +296,15 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
       )}`
     });
     const combined = [...firstBody.items, ...secondPage.json().items];
-    const instants = combined.map(
-      (item: { measuredAt: string }) => item.measuredAt
+    const localDates = combined.map(
+      (item: { localDate: string }) => item.localDate
     );
 
     expect(firstPage.statusCode).toBe(200);
     expect(firstBody.items).toHaveLength(2);
     expect(firstBody.nextCursor).toEqual(expect.any(String));
     expect(secondPage.statusCode).toBe(200);
-    expect(instants).toEqual([...instants].sort().reverse());
+    expect(localDates).toEqual([...localDates].sort().reverse());
     expect(new Set(combined.map((item: { id: string }) => item.id)).size).toBe(
       combined.length
     );

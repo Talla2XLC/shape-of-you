@@ -10,6 +10,7 @@ import {
 import { PostgresWeightTargetReader } from "../import/postgres-weight-target-reader.js";
 import { PrivateJsonFileReportSink } from "../import/private-report-sink.js";
 import { WeightDryRunAdapter } from "../import/weight-dry-run.js";
+import { WeightImportApplyService } from "../import/weight-import-apply.js";
 
 function required(value: string | undefined, name: string): string {
   const normalized = value?.trim();
@@ -17,14 +18,35 @@ function required(value: string | undefined, name: string): string {
   return normalized;
 }
 
-async function main(): Promise<void> {
+/** Runs the shared Fitness Tracker import lifecycle for one typed domain adapter. */
+export async function main(argv = process.argv.slice(2)): Promise<void> {
   const { values } = parseArgs({
-    options: { "detail-report": { type: "string" } }
+    args: argv,
+    options: {
+      domain: { type: "string" },
+      mode: { type: "string" },
+      "detail-report": { type: "string" }
+    }
   });
-  const personId = required(process.env.FITNESS_TRACKER_PERSON_ID, "FITNESS_TRACKER_PERSON_ID");
+  const domain = required(values.domain, "--domain");
+  const mode = required(values.mode, "--mode");
+  if (domain !== "weight") {
+    throw new Error(`Unsupported import domain ${domain}; available: weight`);
+  }
+  if (mode !== "dry-run" && mode !== "apply") {
+    throw new Error("--mode must be dry-run or apply");
+  }
+  if (mode === "apply" && values["detail-report"]) {
+    throw new Error("--detail-report is available only in dry-run mode");
+  }
+
+  const personId = required(
+    process.env.FITNESS_TRACKER_PERSON_ID,
+    "FITNESS_TRACKER_PERSON_ID"
+  );
   const pool = new Pool({
     connectionString: required(process.env.DATABASE_URL, "DATABASE_URL"),
-    max: 1
+    max: 2
   });
   try {
     const source = new FitnessTrackerSheetsReader({
@@ -38,15 +60,24 @@ async function main(): Promise<void> {
       )
     });
     const snapshot = await source.readSnapshot();
-    const target = new PostgresWeightTargetReader(
-      pool,
-      FITNESS_TRACKER_SPREADSHEET_ID,
-      snapshot.weight.sheetId
-    );
+    if (mode === "apply") {
+      const report = await new WeightImportApplyService(
+        pool,
+        FITNESS_TRACKER_SPREADSHEET_ID,
+        snapshot.weight.sheetId
+      ).apply(personId, snapshot);
+      process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+      return;
+    }
+
     const result = await runDryRun(
       personId,
       { readSnapshot: async () => snapshot },
-      target,
+      new PostgresWeightTargetReader(
+        pool,
+        FITNESS_TRACKER_SPREADSHEET_ID,
+        snapshot.weight.sheetId
+      ),
       new WeightDryRunAdapter()
     );
     if (values["detail-report"]) {
@@ -62,7 +93,7 @@ async function main(): Promise<void> {
 
 main().catch((error: unknown) => {
   process.stderr.write(
-    `${error instanceof Error ? error.message : "Weight dry-run import failed"}\n`
+    `${error instanceof Error ? error.message : "Fitness Tracker import failed"}\n`
   );
   process.exitCode = 1;
 });

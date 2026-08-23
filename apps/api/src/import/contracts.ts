@@ -19,11 +19,18 @@ export interface SafeImportFinding {
 /** Deterministic, non-sensitive dry-run report. */
 export interface SafeImportReport {
   readonly version: 1;
-  readonly mode: "dry_run";
+  readonly mode: "dry_run" | "apply";
   readonly domain: string;
   readonly sourceManifestChecksum: string;
   readonly counts: Readonly<Record<ImportOutcome, number>>;
   readonly findings: readonly SafeImportFinding[];
+}
+
+/** Safe result of an auditable apply attempt. */
+export interface SafeApplyImportReport extends SafeImportReport {
+  readonly mode: "apply";
+  readonly batchId: string;
+  readonly status: "completed" | "blocked";
 }
 
 /** Adapter result containing safe output and an explicitly private detail payload. */

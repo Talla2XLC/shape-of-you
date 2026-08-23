@@ -41,25 +41,35 @@ Required stages:
 8. Transfer authority only after criteria pass.
 9. Preserve rollback and discrepancy-recovery procedures.
 
-TASK-0044 implements the first DEV-024 slice: a shared typed dry-run kernel and
-the Weight adapter inside the existing API. The one-shot command reads the
+TASK-0044 and TASK-0045 implement the first DEV-024 vertical: one shared typed
+importer with `dry-run` and `apply` modes and a Weight adapter inside the
+existing API. The one-shot command reads the
 exact workbook through bounded `Weight` and `Daily_Log` ranges, derives numeric
 sheet IDs from metadata, reconciles `Weight` authority with the legacy mirror,
-and compares current PostgreSQL facts inside a read-only transaction. It
-reports `created`, `unchanged`, `conflict`, and `invalid` without constructing a
-writer port or persisting run state.
+and reports `created`, `unchanged`, `conflict`, and `invalid`. Dry-run constructs
+no writer and persists nothing.
+
+Apply uses the same classifier through a reusable PostgreSQL lifecycle. It
+takes a Person/domain advisory transaction lock, re-reads target state, and
+persists a relational `import_batches` audit plus typed
+`weight_import_records`. Any conflict or invalid row blocks every fact write in
+that batch. A clean batch creates only missing immutable facts and provenance;
+unchanged facts are never rewritten. Batch, audit, provenance, and facts commit
+or roll back together. Future domains add typed adapters and audit tables to
+this lifecycle rather than separate migration programs or generic JSON facts.
 
 Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
 date; row position is locator evidence and content checksum remains separate.
-Date-only Weight evidence retains `local_date` precision. Current PostgreSQL
-Weight facts have `instant` precision and therefore cannot silently compare as
-equal until a separately approved relational precision contract exists.
+Date-only Weight evidence is stored with explicit `local_date` precision and a
+null instant; existing and interactive Weight facts retain `instant` precision.
+The importer never synthesizes midnight.
 
 The reader uses a dedicated API-owned Google service identity with
 `spreadsheets.readonly`, access restricted operationally to the exact workbook,
 and secret delivery through the existing runtime mechanism. Credentials are
-not stored in Git or emitted in reports. Apply/backfill, recurring dual-run,
-live credential execution, and cutover require later approvals.
+not stored in Git or emitted in reports. The apply capability is implemented,
+but real-data execution, recurring dual-run, live credential use, and cutover
+remain separately approved operations.
 
 Before cutover, Shape of You MCP must provide tested typed write tools for
 every fact type used by the ChatGPT project, including Garmin/Recovery
@@ -86,14 +96,14 @@ automatically changes closed days or ambiguous facts.
 
 - Pull-based import, typed adapters, exclusive-writer cutover, and rollback are
   accepted in the linked ADR.
-- Weight dry-run is implemented; mutation and authority-transfer stages remain
-  separately gated.
+- Weight dry-run and controlled apply are implemented; real-data execution,
+  recurring reconciliation, and authority transfer remain separately gated.
 
 ## Open questions
 
 - Complete verified formula/validation/script/workflow catalog, identifier
   quality, reconciliation tolerances, cutover duration, and rollback window.
-- Source checkpoint format for persisted apply/dual-run stages.
+- Operational source checkpoint and run cadence for recurring dual-run.
 - MCP coverage sequence for remaining fact types, including Recovery/Garmin.
 
 ## Related material

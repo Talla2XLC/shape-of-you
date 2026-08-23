@@ -12,10 +12,26 @@ tags: []
 
 The project knowledge baseline was created on 2026-07-28. Core DEV-023 backend
 verticals, asynchronous Intake foundations, an explicit shared day lifecycle,
-and the first DEV-024 read-only migration slice are implemented. Production
-parsing, real-data apply, dual-run, and cutover remain separate stages.
+and the first DEV-024 controlled Weight importer are implemented. Production
+parsing, real-data execution, recurring dual-run, and cutover remain separate
+stages.
 
 ## Content
+
+### 2026-08-23 — Unified Fitness Tracker importer and Weight apply
+
+- Added one `fitness-tracker:import --domain weight --mode dry-run|apply`
+  command and reusable PostgreSQL apply lifecycle; future domains plug in typed
+  adapters instead of receiving separate migrators.
+- Added relational import batches and typed Weight audit records, exact
+  provenance batch links, advisory locking, target re-read, atomic rollback,
+  exact blocked retry, and concurrent duplicate protection.
+- Added explicit Weight `instant|local_date` precision. Existing and public
+  create/correct facts remain exact instants; imported date-only facts expose a
+  null `measuredAt` without synthetic midnight.
+- Apply writes no Google Sheets data, blocks every fact write on any conflict or
+  invalid row, and never overwrites an existing fact. Real-data execution,
+  recurring dual-run, cutover, and authority transfer remain separately gated.
 
 ### 2026-08-21 — Controlled Weight import dry-run
 

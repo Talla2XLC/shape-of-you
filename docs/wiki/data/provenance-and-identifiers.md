@@ -26,6 +26,13 @@ Fitness facts are Person-scoped. Typed provenance fields remain indexed
 columns. Private raw JSONB snapshot is allowed only for import,
 reconciliation, or reproducibility and is excluded from public contracts.
 
+Fitness Tracker import identity uses exact spreadsheet ID, numeric sheet ID,
+and a domain-owned source key. Row position is locator evidence only, and
+content checksum is separate from identity and dedupe. Controlled apply links
+created SourceReferences to a Person-owned relational `import_batches` row;
+typed Weight findings live in `weight_import_records`. Known import structure
+is not stored as a generic JSON payload.
+
 Correction creates a new immutable typed fact with UUID/`supersedes_id`; it
 cannot cross Person or fact type. Current queries omit superseded facts.
 Idempotency includes at least Person and source channel.
@@ -59,3 +66,4 @@ connection, consent, RecoveryObservation, policy version, and assessment.
 - [Integrity](integrity-and-lifecycle.md)
 - [Identity ADR](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Provenance ADR](../../adr/20260730-use-typed-provenance-and-append-only-supersession.md)
+- [Importer ADR](../../adr/20260821-use-relational-import-batches-and-explicit-weight-temporal-precision.md)

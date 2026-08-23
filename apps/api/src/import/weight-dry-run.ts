@@ -42,10 +42,26 @@ export interface WeightImportCandidate {
 export interface WeightDryRunPrivateDetail {
   readonly candidates: readonly WeightImportCandidate[];
   readonly targetRecordIds: readonly string[];
+  readonly records: readonly WeightImportAuditRecord[];
+}
+
+/** Typed private evidence persisted for one Weight reconciliation finding. */
+export interface WeightImportAuditRecord {
+  readonly role: "authority" | "mirror" | "target";
+  readonly sourceSheetId: number | null;
+  readonly sourceLocator: string;
+  readonly sourceLocalDate: string | null;
+  readonly sourceChecksum: string | null;
+  readonly normalizedLocalDate: string | null;
+  readonly normalizedWeightKg: number | null;
+  readonly outcome: ImportOutcome;
+  readonly findingCode: string;
+  readonly targetMeasurementId: string | null;
 }
 
 interface SortableFinding extends SafeImportFinding {
   readonly sourceKeySort: string;
+  readonly targetRecordId?: string;
 }
 
 /** Deterministic typed Weight classifier used by the shared dry-run lifecycle. */
@@ -123,7 +139,15 @@ export class WeightDryRunAdapter
     }
     for (const row of target) {
       if (!sourceKeys.has(identityKey(row.sourceIdentity))) {
-        findings.push(finding("conflict", "target_only", "postgresql", row.sourceIdentity.sourceKey));
+        findings.push(
+          finding(
+            "conflict",
+            "target_only",
+            "postgresql",
+            row.sourceIdentity.sourceKey,
+            row.id
+          )
+        );
       }
     }
 
@@ -147,7 +171,8 @@ export class WeightDryRunAdapter
         candidates: [...candidates].sort((left, right) =>
           left.sourceIdentity.sourceKey.localeCompare(right.sourceIdentity.sourceKey)
         ),
-        targetRecordIds: target.map((row) => row.id).sort()
+        targetRecordIds: target.map((row) => row.id).sort(),
+        records: findings.map((item) => auditRecord(item, candidates, mirrorRows, target, snapshot))
       }
     };
   }
@@ -242,14 +267,16 @@ function finding(
   outcome: ImportOutcome,
   code: string,
   locator: string,
-  sourceKey: string
+  sourceKey: string,
+  targetRecordId?: string
 ): SortableFinding {
   return {
     outcome,
     code,
     locator,
     sourceKeyHash: hash(sourceKey).slice(0, 16),
-    sourceKeySort: sourceKey
+    sourceKeySort: sourceKey,
+    ...(targetRecordId ? { targetRecordId } : {})
   };
 }
 
@@ -279,4 +306,77 @@ function countOutcomes(findings: readonly SafeImportFinding[]): Record<ImportOut
   };
   for (const finding of findings) counts[finding.outcome] += 1;
   return counts;
+}
+
+function auditRecord(
+  finding: SortableFinding,
+  candidates: readonly WeightImportCandidate[],
+  mirrors: readonly DailyWeightMirrorRow[],
+  targets: readonly WeightImportTarget[],
+  snapshot: FitnessTrackerWeightSnapshot
+): WeightImportAuditRecord {
+  const candidate = candidates.find((item) => item.locator === finding.locator);
+  if (candidate) {
+    const matches = targets.filter(
+      (target) => identityKey(target.sourceIdentity) === identityKey(candidate.sourceIdentity)
+    );
+    return {
+      role: "authority",
+      sourceSheetId: snapshot.weight.sheetId,
+      sourceLocator: candidate.locator,
+      sourceLocalDate: candidate.localDate,
+      sourceChecksum: candidate.checksum,
+      normalizedLocalDate: candidate.localDate,
+      normalizedWeightKg: candidate.weightKg,
+      outcome: finding.outcome,
+      findingCode: finding.code,
+      targetMeasurementId: matches.length === 1 ? matches[0]!.id : null
+    };
+  }
+  const mirror = mirrors.find((item) => item.sourceRecordId === finding.locator);
+  if (mirror) {
+    return {
+      role: "mirror",
+      sourceSheetId: snapshot.dailyLog.sheetId,
+      sourceLocator: mirror.sourceRecordId,
+      sourceLocalDate: mirror.localDate,
+      sourceChecksum: hash(JSON.stringify({ localDate: mirror.localDate, weightKg: mirror.weightKg })),
+      normalizedLocalDate: mirror.localDate,
+      normalizedWeightKg: mirror.weightKg,
+      outcome: finding.outcome,
+      findingCode: finding.code,
+      targetMeasurementId: null
+    };
+  }
+  if (finding.locator === "postgresql") {
+    const target = targets.find(
+      (item) => item.id === finding.targetRecordId
+    );
+    return {
+      role: "target",
+      sourceSheetId: null,
+      sourceLocator: target ? `postgresql:${target.id}` : "postgresql:unknown",
+      sourceLocalDate: target?.localDate ?? null,
+      sourceChecksum: target?.checksum ?? null,
+      normalizedLocalDate: target?.localDate ?? null,
+      normalizedWeightKg: target?.weightKg ?? null,
+      outcome: finding.outcome,
+      findingCode: finding.code,
+      targetMeasurementId: target?.id ?? null
+    };
+  }
+  return {
+    role: finding.locator.startsWith("Daily_Log!") ? "mirror" : "authority",
+    sourceSheetId: finding.locator.startsWith("Daily_Log!")
+      ? snapshot.dailyLog.sheetId
+      : snapshot.weight.sheetId,
+    sourceLocator: finding.locator,
+    sourceLocalDate: null,
+    sourceChecksum: null,
+    normalizedLocalDate: null,
+    normalizedWeightKg: null,
+    outcome: finding.outcome,
+    findingCode: finding.code,
+    targetMeasurementId: null
+  };
 }

@@ -25,7 +25,8 @@ and explicit correction history using shared runtime/OpenAPI schemas.
 - `GET /v1/weight-measurements/:id/history` — complete chain.
 - `GET /v1/weight-measurements/:id` — immutable fact or `404`.
 - `GET /v1/weight-measurements?limit=50&cursor=...` — current facts ordered
-  `(measuredAt DESC, id DESC)` with opaque cursor.
+  `(localDate DESC, measuredAt DESC NULLS LAST, id DESC)` with an opaque
+  versioned cursor.
 - `GET /openapi.json` — generated OpenAPI.
 
 Create accepts `measuredAt`, `timezone`, `weightKg`, `dedupeKey`, typed
@@ -33,6 +34,10 @@ Create accepts `measuredAt`, `timezone`, `weightKg`, `dedupeKey`, typed
 replacement plus `reason`. Verified application context supplies `personId`;
 the server creates `localDate`, UUID, and timestamps. Unknown fields are
 rejected; domain validation verifies IANA timezone.
+
+Read contracts expose `temporalPrecision: instant|local_date` and nullable
+`measuredAt`. Public HTTP and MCP create/correct commands still require an exact
+instant; only the internal typed importer can create a date-only fact.
 
 ## Evidence
 

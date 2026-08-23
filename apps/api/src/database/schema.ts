@@ -39,6 +39,33 @@ export const sourceChannel = pgEnum("source_channel", [
   "import",
   "device"
 ]);
+export const importDomain = pgEnum("import_domain", [
+  "weight",
+  "body",
+  "nutrition",
+  "training",
+  "recovery"
+]);
+export const importMode = pgEnum("import_mode", ["apply", "reconcile"]);
+export const importBatchStatus = pgEnum("import_batch_status", [
+  "completed",
+  "blocked"
+]);
+export const importRecordOutcome = pgEnum("import_record_outcome", [
+  "created",
+  "unchanged",
+  "conflict",
+  "invalid"
+]);
+export const weightImportRecordRole = pgEnum("weight_import_record_role", [
+  "authority",
+  "mirror",
+  "target"
+]);
+export const weightTemporalPrecision = pgEnum("weight_temporal_precision", [
+  "instant",
+  "local_date"
+]);
 export const bodyMeasurementMetric = pgEnum("body_measurement_metric", [
   "waist",
   "chest",
@@ -352,6 +379,69 @@ export const personAccessGrants = pgTable(
   ]
 );
 
+export const importBatches = pgTable(
+  "import_batches",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id),
+    domain: importDomain("domain").notNull(),
+    mode: importMode("mode").notNull(),
+    sourceSystem: varchar("source_system", { length: 64 }).notNull(),
+    sourceContainerId: varchar("source_container_id", { length: 128 }).notNull(),
+    sourceManifestChecksum: varchar("source_manifest_checksum", {
+      length: 64
+    }).notNull(),
+    targetStateChecksum: varchar("target_state_checksum", {
+      length: 64
+    }).notNull(),
+    status: importBatchStatus("status").notNull(),
+    createdCount: integer("created_count").notNull(),
+    unchangedCount: integer("unchanged_count").notNull(),
+    conflictCount: integer("conflict_count").notNull(),
+    invalidCount: integer("invalid_count").notNull(),
+    startedAt: timestamp("started_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
+    completedAt: timestamp("completed_at", {
+      withTimezone: true,
+      mode: "date"
+    }).notNull(),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("import_batches_id_person_uq").on(table.id, table.personId),
+    uniqueIndex("import_batches_comparison_uq").on(
+      table.personId,
+      table.domain,
+      table.mode,
+      table.sourceSystem,
+      table.sourceContainerId,
+      table.sourceManifestChecksum,
+      table.targetStateChecksum
+    ),
+    check(
+      "import_batches_nonnegative_counts",
+      sql`${table.createdCount} >= 0 AND ${table.unchangedCount} >= 0 AND ${table.conflictCount} >= 0 AND ${table.invalidCount} >= 0`
+    ),
+    check(
+      "import_batches_status_outcomes",
+      sql`(${table.status} = 'completed' AND ${table.conflictCount} = 0 AND ${table.invalidCount} = 0) OR (${table.status} = 'blocked' AND (${table.conflictCount} > 0 OR ${table.invalidCount} > 0))`
+    ),
+    check(
+      "import_batches_completion_order",
+      sql`${table.completedAt} >= ${table.startedAt}`
+    )
+  ]
+);
+
 export const sourceReferences = pgTable(
   "source_references",
   {
@@ -381,6 +471,11 @@ export const sourceReferences = pgTable(
   },
   (table) => [
     unique("source_references_id_person_uq").on(table.id, table.personId),
+    foreignKey({
+      name: "source_references_import_batch_same_person_fk",
+      columns: [table.importBatchId, table.personId],
+      foreignColumns: [importBatches.id, importBatches.personId]
+    }),
     check(
       "source_references_external_pair",
       sql`(${table.externalSystem} IS NULL) = (${table.externalRecordId} IS NULL)`
@@ -398,7 +493,10 @@ export const weightMeasurements = pgTable(
     measuredAt: timestamp("measured_at", {
       withTimezone: true,
       mode: "date"
-    }).notNull(),
+    }),
+    temporalPrecision: weightTemporalPrecision("temporal_precision")
+      .default("instant")
+      .notNull(),
     localDate: date("local_date", { mode: "string" }).notNull(),
     timezone: varchar("timezone", { length: 64 }).notNull(),
     weightKg: numeric("weight_kg", { precision: 6, scale: 3 }).notNull(),
@@ -440,6 +538,10 @@ export const weightMeasurements = pgTable(
       sql`${table.weightKg} >= 0.500 AND ${table.weightKg} <= 700.000`
     ),
     check(
+      "weight_measurements_temporal_shape",
+      sql`(${table.temporalPrecision} = 'instant' AND ${table.measuredAt} IS NOT NULL) OR (${table.temporalPrecision} = 'local_date' AND ${table.measuredAt} IS NULL)`
+    ),
+    check(
       "weight_measurements_confidence_range",
       sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`
     ),
@@ -450,6 +552,60 @@ export const weightMeasurements = pgTable(
     check(
       "weight_measurements_no_self_supersession",
       sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
+    )
+  ]
+);
+
+export const weightImportRecords = pgTable(
+  "weight_import_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    role: weightImportRecordRole("role").notNull(),
+    sourceSheetId: integer("source_sheet_id"),
+    sourceLocator: varchar("source_locator", { length: 128 }).notNull(),
+    sourceLocalDate: date("source_local_date", { mode: "string" }),
+    sourceChecksum: varchar("source_checksum", { length: 64 }),
+    normalizedLocalDate: date("normalized_local_date", { mode: "string" }),
+    normalizedWeightKg: numeric("normalized_weight_kg", {
+      precision: 6,
+      scale: 3
+    }),
+    outcome: importRecordOutcome("outcome").notNull(),
+    findingCode: varchar("finding_code", { length: 64 }).notNull(),
+    targetMeasurementId: uuid("target_measurement_id"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "weight_import_records_batch_same_person_fk",
+      columns: [table.batchId, table.personId],
+      foreignColumns: [importBatches.id, importBatches.personId]
+    }),
+    foreignKey({
+      name: "weight_import_records_target_same_person_fk",
+      columns: [table.targetMeasurementId, table.personId],
+      foreignColumns: [weightMeasurements.id, weightMeasurements.personId]
+    }),
+    uniqueIndex("weight_import_records_batch_locator_code_uq").on(
+      table.batchId,
+      table.role,
+      table.sourceLocator,
+      table.findingCode
+    ),
+    check(
+      "weight_import_records_weight_range",
+      sql`${table.normalizedWeightKg} IS NULL OR (${table.normalizedWeightKg} >= 0.500 AND ${table.normalizedWeightKg} <= 700.000)`
+    ),
+    check(
+      "weight_import_records_valid_shape",
+      sql`${table.outcome} IN ('conflict', 'invalid') OR (${table.normalizedLocalDate} IS NOT NULL AND ${table.normalizedWeightKg} IS NOT NULL AND ${table.sourceChecksum} IS NOT NULL)`
     )
   ]
 );
@@ -2804,6 +2960,10 @@ export type NewSourceReferenceRow = typeof sourceReferences.$inferInsert;
 export type WeightMeasurementRow = typeof weightMeasurements.$inferSelect;
 /** Insertable WeightMeasurement row accepted by Drizzle mutations. */
 export type NewWeightMeasurementRow = typeof weightMeasurements.$inferInsert;
+/** Persisted common import execution audit row. */
+export type ImportBatchRow = typeof importBatches.$inferSelect;
+/** Persisted typed Weight reconciliation finding. */
+export type WeightImportRecordRow = typeof weightImportRecords.$inferSelect;
 /** Persisted person-owned natural-language intake request. */
 export type IntakeRequestRow = typeof intakeRequests.$inferSelect;
 /** Persisted independently actionable intake item. */

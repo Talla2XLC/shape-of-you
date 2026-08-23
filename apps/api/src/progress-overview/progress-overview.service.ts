@@ -85,7 +85,11 @@ export class ProgressOverviewService {
     const points = new Map<ProgressMetricKey, Map<string, number>>(
       metricKeys.map((key) => [key, new Map<string, number>()])
     );
-    for (const item of [...weights].sort((a, b) => a.measuredAt.localeCompare(b.measuredAt) || a.id.localeCompare(b.id))) {
+    for (const item of [...weights].sort((a, b) =>
+      a.localDate.localeCompare(b.localDate) ||
+      (a.measuredAt ?? "").localeCompare(b.measuredAt ?? "") ||
+      a.id.localeCompare(b.id)
+    )) {
       points.get("weight_kg")!.set(item.localDate, item.weightKg);
     }
     for (const meal of meals) {

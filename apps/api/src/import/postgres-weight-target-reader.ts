@@ -6,6 +6,7 @@ import type { WeightImportTarget } from "./weight-dry-run.js";
 interface WeightTargetRow {
   readonly id: string;
   readonly local_date: string;
+  readonly temporal_precision: "instant" | "local_date";
   readonly weight_kg: string;
   readonly checksum: string | null;
   readonly external_system: string | null;
@@ -15,8 +16,8 @@ interface WeightTargetRow {
 /**
  * PostgreSQL Weight comparison reader with transaction-level write protection.
  *
- * Current rows use `instant` precision because the existing schema requires
- * measured_at. Consequently they cannot silently equal date-only legacy facts.
+ * It preserves stored temporal precision, so an instant never silently equals
+ * a date-only legacy fact.
  */
 export class PostgresWeightTargetReader
   implements ImportTargetReader<WeightImportTarget>
@@ -43,10 +44,18 @@ export class PostgresWeightTargetReader
     }
   }
 
+  /** Reads comparison rows through an existing caller-owned transaction. */
+  public async readTargetWithClient(
+    client: PoolClient,
+    personId: string
+  ): Promise<readonly WeightImportTarget[]> {
+    return this.query(client, personId);
+  }
+
   private async query(client: PoolClient, personId: string): Promise<WeightImportTarget[]> {
     const externalSystem = `google_sheets:${this.spreadsheetId}:${this.sheetId}`;
     const result = await client.query<WeightTargetRow>(
-      `select wm.id, wm.local_date::text, wm.weight_kg::text,
+      `select wm.id, wm.local_date::text, wm.temporal_precision, wm.weight_kg::text,
               sr.checksum, sr.external_system, sr.external_record_id
          from weight_measurements wm
          join source_references sr
@@ -73,7 +82,7 @@ export class PostgresWeightTargetReader
             },
             checksum: row.checksum,
             localDate: row.local_date,
-            temporalPrecision: "instant" as const,
+            temporalPrecision: row.temporal_precision,
             weightKg: Number(row.weight_kg)
           }]
         : []

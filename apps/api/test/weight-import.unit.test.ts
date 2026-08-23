@@ -157,6 +157,13 @@ describe("Weight import dry-run", () => {
     expect(codes).toContain("target_only");
     expect(codes).toContain("invalid_authority_row");
     expect(result.safeReport.counts.created).toBe(0);
+    expect(result.privateDetail.records).toContainEqual(
+      expect.objectContaining({
+        role: "target",
+        sourceLocator: "postgresql:target-only",
+        targetMeasurementId: "target-only"
+      })
+    );
   });
 
   it("does not overwrite changed values or invent a link for a changed date", () => {

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   decodeCursor,
+  decodeWeightCursor,
   encodeCursor,
+  encodeWeightCursor,
   type WeightMeasurementCursor
 } from "../src/domain/cursor.js";
 import { DomainValidationError } from "../src/domain/errors.js";
@@ -15,6 +17,16 @@ const cursor: WeightMeasurementCursor = {
 describe("WeightMeasurement cursor", () => {
   it("round-trips a valid stable pagination key", () => {
     expect(decodeCursor(encodeCursor(cursor))).toEqual(cursor);
+  });
+
+  it("round-trips a versioned date-only Weight position", () => {
+    const dateOnly = {
+      version: 2 as const,
+      localDate: "2026-08-21",
+      measuredAt: null,
+      id: cursor.id
+    };
+    expect(decodeWeightCursor(encodeWeightCursor(dateOnly))).toEqual(dateOnly);
   });
 
   it("rejects a value that cannot be decoded as cursor JSON", () => {

@@ -72,8 +72,13 @@ export const DaySnapshotSchema = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["id", "measuredAt", "weightKg"],
-            properties: { id: uuid, measuredAt: dateTime, weightKg: { type: "number" } }
+            required: ["id", "measuredAt", "temporalPrecision", "weightKg"],
+            properties: {
+              id: uuid,
+              measuredAt: { anyOf: [dateTime, { type: "null" }] },
+              temporalPrecision: { enum: ["instant", "local_date"] },
+              weightKg: { type: "number" }
+            }
           }
         },
         bodyMeasurementSessions: {

@@ -4,6 +4,7 @@ import {
   eq,
   gte,
   inArray,
+  isNull,
   lt,
   lte,
   notExists,
@@ -28,8 +29,8 @@ import {
   type WeightMeasurementRow
 } from "../database/schema.js";
 import {
-  decodeCursor,
-  encodeCursor
+  decodeWeightCursor,
+  encodeWeightCursor
 } from "../domain/cursor.js";
 import {
   ConflictError,
@@ -102,7 +103,7 @@ export interface WeightMeasurementStore {
   ): Promise<WeightMeasurement | null>;
 
   /**
-   * Lists only current facts in stable descending timestamp and UUID order.
+   * Lists current facts by local date, known instant, and UUID descending.
    *
    * @param personId - Authorized data-owner UUID.
    * @param limit - Maximum number of facts to return.
@@ -391,7 +392,7 @@ export class WeightMeasurementRepository
     limit: number,
     cursorValue?: string
   ): Promise<WeightMeasurementList> {
-    const cursor = cursorValue ? decodeCursor(cursorValue) : undefined;
+    const cursor = cursorValue ? decodeWeightCursor(cursorValue) : undefined;
     const successor = alias(weightMeasurements, "successor");
     const rows = await this.database.db
       .select({
@@ -414,23 +415,30 @@ export class WeightMeasurementRepository
           ),
           cursor
             ? or(
-                lt(
-                  weightMeasurements.measuredAt,
-                  new Date(cursor.measuredAt)
-                ),
+                lt(weightMeasurements.localDate, cursor.localDate),
                 and(
-                  eq(
-                    weightMeasurements.measuredAt,
-                    new Date(cursor.measuredAt)
-                  ),
-                  lt(weightMeasurements.id, cursor.id)
+                  eq(weightMeasurements.localDate, cursor.localDate),
+                  cursor.measuredAt === null
+                    ? and(
+                        isNull(weightMeasurements.measuredAt),
+                        lt(weightMeasurements.id, cursor.id)
+                      )
+                    : or(
+                        lt(weightMeasurements.measuredAt, new Date(cursor.measuredAt)),
+                        isNull(weightMeasurements.measuredAt),
+                        and(
+                          eq(weightMeasurements.measuredAt, new Date(cursor.measuredAt)),
+                          lt(weightMeasurements.id, cursor.id)
+                        )
+                      )
                 )
               )
             : undefined
         )
       )
       .orderBy(
-        desc(weightMeasurements.measuredAt),
+        desc(weightMeasurements.localDate),
+        sql`${weightMeasurements.measuredAt} desc nulls last`,
         desc(weightMeasurements.id)
       )
       .limit(limit + 1);
@@ -443,8 +451,10 @@ export class WeightMeasurementRepository
       items: page.map(serializeJoined),
       nextCursor:
         hasNextPage && last
-          ? encodeCursor({
-              measuredAt: last.measuredAt.toISOString(),
+          ? encodeWeightCursor({
+              version: 2,
+              localDate: last.localDate,
+              measuredAt: last.measuredAt?.toISOString() ?? null,
               id: last.id
             })
           : null
@@ -473,7 +483,10 @@ export class WeightMeasurementRepository
           )
         )
       )
-      .orderBy(desc(weightMeasurements.measuredAt), desc(weightMeasurements.id));
+      .orderBy(
+        sql`${weightMeasurements.measuredAt} desc nulls last`,
+        desc(weightMeasurements.id)
+      );
     return rows.map(serializeJoined);
   }
 
@@ -497,7 +510,11 @@ export class WeightMeasurementRepository
             .where(eq(successor.supersedesId, weightMeasurements.id))
         )
       ))
-      .orderBy(desc(weightMeasurements.measuredAt), desc(weightMeasurements.id));
+      .orderBy(
+        desc(weightMeasurements.localDate),
+        sql`${weightMeasurements.measuredAt} desc nulls last`,
+        desc(weightMeasurements.id)
+      );
     return rows.map(serializeJoined);
   }
 

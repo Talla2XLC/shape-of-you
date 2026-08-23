@@ -49,13 +49,16 @@ Migration sequence:
 9. Intake requests/items, typed Weight detail, lease queue, timeline,
    relational idempotency, and typed fact link without JSON/JSONB payload;
 10. API-owned exact Identity `(issuer, subject)` mappings to local Users.
+11. Relational import batches and typed Weight audit, provenance batch
+    ownership, and explicit `instant|local_date` Weight temporal precision.
 
 The central PostgreSQL test applies the full journal to a clean database,
 re-runs idempotently, and upgrades every committed non-empty journal prefix.
 It verifies order, `created_at`, and SQL SHA-256 in
 `drizzle.__drizzle_migrations`. A separate test preserves synthetic legacy
-Weight migration. The chain does not import Google Sheets, backfill operational
-data, or transfer authority. It also statically rejects every generated quoted
+Weight migration and verifies existing instants survive the temporal-precision
+upgrade unchanged. The chain does not import Google Sheets, backfill
+operational data, or transfer authority. It also statically rejects every generated quoted
 PostgreSQL identifier longer than 63 UTF-8 bytes and verifies mapping
 uniqueness plus denial through a revoked Person grant.
 

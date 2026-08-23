@@ -64,6 +64,7 @@ const baselineMeasurement: WeightMeasurement = {
   id: "01983f6c-e470-7000-8000-000000000001",
   personId,
   measuredAt: baselineInput.measuredAt,
+  temporalPrecision: "instant",
   localDate: "2026-07-28",
   timezone: baselineInput.timezone,
   weightKg: baselineInput.weightKg,
