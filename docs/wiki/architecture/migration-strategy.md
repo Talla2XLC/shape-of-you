@@ -71,6 +71,14 @@ not stored in Git or emitted in reports. The apply capability is implemented,
 but real-data execution, recurring dual-run, live credential use, and cutover
 remain separately approved operations.
 
+Staging now provides a dedicated one-shot Compose profile for that same
+importer. Its separate root-owned mode-`0600` environment is not attached to
+the long-running API or migration container. Automatic deployments never run
+the importer; an approved manual deployment requires the complete Person and
+service-identity configuration and can invoke only the Weight `dry-run`. The
+first credential provisioning, exact-workbook Viewer grant, staging deploy,
+and live run have not been performed.
+
 Before cutover, Shape of You MCP must provide tested typed write tools for
 every fact type used by the ChatGPT project, including Garmin/Recovery
 observations. Cutover pauses the Sheets writer, captures a source checkpoint,
@@ -112,3 +120,4 @@ automatically changes closed days or ambiguous facts.
 - [Roadmap](../roadmap/overview.md)
 - [Glossary](../domain/glossary.md)
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
+- [Dedicated one-shot staging importer ADR](../../adr/20260823-use-dedicated-one-shot-staging-import-runtime.md)

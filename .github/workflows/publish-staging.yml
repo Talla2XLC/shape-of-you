@@ -339,4 +339,5 @@ jobs:
       identity_schema_backward_compatible: false
       identity_oauth_clients_backward_compatible: true
       run_write_smoke: false
+      run_fitness_tracker_weight_dry_run: false
     secrets: inherit

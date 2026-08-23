@@ -18,6 +18,20 @@ stages.
 
 ## Content
 
+### 2026-08-23 — Controlled staging Weight dry-run runtime
+
+- Added a manual, default-off staging trigger for the existing unified Fitness
+  Tracker importer; automatic `main` deployments never run it.
+- Added a portless, read-only one-shot Compose process on the API image and a
+  separate root-owned mode-`0600` environment that is not exposed to API,
+  migrations, Identity, edge, or frontend.
+- Added complete-set credential validation, escaped private-key handling,
+  fail-closed deployment behavior, safe-output constraints, and deployment
+  contract coverage.
+- No real credentials were accessed, no workbook permission was changed, and
+  no staging deploy or live dry-run occurred. Those operations, plus `apply`,
+  recurring dual-run, and cutover, remain separately gated.
+
 ### 2026-08-23 — Unified Fitness Tracker importer and Weight apply
 
 - Added one `fitness-tracker:import --domain weight --mode dry-run|apply`

@@ -30,6 +30,9 @@ on:
       run_write_smoke:
         required: true
         type: boolean
+      run_fitness_tracker_weight_dry_run:
+        required: true
+        type: boolean
   workflow_dispatch:
     inputs:
       release_id:
@@ -72,6 +75,11 @@ on:
         required: true
         default: false
         type: boolean
+      run_fitness_tracker_weight_dry_run:
+        description: Run the read-only Fitness Tracker Weight importer after migrations
+        required: true
+        default: false
+        type: boolean
 
 concurrency:
   group: shape-of-you-staging
@@ -106,6 +114,7 @@ jobs:
       IDENTITY_SCHEMA_BACKWARD_COMPATIBLE: ${{ inputs.identity_schema_backward_compatible }}
       IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE: ${{ inputs.identity_oauth_clients_backward_compatible }}
       RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
+      RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN: ${{ inputs.run_fitness_tracker_weight_dry_run }}
 
     steps:
       - name: Validate deployment inputs
@@ -150,6 +159,9 @@ jobs:
           IDENTITY_CHATGPT_REDIRECT_URI: ${{ vars.STAGING_IDENTITY_CHATGPT_REDIRECT_URI }}
           IDENTITY_WEB_REDIRECT_URI: ${{ vars.STAGING_IDENTITY_WEB_REDIRECT_URI }}
           API_BROWSER_SESSION_KEYS: ${{ secrets.STAGING_API_BROWSER_SESSION_KEYS }}
+          FITNESS_TRACKER_PERSON_ID: ${{ vars.STAGING_FITNESS_TRACKER_PERSON_ID }}
+          GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: ${{ vars.STAGING_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL }}
+          GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.STAGING_GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY }}
           GHCR_TOKEN: ${{ github.token }}
         run: |
           set -eu
@@ -163,6 +175,42 @@ jobs:
           test -n "$IDENTITY_CHATGPT_REDIRECT_URI"
           test -n "$IDENTITY_WEB_REDIRECT_URI"
           test -n "$API_BROWSER_SESSION_KEYS"
+          configured_importer_values=0
+          for importer_value in \
+            "$FITNESS_TRACKER_PERSON_ID" \
+            "$GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL" \
+            "$GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY"; do
+            if [ -n "$importer_value" ]; then
+              configured_importer_values=$((configured_importer_values + 1))
+            fi
+            case "$importer_value" in
+              *$'\n'*|*$'\r'*)
+                printf '%s\n' 'Fitness Tracker importer values must use a single-line escaped representation.' >&2
+                exit 2
+                ;;
+            esac
+          done
+          if [ "$configured_importer_values" -ne 0 ] && [ "$configured_importer_values" -ne 3 ]; then
+            printf '%s\n' 'Fitness Tracker importer configuration must be either absent or complete.' >&2
+            exit 2
+          fi
+          if [ "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" = 'true' ]; then
+            test "$configured_importer_values" -eq 3
+          fi
+          if [ "$configured_importer_values" -eq 3 ]; then
+            printf '%s\n' "$FITNESS_TRACKER_PERSON_ID" |
+              grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+            printf '%s\n' "$GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL" |
+              grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.gserviceaccount\.com$'
+            case "$GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY" in
+              '-----BEGIN PRIVATE KEY-----\n'*'\n-----END PRIVATE KEY-----'|\
+              '-----BEGIN PRIVATE KEY-----\n'*'\n-----END PRIVATE KEY-----\n') ;;
+              *)
+                printf '%s\n' 'Google service identity private key must use escaped newlines.' >&2
+                exit 2
+                ;;
+            esac
+          fi
           printf '%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI" |
             grep -Eq '^https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{8,200}$'
           test "$IDENTITY_WEB_REDIRECT_URI" = 'https://staging.shape-of-you.ru/api/browser-auth/callback'
@@ -181,6 +229,7 @@ jobs:
             printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s\n' "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE"
             printf 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=%s\n' "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE"
             printf 'RUN_WRITE_SMOKE=%s\n' "$RUN_WRITE_SMOKE"
+            printf 'RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN=%s\n' "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN"
             printf 'GHCR_NAMESPACE=%s\n' "$GHCR_NAMESPACE"
             printf 'GHCR_ACTOR=%s\n' "$GITHUB_ACTOR"
             printf 'CONTROL_SHA=%s\n' "$GITHUB_SHA"
@@ -194,6 +243,9 @@ jobs:
             printf 'IDENTITY_CHATGPT_REDIRECT_URI=%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI"
             printf 'IDENTITY_WEB_REDIRECT_URI=%s\n' "$IDENTITY_WEB_REDIRECT_URI"
             printf 'API_BROWSER_SESSION_KEYS=%s\n' "$API_BROWSER_SESSION_KEYS"
+            printf 'FITNESS_TRACKER_PERSON_ID=%s\n' "$FITNESS_TRACKER_PERSON_ID"
+            printf 'GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL=%s\n' "$GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL"
+            printf 'GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY=%s\n' "$GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY"
             printf 'GHCR_TOKEN=%s\n' "$GHCR_TOKEN"
           } | ssh -p "$VM_PORT" "$target" \
             -o BatchMode=yes \

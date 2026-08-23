@@ -9,6 +9,7 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CONTROL_STAGING=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 RUNTIME_ENV=/etc/shape-of-you/staging/api.env
 IDENTITY_RUNTIME_ENV=/etc/shape-of-you/staging/identity.env
+FITNESS_TRACKER_IMPORT_RUNTIME_ENV=/etc/shape-of-you/staging/fitness-tracker-import.env
 RELEASE_ENV=
 DOCKER_CONFIG_DIR=
 
@@ -45,6 +46,7 @@ PUBLIC_IPV4=
 DEPLOYMENT_TOPOLOGY=
 SCHEMA_BACKWARD_COMPATIBLE=
 RUN_WRITE_SMOKE=
+RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN=
 GHCR_NAMESPACE=
 GHCR_ACTOR=
 CONTROL_SHA=
@@ -58,6 +60,9 @@ IDENTITY_OAUTH_COOKIE_KEYS=
 IDENTITY_CHATGPT_REDIRECT_URI=
 IDENTITY_WEB_REDIRECT_URI=
 API_BROWSER_SESSION_KEYS=
+FITNESS_TRACKER_PERSON_ID=
+GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL=
+GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY=
 GHCR_TOKEN=
 seen_keys=' '
 
@@ -73,7 +78,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|IDENTITY_TOTP_ACTIVE_KEY_ID|IDENTITY_TOTP_ENCRYPTION_KEYS|IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID|IDENTITY_OAUTH_SIGNING_KEYS|IDENTITY_OAUTH_COOKIE_KEYS|IDENTITY_CHATGPT_REDIRECT_URI|IDENTITY_WEB_REDIRECT_URI|API_BROWSER_SESSION_KEYS|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|IDENTITY_TOTP_ACTIVE_KEY_ID|IDENTITY_TOTP_ENCRYPTION_KEYS|IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID|IDENTITY_OAUTH_SIGNING_KEYS|IDENTITY_OAUTH_COOKIE_KEYS|IDENTITY_CHATGPT_REDIRECT_URI|IDENTITY_WEB_REDIRECT_URI|API_BROWSER_SESSION_KEYS|FITNESS_TRACKER_PERSON_ID|GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL|GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -91,6 +96,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
         IDENTITY_SCHEMA_BACKWARD_COMPATIBLE) IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=$input_value ;;
         IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE) IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=$input_value ;;
         RUN_WRITE_SMOKE) RUN_WRITE_SMOKE=$input_value ;;
+        RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN) RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN=$input_value ;;
         GHCR_NAMESPACE) GHCR_NAMESPACE=$input_value ;;
         GHCR_ACTOR) GHCR_ACTOR=$input_value ;;
         CONTROL_SHA) CONTROL_SHA=$input_value ;;
@@ -104,6 +110,9 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
         IDENTITY_CHATGPT_REDIRECT_URI) IDENTITY_CHATGPT_REDIRECT_URI=$input_value ;;
         IDENTITY_WEB_REDIRECT_URI) IDENTITY_WEB_REDIRECT_URI=$input_value ;;
         API_BROWSER_SESSION_KEYS) API_BROWSER_SESSION_KEYS=$input_value ;;
+        FITNESS_TRACKER_PERSON_ID) FITNESS_TRACKER_PERSON_ID=$input_value ;;
+        GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL) GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL=$input_value ;;
+        GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY) GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY=$input_value ;;
         GHCR_TOKEN) GHCR_TOKEN=$input_value ;;
       esac
       ;;
@@ -122,6 +131,7 @@ done
 [ -n "$DEPLOYMENT_TOPOLOGY" ] || fail 'DEPLOYMENT_TOPOLOGY is required.'
 [ -n "$SCHEMA_BACKWARD_COMPATIBLE" ] || fail 'SCHEMA_BACKWARD_COMPATIBLE is required.'
 [ -n "$RUN_WRITE_SMOKE" ] || fail 'RUN_WRITE_SMOKE is required.'
+[ -n "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" ] || fail 'RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN is required.'
 [ -n "$API_BROWSER_SESSION_KEYS" ] || fail 'API_BROWSER_SESSION_KEYS is required.'
 [ -n "$GHCR_NAMESPACE" ] || fail 'GHCR_NAMESPACE is required.'
 [ -n "$GHCR_ACTOR" ] || fail 'GHCR_ACTOR is required.'
@@ -196,6 +206,41 @@ case "$RUN_WRITE_SMOKE" in
   *) fail 'Invalid RUN_WRITE_SMOKE.' ;;
 esac
 
+case "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" in
+  true|false) ;;
+  *) fail 'Invalid RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN.' ;;
+esac
+
+configured_importer_values=0
+for importer_value in \
+  "$FITNESS_TRACKER_PERSON_ID" \
+  "$GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL" \
+  "$GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY"; do
+  if [ -n "$importer_value" ]; then
+    configured_importer_values=$((configured_importer_values + 1))
+  fi
+done
+if [ "$configured_importer_values" -ne 0 ] && [ "$configured_importer_values" -ne 3 ]; then
+  fail 'Fitness Tracker importer configuration must be either absent or complete.'
+fi
+if [ "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" = true ] &&
+  [ "$configured_importer_values" -ne 3 ]; then
+  fail 'Fitness Tracker Weight dry-run requires complete importer configuration.'
+fi
+if [ "$configured_importer_values" -eq 3 ]; then
+  printf '%s\n' "$FITNESS_TRACKER_PERSON_ID" |
+    grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$' ||
+    fail 'Invalid FITNESS_TRACKER_PERSON_ID.'
+  printf '%s\n' "$GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL" |
+    grep -Eq '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.gserviceaccount\.com$' ||
+    fail 'Invalid GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL.'
+  case "$GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY" in
+    '-----BEGIN PRIVATE KEY-----\n'*'\n-----END PRIVATE KEY-----'|\
+    '-----BEGIN PRIVATE KEY-----\n'*'\n-----END PRIVATE KEY-----\n') ;;
+    *) fail 'Invalid GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY encoding.' ;;
+  esac
+fi
+
 case "$DATABASE_URL" in
   postgresql://*) ;;
   *) fail 'DATABASE_URL must use the postgresql scheme.' ;;
@@ -211,6 +256,22 @@ printf 'DATABASE_URL=%s\n' "$DATABASE_URL" > "$runtime_file"
 printf 'API_BROWSER_SESSION_KEYS=%s\n' "$API_BROWSER_SESSION_KEYS" >> "$runtime_file"
 install -m 0600 "$runtime_file" "$RUNTIME_ENV"
 rm -f "$runtime_file"
+
+if [ "$configured_importer_values" -eq 3 ]; then
+  fitness_tracker_import_runtime_file=$(
+    mktemp /etc/shape-of-you/staging/fitness-tracker-import.env.XXXXXX
+  )
+  {
+    printf 'DATABASE_URL=%s\n' "$DATABASE_URL"
+    printf 'FITNESS_TRACKER_PERSON_ID=%s\n' "$FITNESS_TRACKER_PERSON_ID"
+    printf 'GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL=%s\n' "$GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL"
+    printf 'GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY=%s\n' \
+      "$GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY"
+  } > "$fitness_tracker_import_runtime_file"
+  install -m 0600 "$fitness_tracker_import_runtime_file" \
+    "$FITNESS_TRACKER_IMPORT_RUNTIME_ENV"
+  rm -f "$fitness_tracker_import_runtime_file"
+fi
 
 if [ -n "$IDENTITY_DATABASE_URL" ]; then
   identity_runtime_file=$(mktemp /etc/shape-of-you/staging/identity.env.XXXXXX)
@@ -261,5 +322,7 @@ DEPLOY_ROOT="$DEPLOY_ROOT" \
 RUNTIME_ENV="$RUNTIME_ENV" \
 IDENTITY_RUNTIME_ENV="$IDENTITY_RUNTIME_ENV" \
 RUN_WRITE_SMOKE="$RUN_WRITE_SMOKE" \
+RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN="$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" \
+FITNESS_TRACKER_IMPORT_RUNTIME_ENV="$FITNESS_TRACKER_IMPORT_RUNTIME_ENV" \
 DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
   sh "$CONTROL_STAGING/scripts/deploy.sh" "$RELEASE_ENV"

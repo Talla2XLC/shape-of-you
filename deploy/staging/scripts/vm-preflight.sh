@@ -6,6 +6,8 @@ PACKAGE_DIR=$(dirname "$SCRIPT_DIR")
 COMPOSE_FILE=${COMPOSE_FILE:-"$PACKAGE_DIR/compose.yaml"}
 RUNTIME_ENV=${RUNTIME_ENV:-/etc/shape-of-you/staging/api.env}
 IDENTITY_RUNTIME_ENV=${IDENTITY_RUNTIME_ENV:-/etc/shape-of-you/staging/identity.env}
+FITNESS_TRACKER_IMPORT_RUNTIME_ENV=${FITNESS_TRACKER_IMPORT_RUNTIME_ENV:-/etc/shape-of-you/staging/fitness-tracker-import.env}
+RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN=${RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN:-false}
 RELEASE_ENV=${1:-}
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-shape-of-you-staging}
 
@@ -19,6 +21,15 @@ test -f "$RUNTIME_ENV"
 test -n "$RELEASE_ENV"
 test -f "$RELEASE_ENV"
 
+case "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" in
+  true) test -f "$FITNESS_TRACKER_IMPORT_RUNTIME_ENV" ;;
+  false) ;;
+  *)
+    printf '%s\n' 'Invalid Fitness Tracker Weight dry-run declaration.' >&2
+    exit 2
+    ;;
+esac
+
 # release.env contains immutable image coordinates and non-secret deployment
 # metadata only.
 # shellcheck disable=SC1090
@@ -28,6 +39,10 @@ test -f "$RELEASE_ENV"
 : "${DEPLOYMENT_TOPOLOGY:?DEPLOYMENT_TOPOLOGY is required}"
 
 identity_enabled=false
+compose_profiles='--profile operations'
+if [ "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" = true ]; then
+  compose_profiles="$compose_profiles --profile fitness-tracker-import"
+fi
 if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
   [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ] ||
   [ -n "${IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE:-}" ]; then
@@ -86,7 +101,7 @@ if [ "$identity_enabled" = "true" ]; then
     --file "$COMPOSE_FILE" \
     --file "$COMPOSE_TOPOLOGY_FILE" \
     --file "$PACKAGE_DIR/compose.identity.yaml" \
-    --profile operations \
+    $compose_profiles \
     config --quiet
 else
   docker compose \
@@ -94,7 +109,7 @@ else
     --env-file "$RELEASE_ENV" \
     --file "$COMPOSE_FILE" \
     --file "$COMPOSE_TOPOLOGY_FILE" \
-    --profile operations \
+    $compose_profiles \
     config --quiet
 fi
 
