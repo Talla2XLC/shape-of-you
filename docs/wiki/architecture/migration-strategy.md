@@ -103,6 +103,10 @@ automatically changes closed days or ambiguous facts.
   the official read-only target reader: `created=20`, `unchanged=0`,
   `conflict=0`, `invalid=0`. The private snapshot was removed and the SSH
   tunnel closed immediately after execution.
+- The accepted Weight manifest was then applied once through the transactional
+  lifecycle: 20 missing facts plus relational provenance/audit were created.
+  A same-manifest read-only verification returned `unchanged=20` with every
+  other outcome zero. Sheets remains authoritative; this was not cutover.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions

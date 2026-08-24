@@ -18,6 +18,17 @@ stages.
 
 ## Content
 
+### 2026-08-24 — Controlled staging Weight apply
+
+- Applied one clean bounded Weight manifest through the existing unified
+  transactional importer, creating 20 missing facts with relational provenance
+  and typed import audit; no existing fact was overwritten.
+- Verified idempotency immediately against the identical manifest:
+  `created=0`, `unchanged=20`, `conflict=0`, `invalid=0`.
+- Removed the private snapshot and SSH tunnel after verification. Google Sheets
+  remains authoritative; no Sheets write, recurring automation, cutover, or
+  authority transfer occurred.
+
 ### 2026-08-23 — Local controlled Weight dry-run input
 
 - Replaced the unused staging importer profile and credential plumbing with a
