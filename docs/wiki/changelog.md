@@ -18,6 +18,22 @@ stages.
 
 ## Content
 
+### 2026-08-24 — Nutrition adapter in the unified Fitness Tracker importer
+
+- Added one Nutrition adapter to the existing `fitness-tracker:import` command
+  over `Brands`, `Ingredients`, `Foods`, `Food_Ingredients`, and `Meals`; no
+  separate migrator, deployable, database, or writer was added.
+- Preserved durable source IDs, Person-private catalog ownership, typed
+  relational audit, atomic fail-closed apply, and date-only Meal precision with
+  one immutable serving snapshot item per valid legacy row.
+- Added five-sheet source-drift detection, referential validation, safe
+  `created / unchanged / conflict / invalid` reporting, schema migration, and
+  unit/integration/every-prefix migration coverage.
+- Completed the exact-workbook read-only staging dry-run with `created=38`,
+  `unchanged=0`, `conflict=81`, and `invalid=40`. No apply, deployment,
+  cutover, authority transfer, or post-remediation Sheets write occurred; the
+  private snapshot and tunnel were removed.
+
 ### 2026-08-24 — Body adapter in the unified Fitness Tracker importer
 
 - Added Body to the existing `fitness-tracker:import` command and shared atomic

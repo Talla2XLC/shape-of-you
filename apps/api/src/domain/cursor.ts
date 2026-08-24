@@ -141,3 +141,46 @@ export function decodeBodyMeasurementSessionCursor(
     id: parsed.id
   };
 }
+
+/** Versioned keyset cursor for mixed instant and date-only Meals. */
+export interface MealListCursor {
+  readonly version: 2;
+  readonly localDate: string;
+  readonly occurredAt: string | null;
+  readonly id: string;
+}
+
+/** Encodes a mixed-precision Meal list position. */
+export function encodeMealCursor(cursor: MealListCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+/** Decodes and validates a mixed-precision Meal cursor. */
+export function decodeMealCursor(value: string): MealListCursor {
+  let parsed: Partial<MealListCursor>;
+  try {
+    parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as Partial<MealListCursor>;
+  } catch {
+    throw new DomainValidationError("cursor is invalid");
+  }
+  if (
+    parsed.version !== 2 ||
+    typeof parsed.localDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(parsed.localDate) ||
+    (parsed.occurredAt !== null &&
+      (typeof parsed.occurredAt !== "string" ||
+        Number.isNaN(new Date(parsed.occurredAt).valueOf()))) ||
+    typeof parsed.id !== "string" ||
+    !uuidPattern.test(parsed.id)
+  ) {
+    throw new DomainValidationError("cursor is invalid");
+  }
+  return {
+    version: 2,
+    localDate: parsed.localDate,
+    occurredAt: parsed.occurredAt,
+    id: parsed.id
+  };
+}

@@ -65,6 +65,16 @@ only the bounded `Body` range; a Weight run reads only `Weight` and
 while schema v1 Weight snapshots remain readable. This prevents each new
 adapter from expanding into an all-workbook capture.
 
+TASK-0049 adds Nutrition as one linked adapter, not five sheet-specific
+migrators. `fitness-tracker:import --domain nutrition --mode dry-run|apply`
+captures exactly `Brands`, `Ingredients`, `Foods`, `Food_Ingredients`, and
+`Meals`, then reconciles their referential graph as one atomic boundary.
+Durable catalog IDs and `Meal_ID` remain separate from row locators and content
+checksums. Catalog facts stay Person-private, known import evidence is stored
+in five typed relational audit tables, and any incomplete composition,
+unsupported Meal kind, unresolved reference, or Photo marker blocks all fact
+writes for the run.
+
 Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
 date; row position is locator evidence and content checksum remains separate.
 Date-only Weight evidence is stored with explicit `local_date` precision and a
@@ -76,6 +86,11 @@ Body source identity combines spreadsheet ID, numeric sheet ID, and required
 rows also preserve `local_date` precision with a null instant. Notes and source
 labels remain private relational audit evidence. A non-empty Photo reference
 blocks the row until a media migration capability exists.
+
+Nutrition Meals preserve source date-only semantics with `local_date`, a null
+`occurredAt`, and one immutable `serving` snapshot item containing the row's
+source nutrient totals. Existing and interactive Meals remain `instant`.
+Neither catalog gaps nor Meal time/media are inferred.
 
 Controlled one-time runs execute from the operator workstation. Codex reads
 only approved bounded ranges, capped by current sheet grid metadata, from the
@@ -124,15 +139,22 @@ automatically changes closed days or ambiguous facts.
   Body-only private snapshot was compared with staging PostgreSQL read-only and
   returned `created=0`, `unchanged=0`, `conflict=0`, `invalid=0`; the snapshot
   and tunnel were removed afterwards.
+- The first exact-workbook Nutrition read captured the five approved sheets and
+  compared them with staging PostgreSQL read-only. It returned `created=38`,
+  `unchanged=0`, `conflict=81`, and `invalid=40`. These blockers reflect source
+  gaps and unsupported evidence; no apply occurred. The private snapshot and
+  SSH tunnel were removed after the run.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
 
 - Pull-based import, typed adapters, exclusive-writer cutover, and rollback are
   accepted in the linked ADR.
-- Weight and Body dry-run/apply adapters are implemented. Body apply has not
-  been executed against staging because the authoritative Body source is empty;
-  recurring reconciliation and authority transfer remain separately gated.
+- Weight, Body, and Nutrition dry-run/apply adapters are implemented through
+  one command and lifecycle. Body apply has not been executed because its
+  authoritative source is empty; Nutrition apply has not been executed because
+  its live dry-run contains blockers. Recurring reconciliation and authority
+  transfer remain separately gated.
 
 ## Open questions
 
@@ -149,3 +171,4 @@ automatically changes closed days or ambiguous facts.
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Operator-workstation import ADR](../../adr/20260823-run-controlled-sheets-imports-from-operator-workstation.md)
 - [Body import precision and audit ADR](../../adr/20260824-use-explicit-body-temporal-precision-and-typed-import-records.md)
+- [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md)

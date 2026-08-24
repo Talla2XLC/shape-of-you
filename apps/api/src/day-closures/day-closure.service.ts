@@ -201,6 +201,7 @@ export class DayClosureService {
         meals: meals.map((item) => ({
           id: item.id,
           occurredAt: item.occurredAt,
+          temporalPrecision: item.temporalPrecision,
           kind: item.kind
         }))
       },

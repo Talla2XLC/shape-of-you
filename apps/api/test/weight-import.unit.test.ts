@@ -24,6 +24,7 @@ import {
   FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
   PrivateFitnessTrackerSnapshotReader,
   type FitnessTrackerBodySnapshotCapture,
+  type FitnessTrackerNutritionSnapshotCapture,
   type FitnessTrackerWeightSnapshotCapture,
   writePrivateFitnessTrackerSnapshot
 } from "../src/import/private-fitness-tracker-snapshot.js";
@@ -404,6 +405,19 @@ const bodySnapshotCapture = (): FitnessTrackerBodySnapshotCapture => ({
   }
 });
 
+const nutritionSnapshotCapture = (): FitnessTrackerNutritionSnapshotCapture => ({
+  schemaVersion: FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
+  spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+  workbookTitle: "Fitness Tracker",
+  locale: "ru_RU",
+  timeZone: "Europe/Moscow",
+  brands: { sheetId: 401, title: "Brands", headers: ["Brand_ID", "Name", "Type", "Notes", "Active", "Source"], rows: [] },
+  ingredients: { sheetId: 402, title: "Ingredients", headers: ["Ingredient_ID", "Name", "Category", "Default_unit", "Calories_per_100g", "Protein_per_100g", "Fat_per_100g", "Carbs_per_100g", "Source", "Active"], rows: [] },
+  foods: { sheetId: 403, title: "Foods", headers: ["Food_ID", "Name", "Type", "Category", "Default_portion", "Calories", "Protein", "Fat", "Carbs", "Source", "Confidence", "Active", "Brand_ID"], rows: [] },
+  foodIngredients: { sheetId: 404, title: "Food_Ingredients", headers: ["Food_ID", "Ingredient_ID", "Quantity", "Unit", "Preparation", "Required", "Notes", "Confidence"], rows: [] },
+  meals: { sheetId: 405, title: "Meals", headers: ["Date", "Meal", "Description", "Calories", "Protein", "Fat", "Carbs", "Photo", "Notes", "Food_ID", "Confidence", "Meal_ID"], rows: [] }
+});
+
 describe("Private Fitness Tracker snapshot", () => {
   it("keeps schema v1 Weight snapshots readable", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
@@ -468,6 +482,22 @@ describe("Private Fitness Tracker snapshot", () => {
       expect(result.body.headers).toEqual(bodyHeaders);
       expect("weight" in result).toBe(false);
       expect("dailyLog" in result).toBe(false);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("round-trips one linked Nutrition-only capture", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    const snapshotPath = path.join(directory, "nutrition.json");
+    try {
+      await writePrivateFitnessTrackerSnapshot(snapshotPath, nutritionSnapshotCapture());
+      const result = await new PrivateFitnessTrackerSnapshotReader(snapshotPath).readSnapshot();
+
+      if (!("meals" in result)) throw new Error("Expected Nutrition snapshot");
+      expect(result.meals.sheetId).toBe(405);
+      expect("weight" in result).toBe(false);
+      expect("body" in result).toBe(false);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

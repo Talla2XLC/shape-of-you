@@ -4,6 +4,7 @@ import {
   eq,
   gte,
   inArray,
+  isNull,
   lt,
   lte,
   notExists,
@@ -59,8 +60,8 @@ import {
   type SourceReferenceRow
 } from "../database/schema.js";
 import {
-  decodeCursor,
-  encodeCursor
+  decodeMealCursor,
+  encodeMealCursor
 } from "../domain/cursor.js";
 import {
   canAccessCatalogEntity,
@@ -298,7 +299,8 @@ function serializeMeal(
   return {
     id: meal.id,
     personId: meal.personId,
-    occurredAt: meal.occurredAt.toISOString(),
+    occurredAt: meal.occurredAt?.toISOString() ?? null,
+    temporalPrecision: meal.temporalPrecision,
     localDate: meal.localDate,
     timezone: meal.timezone,
     kind: meal.kind,
@@ -1186,7 +1188,7 @@ export class NutritionRepository implements NutritionStore {
     localDate?: string
   ): Promise<MealList> {
     const successor = alias(meals, "meal_successor");
-    const decoded = cursor ? decodeCursor(cursor) : undefined;
+    const decoded = cursor ? decodeMealCursor(cursor) : undefined;
     return this.database.db.transaction(async (transaction) => {
       const rows = await transaction
         .select()
@@ -1203,19 +1205,29 @@ export class NutritionRepository implements NutritionStore {
             ),
             decoded
               ? or(
-                  lt(meals.occurredAt, new Date(decoded.measuredAt)),
+                  lt(meals.localDate, decoded.localDate),
                   and(
-                    eq(
-                      meals.occurredAt,
-                      new Date(decoded.measuredAt)
-                    ),
-                    lt(meals.id, decoded.id)
+                    eq(meals.localDate, decoded.localDate),
+                    decoded.occurredAt === null
+                      ? and(isNull(meals.occurredAt), lt(meals.id, decoded.id))
+                      : or(
+                          lt(meals.occurredAt, new Date(decoded.occurredAt)),
+                          isNull(meals.occurredAt),
+                          and(
+                            eq(meals.occurredAt, new Date(decoded.occurredAt)),
+                            lt(meals.id, decoded.id)
+                          )
+                        )
                   )
                 )
               : undefined
           )
         )
-        .orderBy(desc(meals.occurredAt), desc(meals.id))
+        .orderBy(
+          desc(meals.localDate),
+          sql`${meals.occurredAt} desc nulls last`,
+          desc(meals.id)
+        )
         .limit(limit + 1);
       const page = rows.slice(0, limit);
       const items: Meal[] = [];
@@ -1227,8 +1239,10 @@ export class NutritionRepository implements NutritionStore {
         items,
         nextCursor:
           rows.length > limit && last
-            ? encodeCursor({
-                measuredAt: last.occurredAt.toISOString(),
+            ? encodeMealCursor({
+                version: 2,
+                localDate: last.localDate,
+                occurredAt: last.occurredAt?.toISOString() ?? null,
                 id: last.id
               })
             : null
@@ -1244,7 +1258,7 @@ export class NutritionRepository implements NutritionStore {
         eq(meals.personId, personId),
         eq(meals.localDate, localDate),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
-      )).orderBy(desc(meals.occurredAt), desc(meals.id));
+      )).orderBy(sql`${meals.occurredAt} desc nulls last`, desc(meals.id));
       return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row)));
     });
   }
@@ -1258,7 +1272,11 @@ export class NutritionRepository implements NutritionStore {
         gte(meals.localDate, from),
         lte(meals.localDate, to),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
-      )).orderBy(desc(meals.localDate), desc(meals.occurredAt), desc(meals.id));
+      )).orderBy(
+        desc(meals.localDate),
+        sql`${meals.occurredAt} desc nulls last`,
+        desc(meals.id)
+      );
       return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row)));
     });
   }

@@ -494,6 +494,11 @@ export const MealKindSchema = {
   enum: ["breakfast", "lunch", "dinner", "snack", "other"]
 } as const;
 
+export const MealTemporalPrecisionSchema = {
+  type: "string",
+  enum: ["instant", "local_date"]
+} as const;
+
 export const MealItemInputSchema = {
   type: "object",
   additionalProperties: false,
@@ -540,6 +545,7 @@ export const MealSchema = {
     "id",
     "personId",
     "occurredAt",
+    "temporalPrecision",
     "localDate",
     "timezone",
     "kind",
@@ -558,7 +564,13 @@ export const MealSchema = {
   properties: {
     id: { type: "string", format: "uuid" },
     personId: { type: "string", format: "uuid" },
-    occurredAt: { type: "string", format: "date-time" },
+    occurredAt: {
+      anyOf: [
+        { type: "string", format: "date-time" },
+        { type: "null" }
+      ]
+    },
+    temporalPrecision: MealTemporalPrecisionSchema,
     localDate: { type: "string", format: "date" },
     timezone: { type: "string", minLength: 1, maxLength: 64 },
     kind: MealKindSchema,

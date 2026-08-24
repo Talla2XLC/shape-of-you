@@ -633,17 +633,17 @@ describe("API migration chain", () => {
         `select measured_at::text, temporal_precision
            from weight_measurements where dedupe_key = 'migration:precision'`
       );
-      await verification.end();
       expect(result.rows[0]).toEqual({
         measured_at: "2026-08-20 06:00:00+00",
         temporal_precision: "instant"
       });
+      await verification.end();
     } finally {
       await rm(prefixFolder, { force: true, recursive: true });
     }
   }, 120_000);
 
-  it("preserves an existing Body instant when adding temporal precision", async () => {
+  it("preserves existing Body and Meal instants when adding temporal precision", async () => {
     const databaseName = "shape_of_you_body_precision_upgrade";
     const adminPool = new Pool({ connectionString: container.getConnectionUri() });
     await adminPool.query(`create database ${databaseName}`);
@@ -695,6 +695,20 @@ describe("API migration chain", () => {
       ).readTarget(syntheticPersonId)).resolves.toEqual([
         expect.objectContaining({ temporalPrecision: "instant" })
       ]);
+      const mealSource = await database.pool.query<{ id: string }>(
+        `insert into source_references (
+           person_id, channel, external_system, external_record_id, checksum
+         ) values ($1, 'manual', null, null, null) returning id`,
+        [syntheticPersonId]
+      );
+      await database.pool.query(
+        `insert into meals (
+           person_id, occurred_at, local_date, timezone, kind, source,
+           source_reference_id, dedupe_key
+         ) values ($1, '2026-08-20T12:00:00Z', '2026-08-20', 'UTC', 'lunch',
+           'manual', $2, 'migration:meal-precision')`,
+        [syntheticPersonId, mealSource.rows[0]!.id]
+      );
       await database.pool.end();
 
       await runMigrations(url);
@@ -707,11 +721,22 @@ describe("API migration chain", () => {
            from body_measurement_sessions
           where dedupe_key = 'migration:body-precision'`
       );
-      await verification.end();
       expect(result.rows[0]).toEqual({
         measured_at: "2026-08-20 06:00:00+00",
         temporal_precision: "instant"
       });
+      const meal = await verification.query<{
+        occurred_at: string;
+        temporal_precision: string;
+      }>(
+        `select occurred_at::text, temporal_precision from meals
+          where dedupe_key = 'migration:meal-precision'`
+      );
+      expect(meal.rows[0]).toEqual({
+        occurred_at: "2026-08-20 12:00:00+00",
+        temporal_precision: "instant"
+      });
+      await verification.end();
     } finally {
       await rm(prefixFolder, { force: true, recursive: true });
     }

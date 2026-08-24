@@ -8,6 +8,7 @@ import { BodyImportApplyService } from "../import/body-import-apply.js";
 import {
   FITNESS_TRACKER_SPREADSHEET_ID,
   type FitnessTrackerBodySnapshot,
+  type FitnessTrackerNutritionSnapshot,
   type FitnessTrackerSourceSnapshot,
   type FitnessTrackerWeightSnapshot
 } from "../import/fitness-tracker-sheets-reader.js";
@@ -17,6 +18,9 @@ import { PostgresBodyTargetReader } from "../import/postgres-body-target-reader.
 import { PrivateJsonFileReportSink } from "../import/private-report-sink.js";
 import { WeightDryRunAdapter } from "../import/weight-dry-run.js";
 import { WeightImportApplyService } from "../import/weight-import-apply.js";
+import { NutritionDryRunAdapter } from "../import/nutrition-dry-run.js";
+import { NutritionImportApplyService } from "../import/nutrition-import-apply.js";
+import { PostgresNutritionTargetReader } from "../import/postgres-nutrition-target-reader.js";
 
 function required(value: string | undefined, name: string): string {
   const normalized = value?.trim();
@@ -37,8 +41,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   });
   const domain = required(values.domain, "--domain");
   const mode = required(values.mode, "--mode");
-  if (domain !== "weight" && domain !== "body") {
-    throw new Error(`Unsupported import domain ${domain}; available: weight, body`);
+  if (domain !== "weight" && domain !== "body" && domain !== "nutrition") {
+    throw new Error(`Unsupported import domain ${domain}; available: weight, body, nutrition`);
   }
   if (mode !== "dry-run" && mode !== "apply") {
     throw new Error("--mode must be dry-run or apply");
@@ -62,6 +66,42 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
       domain
     );
     const snapshot = await source.readSnapshot();
+    if (domain === "nutrition") {
+      const nutritionSnapshot = requireNutritionSnapshot(snapshot);
+      const sheetIds = {
+        brands: nutritionSnapshot.brands.sheetId,
+        ingredients: nutritionSnapshot.ingredients.sheetId,
+        foods: nutritionSnapshot.foods.sheetId,
+        foodIngredients: nutritionSnapshot.foodIngredients.sheetId,
+        meals: nutritionSnapshot.meals.sheetId
+      };
+      if (mode === "apply") {
+        const report = await new NutritionImportApplyService(
+          pool,
+          FITNESS_TRACKER_SPREADSHEET_ID,
+          sheetIds
+        ).apply(personId, nutritionSnapshot);
+        process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+        return;
+      }
+      const result = await runDryRun(
+        personId,
+        { readSnapshot: async () => nutritionSnapshot },
+        new PostgresNutritionTargetReader(
+          pool,
+          FITNESS_TRACKER_SPREADSHEET_ID,
+          sheetIds
+        ),
+        new NutritionDryRunAdapter()
+      );
+      if (values["detail-report"]) {
+        await new PrivateJsonFileReportSink(values["detail-report"]).write(
+          result.privateDetail
+        );
+      }
+      process.stdout.write(`${JSON.stringify(result.safeReport, null, 2)}\n`);
+      return;
+    }
     if (domain === "body") {
       const bodySnapshot = requireBodySnapshot(snapshot);
       if (mode === "apply") {
@@ -122,6 +162,17 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   } finally {
     await pool.end();
   }
+}
+
+function requireNutritionSnapshot(
+  snapshot: FitnessTrackerSourceSnapshot
+): FitnessTrackerNutritionSnapshot {
+  if (!("brands" in snapshot) || !("ingredients" in snapshot) ||
+      !("foods" in snapshot) || !("foodIngredients" in snapshot) ||
+      !("meals" in snapshot)) {
+    throw new Error("Nutrition import requires five linked Nutrition sheets");
+  }
+  return snapshot as FitnessTrackerNutritionSnapshot;
 }
 
 function requireBodySnapshot(

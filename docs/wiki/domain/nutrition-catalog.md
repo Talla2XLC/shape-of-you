@@ -34,13 +34,24 @@ is idempotent within source. Canonical match/merge is explicit; name alone is
 never sufficient. No provider, scraper, scheduler, or network adapter is yet
 approved.
 
+The Fitness Tracker importer treats `Brands`, `Ingredients`, `Foods`, and
+`Food_Ingredients` as the catalog part of one Nutrition migration boundary.
+Imported definitions are Person-private. Stable sheet IDs identify source
+records, immutable versions retain typed source provenance, and composition
+rows retain their Food/Ingredient pair identity. Missing nutrients, quantity,
+unsupported units, or unresolved dependencies block the whole atomic apply;
+the importer does not create a truncated Food. Known migration evidence is
+stored relationally rather than as a generic JSON fact payload.
+
 ## Evidence
 
-- Schema, Nutrition contracts, and integration tests.
+- Schema, Nutrition contracts, importer/migration tests, and accepted
+  TASK-0049 quality evidence.
 
 ## Decisions
 
 - [Layered Nutrition ADR](../../adr/20260731-use-layered-versioned-nutrition-catalog.md).
+- [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md).
 
 ## Open questions
 

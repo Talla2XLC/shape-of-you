@@ -99,6 +99,13 @@
       "when": 1787556245469,
       "tag": "20260824072405_body_import_adapter",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787583703252,
+      "tag": "20260824150143_nutrition_import_adapter",
+      "breakpoints": true
     }
   ]
 }

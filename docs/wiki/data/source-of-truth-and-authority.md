@@ -53,6 +53,15 @@ the exact workbook, numeric sheet ID, and `Measurement_ID`. The importer reads
 only Body for this domain. Notes and source labels remain private evidence; a
 Photo reference blocks automatic import until media handling is designed.
 
+For Nutrition, `Brands`, `Ingredients`, `Foods`, `Food_Ingredients`, and
+`Meals` form one linked migration boundary. Stable identity uses the exact
+workbook, numeric sheet ID, and the sheet's durable ID (`Brand_ID`,
+`Ingredient_ID`, `Food_ID`, the Food/Ingredient pair, or `Meal_ID`). Imported
+catalog definitions remain Person-private and are never promoted to shared
+automatically. Missing nutrients or quantities, broken links, unsupported Meal
+kinds, and Photo markers remain explicit blockers rather than discarded or
+invented data.
+
 After cutover, Brand/Ingredient/FoodVersion are shared definitions; personal
 catalog stores overlays/private items. Until then, Sheets remains authority for
 current catalog/Meals. Meal snapshots never recalculate from later catalog
@@ -70,15 +79,16 @@ write to Sheets requires separate operator approval.
 
 - Weight mirror, Meal aggregation, Training-derived records/program fields,
   NL_Engine/Inbox lifecycle, and Self_Healing read-back.
-- Accepted Weight dry-run/apply evidence and TASK-0048 Body dry-run, atomic
-  apply, privacy, and typed-audit evidence.
+- Accepted Weight dry-run/apply evidence, TASK-0048 Body evidence, and
+  TASK-0049 Nutrition five-sheet dry-run, atomic apply, privacy, and typed
+  relational audit evidence.
 
 ## Decisions
 
 - Authority follows field/record type. The Google Sheets cutover ADR remains
   unchanged.
-- Weight and Body importer work changes neither the active writer nor
-  operational authority.
+- Weight, Body, and Nutrition importer work changes neither the active writer
+  nor operational authority.
 
 ## Open questions
 
@@ -92,3 +102,4 @@ write to Sheets requires separate operator approval.
 - [Integrity](integrity-and-lifecycle.md)
 - [Domain invariants](../domain/invariants.md)
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
+- [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md)

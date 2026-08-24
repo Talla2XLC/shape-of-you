@@ -53,18 +53,25 @@ operator authorizes a specific write.
   projection `A:J`: Date, five metric columns, Photo, Notes, Measurement_ID,
   and Source. The accepted TASK-0048 live read observed headers and no data
   rows.
+- Nutrition migration uses one bounded snapshot of `Brands`, `Ingredients`,
+  `Foods`, `Food_Ingredients`, and `Meals`. Existing populated Meal rows have a
+  durable UUIDv4 `Meal_ID`; the active external writer must provide a new
+  immutable `Meal_ID` for every future Meal row.
 
 ## Decisions
 
 - Treat workbook as one operational system with domain modules/adapters, not a
   service or target table per sheet.
 - Domain runs capture only required sheets: Body alone for Body; Weight and
-  Daily_Log for Weight. Body Notes and Source are private, Measurement_ID is
-  stable identity, and Photo remains a blocking unsupported reference.
+  Daily_Log for Weight; and the five linked Nutrition sheets for Nutrition.
+  Body Notes and Source are private, Measurement_ID is stable identity, and
+  Photo remains a blocking unsupported reference. Nutrition uses durable
+  catalog IDs/Meal_ID and treats Photo markers and incomplete linked rows as
+  blockers.
 
 ## Open questions
 
-- Body media migration lifecycle; repeated recipe ingredients; Rules classification;
+- Body and Meal media migration lifecycle; repeated recipe ingredients; Rules classification;
   authoritative exercise catalog; status vocabularies; historical requiredness.
 
 ## Related material

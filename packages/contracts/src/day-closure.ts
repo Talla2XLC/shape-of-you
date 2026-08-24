@@ -120,8 +120,13 @@ export const DaySnapshotSchema = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["id", "occurredAt", "kind"],
-            properties: { id: uuid, occurredAt: dateTime, kind: { type: "string" } }
+            required: ["id", "occurredAt", "temporalPrecision", "kind"],
+            properties: {
+              id: uuid,
+              occurredAt: { anyOf: [dateTime, { type: "null" }] },
+              temporalPrecision: { enum: ["instant", "local_date"] },
+              kind: { type: "string" }
+            }
           }
         }
       }

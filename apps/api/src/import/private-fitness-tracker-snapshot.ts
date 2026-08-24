@@ -40,10 +40,21 @@ export interface FitnessTrackerBodySnapshotCapture
   readonly body: BoundedSheetSnapshot;
 }
 
+/** Connector-owned Nutrition capture before the canonical checksum is attached. */
+export interface FitnessTrackerNutritionSnapshotCapture
+  extends FitnessTrackerSnapshotCaptureBase {
+  readonly brands: BoundedSheetSnapshot;
+  readonly ingredients: BoundedSheetSnapshot;
+  readonly foods: BoundedSheetSnapshot;
+  readonly foodIngredients: BoundedSheetSnapshot;
+  readonly meals: BoundedSheetSnapshot;
+}
+
 /** Exactly one typed domain subset captured from the authoritative workbook. */
 export type FitnessTrackerSnapshotCapture =
   | FitnessTrackerWeightSnapshotCapture
-  | FitnessTrackerBodySnapshotCapture;
+  | FitnessTrackerBodySnapshotCapture
+  | FitnessTrackerNutritionSnapshotCapture;
 
 type FitnessTrackerSnapshotFile = FitnessTrackerSnapshotCapture & {
   readonly manifestChecksum: string;
@@ -110,7 +121,15 @@ export function parseFitnessTrackerSnapshotCapture(
   ] as const;
   const hasWeightShape = hasExactKeys(root, [...commonKeys, "weight", "dailyLog"]);
   const hasBodyShape = hasExactKeys(root, [...commonKeys, "body"]);
-  if (!hasWeightShape && !hasBodyShape) {
+  const hasNutritionShape = hasExactKeys(root, [
+    ...commonKeys,
+    "brands",
+    "ingredients",
+    "foods",
+    "foodIngredients",
+    "meals"
+  ]);
+  if (!hasWeightShape && !hasBodyShape && !hasNutritionShape) {
     throw new Error("Fitness Tracker snapshot contains unknown or missing fields");
   }
   if (root.schemaVersion !== FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION) {
@@ -139,7 +158,20 @@ export function parseFitnessTrackerSnapshotCapture(
     }
     return { ...base, weight, dailyLog };
   }
-  return { ...base, body: sheet(root.body, "Body", 10) };
+  if (hasBodyShape) {
+    return { ...base, body: sheet(root.body, "Body", 10) };
+  }
+  const brands = sheet(root.brands, "Brands", 6);
+  const ingredients = sheet(root.ingredients, "Ingredients", 10);
+  const foods = sheet(root.foods, "Foods", 13);
+  const foodIngredients = sheet(root.foodIngredients, "Food_Ingredients", 8);
+  const meals = sheet(root.meals, "Meals", 12);
+  const ids = [brands, ingredients, foods, foodIngredients, meals]
+    .map(({ sheetId }) => sheetId);
+  if (new Set(ids).size !== ids.length) {
+    throw new Error("Fitness Tracker snapshot sheet ids must be distinct");
+  }
+  return { ...base, brands, ingredients, foods, foodIngredients, meals };
 }
 
 function parseFitnessTrackerSnapshotFile(raw: string): FitnessTrackerSourceSnapshot {
@@ -177,7 +209,16 @@ function toSnapshot(
   } as const;
   const withoutChecksum = "body" in capture
     ? { ...base, body: capture.body }
-    : { ...base, weight: capture.weight, dailyLog: capture.dailyLog };
+    : "weight" in capture
+      ? { ...base, weight: capture.weight, dailyLog: capture.dailyLog }
+      : {
+          ...base,
+          brands: capture.brands,
+          ingredients: capture.ingredients,
+          foods: capture.foods,
+          foodIngredients: capture.foodIngredients,
+          meals: capture.meals
+        };
   return {
     ...withoutChecksum,
     manifestChecksum: computeFitnessTrackerManifestChecksum(withoutChecksum)
@@ -186,7 +227,8 @@ function toSnapshot(
 
 function sheet(
   input: unknown,
-  title: "Weight" | "Daily_Log" | "Body",
+  title: "Weight" | "Daily_Log" | "Body" | "Brands" | "Ingredients" |
+    "Foods" | "Food_Ingredients" | "Meals",
   columns: number
 ) {
   const value = record(input, `${title} sheet`);
@@ -206,7 +248,8 @@ function sheet(
     ? ["Date", "Weight_kg"]
     : title === "Daily_Log"
       ? ["Date", "Weight"]
-      : [
+      : title === "Body"
+        ? [
           "Date",
           "Waist_cm",
           "Chest_cm",
@@ -217,7 +260,8 @@ function sheet(
           "Notes",
           "Measurement_ID",
           "Source"
-        ];
+        ]
+        : nutritionRequiredHeaders[title];
   if (!required.every((header) => headers.includes(header))) {
     throw new Error(`${title} required headers are missing`);
   }
@@ -236,7 +280,8 @@ function sheet(
 
 function row(
   input: unknown,
-  title: "Weight" | "Daily_Log" | "Body",
+  title: "Weight" | "Daily_Log" | "Body" | "Brands" | "Ingredients" |
+    "Foods" | "Food_Ingredients" | "Meals",
   columns: number
 ): BoundedSheetRow {
   const value = record(input, `${title} row`);
@@ -253,6 +298,26 @@ function row(
   }
   return { locator: value.locator, values: value.values.map(cell) };
 }
+
+const nutritionRequiredHeaders = {
+  Brands: ["Brand_ID", "Name", "Type", "Notes", "Active", "Source"],
+  Ingredients: [
+    "Ingredient_ID", "Name", "Category", "Default_unit", "Calories_per_100g",
+    "Protein_per_100g", "Fat_per_100g", "Carbs_per_100g", "Source", "Active"
+  ],
+  Foods: [
+    "Food_ID", "Name", "Type", "Category", "Default_portion", "Calories",
+    "Protein", "Fat", "Carbs", "Source", "Confidence", "Active", "Brand_ID"
+  ],
+  Food_Ingredients: [
+    "Food_ID", "Ingredient_ID", "Quantity", "Unit", "Preparation", "Required",
+    "Notes", "Confidence"
+  ],
+  Meals: [
+    "Date", "Meal", "Description", "Calories", "Protein", "Fat", "Carbs",
+    "Photo", "Notes", "Food_ID", "Confidence", "Meal_ID"
+  ]
+} as const;
 
 function parseLegacySnapshotFile(
   root: Record<string, unknown>
