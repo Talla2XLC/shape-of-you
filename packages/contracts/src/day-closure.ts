@@ -86,10 +86,11 @@ export const DaySnapshotSchema = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["id", "measuredAt", "values"],
+            required: ["id", "measuredAt", "temporalPrecision", "values"],
             properties: {
               id: uuid,
-              measuredAt: dateTime,
+              measuredAt: { anyOf: [dateTime, { type: "null" }] },
+              temporalPrecision: { enum: ["instant", "local_date"] },
               values: {
                 type: "array",
                 items: {

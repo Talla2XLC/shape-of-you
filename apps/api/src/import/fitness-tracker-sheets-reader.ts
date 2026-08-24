@@ -38,6 +38,26 @@ export interface FitnessTrackerWeightSnapshot {
   readonly dailyLog: BoundedSheetSnapshot;
 }
 
+/** Source snapshot required by the Body import adapter. */
+export interface FitnessTrackerBodySnapshot {
+  readonly spreadsheetId: typeof FITNESS_TRACKER_SPREADSHEET_ID;
+  readonly locale: "ru_RU";
+  readonly timeZone: "Europe/Moscow";
+  readonly manifestChecksum: string;
+  readonly body: BoundedSheetSnapshot;
+}
+
+/** Workbook snapshot accepted by the shared domain router. */
+export type FitnessTrackerSnapshot =
+  | FitnessTrackerWeightSnapshot
+  | FitnessTrackerBodySnapshot;
+
+/** Concrete source shape selected by the shared domain router. */
+export type FitnessTrackerSourceSnapshot = FitnessTrackerSnapshot;
+
+/** Domain selector that bounds every live source read. */
+export type FitnessTrackerImportDomain = "weight" | "body";
+
 /** Runtime identity values delivered by the existing environment mechanism. */
 export interface GoogleServiceIdentityCredential {
   readonly clientEmail: string;
@@ -85,22 +105,27 @@ type Fetch = typeof globalThis.fetch;
  * numeric sheet ids from metadata, and never exposes a Sheets write method.
  */
 export class FitnessTrackerSheetsReader
-  implements ImportSourceReader<FitnessTrackerWeightSnapshot>
+  implements ImportSourceReader<FitnessTrackerSourceSnapshot>
 {
   public constructor(
     private readonly credential: GoogleServiceIdentityCredential,
+    private readonly domain: FitnessTrackerImportDomain,
     private readonly fetcher: Fetch = globalThis.fetch
   ) {}
 
-  /** Reads and validates the bounded Weight/Daily_Log snapshot. */
-  public async readSnapshot(): Promise<FitnessTrackerWeightSnapshot> {
+  /** Reads and validates only the bounded sheets required by the selected domain. */
+  public async readSnapshot(): Promise<FitnessTrackerSourceSnapshot> {
     const accessToken = await this.accessToken();
     const url = new URL(
       `https://sheets.googleapis.com/v4/spreadsheets/${FITNESS_TRACKER_SPREADSHEET_ID}`
     );
     url.searchParams.set("includeGridData", "true");
-    url.searchParams.append("ranges", "Weight!A1:B5000");
-    url.searchParams.append("ranges", "Daily_Log!A1:AZ5000");
+    if (this.domain === "weight") {
+      url.searchParams.append("ranges", "Weight!A1:B5000");
+      url.searchParams.append("ranges", "Daily_Log!A1:AZ5000");
+    } else {
+      url.searchParams.append("ranges", "Body!A1:J5000");
+    }
     const response = await this.fetcher(url, {
       headers: { authorization: `Bearer ${accessToken}` },
       method: "GET"
@@ -118,26 +143,37 @@ export class FitnessTrackerSheetsReader
       throw new Error("Google Sheets workbook metadata does not match the approved source");
     }
 
-    const weight = parseSheet(workbook, "Weight", 2);
-    const dailyLog = parseSheet(workbook, "Daily_Log", 52);
-    requireHeader(weight, "Date");
-    requireHeader(weight, "Weight_kg");
-    requireHeader(dailyLog, "Date");
-    requireHeader(dailyLog, "Weight");
-    const manifestChecksum = computeFitnessTrackerManifestChecksum({
+    if (this.domain === "weight") {
+      const weight = parseSheet(workbook, "Weight", 2);
+      const dailyLog = parseSheet(workbook, "Daily_Log", 52);
+      requireHeader(weight, "Date");
+      requireHeader(weight, "Weight_kg");
+      requireHeader(dailyLog, "Date");
+      requireHeader(dailyLog, "Weight");
+      const fields = {
+        spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+        locale: "ru_RU" as const,
+        timeZone: "Europe/Moscow" as const,
+        weight,
+        dailyLog
+      } as const;
+      return {
+        ...fields,
+        manifestChecksum: computeFitnessTrackerManifestChecksum(fields)
+      };
+    }
+
+    const body = parseSheet(workbook, "Body", 10);
+    for (const header of bodyHeaders) requireHeader(body, header);
+    const fields = {
       spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
-      locale: "ru_RU",
-      timeZone: "Europe/Moscow",
-      weight,
-      dailyLog
-    });
+      locale: "ru_RU" as const,
+      timeZone: "Europe/Moscow" as const,
+      body
+    } as const;
     return {
-      spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
-      locale: "ru_RU",
-      timeZone: "Europe/Moscow",
-      manifestChecksum,
-      weight,
-      dailyLog
+      ...fields,
+      manifestChecksum: computeFitnessTrackerManifestChecksum(fields)
     };
   }
 
@@ -172,6 +208,19 @@ export class FitnessTrackerSheetsReader
     return payload.access_token;
   }
 }
+
+const bodyHeaders = [
+  "Date",
+  "Waist_cm",
+  "Chest_cm",
+  "Hips_cm",
+  "Thigh_cm",
+  "Biceps_cm",
+  "Photo",
+  "Notes",
+  "Measurement_ID",
+  "Source"
+] as const;
 
 function parseSheet(
   workbook: GoogleSpreadsheetResponse,
@@ -220,13 +269,22 @@ function requireHeader(sheet: BoundedSheetSnapshot, header: string): void {
 
 /** Computes the canonical checksum shared by live and private-file snapshots. */
 export function computeFitnessTrackerManifestChecksum(
-  snapshot: Omit<FitnessTrackerWeightSnapshot, "manifestChecksum">
+  snapshot: {
+    readonly spreadsheetId: typeof FITNESS_TRACKER_SPREADSHEET_ID;
+    readonly locale: "ru_RU";
+    readonly timeZone: "Europe/Moscow";
+    readonly weight?: BoundedSheetSnapshot;
+    readonly dailyLog?: BoundedSheetSnapshot;
+    readonly body?: BoundedSheetSnapshot;
+  }
 ): string {
+  const sheets = [snapshot.weight, snapshot.dailyLog, snapshot.body]
+    .filter((sheet): sheet is BoundedSheetSnapshot => sheet !== undefined);
   return digest({
     spreadsheetId: snapshot.spreadsheetId,
     locale: snapshot.locale,
     timeZone: snapshot.timeZone,
-    sheets: [snapshot.weight, snapshot.dailyLog]
+    sheets
   });
 }
 

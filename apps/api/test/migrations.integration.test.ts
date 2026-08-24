@@ -15,6 +15,8 @@ import { migrate } from "drizzle-orm/node-postgres/migrator";
 
 import { createDatabase } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
+import { FITNESS_TRACKER_SPREADSHEET_ID } from "../src/import/fitness-tracker-sheets-reader.js";
+import { PostgresBodyTargetReader } from "../src/import/postgres-body-target-reader.js";
 import { personAccessGrants, users } from "../src/database/schema.js";
 import {
   IdentityAccessProvisioningConflictError,
@@ -591,7 +593,11 @@ describe("API migration chain", () => {
     const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-weight-prefix-"));
     await mkdir(path.join(prefixFolder, "meta"));
     try {
-      for (const entry of journal.entries.slice(0, -1)) {
+      const weightMigrationIndex = journal.entries.findIndex(
+        ({ tag }) => tag === "20260823095404_powerful_monster_badoon"
+      );
+      const prefixEntries = journal.entries.slice(0, weightMigrationIndex);
+      for (const entry of prefixEntries) {
         await cp(
           new URL(`${entry.tag}.sql`, migrationsFolder),
           path.join(prefixFolder, `${entry.tag}.sql`)
@@ -599,7 +605,7 @@ describe("API migration chain", () => {
       }
       await writeFile(
         path.join(prefixFolder, "meta", "_journal.json"),
-        JSON.stringify({ ...journal, entries: journal.entries.slice(0, -1) })
+        JSON.stringify({ ...journal, entries: prefixEntries })
       );
       const database = createDatabase(databaseConfig(url));
       await migrate(database.db, { migrationsFolder: prefixFolder });
@@ -626,6 +632,80 @@ describe("API migration chain", () => {
       }>(
         `select measured_at::text, temporal_precision
            from weight_measurements where dedupe_key = 'migration:precision'`
+      );
+      await verification.end();
+      expect(result.rows[0]).toEqual({
+        measured_at: "2026-08-20 06:00:00+00",
+        temporal_precision: "instant"
+      });
+    } finally {
+      await rm(prefixFolder, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  it("preserves an existing Body instant when adding temporal precision", async () => {
+    const databaseName = "shape_of_you_body_precision_upgrade";
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    await adminPool.query(`create database ${databaseName}`);
+    await adminPool.end();
+    const url = databaseUrl(databaseName);
+    const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-body-prefix-"));
+    await mkdir(path.join(prefixFolder, "meta"));
+    try {
+      const prefixEntries = journal.entries.slice(0, -1);
+      for (const entry of prefixEntries) {
+        await cp(
+          new URL(`${entry.tag}.sql`, migrationsFolder),
+          path.join(prefixFolder, `${entry.tag}.sql`)
+        );
+      }
+      await writeFile(
+        path.join(prefixFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: prefixEntries })
+      );
+      const database = createDatabase(databaseConfig(url));
+      await migrate(database.db, { migrationsFolder: prefixFolder });
+      const source = await database.pool.query<{ id: string }>(
+        `insert into source_references (
+           person_id, channel, external_system, external_record_id, checksum
+         ) values ($1, 'google_sheets', $2, 'legacy-body', 'legacy-checksum')
+         returning id`,
+        [
+          syntheticPersonId,
+          `google_sheets:${FITNESS_TRACKER_SPREADSHEET_ID}:303`
+        ]
+      );
+      const session = await database.pool.query<{ id: string }>(
+        `insert into body_measurement_sessions (
+           person_id, measured_at, local_date, timezone, source,
+           source_reference_id, dedupe_key
+         ) values ($1, '2026-08-20T06:00:00Z', '2026-08-20', 'UTC',
+           'google_sheets', $2, 'migration:body-precision') returning id`,
+        [syntheticPersonId, source.rows[0]!.id]
+      );
+      await database.pool.query(
+        `insert into body_measurement_values (session_id, metric, value, unit)
+         values ($1, 'waist', 81, 'cm')`,
+        [session.rows[0]!.id]
+      );
+      await expect(new PostgresBodyTargetReader(
+        database.pool,
+        FITNESS_TRACKER_SPREADSHEET_ID,
+        303
+      ).readTarget(syntheticPersonId)).resolves.toEqual([
+        expect.objectContaining({ temporalPrecision: "instant" })
+      ]);
+      await database.pool.end();
+
+      await runMigrations(url);
+      const verification = new Pool({ connectionString: url });
+      const result = await verification.query<{
+        measured_at: string;
+        temporal_precision: string;
+      }>(
+        `select measured_at::text, temporal_precision
+           from body_measurement_sessions
+          where dedupe_key = 'migration:body-precision'`
       );
       await verification.end();
       expect(result.rows[0]).toEqual({

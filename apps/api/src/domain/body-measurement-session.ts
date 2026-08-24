@@ -62,6 +62,7 @@ export function toNewBodyMeasurementSession(
   return {
     personId,
     measuredAt,
+    temporalPrecision: "instant",
     localDate: deriveLocalDate(measuredAt, input.timezone),
     timezone: input.timezone,
     source: input.sourceReference.channel,
@@ -92,7 +93,8 @@ export function toBodyMeasurementSession(
   return {
     id: row.id,
     personId: row.personId,
-    measuredAt: row.measuredAt.toISOString(),
+    measuredAt: row.measuredAt?.toISOString() ?? null,
+    temporalPrecision: row.temporalPrecision,
     localDate: row.localDate,
     timezone: row.timezone,
     values: values

@@ -1,15 +1,17 @@
 import type { ImportSourceReader } from "./contracts.js";
 import {
   FitnessTrackerSheetsReader,
-  type FitnessTrackerWeightSnapshot
+  type FitnessTrackerImportDomain,
+  type FitnessTrackerSourceSnapshot
 } from "./fitness-tracker-sheets-reader.js";
 import { PrivateFitnessTrackerSnapshotReader } from "./private-fitness-tracker-snapshot.js";
 
 /** Selects exactly one source path without reading Google credentials for files. */
 export function createFitnessTrackerSource(
   snapshotFile: string | undefined,
-  environment: NodeJS.ProcessEnv
-): ImportSourceReader<FitnessTrackerWeightSnapshot> {
+  environment: NodeJS.ProcessEnv,
+  domain: FitnessTrackerImportDomain
+): ImportSourceReader<FitnessTrackerSourceSnapshot> {
   const normalizedSnapshotFile = snapshotFile?.trim();
   if (normalizedSnapshotFile) {
     if (
@@ -31,7 +33,7 @@ export function createFitnessTrackerSource(
       environment.GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,
       "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY"
     )
-  });
+  }, domain);
 }
 
 function required(value: string | undefined, name: string): string {

@@ -548,12 +548,40 @@ describe("Physical State PostgreSQL vertical", () => {
       method: "GET",
       url: `/v1/body-measurement-sessions/${corrected.json().id as string}/history`
     });
+    const dateOnlySource = await database.pool.query<{ id: string }>(
+      `insert into source_references (
+         person_id, channel, external_system, external_record_id, checksum
+       ) values ($1, 'google_sheets', 'google_sheets:test:body',
+         'body-date-only', 'body-date-only-checksum') returning id`,
+      [syntheticPersonId]
+    );
+    const dateOnly = await database.pool.query<{ id: string }>(
+      `insert into body_measurement_sessions (
+         person_id, measured_at, temporal_precision, local_date, timezone,
+         source, source_reference_id, dedupe_key
+       ) values ($1, null, 'local_date', '2026-08-04', 'Europe/Moscow',
+         'google_sheets', $2, 'integration:body:date-only') returning id`,
+      [syntheticPersonId, dateOnlySource.rows[0]!.id]
+    );
+    await database.pool.query(
+      `insert into body_measurement_values (session_id, metric, value, unit)
+       values ($1, 'hips', 98.50, 'cm')`,
+      [dateOnly.rows[0]!.id]
+    );
+    const mixedPrecision = await fastify.inject({
+      method: "GET",
+      url: "/v1/body-measurement-sessions"
+    });
     const waistOnly = await fastify.inject({
       method: "GET",
       url: "/v1/body-measurement-sessions?metric=waist"
     });
 
     expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      measuredAt: "2026-08-03T06:00:00.000Z",
+      temporalPrecision: "instant"
+    });
     expect(created.json().values).toHaveLength(2);
     expect(duplicate.statusCode).toBe(200);
     expect(duplicate.json().id).toBe(created.json().id);
@@ -561,6 +589,13 @@ describe("Physical State PostgreSQL vertical", () => {
     expect(corrected.statusCode).toBe(201);
     expect(corrected.json().supersedesId).toBe(created.json().id);
     expect(history.statusCode).toBe(200);
+    expect(mixedPrecision.statusCode).toBe(200);
+    expect(mixedPrecision.json().items[0]).toMatchObject({
+      id: dateOnly.rows[0]!.id,
+      measuredAt: null,
+      temporalPrecision: "local_date",
+      localDate: "2026-08-04"
+    });
     expect(
       history.json().items.map((item: { id: string }) => item.id)
     ).toEqual([created.json().id, corrected.json().id]);

@@ -16,13 +16,15 @@ import { runDryRun } from "../src/import/contracts.js";
 import {
   FITNESS_TRACKER_SPREADSHEET_ID,
   FitnessTrackerSheetsReader,
+  computeFitnessTrackerManifestChecksum,
   type FitnessTrackerWeightSnapshot
 } from "../src/import/fitness-tracker-sheets-reader.js";
 import { createFitnessTrackerSource } from "../src/import/fitness-tracker-source.js";
 import {
   FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
   PrivateFitnessTrackerSnapshotReader,
-  type FitnessTrackerSnapshotCapture,
+  type FitnessTrackerBodySnapshotCapture,
+  type FitnessTrackerWeightSnapshotCapture,
   writePrivateFitnessTrackerSnapshot
 } from "../src/import/private-fitness-tracker-snapshot.js";
 import {
@@ -273,12 +275,28 @@ describe("Fitness Tracker read-only Sheets adapter", () => {
                 { effectiveValue: { numberValue: 82 } }
               ] }
             ] }]
+          },
+          {
+            properties: { sheetId: 903, title: "Body" },
+            data: [{ rowData: [{ values: [
+              { effectiveValue: { stringValue: "Date" } },
+              { effectiveValue: { stringValue: "Waist_cm" } },
+              { effectiveValue: { stringValue: "Chest_cm" } },
+              { effectiveValue: { stringValue: "Hips_cm" } },
+              { effectiveValue: { stringValue: "Thigh_cm" } },
+              { effectiveValue: { stringValue: "Biceps_cm" } },
+              { effectiveValue: { stringValue: "Photo" } },
+              { effectiveValue: { stringValue: "Notes" } },
+              { effectiveValue: { stringValue: "Measurement_ID" } },
+              { effectiveValue: { stringValue: "Source" } }
+            ] }] }]
           }
         ]
       });
     };
     const reader = new FitnessTrackerSheetsReader(
       { clientEmail: "api-reader@example.test", privateKey: pkcs8 },
+      "weight",
       fetcher
     );
     const result = await reader.readSnapshot();
@@ -296,12 +314,63 @@ describe("Fitness Tracker read-only Sheets adapter", () => {
       "Weight!A1:B5000",
       "Daily_Log!A1:AZ5000"
     ]);
+    if (!("weight" in result)) throw new Error("Expected Weight snapshot");
     expect(result.weight.sheetId).toBe(901);
     expect(result.dailyLog.sheetId).toBe(902);
   });
+
+  it("reads only Body when the shared reader selects the Body domain", async () => {
+    const { privateKey } = await generateKeyPair("RS256", { extractable: true });
+    const pkcs8 = await exportPKCS8(privateKey);
+    const requests: string[] = [];
+    const fetcher: typeof fetch = async (input) => {
+      const url = String(input);
+      requests.push(url);
+      if (url === "https://oauth2.googleapis.com/token") {
+        return Response.json({ access_token: "test-access-token" });
+      }
+      return Response.json({
+        spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+        properties: {
+          title: "Fitness Tracker",
+          locale: "ru_RU",
+          timeZone: "Europe/Moscow"
+        },
+        sheets: [{
+          properties: { sheetId: 903, title: "Body" },
+          data: [{ rowData: [{ values: bodyHeaders.map((header) => ({
+            effectiveValue: { stringValue: header }
+          })) }] }]
+        }]
+      });
+    };
+    const result = await new FitnessTrackerSheetsReader(
+      { clientEmail: "api-reader@example.test", privateKey: pkcs8 },
+      "body",
+      fetcher
+    ).readSnapshot();
+    const readUrl = new URL(requests[1]!);
+
+    expect(readUrl.searchParams.getAll("ranges")).toEqual(["Body!A1:J5000"]);
+    if (!("body" in result)) throw new Error("Expected Body snapshot");
+    expect(result.body.sheetId).toBe(903);
+  });
 });
 
-const snapshotCapture = (): FitnessTrackerSnapshotCapture => ({
+const bodyHeaders = [
+  "Date",
+  "Waist_cm",
+  "Chest_cm",
+  "Hips_cm",
+  "Thigh_cm",
+  "Biceps_cm",
+  "Photo",
+  "Notes",
+  "Measurement_ID",
+  "Source"
+] as const;
+
+const snapshotCapture = (): FitnessTrackerWeightSnapshotCapture => ({
   schemaVersion: FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
   spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
   workbookTitle: "Fitness Tracker",
@@ -321,7 +390,53 @@ const snapshotCapture = (): FitnessTrackerSnapshotCapture => ({
   }
 });
 
+const bodySnapshotCapture = (): FitnessTrackerBodySnapshotCapture => ({
+  schemaVersion: FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
+  spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+  workbookTitle: "Fitness Tracker",
+  locale: "ru_RU",
+  timeZone: "Europe/Moscow",
+  body: {
+    sheetId: 303,
+    title: "Body",
+    headers: bodyHeaders,
+    rows: []
+  }
+});
+
 describe("Private Fitness Tracker snapshot", () => {
+  it("keeps schema v1 Weight snapshots readable", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    const snapshotPath = path.join(directory, "legacy.json");
+    const capture = snapshotCapture();
+    const legacyFields = {
+      spreadsheetId: capture.spreadsheetId,
+      locale: capture.locale,
+      timeZone: capture.timeZone,
+      weight: capture.weight,
+      dailyLog: capture.dailyLog
+    };
+    try {
+      await writeFile(snapshotPath, `${JSON.stringify({
+        schemaVersion: 1,
+        spreadsheetId: capture.spreadsheetId,
+        workbookTitle: capture.workbookTitle,
+        locale: capture.locale,
+        timeZone: capture.timeZone,
+        weight: capture.weight,
+        dailyLog: capture.dailyLog,
+        manifestChecksum: computeFitnessTrackerManifestChecksum(legacyFields)
+      })}\n`, { mode: 0o600 });
+
+      const result = await new PrivateFitnessTrackerSnapshotReader(snapshotPath).readSnapshot();
+      if (!("weight" in result)) throw new Error("Expected Weight snapshot");
+      expect(result.weight.rows).toEqual(capture.weight.rows);
+      expect("body" in result).toBe(false);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
   it("round-trips a bounded capture with private permissions and stable checksum", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
     const firstPath = path.join(directory, "first.json");
@@ -335,7 +450,24 @@ describe("Private Fitness Tracker snapshot", () => {
       expect((await stat(firstPath)).mode & 0o777).toBe(0o600);
       expect(first.manifestChecksum).toMatch(/^[0-9a-f]{64}$/);
       expect(first.manifestChecksum).toBe(second.manifestChecksum);
+      if (!("weight" in first)) throw new Error("Expected Weight snapshot");
       expect(first.weight.rows).toEqual(snapshotCapture().weight.rows);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("round-trips a Body-only schema v2 capture", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    const snapshotPath = path.join(directory, "body.json");
+    try {
+      await writePrivateFitnessTrackerSnapshot(snapshotPath, bodySnapshotCapture());
+      const result = await new PrivateFitnessTrackerSnapshotReader(snapshotPath).readSnapshot();
+
+      if (!("body" in result)) throw new Error("Expected Body snapshot");
+      expect(result.body.headers).toEqual(bodyHeaders);
+      expect("weight" in result).toBe(false);
+      expect("dailyLog" in result).toBe(false);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
@@ -361,6 +493,7 @@ describe("Private Fitness Tracker snapshot", () => {
         snapshotPath
       ).readSnapshot();
 
+      if (!("weight" in result)) throw new Error("Expected Weight snapshot");
       expect(result.weight.rows).toEqual(capture.weight.rows);
     } finally {
       await rm(directory, { force: true, recursive: true });
@@ -408,6 +541,27 @@ describe("Private Fitness Tracker snapshot", () => {
           unexpected: true
         })
       ).rejects.toThrow("unknown or missing fields");
+      const completeWeight = snapshotCapture();
+      const incomplete = {
+        schemaVersion: completeWeight.schemaVersion,
+        spreadsheetId: completeWeight.spreadsheetId,
+        workbookTitle: completeWeight.workbookTitle,
+        locale: completeWeight.locale,
+        timeZone: completeWeight.timeZone,
+        weight: completeWeight.weight
+      };
+      await expect(
+        writePrivateFitnessTrackerSnapshot(
+          path.join(directory, "incomplete.json"),
+          incomplete
+        )
+      ).rejects.toThrow("unknown or missing fields");
+      await expect(
+        writePrivateFitnessTrackerSnapshot(path.join(directory, "all-domains.json"), {
+          ...snapshotCapture(),
+          body: bodySnapshotCapture().body
+        })
+      ).rejects.toThrow("unknown or missing fields");
       const duplicate = snapshotCapture();
       await expect(
         writePrivateFitnessTrackerSnapshot(path.join(directory, "duplicate.json"), {
@@ -433,7 +587,7 @@ describe("Private Fitness Tracker snapshot", () => {
   it("rejects invalid version, metadata, locators, cells and bounds", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
     const cases: Array<[string, unknown, string]> = [
-      ["version", { ...snapshotCapture(), schemaVersion: 2 }, "schema version"],
+      ["version", { ...snapshotCapture(), schemaVersion: 3 }, "schema version"],
       ["metadata", { ...snapshotCapture(), workbookTitle: "Another book" }, "metadata"],
       [
         "locator",
@@ -493,14 +647,14 @@ describe("Private Fitness Tracker snapshot", () => {
 
   it("selects exactly one source and needs no Google credential for a snapshot", () => {
     expect(
-      createFitnessTrackerSource(" /private/tmp/snapshot.json ", {})
+      createFitnessTrackerSource(" /private/tmp/snapshot.json ", {}, "weight")
     ).toBeInstanceOf(PrivateFitnessTrackerSnapshotReader);
     expect(() =>
       createFitnessTrackerSource("/private/tmp/snapshot.json", {
         GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: "reader@example.test"
-      })
+      }, "weight")
     ).toThrow("cannot be combined");
-    expect(() => createFitnessTrackerSource(undefined, {})).toThrow(
+    expect(() => createFitnessTrackerSource(undefined, {}, "weight")).toThrow(
       "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL"
     );
   });

@@ -94,3 +94,50 @@ export function decodeWeightCursor(value: string): WeightListCursor {
     id: parsed.id
   };
 }
+
+/** Versioned keyset cursor for mixed instant and date-only Body sessions. */
+export interface BodyMeasurementSessionListCursor {
+  readonly version: 2;
+  readonly localDate: string;
+  readonly measuredAt: string | null;
+  readonly id: string;
+}
+
+/** Encodes a mixed-precision Body session list position. */
+export function encodeBodyMeasurementSessionCursor(
+  cursor: BodyMeasurementSessionListCursor
+): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+/** Decodes and validates a mixed-precision Body session cursor. */
+export function decodeBodyMeasurementSessionCursor(
+  value: string
+): BodyMeasurementSessionListCursor {
+  let parsed: Partial<BodyMeasurementSessionListCursor>;
+  try {
+    parsed = JSON.parse(
+      Buffer.from(value, "base64url").toString("utf8")
+    ) as Partial<BodyMeasurementSessionListCursor>;
+  } catch {
+    throw new DomainValidationError("cursor is invalid");
+  }
+  if (
+    parsed.version !== 2 ||
+    typeof parsed.localDate !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/u.test(parsed.localDate) ||
+    (parsed.measuredAt !== null &&
+      (typeof parsed.measuredAt !== "string" ||
+        Number.isNaN(new Date(parsed.measuredAt).valueOf()))) ||
+    typeof parsed.id !== "string" ||
+    !uuidPattern.test(parsed.id)
+  ) {
+    throw new DomainValidationError("cursor is invalid");
+  }
+  return {
+    version: 2,
+    localDate: parsed.localDate,
+    measuredAt: parsed.measuredAt,
+    id: parsed.id
+  };
+}

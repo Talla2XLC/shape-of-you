@@ -49,15 +49,22 @@ operator authorizes a specific write.
 
 - Metadata, headers for all 26 sheets, limited range/formula reads, and no
   copied personal values.
+- The `Body` sheet has numeric sheet ID `2000000003` and the bounded import
+  projection `A:J`: Date, five metric columns, Photo, Notes, Measurement_ID,
+  and Source. The accepted TASK-0048 live read observed headers and no data
+  rows.
 
 ## Decisions
 
 - Treat workbook as one operational system with domain modules/adapters, not a
   service or target table per sheet.
+- Domain runs capture only required sheets: Body alone for Body; Weight and
+  Daily_Log for Weight. Body Notes and Source are private, Measurement_ID is
+  stable identity, and Photo remains a blocking unsupported reference.
 
 ## Open questions
 
-- Body-photo/note privacy; repeated recipe ingredients; Rules classification;
+- Body media migration lifecycle; repeated recipe ingredients; Rules classification;
   authoritative exercise catalog; status vocabularies; historical requiredness.
 
 ## Related material

@@ -19,6 +19,13 @@ const nullableStringSchema = {
   ]
 } as const;
 
+const nullableDateTimeSchema = {
+  anyOf: [
+    { type: "string", format: "date-time" },
+    { type: "null" }
+  ]
+} as const;
+
 const nullableConfidenceSchema = {
   anyOf: [
     { type: "number", minimum: 0, maximum: 1, multipleOf: 0.001 },
@@ -59,6 +66,7 @@ export const BodyMeasurementSessionSchema = {
     "id",
     "personId",
     "measuredAt",
+    "temporalPrecision",
     "localDate",
     "timezone",
     "values",
@@ -74,7 +82,11 @@ export const BodyMeasurementSessionSchema = {
   properties: {
     id: { type: "string", format: "uuid" },
     personId: { type: "string", format: "uuid" },
-    measuredAt: { type: "string", format: "date-time" },
+    measuredAt: nullableDateTimeSchema,
+    temporalPrecision: {
+      type: "string",
+      enum: ["instant", "local_date"]
+    },
     localDate: { type: "string", format: "date" },
     timezone: { type: "string", minLength: 1, maxLength: 64 },
     values: {

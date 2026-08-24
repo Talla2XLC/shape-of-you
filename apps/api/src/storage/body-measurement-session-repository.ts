@@ -3,6 +3,7 @@ import {
   desc,
   eq,
   gte,
+  isNull,
   lt,
   lte,
   notExists,
@@ -30,8 +31,8 @@ import {
   type SourceReferenceRow
 } from "../database/schema.js";
 import {
-  decodeCursor,
-  encodeCursor
+  decodeBodyMeasurementSessionCursor,
+  encodeBodyMeasurementSessionCursor
 } from "../domain/cursor.js";
 import {
   ConflictError,
@@ -321,7 +322,9 @@ export class BodyMeasurementSessionRepository
     cursorValue?: string,
     metric?: BodyMeasurementValueInput["metric"]
   ): Promise<BodyMeasurementSessionList> {
-    const cursor = cursorValue ? decodeCursor(cursorValue) : undefined;
+    const cursor = cursorValue
+      ? decodeBodyMeasurementSessionCursor(cursorValue)
+      : undefined;
     const successor = alias(bodyMeasurementSessions, "body_successor");
     const rows = await this.database.db
       .select({
@@ -356,23 +359,36 @@ export class BodyMeasurementSessionRepository
             : undefined,
           cursor
             ? or(
-                lt(
-                  bodyMeasurementSessions.measuredAt,
-                  new Date(cursor.measuredAt)
-                ),
+                lt(bodyMeasurementSessions.localDate, cursor.localDate),
                 and(
-                  eq(
-                    bodyMeasurementSessions.measuredAt,
-                    new Date(cursor.measuredAt)
-                  ),
-                  lt(bodyMeasurementSessions.id, cursor.id)
+                  eq(bodyMeasurementSessions.localDate, cursor.localDate),
+                  cursor.measuredAt === null
+                    ? and(
+                        isNull(bodyMeasurementSessions.measuredAt),
+                        lt(bodyMeasurementSessions.id, cursor.id)
+                      )
+                    : or(
+                        lt(
+                          bodyMeasurementSessions.measuredAt,
+                          new Date(cursor.measuredAt)
+                        ),
+                        isNull(bodyMeasurementSessions.measuredAt),
+                        and(
+                          eq(
+                            bodyMeasurementSessions.measuredAt,
+                            new Date(cursor.measuredAt)
+                          ),
+                          lt(bodyMeasurementSessions.id, cursor.id)
+                        )
+                      )
                 )
               )
             : undefined
         )
       )
       .orderBy(
-        desc(bodyMeasurementSessions.measuredAt),
+        desc(bodyMeasurementSessions.localDate),
+        sql`${bodyMeasurementSessions.measuredAt} desc nulls last`,
         desc(bodyMeasurementSessions.id)
       )
       .limit(limit + 1);
@@ -386,8 +402,10 @@ export class BodyMeasurementSessionRepository
       items,
       nextCursor:
         hasNextPage && last
-          ? encodeCursor({
-              measuredAt: last.measuredAt.toISOString(),
+          ? encodeBodyMeasurementSessionCursor({
+              version: 2,
+              localDate: last.localDate,
+              measuredAt: last.measuredAt?.toISOString() ?? null,
               id: last.id
             })
           : null

@@ -25,12 +25,15 @@ one to five typed values with shared provenance; correction is full replacement.
 - `GET /v1/body-measurement-sessions/:id` — immutable snapshot.
 - `GET /v1/body-measurement-sessions/:id/history` — correction chain.
 - `GET /v1/body-measurement-sessions?limit=50&cursor=...&metric=waist` —
-  current sessions ordered `(measuredAt DESC, id DESC)`, optional metric.
+  current sessions ordered by local date, then exact time with date-only rows
+  last within the date, then ID; optional metric.
 
-Create/correction accept time, IANA timezone, values, dedupe key,
+Create/correction require an exact time, IANA timezone, values, dedupe key,
 SourceReference, and nullable confidence/photoMediaId/note. Values use metric
 `waist|chest|hips|thigh|biceps`, `1.00..500.00`, and `cm`; duplicate metrics are
-invalid. Server context supplies Person and generated fields.
+invalid. Server context supplies Person and generated fields. Read contracts
+return `temporalPrecision=instant|local_date` and nullable `measuredAt`; only
+the controlled import path creates `local_date` sessions.
 
 ## Evidence
 

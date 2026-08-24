@@ -92,6 +92,13 @@
       "when": 1787478844910,
       "tag": "20260823095404_powerful_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787556245469,
+      "tag": "20260824072405_body_import_adapter",
+      "breakpoints": true
     }
   ]
 }

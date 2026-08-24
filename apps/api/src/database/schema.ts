@@ -66,6 +66,10 @@ export const weightTemporalPrecision = pgEnum("weight_temporal_precision", [
   "instant",
   "local_date"
 ]);
+export const bodyMeasurementTemporalPrecision = pgEnum(
+  "body_measurement_temporal_precision",
+  ["instant", "local_date"]
+);
 export const bodyMeasurementMetric = pgEnum("body_measurement_metric", [
   "waist",
   "chest",
@@ -620,7 +624,10 @@ export const bodyMeasurementSessions = pgTable(
     measuredAt: timestamp("measured_at", {
       withTimezone: true,
       mode: "date"
-    }).notNull(),
+    }),
+    temporalPrecision: bodyMeasurementTemporalPrecision("temporal_precision")
+      .default("instant")
+      .notNull(),
     localDate: date("local_date", { mode: "string" }).notNull(),
     timezone: varchar("timezone", { length: 64 }).notNull(),
     source: sourceChannel("source").notNull(),
@@ -662,6 +669,10 @@ export const bodyMeasurementSessions = pgTable(
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
     check(
+      "body_measurement_sessions_temporal_shape",
+      sql`(${table.temporalPrecision} = 'instant' AND ${table.measuredAt} IS NOT NULL) OR (${table.temporalPrecision} = 'local_date' AND ${table.measuredAt} IS NULL)`
+    ),
+    check(
       "body_measurement_sessions_confidence_range",
       sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`
     ),
@@ -696,6 +707,78 @@ export const bodyMeasurementValues = pgTable(
     ),
     check(
       "body_measurement_values_range",
+      sql`${table.value} >= 1.00 AND ${table.value} <= 500.00`
+    )
+  ]
+);
+
+export const bodyImportRecords = pgTable(
+  "body_import_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    sourceSheetId: integer("source_sheet_id"),
+    sourceLocator: varchar("source_locator", { length: 128 }).notNull(),
+    sourceMeasurementId: varchar("source_measurement_id", { length: 512 }),
+    sourceLocalDate: date("source_local_date", { mode: "string" }),
+    sourceChecksum: varchar("source_checksum", { length: 64 }),
+    normalizedLocalDate: date("normalized_local_date", { mode: "string" }),
+    normalizedNote: text("normalized_note"),
+    normalizedSource: varchar("normalized_source", { length: 256 }),
+    outcome: importRecordOutcome("outcome").notNull(),
+    findingCode: varchar("finding_code", { length: 64 }).notNull(),
+    targetSessionId: uuid("target_session_id"),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "body_import_records_batch_same_person_fk",
+      columns: [table.batchId, table.personId],
+      foreignColumns: [importBatches.id, importBatches.personId]
+    }),
+    foreignKey({
+      name: "body_import_records_target_same_person_fk",
+      columns: [table.targetSessionId, table.personId],
+      foreignColumns: [bodyMeasurementSessions.id, bodyMeasurementSessions.personId]
+    }),
+    uniqueIndex("body_import_records_batch_locator_code_uq").on(
+      table.batchId,
+      table.sourceLocator,
+      table.findingCode
+    ),
+    check(
+      "body_import_records_valid_shape",
+      sql`${table.outcome} IN ('conflict', 'invalid') OR (${table.sourceMeasurementId} IS NOT NULL AND ${table.normalizedLocalDate} IS NOT NULL AND ${table.sourceChecksum} IS NOT NULL)`
+    )
+  ]
+);
+
+export const bodyImportRecordValues = pgTable(
+  "body_import_record_values",
+  {
+    recordId: uuid("record_id").notNull(),
+    metric: bodyMeasurementMetric("metric").notNull(),
+    value: numeric("value", { precision: 6, scale: 2 }).notNull(),
+    unit: bodyMeasurementUnit("unit").default("cm").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "body_import_record_values_record_fk",
+      columns: [table.recordId],
+      foreignColumns: [bodyImportRecords.id]
+    }).onDelete("cascade"),
+    unique("body_import_record_values_record_metric_uq").on(
+      table.recordId,
+      table.metric
+    ),
+    check(
+      "body_import_record_values_range",
       sql`${table.value} >= 1.00 AND ${table.value} <= 500.00`
     )
   ]

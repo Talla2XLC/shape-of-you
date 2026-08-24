@@ -182,6 +182,7 @@ export class DayClosureService {
           .map((item) => ({
             id: item.id,
             measuredAt: item.measuredAt,
+            temporalPrecision: item.temporalPrecision,
             values: item.values.map((value) => ({
               metric: value.metric,
               value: value.value,

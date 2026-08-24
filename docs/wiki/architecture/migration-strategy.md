@@ -58,11 +58,24 @@ unchanged facts are never rewritten. Batch, audit, provenance, and facts commit
 or roll back together. Future domains add typed adapters and audit tables to
 this lifecycle rather than separate migration programs or generic JSON facts.
 
+TASK-0048 adds Body as the second adapter to that same command and lifecycle:
+`fitness-tracker:import --domain body --mode dry-run|apply`. A Body run reads
+only the bounded `Body` range; a Weight run reads only `Weight` and
+`Daily_Log`. Private snapshot schema v2 accepts exactly one typed domain subset
+while schema v1 Weight snapshots remain readable. This prevents each new
+adapter from expanding into an all-workbook capture.
+
 Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
 date; row position is locator evidence and content checksum remains separate.
 Date-only Weight evidence is stored with explicit `local_date` precision and a
 null instant; existing and interactive Weight facts retain `instant` precision.
 The importer never synthesizes midnight.
+
+Body source identity combines spreadsheet ID, numeric sheet ID, and required
+`Measurement_ID`; row position remains locator evidence only. Imported Body
+rows also preserve `local_date` precision with a null instant. Notes and source
+labels remain private relational audit evidence. A non-empty Photo reference
+blocks the row until a media migration capability exists.
 
 Controlled one-time runs execute from the operator workstation. Codex reads
 only approved bounded ranges, capped by current sheet grid metadata, from the
@@ -107,14 +120,19 @@ automatically changes closed days or ambiguous facts.
   lifecycle: 20 missing facts plus relational provenance/audit were created.
   A same-manifest read-only verification returned `unchanged=20` with every
   other outcome zero. Sheets remains authoritative; this was not cutover.
+- The first exact-workbook Body read contained headers and no data rows. A
+  Body-only private snapshot was compared with staging PostgreSQL read-only and
+  returned `created=0`, `unchanged=0`, `conflict=0`, `invalid=0`; the snapshot
+  and tunnel were removed afterwards.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
 
 - Pull-based import, typed adapters, exclusive-writer cutover, and rollback are
   accepted in the linked ADR.
-- Weight dry-run and controlled apply are implemented; real-data execution,
-  recurring reconciliation, and authority transfer remain separately gated.
+- Weight and Body dry-run/apply adapters are implemented. Body apply has not
+  been executed against staging because the authoritative Body source is empty;
+  recurring reconciliation and authority transfer remain separately gated.
 
 ## Open questions
 
@@ -130,3 +148,4 @@ automatically changes closed days or ambiguous facts.
 - [Glossary](../domain/glossary.md)
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Operator-workstation import ADR](../../adr/20260823-run-controlled-sheets-imports-from-operator-workstation.md)
+- [Body import precision and audit ADR](../../adr/20260824-use-explicit-body-temporal-precision-and-typed-import-records.md)

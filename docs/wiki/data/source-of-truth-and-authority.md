@@ -41,11 +41,17 @@ For Weight, `Weight` is migration authority and `Daily_Log.Weight` is legacy
 mirror/reconciliation evidence. Equal mirror values create no second fact;
 discrepancy blocks automatic import and requires investigation.
 
-The implemented TASK-0044 Weight dry-run preserves this authority boundary. It
-can classify source candidates against PostgreSQL, but has no PostgreSQL or
-Sheets writer and persists no import state. A `created` result is only an
-intention, not a fact insertion. Existing facts are never overwritten, and
-date-only source evidence is not converted to an invented timestamp.
+The unified importer preserves this authority boundary for Weight and Body.
+Dry-run classifies source candidates against PostgreSQL and persists nothing.
+Apply is a separately invoked transactional mode that creates only missing
+facts plus provenance and typed audit; it never writes Sheets or overwrites an
+existing fact. Date-only source evidence is not converted to an invented
+timestamp.
+
+For Body, the `Body` sheet is migration authority. Stable source identity is
+the exact workbook, numeric sheet ID, and `Measurement_ID`. The importer reads
+only Body for this domain. Notes and source labels remain private evidence; a
+Photo reference blocks automatic import until media handling is designed.
 
 After cutover, Brand/Ingredient/FoodVersion are shared definitions; personal
 catalog stores overlays/private items. Until then, Sheets remains authority for
@@ -64,13 +70,15 @@ write to Sheets requires separate operator approval.
 
 - Weight mirror, Meal aggregation, Training-derived records/program fields,
   NL_Engine/Inbox lifecycle, and Self_Healing read-back.
-- Accepted TASK-0044 Weight dry-run and zero-write integration evidence.
+- Accepted Weight dry-run/apply evidence and TASK-0048 Body dry-run, atomic
+  apply, privacy, and typed-audit evidence.
 
 ## Decisions
 
 - Authority follows field/record type. The Google Sheets cutover ADR remains
   unchanged.
-- TASK-0044 changes neither the active writer nor operational authority.
+- Weight and Body importer work changes neither the active writer nor
+  operational authority.
 
 ## Open questions
 

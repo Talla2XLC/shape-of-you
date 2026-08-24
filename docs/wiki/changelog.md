@@ -18,6 +18,20 @@ stages.
 
 ## Content
 
+### 2026-08-24 — Body adapter in the unified Fitness Tracker importer
+
+- Added Body to the existing `fitness-tracker:import` command and shared atomic
+  lifecycle; no separate migrator, deployable, database, or writer was added.
+- Preserved date-only Body evidence as `local_date` with null `measuredAt`,
+  stable workbook/sheet/`Measurement_ID` provenance, partial typed metric
+  sessions, private Notes/Source, and blocking Photo references.
+- Added typed relational Body import audit and schema-v2 domain-minimal private
+  snapshots while retaining schema-v1 Weight compatibility.
+- Completed a Body-only exact-workbook read and staging read-only dry-run with
+  `created=0`, `unchanged=0`, `conflict=0`, `invalid=0`; the authoritative Body
+  sheet contained no data rows. No apply, Sheets write, deployment, cutover, or
+  authority transfer occurred.
+
 ### 2026-08-24 — Controlled staging Weight apply
 
 - Applied one clean bounded Weight manifest through the existing unified

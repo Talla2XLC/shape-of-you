@@ -7,39 +7,56 @@ import {
   FITNESS_TRACKER_SPREADSHEET_ID,
   type BoundedSheetRow,
   type BoundedSheetSnapshot,
+  type FitnessTrackerSourceSnapshot,
   type FitnessTrackerWeightSnapshot,
   type SheetCellValue
 } from "./fitness-tracker-sheets-reader.js";
 
 /** Current private snapshot envelope emitted by connector orchestration. */
-export const FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION = 1;
+export const FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION = 2;
+const legacySnapshotSchemaVersion = 1;
 
 const maxSnapshotBytes = 16 * 1024 * 1024;
 const workbookTitle = "Fitness Tracker";
 
-/** Connector-owned capture before the canonical manifest checksum is attached. */
-export interface FitnessTrackerSnapshotCapture {
+interface FitnessTrackerSnapshotCaptureBase {
   readonly schemaVersion: typeof FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION;
   readonly spreadsheetId: typeof FITNESS_TRACKER_SPREADSHEET_ID;
   readonly workbookTitle: typeof workbookTitle;
   readonly locale: "ru_RU";
   readonly timeZone: "Europe/Moscow";
+}
+
+/** Connector-owned Weight capture before the canonical checksum is attached. */
+export interface FitnessTrackerWeightSnapshotCapture
+  extends FitnessTrackerSnapshotCaptureBase {
   readonly weight: BoundedSheetSnapshot;
   readonly dailyLog: BoundedSheetSnapshot;
 }
 
-interface FitnessTrackerSnapshotFile extends FitnessTrackerSnapshotCapture {
-  readonly manifestChecksum: string;
+/** Connector-owned Body capture before the canonical checksum is attached. */
+export interface FitnessTrackerBodySnapshotCapture
+  extends FitnessTrackerSnapshotCaptureBase {
+  readonly body: BoundedSheetSnapshot;
 }
+
+/** Exactly one typed domain subset captured from the authoritative workbook. */
+export type FitnessTrackerSnapshotCapture =
+  | FitnessTrackerWeightSnapshotCapture
+  | FitnessTrackerBodySnapshotCapture;
+
+type FitnessTrackerSnapshotFile = FitnessTrackerSnapshotCapture & {
+  readonly manifestChecksum: string;
+};
 
 /** Reads a bounded private snapshot without following symlinks or permissive files. */
 export class PrivateFitnessTrackerSnapshotReader
-  implements ImportSourceReader<FitnessTrackerWeightSnapshot>
+  implements ImportSourceReader<FitnessTrackerSourceSnapshot>
 {
   public constructor(private readonly path: string) {}
 
   /** Validates file safety, schema, source metadata, bounds, and checksum. */
-  public async readSnapshot(): Promise<FitnessTrackerWeightSnapshot> {
+  public async readSnapshot(): Promise<FitnessTrackerSourceSnapshot> {
     const handle = await open(
       this.path,
       constants.O_RDONLY | constants.O_NOFOLLOW
@@ -88,15 +105,14 @@ export function parseFitnessTrackerSnapshotCapture(
   input: unknown
 ): FitnessTrackerSnapshotCapture {
   const root = record(input, "snapshot capture");
-  exactKeys(root, [
-    "schemaVersion",
-    "spreadsheetId",
-    "workbookTitle",
-    "locale",
-    "timeZone",
-    "weight",
-    "dailyLog"
-  ]);
+  const commonKeys = [
+    "schemaVersion", "spreadsheetId", "workbookTitle", "locale", "timeZone"
+  ] as const;
+  const hasWeightShape = hasExactKeys(root, [...commonKeys, "weight", "dailyLog"]);
+  const hasBodyShape = hasExactKeys(root, [...commonKeys, "body"]);
+  if (!hasWeightShape && !hasBodyShape) {
+    throw new Error("Fitness Tracker snapshot contains unknown or missing fields");
+  }
   if (root.schemaVersion !== FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION) {
     throw new Error("Unsupported Fitness Tracker snapshot schema version");
   }
@@ -108,23 +124,25 @@ export function parseFitnessTrackerSnapshotCapture(
   ) {
     throw new Error("Fitness Tracker snapshot metadata does not match the approved source");
   }
-  const weight = sheet(root.weight, "Weight", 2);
-  const dailyLog = sheet(root.dailyLog, "Daily_Log", 52);
-  if (weight.sheetId === dailyLog.sheetId) {
-    throw new Error("Fitness Tracker snapshot sheet ids must be distinct");
-  }
-  return {
+  const base = {
     schemaVersion: FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
     spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
     workbookTitle,
-    locale: "ru_RU",
-    timeZone: "Europe/Moscow",
-    weight,
-    dailyLog
-  };
+    locale: "ru_RU" as const,
+    timeZone: "Europe/Moscow" as const
+  } as const;
+  if (hasWeightShape) {
+    const weight = sheet(root.weight, "Weight", 2);
+    const dailyLog = sheet(root.dailyLog, "Daily_Log", 52);
+    if (weight.sheetId === dailyLog.sheetId) {
+      throw new Error("Fitness Tracker snapshot sheet ids must be distinct");
+    }
+    return { ...base, weight, dailyLog };
+  }
+  return { ...base, body: sheet(root.body, "Body", 10) };
 }
 
-function parseFitnessTrackerSnapshotFile(raw: string): FitnessTrackerWeightSnapshot {
+function parseFitnessTrackerSnapshotFile(raw: string): FitnessTrackerSourceSnapshot {
   let decoded: unknown;
   try {
     decoded = JSON.parse(raw);
@@ -132,16 +150,9 @@ function parseFitnessTrackerSnapshotFile(raw: string): FitnessTrackerWeightSnaps
     throw new Error("Fitness Tracker snapshot is not valid JSON");
   }
   const root = record(decoded, "snapshot file");
-  exactKeys(root, [
-    "schemaVersion",
-    "spreadsheetId",
-    "workbookTitle",
-    "locale",
-    "timeZone",
-    "weight",
-    "dailyLog",
-    "manifestChecksum"
-  ]);
+  if (root.schemaVersion === legacySnapshotSchemaVersion) {
+    return parseLegacySnapshotFile(root);
+  }
   const { manifestChecksum, ...captureFields } = root;
   if (
     typeof manifestChecksum !== "string" ||
@@ -158,21 +169,26 @@ function parseFitnessTrackerSnapshotFile(raw: string): FitnessTrackerWeightSnaps
 
 function toSnapshot(
   capture: FitnessTrackerSnapshotCapture
-): FitnessTrackerWeightSnapshot {
-  const withoutChecksum = {
+): FitnessTrackerSourceSnapshot {
+  const base = {
     spreadsheetId: capture.spreadsheetId,
     locale: capture.locale,
-    timeZone: capture.timeZone,
-    weight: capture.weight,
-    dailyLog: capture.dailyLog
+    timeZone: capture.timeZone
   } as const;
+  const withoutChecksum = "body" in capture
+    ? { ...base, body: capture.body }
+    : { ...base, weight: capture.weight, dailyLog: capture.dailyLog };
   return {
     ...withoutChecksum,
     manifestChecksum: computeFitnessTrackerManifestChecksum(withoutChecksum)
   };
 }
 
-function sheet(input: unknown, title: "Weight" | "Daily_Log", columns: number) {
+function sheet(
+  input: unknown,
+  title: "Weight" | "Daily_Log" | "Body",
+  columns: number
+) {
   const value = record(input, `${title} sheet`);
   exactKeys(value, ["sheetId", "title", "headers", "rows"]);
   if (!Number.isSafeInteger(value.sheetId) || Number(value.sheetId) < 0) {
@@ -186,7 +202,22 @@ function sheet(input: unknown, title: "Weight" | "Daily_Log", columns: number) {
     if (typeof header !== "string") throw new Error(`${title} header is invalid`);
     return header;
   });
-  const required = title === "Weight" ? ["Date", "Weight_kg"] : ["Date", "Weight"];
+  const required = title === "Weight"
+    ? ["Date", "Weight_kg"]
+    : title === "Daily_Log"
+      ? ["Date", "Weight"]
+      : [
+          "Date",
+          "Waist_cm",
+          "Chest_cm",
+          "Hips_cm",
+          "Thigh_cm",
+          "Biceps_cm",
+          "Photo",
+          "Notes",
+          "Measurement_ID",
+          "Source"
+        ];
   if (!required.every((header) => headers.includes(header))) {
     throw new Error(`${title} required headers are missing`);
   }
@@ -205,7 +236,7 @@ function sheet(input: unknown, title: "Weight" | "Daily_Log", columns: number) {
 
 function row(
   input: unknown,
-  title: "Weight" | "Daily_Log",
+  title: "Weight" | "Daily_Log" | "Body",
   columns: number
 ): BoundedSheetRow {
   const value = record(input, `${title} row`);
@@ -221,6 +252,53 @@ function row(
     throw new Error(`${title} row cells are outside the allowed bound`);
   }
   return { locator: value.locator, values: value.values.map(cell) };
+}
+
+function parseLegacySnapshotFile(
+  root: Record<string, unknown>
+): FitnessTrackerWeightSnapshot {
+  exactKeys(root, [
+    "schemaVersion",
+    "spreadsheetId",
+    "workbookTitle",
+    "locale",
+    "timeZone",
+    "weight",
+    "dailyLog",
+    "manifestChecksum"
+  ]);
+  if (
+    root.spreadsheetId !== FITNESS_TRACKER_SPREADSHEET_ID ||
+    root.workbookTitle !== workbookTitle ||
+    root.locale !== "ru_RU" ||
+    root.timeZone !== "Europe/Moscow"
+  ) {
+    throw new Error("Fitness Tracker snapshot metadata does not match the approved source");
+  }
+  const manifestChecksum = root.manifestChecksum;
+  if (typeof manifestChecksum !== "string" || !/^[0-9a-f]{64}$/.test(manifestChecksum)) {
+    throw new Error("Fitness Tracker snapshot manifest checksum is invalid");
+  }
+  const weight = sheet(root.weight, "Weight", 2);
+  const dailyLog = sheet(root.dailyLog, "Daily_Log", 52);
+  if (weight.sheetId === dailyLog.sheetId) {
+    throw new Error("Fitness Tracker snapshot sheet ids must be distinct");
+  }
+  const fields = {
+    spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+    locale: "ru_RU" as const,
+    timeZone: "Europe/Moscow" as const,
+    weight,
+    dailyLog
+  } as const;
+  const snapshot = {
+    ...fields,
+    manifestChecksum: computeFitnessTrackerManifestChecksum(fields)
+  };
+  if (snapshot.manifestChecksum !== manifestChecksum) {
+    throw new Error("Fitness Tracker snapshot manifest checksum does not match");
+  }
+  return snapshot;
 }
 
 function cell(value: unknown): SheetCellValue {
@@ -243,9 +321,17 @@ function record(value: unknown, label: string): Record<string, unknown> {
 }
 
 function exactKeys(value: Record<string, unknown>, expected: readonly string[]) {
-  const actual = Object.keys(value).sort();
-  const wanted = [...expected].sort();
-  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+  if (!hasExactKeys(value, expected)) {
     throw new Error("Fitness Tracker snapshot contains unknown or missing fields");
   }
+}
+
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[]
+): boolean {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  return actual.length === wanted.length &&
+    actual.every((key, index) => key === wanted[index]);
 }
