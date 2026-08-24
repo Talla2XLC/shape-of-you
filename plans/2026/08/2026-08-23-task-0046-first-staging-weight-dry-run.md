@@ -1,107 +1,120 @@
-# TASK-0046 — Первый контролируемый staging Weight dry-run
+# TASK-0046 — Первый локально управляемый staging Weight dry-run
 
 ## Статус и разрешение
 
-- Статус: implementation accepted 2026-08-23; ожидает commit и отдельных
-  operational approvals.
-- Текущий owner: `release`.
-- Оператор одобрил начало TASK-0046 и ранее утвердил credential strategy:
-  отдельная API-owned Google service identity, read-only доступ только к точному
-  workbook, secret через существующий runtime-механизм, без хранения в Git.
-- Оператор явно утвердил ADR и план командой `го` 2026-08-23.
-- Реальные credentials, изменение workbook sharing, staging deploy и live
-  dry-run остаются отдельными явными operational gates.
+- Статус: revised и approved 2026-08-23, implementation in progress.
+- Текущий owner: `developer`.
+- Оператор уточнил, что migration/reconciliation runs являются ограниченными
+  ручными операциями, и утвердил local operator-run вместо server runtime.
+- Предыдущее staging credential решение superseded до создания credentials или
+  live run; dormant wiring удаляется.
+- Google Sheets остаётся read-only authority. Реальный snapshot read, staging
+  connection и live dry-run разрешены; `apply`, cutover и Sheets writes нет.
 
 ## Цель
 
-Подготовить воспроизводимый least-privilege staging runtime для уже
-реализованного единого Fitness Tracker importer и после отдельного допуска
-выполнить первый Weight dry-run против точного workbook и staging PostgreSQL,
-получив безопасные `created / unchanged / conflict / invalid` counts без записи
-в обе системы.
+Использовать установленный Google connector для bounded read точного workbook,
+передать эфемерный private snapshot существующему единому importer и локально
+получить первый Weight dry-run baseline против staging PostgreSQL без Google
+Cloud/service identity и без записи в обе системы.
 
 ## Входит
 
-1. Один dedicated one-shot Compose service/profile на существующем API image.
-2. Отдельный root-owned importer environment file mode `0600`, не подключённый
-   к обычному API и migration container.
-3. Optional complete credential delivery через существующий staging deployment
-   controller и manual boolean trigger, default `false`.
-4. Fail-closed validation для missing/partial configuration.
-5. Exact Weight dry-run command и только safe aggregate output.
-6. Deployment/Compose/security tests и operator instructions без secret values.
-7. После отдельного разрешения: конфигурация runtime values и один live dry-run.
-8. Independent Quality, Architecture Review и post-acceptance Wiki/changelog.
+1. Versioned typed snapshot-file contract для существующего Weight adapter.
+2. `--snapshot-file` в общей importer command без второго lifecycle.
+3. Валидация exact workbook metadata, sheet ids/titles, headers, scalar cells,
+   checksum, размера, regular-file/no-symlink и mode `0600`.
+4. Удаление неиспользованного staging credential/trigger/Compose plumbing.
+5. Unit/integration/deployment regression tests.
+6. Codex connector read только metadata и bounded Weight/Daily_Log ranges.
+7. Private temporary snapshot вне Git, локальный dry-run и гарантированный
+   cleanup после отдельно проверенного staging connection.
+8. Safe counts/status, Quality, Architecture Review и Wiki/changelog.
 
 ## Не входит
 
-- Новый Weight-specific или второй migration framework.
-- Google Sheets writes, PostgreSQL apply или автоматическое исправление фактов.
-- Body/Nutrition/Training/Recovery adapters.
-- Scheduler, recurring dual-run, cutover, rollback execution или authority
-  transfer.
-- Создание, чтение или раскрытие secret до отдельного разрешения.
-- Staging deploy, commit или push без соответствующего явного разрешения.
+- Извлечение или передача OAuth token Codex connector.
+- Google Cloud service identity, key или workbook sharing change.
+- Второй migrator, agent-side classification или XLSX whole-workbook export.
+- Google Sheets writes, PostgreSQL apply или автоматический conflict repair.
+- Scheduler, unattended recurring run, Body/Nutrition/Training/Recovery
+  adapters, cutover, rollback execution или authority transfer.
+- Commit/push без отдельного разрешения.
 
 ## Реализация
 
-1. [x] Утвердить dedicated one-shot staging runtime ADR и этот план.
-2. [x] Добавить manual workflow trigger и optional importer inputs/secret refs;
-   автоматический publish path оставляет trigger `false`.
-3. [x] Расширить deployment controller complete-set validation и атомарной
-   записью отдельного `fitness-tracker-import.env` mode `0600`.
-4. [x] Добавить one-shot Compose service без ports и browser secrets, с
-   минимальным network/filesystem access и exact importer command.
-5. [x] Запускать dry-run только при явном trigger; не создавать private artifact
-   и печатать только safe report.
-6. [x] Покрыть deployment contract: no-credentials automatic deploy, complete
-   manual run, partial config rejection, no secret logging и command failure.
-7. [x] Выполнить lint, typecheck, build, unit/integration tests, Compose config,
-   docs validator и `git diff --check`.
-8. [x] Провести independent Quality и Architecture Review; после принятия
-   обновить только затронутые current-state Wiki/changelog.
-9. [ ] Отдельно запросить operational approval на service identity/workbook
-   read-only sharing, GitHub Environment configuration и staging deploy.
-10. [ ] После отдельного live-run approval выполнить один Weight dry-run,
-    сохранить только безопасные counts/status и проверить отсутствие mutations.
-11. [ ] Представить результат и отдельно решить дальнейший dual-run; никогда не
-    переходить к `apply` или cutover автоматически.
+1. [x] Утвердить superseding ADR и revised plan.
+2. [x] Добавить validated private snapshot reader и versioned contract.
+3. [x] Подключить `--snapshot-file` к общей command без Google credentials.
+4. [x] Покрыть schema, checksum, metadata, permission/symlink/size и CLI source
+   selection tests.
+5. [x] Удалить dormant staging workflow/controller/Compose credential path и
+   обновить deployment contracts.
+6. [x] Выполнить lint, typecheck, build, unit, доступные staging contracts,
+   docs validator и `git diff --check`; зафиксировать недоступность локального
+   Docker-backed integration runtime.
+7. [x] Провести independent Quality и Architecture Review, обновить Wiki и
+   changelog.
+8. [x] После accepted implementation прочитать exact metadata и bounded ranges
+   через Google connector, создать private snapshot `0600` вне repository.
+9. [x] Установить подтверждённый read-only доступ к staging PostgreSQL,
+   выполнить тем же classifier один Weight dry-run и удалить snapshot.
+10. [x] Зафиксировать только safe counts/status и решить следующий manual
+    reconciliation run; не переходить к `apply` автоматически.
 
 ## Критерии приёмки
 
-1. Используется существующий единый importer; второго migrator нет.
-2. Обычный API, frontend и migration container не получают Google credentials.
-3. Автоматический staging deploy работает без importer configuration и никогда
-   не запускает dry-run.
-4. Manual trigger без полного набора параметров завершается до importer run.
-5. Dedicated environment file создаётся атомарно, принадлежит root, имеет mode
-   `0600` и не выводится в logs.
-6. One-shot service не публикует ports, не получает browser secrets и выполняет
-   только `--domain weight --mode dry-run`.
-7. Safe output содержит counts/status, но не credentials, raw cells,
-   Weight/date values или private report.
-8. Dry-run не пишет в Google Sheets и PostgreSQL и не меняет authority.
-9. Exact workbook ID и read-only Sheets scope остаются статически ограничены
-   существующим reader contract.
-10. Будущие typed adapters используют тот же runtime без нового deployment
-    механизма.
-11. Live run не начинается без отдельных credential, workbook, deploy и
-    execution approvals.
+1. Используется существующий единый importer и Weight adapter.
+2. `--snapshot-file` не требует и не читает Google credentials.
+3. Snapshot exact/versioned/bounded, checksum-protected, regular, не symlink,
+   mode `0600`, ограничен по размеру и удаляется после operation.
+4. JSON остаётся только ephemeral raw evidence и не попадает в PostgreSQL как
+   замена relational model.
+5. Connector читает точный workbook в пределах максимумов
+   `Weight!A1:B5000` и `Daily_Log!A1:AZ5000`, обрезанных до metadata grid
+   bounds; Sheets writes отсутствуют.
+6. Staging runtime больше не принимает и не хранит importer credentials и не
+   содержит importer trigger/service.
+7. Dry-run выполняет PostgreSQL comparison read-only, не создаёт batch/facts и
+   выводит только safe report.
+8. Raw cells, Weight/date values, connector token, database URL и credentials
+   не попадают в Git, logs, artifacts, board, Wiki или chat.
+9. `apply`, recurring automation и cutover остаются отдельными gates.
 
 ## План проверки
 
-- Unit/contract: envelope parsing, complete-set validation, boolean trigger,
-  redaction и exact command.
-- Deployment: automatic path without secrets, manual fail-closed paths,
-  atomic `0600` environment file handling.
-- Compose: resolved service config, no ports/browser env, database connectivity,
-  read-only filesystem где применимо.
-- Repository: lint, typecheck, build, tests, docs validator и diff check.
-- Live gate: safe counts/status, importer exit code и before/after proof нулевых
-  mutations без публикации private facts.
+- Unit: valid snapshot, deterministic checksum, invalid version/metadata,
+  unknown fields, bad scalar/locator, oversized row sets, symlink, permissive
+  mode, oversized file и checksum mismatch.
+- CLI: snapshot selection, no Google credential requirement, mutually exclusive
+  source configuration и safe output.
+- Integration: существующий real PostgreSQL read-only Weight dry-run и zero
+  mutations.
+- Deployment: automatic staging path без importer fields/service/env.
+- Operational: connector metadata/range bounds, private file mode, exact
+  command, safe counts и cleanup.
+
+## Operational evidence
+
+- Exact workbook metadata подтверждены: `Fitness Tracker`, `ru_RU`,
+  `Europe/Moscow`, numeric sheet ids `Weight=830411075`, `Daily_Log=0`.
+- Фактические grid bounds дали read-only ranges `Weight!A1:B1000` и
+  `Daily_Log!A1:AJ1000`; получено 22 и 35 range rows соответственно, пустые
+  промежуточные строки нормализованы так же, как live reader.
+- Staging PostgreSQL прочитан официальным target reader через локальный SSH
+  tunnel `talla2xlc@2.58.15.24`; runtime secret использован только в памяти
+  процесса и не выводился/не сохранялся.
+- Accepted safe dry-run counts: `created=20`, `unchanged=0`, `conflict=0`,
+  `invalid=0`.
+- Private mode-`0600` snapshot удалён после запуска. Sheets и PostgreSQL не
+  изменялись.
+- `lint`, `typecheck`, `build`, 78 unit tests, docs validation и статические
+  staging contracts прошли. Docker-backed integration/runtime tests не
+  запускались, потому что локальный Docker daemon недоступен; PostgreSQL
+  lifecycle code в этом изменении не менялся.
 
 ## Решение об утверждении
 
-Оператор утвердил ADR и этот план командой `го` 2026-08-23. Implementation
-выполняется одним delivery циклом в TASK-0046; operational live-run gates не
-считаются утверждёнными автоматически.
+Оператор утвердил переход к local operator-run командой `ок го` 2026-08-23.
+Live operation ограничена Weight `dry-run`; дальнейшие writes и cutover не
+разрешены.

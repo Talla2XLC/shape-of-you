@@ -100,18 +100,6 @@ same image digest. `STAGING_DATABASE_URL` is delivered through protected
 Environment input into root-owned `/etc/shape-of-you/staging/api.env` mode
 `0600`. No Kubernetes assets exist yet.
 
-The Fitness Tracker importer is a second one-shot process from the same API
-image, not another deployable. It has a dedicated Compose profile and receives
-only `DATABASE_URL`, the approved Person id, and the read-only Google service
-identity through root-owned
-`/etc/shape-of-you/staging/fitness-tracker-import.env` mode `0600`. That file is
-not attached to API or migration containers. Automatic `main` deployments set
-the importer trigger to `false`; an explicitly approved manual deployment can
-run the exact Weight dry-run after API migrations. Missing or partial importer
-configuration fails closed, and the process emits only its safe aggregate
-report. Credential provisioning, workbook sharing, live execution, `apply`,
-recurring dual-run, and cutover remain separate operational gates.
-
 VM resources are limited and swap is in use. Current limits (`384m` API,
 `64m` edge) require observation before adding load.
 
@@ -158,7 +146,6 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
-- [Dedicated one-shot importer runtime](../../adr/20260823-use-dedicated-one-shot-staging-import-runtime.md)
 
 ## Open questions
 

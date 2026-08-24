@@ -64,20 +64,21 @@ Date-only Weight evidence is stored with explicit `local_date` precision and a
 null instant; existing and interactive Weight facts retain `instant` precision.
 The importer never synthesizes midnight.
 
-The reader uses a dedicated API-owned Google service identity with
-`spreadsheets.readonly`, access restricted operationally to the exact workbook,
-and secret delivery through the existing runtime mechanism. Credentials are
-not stored in Git or emitted in reports. The apply capability is implemented,
-but real-data execution, recurring dual-run, live credential use, and cutover
-remain separately approved operations.
+Controlled one-time runs execute from the operator workstation. Codex reads
+only approved bounded ranges, capped by current sheet grid metadata, from the
+exact workbook through the connected
+Google account, then passes a versioned private snapshot to the same importer.
+The snapshot is an ephemeral transport envelope, not a domain model: it has a
+canonical checksum, mode `0600`, strict bounds and source metadata, and is
+deleted after the run. The connector token is neither extracted nor delivered
+to the API. Staging deployment has no importer profile, trigger, Google
+credential, or dedicated runtime environment.
 
-Staging now provides a dedicated one-shot Compose profile for that same
-importer. Its separate root-owned mode-`0600` environment is not attached to
-the long-running API or migration container. Automatic deployments never run
-the importer; an approved manual deployment requires the complete Person and
-service-identity configuration and can invoke only the Weight `dry-run`. The
-first credential provisioning, exact-workbook Viewer grant, staging deploy,
-and live run have not been performed.
+The existing service-identity reader remains available for a future approved
+unattended cadence, but provisioning and scheduling it are deferred until such
+automation is needed. The apply capability is implemented, but real-data
+execution, recurring dual-run, live service-identity use, and cutover remain
+separately approved operations.
 
 Before cutover, Shape of You MCP must provide tested typed write tools for
 every fact type used by the ChatGPT project, including Garmin/Recovery
@@ -98,6 +99,10 @@ automatically changes closed days or ambiguous facts.
 - TASK-0044 accepted Quality and Architecture Review evidence.
 - Synthetic Google Sheets adapter, outcome, reconciliation, safety, and
   PostgreSQL zero-write tests.
+- The first bounded live Sheets-to-staging PostgreSQL dry-run completed through
+  the official read-only target reader: `created=20`, `unchanged=0`,
+  `conflict=0`, `invalid=0`. The private snapshot was removed and the SSH
+  tunnel closed immediately after execution.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
@@ -120,4 +125,4 @@ automatically changes closed days or ambiguous facts.
 - [Roadmap](../roadmap/overview.md)
 - [Glossary](../domain/glossary.md)
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
-- [Dedicated one-shot staging importer ADR](../../adr/20260823-use-dedicated-one-shot-staging-import-runtime.md)
+- [Operator-workstation import ADR](../../adr/20260823-run-controlled-sheets-imports-from-operator-workstation.md)

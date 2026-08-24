@@ -2,10 +2,10 @@
 id: "decisions-20260823-use-dedicated-one-shot-staging-import-runtime"
 kind: adr
 title: "Использовать отдельный одноразовый staging runtime для Fitness Tracker importer"
-status: accepted
+status: superseded
 date: 2026-08-23
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260823-run-controlled-sheets-imports-from-operator-workstation"
 tags:
   - "credentials"
   - "data-migration"

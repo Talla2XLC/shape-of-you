@@ -4,6 +4,3 @@ services:
 
   migrate:
     env_file: !reset []
-
-  fitness-tracker-import:
-    env_file: !reset []

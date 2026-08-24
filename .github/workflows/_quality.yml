@@ -30,9 +30,6 @@ jobs:
       - name: Test stable deployment bootstrap contract
         run: sh deploy/staging/scripts/tests/deployment-bootstrap-contract.sh
 
-      - name: Test Fitness Tracker importer deployment contract
-        run: sh deploy/staging/scripts/tests/fitness-tracker-import-contract.sh
-
       - name: Test frontend edge contract
         run: sh deploy/staging/scripts/tests/frontend-edge-contract.sh
 

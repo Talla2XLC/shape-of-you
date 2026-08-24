@@ -50,7 +50,6 @@ STAGING_IDENTITY_OAUTH_SIGNING_KEYS
 STAGING_IDENTITY_OAUTH_COOKIE_KEYS
 STAGING_VM_SSH_PRIVATE_KEY
 STAGING_VM_KNOWN_HOSTS
-STAGING_GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY
 ```
 
 Variables:
@@ -65,8 +64,6 @@ STAGING_PUBLIC_IPV4
 STAGING_DEPLOYMENT_TOPOLOGY
 STAGING_IDENTITY_TOTP_ACTIVE_KEY_ID
 STAGING_IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID
-STAGING_FITNESS_TRACKER_PERSON_ID
-STAGING_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL
 ```
 
 Database URL shape:
@@ -85,15 +82,6 @@ is a non-secret variable. The deploy workflow and root wrapper require the
 complete TOTP and OAuth groups whenever Identity deployment is enabled, then
 write them only to root-owned `identity.env`. Do not print either generated
 ring, copy it into chat, or commit it.
-
-Fitness Tracker importer configuration is optional for ordinary deployments
-but must be absent or complete. The Person id and service-account email are
-protected Environment variables. The PKCS#8 private key is a protected secret
-stored on one line with literal `\n` sequences. The controller writes the
-complete group with `STAGING_DATABASE_URL` only to root-owned
-`/etc/shape-of-you/staging/fitness-tracker-import.env` mode `0600`; API,
-Identity, migrations, edge, and frontend do not receive it. Never inspect or
-print that file during routine verification.
 
 `STAGING_DEPLOYMENT_TOPOLOGY` accepts `shared-ingress` or `standalone`. The
 current shared VM uses `shared-ingress`; the workflow defaults to that value
@@ -128,9 +116,9 @@ project Certbot image and records provenance/SBOM; digest is deployment
 authority. After quality and publication for a `main` push, it automatically
 invokes `deploy-staging.yml` with all four digests. Manual targeted retry
 supplies full commit SHA, all image digests, separate API and Identity schema
-backward-compatibility flags, write-smoke choice, and the optional Fitness
-Tracker Weight dry-run choice. Automatic publication always sets both write
-smoke and importer dry-run to `false`.
+backward-compatibility flags, and the write-smoke choice. Fitness Tracker
+imports are not part of deployment; controlled runs use the operator
+workstation workflow documented in the migration strategy.
 
 The Environment job invokes only:
 
@@ -206,37 +194,6 @@ historical sequence prevented the new workflow input contract from racing the
 old installed root wrapper; the stable bootstrap removes this class of
 steady-state rollout race.
 
-### Fitness Tracker Weight dry-run
-
-This operation reads live operational data and requires separate approval for
-each of these gates: service-identity provisioning, exact-workbook sharing,
-GitHub Environment configuration, staging deployment, and live dry-run. It
-does not authorize `apply`, recurring execution, Sheets writes, cutover, or
-authority transfer.
-
-Before the first run:
-
-1. create the dedicated API-owned Google service identity;
-2. grant that exact identity Viewer access only to workbook
-   `1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik`;
-3. set `STAGING_FITNESS_TRACKER_PERSON_ID`,
-   `STAGING_GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL`, and the escaped private-key
-   secret in protected Environment `staging` without copying values to logs,
-   chat, repository files, or artifacts;
-4. select an accepted full commit and its four published image digests;
-5. manually dispatch `Deploy staging` with write smoke `false` and Fitness
-   Tracker Weight dry-run `true`;
-6. retain only the workflow status and safe `created / unchanged / conflict /
-   invalid` counts, and verify that no Sheets or PostgreSQL mutation occurred;
-7. stop and review the baseline. Do not proceed automatically to `apply`.
-
-The workflow rejects missing or partial configuration before deployment. The
-controller runs the exact existing command after API migrations in a
-read-only, portless one-shot container and fails the deployment if the command
-fails. Revoking workbook access, deleting/rotating the secret, retrying the
-deployment, or any rollback action is another external mutation and requires
-its own approval.
-
 ### TLS activation and renewal
 
 The first TLS-capable deployment verifies both DNS answers, the external
@@ -292,7 +249,6 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Dedicated identity ADR](../../adr/20260729-use-dedicated-staging-deployment-identity.md)
 - [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
-- [Dedicated one-shot importer runtime](../../adr/20260823-use-dedicated-one-shot-staging-import-runtime.md)
 
 ## Open questions
 

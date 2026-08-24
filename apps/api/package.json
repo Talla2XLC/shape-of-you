@@ -25,6 +25,7 @@
     "identity-access:manage": "tsx src/commands/manage-identity-access.ts",
     "identity-access:restore": "tsx src/commands/change-identity-access.ts --action restore",
     "fitness-tracker:import": "tsx src/commands/import-fitness-tracker.ts",
+    "fitness-tracker:snapshot:write": "tsx src/commands/write-fitness-tracker-snapshot.ts",
     "fitness-tracker:weight:dry-run": "tsx src/commands/import-fitness-tracker.ts --domain weight --mode dry-run",
     "identity-access:revoke": "tsx src/commands/change-identity-access.ts --action revoke"
   },

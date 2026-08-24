@@ -18,19 +18,22 @@ stages.
 
 ## Content
 
-### 2026-08-23 — Controlled staging Weight dry-run runtime
+### 2026-08-23 — Local controlled Weight dry-run input
 
-- Added a manual, default-off staging trigger for the existing unified Fitness
-  Tracker importer; automatic `main` deployments never run it.
-- Added a portless, read-only one-shot Compose process on the API image and a
-  separate root-owned mode-`0600` environment that is not exposed to API,
-  migrations, Identity, edge, or frontend.
-- Added complete-set credential validation, escaped private-key handling,
-  fail-closed deployment behavior, safe-output constraints, and deployment
-  contract coverage.
-- No real credentials were accessed, no workbook permission was changed, and
-  no staging deploy or live dry-run occurred. Those operations, plus `apply`,
-  recurring dual-run, and cutover, remain separately gated.
+- Replaced the unused staging importer profile and credential plumbing with a
+  local operator-run path through the existing unified importer.
+- Added a versioned, bounded private snapshot envelope with canonical checksum,
+  exact workbook metadata, mode `0600`, no-overwrite behavior, and strict
+  symlink, size, row, and cell validation.
+- Kept connector authentication outside the backend: Codex reads the exact
+  workbook through the connected operator account and the API receives only
+  the ephemeral snapshot. Staging deployment receives no Google credential.
+- Google Sheets writes, PostgreSQL `apply`, recurring dual-run, cutover, and
+  authority transfer remain separately gated.
+- Completed the first bounded live Sheets-to-staging PostgreSQL dry-run through
+  the official read-only target reader: `created=20`, `unchanged=0`,
+  `conflict=0`, `invalid=0`. The private snapshot and SSH tunnel were removed
+  immediately afterwards.
 
 ### 2026-08-23 — Unified Fitness Tracker importer and Weight apply
 

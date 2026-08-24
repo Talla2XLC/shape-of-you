@@ -124,11 +124,12 @@ export class FitnessTrackerSheetsReader
     requireHeader(weight, "Weight_kg");
     requireHeader(dailyLog, "Date");
     requireHeader(dailyLog, "Weight");
-    const manifestChecksum = digest({
-      spreadsheetId: workbook.spreadsheetId,
-      locale: workbook.properties.locale,
-      timeZone: workbook.properties.timeZone,
-      sheets: [weight, dailyLog]
+    const manifestChecksum = computeFitnessTrackerManifestChecksum({
+      spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+      locale: "ru_RU",
+      timeZone: "Europe/Moscow",
+      weight,
+      dailyLog
     });
     return {
       spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
@@ -215,6 +216,18 @@ function requireHeader(sheet: BoundedSheetSnapshot, header: string): void {
   if (!sheet.headers.includes(header)) {
     throw new Error(`Required header ${header} is missing from ${sheet.title}`);
   }
+}
+
+/** Computes the canonical checksum shared by live and private-file snapshots. */
+export function computeFitnessTrackerManifestChecksum(
+  snapshot: Omit<FitnessTrackerWeightSnapshot, "manifestChecksum">
+): string {
+  return digest({
+    spreadsheetId: snapshot.spreadsheetId,
+    locale: snapshot.locale,
+    timeZone: snapshot.timeZone,
+    sheets: [snapshot.weight, snapshot.dailyLog]
+  });
 }
 
 function digest(value: unknown): string {

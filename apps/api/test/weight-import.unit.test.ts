@@ -1,5 +1,13 @@
 import { decodeJwt, exportPKCS8, generateKeyPair } from "jose";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
@@ -10,6 +18,13 @@ import {
   FitnessTrackerSheetsReader,
   type FitnessTrackerWeightSnapshot
 } from "../src/import/fitness-tracker-sheets-reader.js";
+import { createFitnessTrackerSource } from "../src/import/fitness-tracker-source.js";
+import {
+  FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
+  PrivateFitnessTrackerSnapshotReader,
+  type FitnessTrackerSnapshotCapture,
+  writePrivateFitnessTrackerSnapshot
+} from "../src/import/private-fitness-tracker-snapshot.js";
 import {
   WeightDryRunAdapter,
   type WeightImportTarget
@@ -283,6 +298,211 @@ describe("Fitness Tracker read-only Sheets adapter", () => {
     ]);
     expect(result.weight.sheetId).toBe(901);
     expect(result.dailyLog.sheetId).toBe(902);
+  });
+});
+
+const snapshotCapture = (): FitnessTrackerSnapshotCapture => ({
+  schemaVersion: FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION,
+  spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+  workbookTitle: "Fitness Tracker",
+  locale: "ru_RU",
+  timeZone: "Europe/Moscow",
+  weight: {
+    sheetId: 101,
+    title: "Weight",
+    headers: ["Date", "Weight_kg"],
+    rows: [{ locator: "Weight!2", values: ["2026-08-21", 82] }]
+  },
+  dailyLog: {
+    sheetId: 202,
+    title: "Daily_Log",
+    headers: ["Date", "Weight"],
+    rows: [{ locator: "Daily_Log!2", values: ["2026-08-21", 82] }]
+  }
+});
+
+describe("Private Fitness Tracker snapshot", () => {
+  it("round-trips a bounded capture with private permissions and stable checksum", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    const firstPath = path.join(directory, "first.json");
+    const secondPath = path.join(directory, "second.json");
+    try {
+      await writePrivateFitnessTrackerSnapshot(firstPath, snapshotCapture());
+      await writePrivateFitnessTrackerSnapshot(secondPath, snapshotCapture());
+      const first = await new PrivateFitnessTrackerSnapshotReader(firstPath).readSnapshot();
+      const second = await new PrivateFitnessTrackerSnapshotReader(secondPath).readSnapshot();
+
+      expect((await stat(firstPath)).mode & 0o777).toBe(0o600);
+      expect(first.manifestChecksum).toMatch(/^[0-9a-f]{64}$/);
+      expect(first.manifestChecksum).toBe(second.manifestChecksum);
+      expect(first.weight.rows).toEqual(snapshotCapture().weight.rows);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("normalizes empty connector rows exactly like the live Sheets reader", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    const snapshotPath = path.join(directory, "snapshot.json");
+    const capture = snapshotCapture();
+    try {
+      await writePrivateFitnessTrackerSnapshot(snapshotPath, {
+        ...capture,
+        weight: {
+          ...capture.weight,
+          rows: [
+            { locator: "Weight!4", values: [] },
+            ...capture.weight.rows,
+            { locator: "Weight!5", values: [null, ""] }
+          ]
+        }
+      });
+      const result = await new PrivateFitnessTrackerSnapshotReader(
+        snapshotPath
+      ).readSnapshot();
+
+      expect(result.weight.rows).toEqual(capture.weight.rows);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("refuses overwrite, permissive files, symlinks and tampered checksums", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    const snapshotPath = path.join(directory, "snapshot.json");
+    const linkPath = path.join(directory, "snapshot-link.json");
+    try {
+      await writePrivateFitnessTrackerSnapshot(snapshotPath, snapshotCapture());
+      await expect(
+        writePrivateFitnessTrackerSnapshot(snapshotPath, snapshotCapture())
+      ).rejects.toThrow();
+
+      const encoded = await readFile(snapshotPath, "utf8");
+      await writeFile(snapshotPath, encoded.replace("2026-08-21", "2026-08-22"), {
+        mode: 0o600
+      });
+      await expect(
+        new PrivateFitnessTrackerSnapshotReader(snapshotPath).readSnapshot()
+      ).rejects.toThrow("checksum does not match");
+
+      await chmod(snapshotPath, 0o644);
+      await expect(
+        new PrivateFitnessTrackerSnapshotReader(snapshotPath).readSnapshot()
+      ).rejects.toThrow("mode 0600");
+      await chmod(snapshotPath, 0o600);
+      await symlink(snapshotPath, linkPath);
+      await expect(
+        new PrivateFitnessTrackerSnapshotReader(linkPath).readSnapshot()
+      ).rejects.toThrow();
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects unknown structure, duplicate locators and reused sheet ids", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    try {
+      await expect(
+        writePrivateFitnessTrackerSnapshot(path.join(directory, "unknown.json"), {
+          ...snapshotCapture(),
+          unexpected: true
+        })
+      ).rejects.toThrow("unknown or missing fields");
+      const duplicate = snapshotCapture();
+      await expect(
+        writePrivateFitnessTrackerSnapshot(path.join(directory, "duplicate.json"), {
+          ...duplicate,
+          weight: {
+            ...duplicate.weight,
+            rows: [...duplicate.weight.rows, duplicate.weight.rows[0]]
+          }
+        })
+      ).rejects.toThrow("locators must be unique");
+      const reusedId = snapshotCapture();
+      await expect(
+        writePrivateFitnessTrackerSnapshot(path.join(directory, "sheet-id.json"), {
+          ...reusedId,
+          dailyLog: { ...reusedId.dailyLog, sheetId: reusedId.weight.sheetId }
+        })
+      ).rejects.toThrow("sheet ids must be distinct");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects invalid version, metadata, locators, cells and bounds", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
+    const cases: Array<[string, unknown, string]> = [
+      ["version", { ...snapshotCapture(), schemaVersion: 2 }, "schema version"],
+      ["metadata", { ...snapshotCapture(), workbookTitle: "Another book" }, "metadata"],
+      [
+        "locator",
+        {
+          ...snapshotCapture(),
+          weight: {
+            ...snapshotCapture().weight,
+            rows: [{ locator: "Weight!5001", values: ["2026-08-21", 82] }]
+          }
+        },
+        "locator"
+      ],
+      [
+        "cell",
+        {
+          ...snapshotCapture(),
+          weight: {
+            ...snapshotCapture().weight,
+            rows: [{ locator: "Weight!2", values: ["2026-08-21", { kg: 82 }] }]
+          }
+        },
+        "cell value"
+      ],
+      [
+        "rows",
+        {
+          ...snapshotCapture(),
+          weight: {
+            ...snapshotCapture().weight,
+            rows: Array.from({ length: 5_000 }, (_, index) => ({
+              locator: `Weight!${index + 2}`,
+              values: []
+            }))
+          }
+        },
+        "allowed bound"
+      ]
+    ];
+    try {
+      for (const [name, input, message] of cases) {
+        await expect(
+          writePrivateFitnessTrackerSnapshot(path.join(directory, `${name}.json`), input)
+        ).rejects.toThrow(message);
+      }
+
+      const oversizedPath = path.join(directory, "oversized.json");
+      await writeFile(oversizedPath, " ".repeat(16 * 1024 * 1024 + 1), {
+        mode: 0o600
+      });
+      await expect(
+        new PrivateFitnessTrackerSnapshotReader(oversizedPath).readSnapshot()
+      ).rejects.toThrow("size is outside");
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("selects exactly one source and needs no Google credential for a snapshot", () => {
+    expect(
+      createFitnessTrackerSource(" /private/tmp/snapshot.json ", {})
+    ).toBeInstanceOf(PrivateFitnessTrackerSnapshotReader);
+    expect(() =>
+      createFitnessTrackerSource("/private/tmp/snapshot.json", {
+        GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL: "reader@example.test"
+      })
+    ).toThrow("cannot be combined");
+    expect(() => createFitnessTrackerSource(undefined, {})).toThrow(
+      "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL"
+    );
   });
 });
 

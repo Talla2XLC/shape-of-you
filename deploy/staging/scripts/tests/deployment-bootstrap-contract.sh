@@ -6,6 +6,9 @@ BOOTSTRAP="$REPOSITORY_ROOT/deploy/staging/system/shape-of-you-staging-deploy"
 CONTROLLER="$REPOSITORY_ROOT/deploy/staging/scripts/deployment-controller.sh"
 INSTALLER="$REPOSITORY_ROOT/deploy/staging/system/install-root-owned-assets.sh"
 SUDOERS="$REPOSITORY_ROOT/deploy/staging/system/shape-deploy.sudoers"
+COMPOSE="$REPOSITORY_ROOT/deploy/staging/compose.yaml"
+DEPLOY_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/deploy-staging.yml"
+PUBLISH_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/publish-staging.yml"
 
 assert_contains() {
   file=$1
@@ -112,6 +115,11 @@ assert_contains "$CONTROLLER" 'docker login ghcr.io'
 assert_contains "$CONTROLLER" 'Deployment controller must be invoked by the root-owned bootstrap.'
 assert_not_contains "$CONTROLLER" 'git clone'
 assert_not_contains "$CONTROLLER" 'git -C'
+assert_not_contains "$CONTROLLER" 'FITNESS_TRACKER'
+assert_not_contains "$CONTROLLER" 'GOOGLE_SHEETS_SERVICE_ACCOUNT'
+assert_not_contains "$COMPOSE" 'fitness-tracker-import'
+assert_not_contains "$DEPLOY_WORKFLOW" 'run_fitness_tracker_weight_dry_run'
+assert_not_contains "$PUBLISH_WORKFLOW" 'run_fitness_tracker_weight_dry_run'
 
 assert_contains "$INSTALLER" 'shape-of-you-staging-deploy'
 assert_contains "$SUDOERS" '/usr/local/sbin/shape-of-you-staging-deploy ""'

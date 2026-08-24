@@ -4,9 +4,9 @@ import { Pool } from "pg";
 
 import { runDryRun } from "../import/contracts.js";
 import {
-  FITNESS_TRACKER_SPREADSHEET_ID,
-  FitnessTrackerSheetsReader
+  FITNESS_TRACKER_SPREADSHEET_ID
 } from "../import/fitness-tracker-sheets-reader.js";
+import { createFitnessTrackerSource } from "../import/fitness-tracker-source.js";
 import { PostgresWeightTargetReader } from "../import/postgres-weight-target-reader.js";
 import { PrivateJsonFileReportSink } from "../import/private-report-sink.js";
 import { WeightDryRunAdapter } from "../import/weight-dry-run.js";
@@ -25,7 +25,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     options: {
       domain: { type: "string" },
       mode: { type: "string" },
-      "detail-report": { type: "string" }
+      "detail-report": { type: "string" },
+      "snapshot-file": { type: "string" }
     }
   });
   const domain = required(values.domain, "--domain");
@@ -49,16 +50,10 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     max: 2
   });
   try {
-    const source = new FitnessTrackerSheetsReader({
-      clientEmail: required(
-        process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL,
-        "GOOGLE_SHEETS_SERVICE_ACCOUNT_EMAIL"
-      ),
-      privateKey: required(
-        process.env.GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY,
-        "GOOGLE_SHEETS_SERVICE_ACCOUNT_PRIVATE_KEY"
-      )
-    });
+    const source = createFitnessTrackerSource(
+      values["snapshot-file"],
+      process.env
+    );
     const snapshot = await source.readSnapshot();
     if (mode === "apply") {
       const report = await new WeightImportApplyService(

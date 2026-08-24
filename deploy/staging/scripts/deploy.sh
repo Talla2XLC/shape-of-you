@@ -18,8 +18,6 @@ bootstrap_started=false
 identity_enabled=false
 rollback_schema_compatible=false
 rollback_client_compatible=false
-RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN=${RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN:-false}
-FITNESS_TRACKER_IMPORT_RUNTIME_ENV=${FITNESS_TRACKER_IMPORT_RUNTIME_ENV:-/etc/shape-of-you/staging/fitness-tracker-import.env}
 
 if [ -z "$RELEASE_ENV_INPUT" ] || [ ! -f "$RELEASE_ENV_INPUT" ]; then
   printf '%s\n' "Usage: deploy.sh <release-env-file>" >&2
@@ -42,17 +40,6 @@ fi
 : "${PUBLIC_IPV4:?PUBLIC_IPV4 is required}"
 : "${SCHEMA_BACKWARD_COMPATIBLE:?SCHEMA_BACKWARD_COMPATIBLE is required}"
 : "${DEPLOYMENT_TOPOLOGY:?DEPLOYMENT_TOPOLOGY is required}"
-
-case "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" in
-  true|false) ;;
-  *)
-    printf '%s\n' 'RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN must be true or false.' >&2
-    exit 2
-    ;;
-esac
-if [ "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" = true ]; then
-  test -f "$FITNESS_TRACKER_IMPORT_RUNTIME_ENV"
-fi
 
 if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
   [ -n "${IDENTITY_SCHEMA_BACKWARD_COMPATIBLE:-}" ] ||
@@ -199,10 +186,6 @@ if [ "$bootstrap_started" = "true" ]; then
 fi
 
 compose --profile operations run --rm migrate
-if [ "$RUN_FITNESS_TRACKER_WEIGHT_DRY_RUN" = true ]; then
-  compose --profile fitness-tracker-import run --rm --no-deps \
-    fitness-tracker-import
-fi
 if [ "$identity_enabled" = "true" ]; then
   compose --profile operations run --rm identity-migrate
   compose --profile operations run --rm identity-reconcile-oauth-clients
