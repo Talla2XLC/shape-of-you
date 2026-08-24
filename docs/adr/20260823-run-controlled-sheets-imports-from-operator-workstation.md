@@ -127,4 +127,4 @@ credential handoff и dry-run trigger. Автодеплой следующего
 - [Pull-based import and exclusive writer cutover](20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Relational import batches and Weight temporal precision](20260821-use-relational-import-batches-and-explicit-weight-temporal-precision.md)
 - [Migration strategy](../wiki/architecture/migration-strategy.md)
-- [TASK-0046 plan](../../plans/2026/08/2026-08-23-task-0046-first-staging-weight-dry-run.md)
+- [TASK-0046 plan](../../plans/2026/08/completed/2026-08-23-task-0046-first-staging-weight-dry-run.md)
