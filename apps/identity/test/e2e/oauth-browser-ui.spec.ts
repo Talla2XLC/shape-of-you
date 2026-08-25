@@ -126,7 +126,8 @@ async function startBrowserFixture(): Promise<BrowserFixture> {
   fixtureState.browserUi = new OAuthBrowserUi({
     authentication,
     clients: {
-      findProviderClient: async () => ({ client_name: "Browser client" })
+      findProviderClient: async () => ({ client_name: "Browser client" }),
+      isRefreshTokenEnabled: async () => true
     } as unknown as OAuthBrowserUiDependencies["clients"],
     publicOrigin: origin,
     resource: `${origin}/api/mcp`,
@@ -161,6 +162,7 @@ test("Allow posts the exact browser Origin once and reaches a CORS-free callback
   const fixture = await startBrowserFixture();
   try {
     await openConsent(page, fixture.origin);
+    await expect(page.getByText("Keep this connection active")).toBeVisible();
     const duplicateGuard = await page.evaluate(() => {
       const form = document.querySelector<HTMLFormElement>("#consent")!;
       const first = form.dispatchEvent(new Event("submit", { cancelable: true }));
