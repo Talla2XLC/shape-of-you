@@ -73,6 +73,8 @@ export class OAuthBrowserUi {
     const client = await this.dependencies.clients.findProviderClient(clientId);
     if (!client) throw new Error("OAuth client is unavailable");
     const scopes = splitScope(requireString(details.params.scope, "OAuth scope"));
+    const durableConnection =
+      await this.dependencies.clients.isRefreshTokenEnabled(clientId);
     const session = await optionalSession(this.dependencies.authentication, request.headers.cookie);
     const csrfToken = readCookie(request.headers.cookie, identityCsrfCookieName);
     const nonce = randomBytes(18).toString("base64url");
@@ -90,6 +92,7 @@ export class OAuthBrowserUi {
       nonce,
       prompt: promptName,
       scopes,
+      durableConnection,
       session
     });
     response.writeHead(200, {
@@ -200,14 +203,18 @@ function renderPage(input: {
   readonly nonce: string;
   readonly prompt: "login" | "consent";
   readonly scopes: readonly string[];
+  readonly durableConnection: boolean;
   readonly session: OAuthBrowserSession | null;
 }): string {
   const title = input.prompt === "login" ? "Sign in" : "Authorize access";
   const description = input.prompt === "login"
     ? `Continue to ${escapeHtml(input.clientName)} with your Shape of You account.`
     : `${escapeHtml(input.clientName)} requests the following access:`;
+  const visibleScopes = input.durableConnection
+    ? [...new Set([...input.scopes, "offline_access"])]
+    : input.scopes;
   const scopeItems = input.prompt === "consent"
-    ? `<ul>${input.scopes.map((scope) => `<li>${escapeHtml(scopeLabel(scope))}</li>`).join("")}</ul>`
+    ? `<ul>${visibleScopes.map((scope) => `<li>${escapeHtml(scopeLabel(scope))}</li>`).join("")}</ul>`
     : "";
   const authenticatedAction = input.session && input.csrfToken
     ? input.prompt === "login"

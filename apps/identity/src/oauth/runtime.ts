@@ -125,8 +125,7 @@ export class OAuthRuntime {
         url: async (_context, interaction) =>
           `/oauth/interaction/${interaction.uid}`
       },
-      issueRefreshToken: async (_context, client, code) =>
-        code.scopes.has("offline_access") &&
+      issueRefreshToken: async (_context, client) =>
         this.clients.isRefreshTokenEnabled(client.clientId),
       jwks: { keys: dependencies.signingKeys.jwks as readonly JWK[] },
       pkce: { required: () => true },

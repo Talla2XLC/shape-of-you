@@ -1236,7 +1236,7 @@ describe("Identity migration chain", () => {
         redirect_uri: chatGptRedirectUri,
         resource,
         response_type: "code",
-        scope: "openid offline_access person:read",
+        scope: "openid person:read",
         state: "runtime-state",
         ui_locales: "ru-RU en"
       };
@@ -1459,6 +1459,7 @@ describe("Identity migration chain", () => {
         .digest("base64url");
       const deniedAuthorization = await fetch(authorizationUrl({
         code_challenge: deniedChallenge,
+        prompt: "consent",
         state: "denied-runtime-state"
       }), {
         headers: { cookie: cookieHeader() },
@@ -1506,7 +1507,6 @@ describe("Identity migration chain", () => {
         [accountId]
       );
       expect(persistedGrantScopes.rows).toEqual([
-        { kind: "oidc", resource: null, scope: "offline_access" },
         { kind: "oidc", resource: null, scope: "openid" },
         { kind: "resource", resource, scope: "person:read" }
       ]);
@@ -1645,6 +1645,7 @@ describe("Identity migration chain", () => {
         authorizationUrl({
           code_challenge: repeatChallenge,
           id_token_hint: tokenBody.id_token,
+          prompt: "consent",
           state: "repeat-runtime-state"
         }),
         {

@@ -87,10 +87,12 @@ payload.
 The initial profile uses authorization code with S256 PKCE, OIDC discovery, a
 predefined ChatGPT public client, ten-minute audience-bound ES256 JWT access
 tokens, hashed rotating refresh credentials, and public JWKS. Durable clients
-must request the allowlisted OIDC `offline_access` scope and have refresh-token
-issuance enabled. Protocol scopes remain separate from resource permissions;
-MCP access tokens contain only the approved resource scopes. Open DCR and CIMD
-are deferred for the first single-operator connection.
+receive rotating refresh credentials according to their registered typed
+`refreshTokensEnabled` policy, even when an external authorization request
+omits the supported OIDC `offline_access` scope. Consent still discloses that
+the connection remains active. Protocol scopes remain separate from resource
+permissions; MCP access tokens contain only the approved resource scopes. Open
+DCR and CIMD are deferred for the first single-operator connection.
 
 The Identity release owns a typed, versioned manifest for reserved predefined
 client IDs, display names, refresh-token capability, and exact scope
@@ -285,7 +287,7 @@ lifecycle.
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
 - [Same-origin browser return routes](../../adr/20260817-preserve-same-origin-browser-return-routes-through-oauth.md)
 - [Progress overview authenticated default](../../adr/20260818-make-progress-overview-the-authenticated-default.md)
-- [Durable OAuth connections](../../adr/20260810-require-offline-access-for-durable-oauth-connections.md)
+- [Refresh tokens by registered client policy](../../adr/20260825-issue-refresh-tokens-by-registered-client-policy.md)
 
 ## Open questions
 
