@@ -92,9 +92,18 @@ export class ProgressOverviewService {
     )) {
       points.get("weight_kg")!.set(item.localDate, item.weightKg);
     }
+    const incompleteNutritionDates = new Set<string>();
     for (const meal of meals) {
+      if (meal.totals.caloriesKcal === null || meal.totals.proteinG === null) {
+        incompleteNutritionDates.add(meal.localDate);
+        continue;
+      }
       points.get("calories_kcal")!.set(meal.localDate, (points.get("calories_kcal")!.get(meal.localDate) ?? 0) + meal.totals.caloriesKcal);
       points.get("protein_g")!.set(meal.localDate, (points.get("protein_g")!.get(meal.localDate) ?? 0) + meal.totals.proteinG);
+    }
+    for (const localDate of incompleteNutritionDates) {
+      points.get("calories_kcal")!.delete(localDate);
+      points.get("protein_g")!.delete(localDate);
     }
     for (const workout of workouts) {
       points.get("workout_session_count")!.set(workout.localDate, (points.get("workout_session_count")!.get(workout.localDate) ?? 0) + 1);

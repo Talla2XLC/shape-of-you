@@ -31,6 +31,13 @@ never replaces the snapshot. Existing dedupe returns `200`, new fact `201`, and
 conflicting second correction `409`. Current list uses
 `(occurredAt DESC, id DESC)`. Totals include only current Meals.
 
+Controlled historical import may return item nutrient components and exact
+totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and
+is never converted to zero. Daily totals also return `incompleteMealCount`; an
+exact component total is null when any current item lacks that component.
+Public create/correction inputs remain complete-only. Progress metrics omit an
+incomplete date instead of publishing a known-subset sum as the full value.
+
 ## Evidence
 
 - Nutrition contracts/controller/integration tests.
@@ -39,6 +46,8 @@ conflicting second correction `409`. Current list uses
 
 - Responses/totals reproduce stored item snapshots; catalog revisions do not
   change Meal; totals are not a mutable table.
+- Partial historical evidence is read-compatible without weakening operational
+  write validation.
 
 ## Open questions
 

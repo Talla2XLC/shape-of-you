@@ -58,6 +58,7 @@ export interface FitnessTrackerNutritionSnapshot {
   readonly foods: BoundedSheetSnapshot;
   readonly foodIngredients: BoundedSheetSnapshot;
   readonly meals: BoundedSheetSnapshot;
+  readonly dailyLog: BoundedSheetSnapshot;
 }
 
 /** Workbook snapshot accepted by the shared domain router. */
@@ -145,6 +146,7 @@ export class FitnessTrackerSheetsReader
       url.searchParams.append("ranges", "Foods!A1:M5000");
       url.searchParams.append("ranges", "Food_Ingredients!A1:H5000");
       url.searchParams.append("ranges", "Meals!A1:L5000");
+      url.searchParams.append("ranges", "Daily_Log!A1:AZ5000");
     }
     const workbook = await this.fetchWorkbook(url, accessToken);
 
@@ -188,11 +190,14 @@ export class FitnessTrackerSheetsReader
     const foods = parseSheet(workbook, "Foods", 13);
     const foodIngredients = parseSheet(workbook, "Food_Ingredients", 8);
     const meals = parseSheet(workbook, "Meals", 12);
+    const dailyLog = parseSheet(workbook, "Daily_Log", 52);
     requireHeaders(brands, nutritionHeaders.Brands);
     requireHeaders(ingredients, nutritionHeaders.Ingredients);
     requireHeaders(foods, nutritionHeaders.Foods);
     requireHeaders(foodIngredients, nutritionHeaders.Food_Ingredients);
     requireHeaders(meals, nutritionHeaders.Meals);
+    requireHeader(dailyLog, "Date");
+    requireHeader(dailyLog, "DayStatus");
     const fields = {
       spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
       locale: "ru_RU" as const,
@@ -201,7 +206,8 @@ export class FitnessTrackerSheetsReader
       ingredients,
       foods,
       foodIngredients,
-      meals
+      meals,
+      dailyLog
     } as const;
     const result = {
       ...fields,
@@ -216,7 +222,8 @@ export class FitnessTrackerSheetsReader
       ingredients: parseSheet(verificationWorkbook, "Ingredients", 10),
       foods: parseSheet(verificationWorkbook, "Foods", 13),
       foodIngredients: parseSheet(verificationWorkbook, "Food_Ingredients", 8),
-      meals: parseSheet(verificationWorkbook, "Meals", 12)
+      meals: parseSheet(verificationWorkbook, "Meals", 12),
+      dailyLog: parseSheet(verificationWorkbook, "Daily_Log", 52)
     } as const;
     if (computeFitnessTrackerManifestChecksum(verificationFields) !== result.manifestChecksum) {
       throw new Error("Google Sheets Nutrition source changed during snapshot read");

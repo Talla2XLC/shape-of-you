@@ -5,7 +5,7 @@ title: "Импортировать Nutrition как один типизиров�
 status: accepted
 date: 2026-08-24
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260825-import-partial-nutrition-and-source-day-closures"
 tags:
   - "nutrition"
   - "data-migration"

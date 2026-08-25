@@ -1,0 +1,2 @@
+ALTER TABLE "import_batches" DROP CONSTRAINT "import_batches_status_outcomes";--> statement-breakpoint
+ALTER TABLE "import_batches" ADD CONSTRAINT "import_batches_status_outcomes" CHECK ("import_batches"."status" = 'completed' OR ("import_batches"."status" = 'blocked' AND ("import_batches"."conflict_count" > 0 OR "import_batches"."invalid_count" > 0)));

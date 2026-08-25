@@ -80,7 +80,7 @@ write to Sheets requires separate operator approval.
 - Weight mirror, Meal aggregation, Training-derived records/program fields,
   NL_Engine/Inbox lifecycle, and Self_Healing read-back.
 - Accepted Weight dry-run/apply evidence, TASK-0048 Body evidence, and
-  TASK-0049 Nutrition five-sheet dry-run, atomic apply, privacy, and typed
+  TASK-0049/0050 Nutrition-and-closure dry-run, identity-scoped apply, privacy, and typed
   relational audit evidence.
 
 ## Decisions

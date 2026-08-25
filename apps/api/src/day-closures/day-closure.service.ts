@@ -196,7 +196,9 @@ export class DayClosureService {
           caloriesKcal: dailyTotals.totals.caloriesKcal,
           proteinG: dailyTotals.totals.proteinG,
           fatG: dailyTotals.totals.fatG,
-          carbsG: dailyTotals.totals.carbsG
+          carbsG: dailyTotals.totals.carbsG,
+          nutritionCompleteness: dailyTotals.nutritionCompleteness,
+          incompleteMealCount: dailyTotals.incompleteMealCount
         },
         meals: meals.map((item) => ({
           id: item.id,

@@ -13,7 +13,7 @@ import {
 } from "./fitness-tracker-sheets-reader.js";
 
 /** Current private snapshot envelope emitted by connector orchestration. */
-export const FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION = 2;
+export const FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION = 3;
 const legacySnapshotSchemaVersion = 1;
 
 const maxSnapshotBytes = 16 * 1024 * 1024;
@@ -48,6 +48,7 @@ export interface FitnessTrackerNutritionSnapshotCapture
   readonly foods: BoundedSheetSnapshot;
   readonly foodIngredients: BoundedSheetSnapshot;
   readonly meals: BoundedSheetSnapshot;
+  readonly dailyLog: BoundedSheetSnapshot;
 }
 
 /** Exactly one typed domain subset captured from the authoritative workbook. */
@@ -127,7 +128,8 @@ export function parseFitnessTrackerSnapshotCapture(
     "ingredients",
     "foods",
     "foodIngredients",
-    "meals"
+    "meals",
+    "dailyLog"
   ]);
   if (!hasWeightShape && !hasBodyShape && !hasNutritionShape) {
     throw new Error("Fitness Tracker snapshot contains unknown or missing fields");
@@ -166,12 +168,13 @@ export function parseFitnessTrackerSnapshotCapture(
   const foods = sheet(root.foods, "Foods", 13);
   const foodIngredients = sheet(root.foodIngredients, "Food_Ingredients", 8);
   const meals = sheet(root.meals, "Meals", 12);
-  const ids = [brands, ingredients, foods, foodIngredients, meals]
+  const dailyLog = sheet(root.dailyLog, "Daily_Log", 52);
+  const ids = [brands, ingredients, foods, foodIngredients, meals, dailyLog]
     .map(({ sheetId }) => sheetId);
   if (new Set(ids).size !== ids.length) {
     throw new Error("Fitness Tracker snapshot sheet ids must be distinct");
   }
-  return { ...base, brands, ingredients, foods, foodIngredients, meals };
+  return { ...base, brands, ingredients, foods, foodIngredients, meals, dailyLog };
 }
 
 function parseFitnessTrackerSnapshotFile(raw: string): FitnessTrackerSourceSnapshot {
@@ -217,7 +220,8 @@ function toSnapshot(
           ingredients: capture.ingredients,
           foods: capture.foods,
           foodIngredients: capture.foodIngredients,
-          meals: capture.meals
+          meals: capture.meals,
+          dailyLog: capture.dailyLog
         };
   return {
     ...withoutChecksum,
@@ -247,7 +251,7 @@ function sheet(
   const required = title === "Weight"
     ? ["Date", "Weight_kg"]
     : title === "Daily_Log"
-      ? ["Date", "Weight"]
+      ? ["Date"]
       : title === "Body"
         ? [
           "Date",
@@ -264,6 +268,9 @@ function sheet(
         : nutritionRequiredHeaders[title];
   if (!required.every((header) => headers.includes(header))) {
     throw new Error(`${title} required headers are missing`);
+  }
+  if (title === "Daily_Log" && !headers.includes("Weight") && !headers.includes("DayStatus")) {
+    throw new Error("Daily_Log required headers are missing");
   }
   if (!Array.isArray(value.rows) || value.rows.length > 4_999) {
     throw new Error(`${title} rows are outside the allowed bound`);

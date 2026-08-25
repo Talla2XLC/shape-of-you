@@ -73,7 +73,8 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
         ingredients: nutritionSnapshot.ingredients.sheetId,
         foods: nutritionSnapshot.foods.sheetId,
         foodIngredients: nutritionSnapshot.foodIngredients.sheetId,
-        meals: nutritionSnapshot.meals.sheetId
+        meals: nutritionSnapshot.meals.sheetId,
+        dailyLog: nutritionSnapshot.dailyLog.sheetId
       };
       if (mode === "apply") {
         const report = await new NutritionImportApplyService(
@@ -169,8 +170,8 @@ function requireNutritionSnapshot(
 ): FitnessTrackerNutritionSnapshot {
   if (!("brands" in snapshot) || !("ingredients" in snapshot) ||
       !("foods" in snapshot) || !("foodIngredients" in snapshot) ||
-      !("meals" in snapshot)) {
-    throw new Error("Nutrition import requires five linked Nutrition sheets");
+      !("meals" in snapshot) || !("dailyLog" in snapshot)) {
+    throw new Error("Nutrition import requires linked Nutrition and Daily_Log sheets");
   }
   return snapshot as FitnessTrackerNutritionSnapshot;
 }
@@ -179,7 +180,7 @@ function requireBodySnapshot(
   snapshot: FitnessTrackerSourceSnapshot
 ): FitnessTrackerBodySnapshot {
   if (!("body" in snapshot) || snapshot.body === undefined) {
-    throw new Error("Body import requires a schema v2 snapshot containing Body");
+    throw new Error("Body import requires a current-schema snapshot containing Body");
   }
   return snapshot as FitnessTrackerBodySnapshot;
 }

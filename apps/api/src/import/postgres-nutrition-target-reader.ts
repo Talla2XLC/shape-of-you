@@ -10,6 +10,7 @@ export interface NutritionSheetIds {
   readonly foods: number;
   readonly foodIngredients: number;
   readonly meals: number;
+  readonly dailyLog: number;
 }
 
 interface TargetRow {
@@ -51,19 +52,21 @@ export class PostgresNutritionTargetReader
             and sr.external_system = $2`,
         [personId, mealExternalSystem(this.spreadsheetId, this.sheetIds.meals)]
       );
+    const closures = await this.dayClosureRows(client, personId);
     return [
       ...mapRows("brand", brands.rows, this.spreadsheetId, this.sheetIds.brands),
       ...mapRows("ingredient", ingredients.rows, this.spreadsheetId, this.sheetIds.ingredients),
       ...mapRows("food", foods.rows, this.spreadsheetId, this.sheetIds.foods),
       ...mapRows("composition", compositions.rows, this.spreadsheetId, this.sheetIds.foodIngredients),
-      ...mapRows("meal", meals.rows, this.spreadsheetId, this.sheetIds.meals)
+      ...mapRows("meal", meals.rows, this.spreadsheetId, this.sheetIds.meals),
+      ...mapRows("day_closure", closures.rows, this.spreadsheetId, this.sheetIds.dailyLog)
     ];
   }
 
   private catalogRows(
     client: PoolClient,
     personId: string,
-    kind: Exclude<NutritionImportRecordKind, "meal">
+    kind: Exclude<NutritionImportRecordKind, "meal" | "day_closure">
   ): Promise<{ rows: TargetRow[] }> {
     const config = kind === "brand"
       ? { root: "nutrition_brands", version: "nutrition_brand_versions", rootId: "brand_id", source: this.sheetIds.brands }
@@ -86,6 +89,34 @@ export class PostgresNutritionTargetReader
       personId,
       catalogSourceKey(this.spreadsheetId, config.source, kind)
     ]);
+  }
+
+  private async dayClosureRows(
+    client: PoolClient,
+    personId: string
+  ): Promise<{ rows: TargetRow[] }> {
+    const capability = await client.query<{ available: boolean }>(
+      `select to_regclass('public.nutrition_day_closure_import_records') is not null as available`
+    );
+    if (!capability.rows[0]?.available) return { rows: [] };
+    return client.query<TargetRow>(
+      `with imported as (
+         select distinct on (r.source_record_id)
+           r.target_closure_id as id, r.source_record_id as source_key,
+           r.source_checksum as checksum
+          from nutrition_day_closure_import_records r
+          join day_closures c on c.id = r.target_closure_id and c.person_id = r.person_id
+         where r.person_id = $1 and r.target_closure_id is not null
+         order by r.source_record_id, r.created_at desc
+       )
+       select * from imported
+       union all
+       select c.id, c.local_date::text as source_key, null::varchar as checksum
+         from day_closures c
+        where c.person_id = $1 and c.status = 'active'
+          and not exists (select 1 from imported i where i.id = c.id)`,
+      [personId]
+    );
   }
 
   private async compositionRows(

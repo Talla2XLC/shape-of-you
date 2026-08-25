@@ -20,7 +20,8 @@ const sheetIds = {
   ingredients: 102,
   foods: 103,
   foodIngredients: 104,
-  meals: 105
+  meals: 105,
+  dailyLog: 106
 };
 
 beforeAll(async () => {
@@ -60,6 +61,8 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       compositions: string;
       meals: string;
       meal_items: string;
+      closures: string;
+      closure_source: string;
       audits: string;
       temporal_precision: string;
       occurred_at: Date | null;
@@ -74,11 +77,14 @@ describe("unified Fitness Tracker Nutrition apply", () => {
          (select count(*) from meals where person_id = $1)::text meals,
          (select count(*) from meal_items i join meals m on m.id = i.meal_id
            where m.person_id = $1)::text meal_items,
+         (select count(*) from day_closures where person_id = $1 and status = 'active')::text closures,
+         (select source::text from day_closures where person_id = $1 and status = 'active' limit 1) closure_source,
          ((select count(*) from nutrition_brand_import_records where person_id = $1) +
           (select count(*) from nutrition_ingredient_import_records where person_id = $1) +
           (select count(*) from nutrition_food_import_records where person_id = $1) +
           (select count(*) from nutrition_composition_import_records where person_id = $1) +
-          (select count(*) from nutrition_meal_import_records where person_id = $1))::text audits,
+          (select count(*) from nutrition_meal_import_records where person_id = $1) +
+          (select count(*) from nutrition_day_closure_import_records where person_id = $1))::text audits,
          m.temporal_precision, m.occurred_at
        from meals m where m.person_id = $1`,
       [personId]
@@ -91,11 +97,11 @@ describe("unified Fitness Tracker Nutrition apply", () => {
 
     expect(first).toEqual(expect.objectContaining({
       status: "completed",
-      counts: { created: 5, unchanged: 0, conflict: 0, invalid: 0 }
+      counts: { created: 6, unchanged: 0, conflict: 0, invalid: 0 }
     }));
     expect(second).toEqual(expect.objectContaining({
       status: "completed",
-      counts: { created: 0, unchanged: 5, conflict: 0, invalid: 0 }
+      counts: { created: 0, unchanged: 6, conflict: 0, invalid: 0 }
     }));
     expect(state.rows[0]).toEqual({
       brands: "1",
@@ -104,14 +110,16 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       compositions: "1",
       meals: "1",
       meal_items: "1",
-      audits: "10",
+      closures: "1",
+      closure_source: "google_sheets",
+      audits: "12",
       temporal_precision: "local_date",
       occurred_at: null
     });
-    expect(target).toHaveLength(5);
+    expect(target).toHaveLength(6);
   });
 
-  it("persists typed blockers without creating any domain facts", async () => {
+  it("preserves photo evidence without blocking independent facts", async () => {
     const personId = "00000000-0000-4000-8000-000000000050";
     await pool.query("insert into persons (id, kind) values ($1, 'synthetic')", [personId]);
     const source = snapshot();
@@ -140,9 +148,96 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       [personId]
     );
 
-    expect(report.status).toBe("blocked");
-    expect(report.counts.conflict).toBe(1);
-    expect(facts.rows[0]?.count).toBe("0");
+    expect(report.status).toBe("completed");
+    expect(report.counts.conflict).toBe(0);
+    expect(facts.rows[0]?.count).toBe("4");
+    const audit = await pool.query<{ source_photo_reference: string | null }>(
+      "select source_photo_reference from nutrition_meal_import_records where person_id = $1",
+      [personId]
+    );
+    expect(audit.rows[0]?.source_photo_reference).toBe("photo");
+  });
+
+  it("persists partial historical nutrients as null instead of zero", async () => {
+    const personId = "00000000-0000-4000-8000-000000000051";
+    await pool.query("insert into persons (id, kind) values ($1, 'synthetic')", [personId]);
+    const source = snapshot();
+    const partial: FitnessTrackerNutritionSnapshot = {
+      ...source,
+      manifestChecksum: "c".repeat(64),
+      ingredients: {
+        ...source.ingredients,
+        rows: [{
+          locator: "Ingredients!2",
+          values: ["ingredient-1", "Ingredient", "Base", "шт", "", "", "", "", "manual", true]
+        }]
+      },
+      foods: {
+        ...source.foods,
+        rows: [{
+          locator: "Foods!2",
+          values: ["food-1", "Food", "Meal", "Lunch", "250 г", 500, 30, 20, 40, "manual", "High", true, "brand-1"]
+        }]
+      },
+      foodIngredients: {
+        ...source.foodIngredients,
+        rows: [["food-1", "ingredient-1", "", "часть порции", "", true, "", "High"]]
+          .map((values) => ({ locator: "Food_Ingredients!2", values }))
+      },
+      meals: {
+        ...source.meals,
+        rows: [{
+          locator: "Meals!2",
+          values: [45527, "Lunch", "Private meal", "", "", "", "", "", "", "", "Medium", "11111111-1111-4111-8111-111111111111"]
+        }]
+      }
+    };
+
+    const report = await new NutritionImportApplyService(
+      pool,
+      FITNESS_TRACKER_SPREADSHEET_ID,
+      sheetIds
+    ).apply(personId, partial);
+    const item = await pool.query<{
+      calories_kcal: string | null;
+      protein_g: string | null;
+      fat_g: string | null;
+      carbs_g: string | null;
+    }>(
+      "select calories_kcal, protein_g, fat_g, carbs_g from meal_items i join meals m on m.id = i.meal_id where m.person_id = $1",
+      [personId]
+    );
+    const closure = await pool.query<{ completeness: string; incomplete_meals: string }>(
+      `select snapshot #>> '{nutrition,totals,nutritionCompleteness}' completeness,
+              snapshot #>> '{nutrition,totals,incompleteMealCount}' incomplete_meals
+         from day_closures where person_id = $1 and status = 'active'`,
+      [personId]
+    );
+    const evidence = await pool.query<{
+      ingredient_unit: string | null;
+      food_portion: string | null;
+      composition_unit: string | null;
+    }>(
+      `select
+         (select source_default_unit from nutrition_ingredient_import_records where person_id = $1) ingredient_unit,
+         (select source_default_portion from nutrition_food_import_records where person_id = $1) food_portion,
+         (select source_unit from nutrition_composition_import_records where person_id = $1) composition_unit`,
+      [personId]
+    );
+
+    expect(report.status).toBe("completed");
+    expect(item.rows[0]).toEqual({
+      calories_kcal: null,
+      protein_g: null,
+      fat_g: null,
+      carbs_g: null
+    });
+    expect(closure.rows[0]).toEqual({ completeness: "partial", incomplete_meals: "1" });
+    expect(evidence.rows[0]).toEqual({
+      ingredient_unit: "шт",
+      food_portion: "250 г",
+      composition_unit: "часть порции"
+    });
   });
 });
 
@@ -170,7 +265,8 @@ function snapshot(): FitnessTrackerNutritionSnapshot {
     meals: sheet(sheetIds.meals, "Meals", [
       "Date", "Meal", "Description", "Calories", "Protein", "Fat", "Carbs",
       "Photo", "Notes", "Food_ID", "Confidence", "Meal_ID"
-    ], [[45527, "Lunch", "Private meal", 500, 30, 20, 40, "", "", "food-1", "Medium", "11111111-1111-4111-8111-111111111111"]])
+    ], [[45527, "Lunch", "Private meal", 500, 30, 20, 40, "", "", "food-1", "Medium", "11111111-1111-4111-8111-111111111111"]]),
+    dailyLog: sheet(sheetIds.dailyLog, "Daily_Log", ["Date", "DayStatus"], [[45527, "Closed"]])
   };
 }
 

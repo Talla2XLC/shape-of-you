@@ -10,19 +10,19 @@ import {
 } from "../src/import/nutrition-dry-run.js";
 
 describe("unified Fitness Tracker Nutrition dry-run", () => {
-  it("reconciles the linked five-sheet graph as one domain", () => {
+  it("reconciles Nutrition facts and closed-day lifecycle as one domain", () => {
     const adapter = new NutritionDryRunAdapter();
     const source = snapshot();
     const created = adapter.classify(source, []);
 
     expect(created.safeReport.counts).toEqual({
-      created: 5,
+      created: 6,
       unchanged: 0,
       conflict: 0,
       invalid: 0
     });
     expect(created.privateDetail.candidates.map(({ kind }) => kind).sort()).toEqual([
-      "brand", "composition", "food", "ingredient", "meal"
+      "brand", "composition", "day_closure", "food", "ingredient", "meal"
     ]);
     const target: NutritionImportTarget[] = created.privateDetail.candidates.map(
       (candidate, index) => ({
@@ -35,7 +35,7 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     const unchanged = adapter.classify(source, target);
     expect(unchanged.safeReport.counts).toEqual({
       created: 0,
-      unchanged: 5,
+      unchanged: 6,
       conflict: 0,
       invalid: 0
     });
@@ -45,7 +45,7 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     expect(safe).not.toContain("brand-1");
   });
 
-  it("blocks missing catalog values, unsupported kinds and photo markers", () => {
+  it("keeps catalog blockers local while accepting legacy kinds and photo evidence", () => {
     const source = snapshot();
     const broken: FitnessTrackerNutritionSnapshot = {
       ...source,
@@ -78,11 +78,35 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     expect(result.safeReport.findings.map(({ code }) => code)).toEqual(
       expect.arrayContaining([
         "invalid_ingredient_row",
-        "invalid_meal_row",
-        "unsupported_photo_reference",
         "unresolved_ingredient_reference"
       ])
     );
+    expect(result.safeReport.findings.map(({ code }) => code)).not.toContain("unsupported_photo_reference");
+    const meals = result.privateDetail.candidates.filter(({ kind }) => kind === "meal");
+    expect(meals).toHaveLength(2);
+    expect(meals[0]).toMatchObject({ mealKind: "other", sourceMealKind: "Lunch-Dinner" });
+    expect(meals[1]).toMatchObject({ sourcePhotoReference: "photo" });
+  });
+
+  it("accepts missing historical nutrients as explicit unknown values", () => {
+    const source = snapshot();
+    const partial: FitnessTrackerNutritionSnapshot = {
+      ...source,
+      meals: {
+        ...source.meals,
+        rows: [{
+          locator: "Meals!2",
+          values: [45527, "Lunch", "Private meal", "", "", "", "", "", "", "", "Medium", "11111111-1111-4111-8111-111111111111"]
+        }]
+      }
+    };
+
+    const result = new NutritionDryRunAdapter().classify(partial, []);
+
+    expect(result.safeReport.counts.created).toBe(6);
+    expect(result.privateDetail.candidates.find(({ kind }) => kind === "meal")).toMatchObject({
+      nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
+    });
   });
 
   it("keeps invalid identities scoped to their exact sheet", () => {
@@ -141,7 +165,8 @@ function snapshot(): FitnessTrackerNutritionSnapshot {
     meals: sheet(105, "Meals", [
       "Date", "Meal", "Description", "Calories", "Protein", "Fat", "Carbs",
       "Photo", "Notes", "Food_ID", "Confidence", "Meal_ID"
-    ], [[45527, "Lunch", "Private meal", 500, 30, 20, 40, "", "", "food-1", "Medium", "11111111-1111-4111-8111-111111111111"]])
+    ], [[45527, "Lunch", "Private meal", 500, 30, 20, 40, "", "", "food-1", "Medium", "11111111-1111-4111-8111-111111111111"]]),
+    dailyLog: sheet(106, "Daily_Log", ["Date", "DayStatus"], [[45527, "Closed"]])
   };
 }
 

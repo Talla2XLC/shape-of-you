@@ -61,19 +61,27 @@ this lifecycle rather than separate migration programs or generic JSON facts.
 TASK-0048 adds Body as the second adapter to that same command and lifecycle:
 `fitness-tracker:import --domain body --mode dry-run|apply`. A Body run reads
 only the bounded `Body` range; a Weight run reads only `Weight` and
-`Daily_Log`. Private snapshot schema v2 accepts exactly one typed domain subset
+`Daily_Log`. Private snapshot schema v3 accepts exactly one typed domain subset
 while schema v1 Weight snapshots remain readable. This prevents each new
 adapter from expanding into an all-workbook capture.
 
-TASK-0049 adds Nutrition as one linked adapter, not five sheet-specific
+TASK-0049 introduced Nutrition as one linked adapter, not five sheet-specific
 migrators. `fitness-tracker:import --domain nutrition --mode dry-run|apply`
-captures exactly `Brands`, `Ingredients`, `Foods`, `Food_Ingredients`, and
-`Meals`, then reconciles their referential graph as one atomic boundary.
+captures `Brands`, `Ingredients`, `Foods`, `Food_Ingredients`, `Meals`, and the
+bounded `Daily_Log` closure projection, then reconciles them in one transaction.
 Durable catalog IDs and `Meal_ID` remain separate from row locators and content
-checksums. Catalog facts stay Person-private, known import evidence is stored
-in five typed relational audit tables, and any incomplete composition,
-unsupported Meal kind, unresolved reference, or Photo marker blocks all fact
-writes for the run.
+checksums. Catalog facts stay Person-private and known import evidence is stored
+in typed relational audit tables.
+
+TASK-0050 makes Nutrition reconciliation identity-scoped. An incomplete catalog
+record blocks only dependent catalog promotion; it does not suppress unrelated
+Meals or closed-day decisions. Historical Meals may preserve unknown nutrient
+components as `null` with explicit `complete|partial` read state. Interactive
+HTTP/MCP writes still require complete nutrients. Legacy kind labels map
+deterministically to `other`, while raw kind, Photo marker, and unresolved
+source `Food_ID` remain relational provenance instead of blockers. Progress
+series omit incomplete daily nutrient points rather than reporting partial sums
+as exact totals.
 
 Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
 date; row position is locator evidence and content checksum remains separate.
@@ -89,8 +97,11 @@ blocks the row until a media migration capability exists.
 
 Nutrition Meals preserve source date-only semantics with `local_date`, a null
 `occurredAt`, and one immutable `serving` snapshot item containing the row's
-source nutrient totals. Existing and interactive Meals remain `instant`.
-Neither catalog gaps nor Meal time/media are inferred.
+known source nutrient values. Existing and interactive Meals remain `instant`.
+Neither catalog gaps nor Meal time/media are inferred. `Daily_Log.DayStatus =
+Closed` is imported after same-run Meals as an idempotent `google_sheets`
+`DayClosure`. Its snapshot records Nutrition completeness. Training is optional:
+absence of a Workout never blocks closure.
 
 Controlled one-time runs execute from the operator workstation. Codex reads
 only approved bounded ranges, capped by current sheet grid metadata, from the
@@ -152,8 +163,8 @@ automatically changes closed days or ambiguous facts.
   accepted in the linked ADR.
 - Weight, Body, and Nutrition dry-run/apply adapters are implemented through
   one command and lifecycle. Body apply has not been executed because its
-  authoritative source is empty; Nutrition apply has not been executed because
-  its live dry-run contains blockers. Recurring reconciliation and authority
+  authoritative source is empty; the revised Nutrition apply has not yet been
+  executed against real data. Recurring reconciliation and authority
   transfer remain separately gated.
 
 ## Open questions
@@ -171,4 +182,4 @@ automatically changes closed days or ambiguous facts.
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Operator-workstation import ADR](../../adr/20260823-run-controlled-sheets-imports-from-operator-workstation.md)
 - [Body import precision and audit ADR](../../adr/20260824-use-explicit-body-temporal-precision-and-typed-import-records.md)
-- [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md)
+- [Partial Nutrition and source closures ADR](../../adr/20260825-import-partial-nutrition-and-source-day-closures.md)

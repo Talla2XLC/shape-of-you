@@ -31,6 +31,7 @@ import type {
   MealHistory,
   MealList,
   NutrientValues,
+  PartialNutrientValues,
   UpsertFoodOverlay
 } from "@shape-of-you/contracts";
 
@@ -65,7 +66,6 @@ import {
 } from "../domain/cursor.js";
 import {
   canAccessCatalogEntity,
-  sumMealNutrition,
   validateFoodComposition,
   validateFoodOverlay
 } from "../domain/nutrition.js";
@@ -187,6 +187,33 @@ function nutrientsToRow(nutrients: NutrientValues): {
   };
 }
 
+function partialNutrientsFromRow(row: {
+  readonly caloriesKcal: string | null;
+  readonly proteinG: string | null;
+  readonly fatG: string | null;
+  readonly carbsG: string | null;
+}): PartialNutrientValues {
+  return {
+    caloriesKcal: row.caloriesKcal === null ? null : Number(row.caloriesKcal),
+    proteinG: row.proteinG === null ? null : Number(row.proteinG),
+    fatG: row.fatG === null ? null : Number(row.fatG),
+    carbsG: row.carbsG === null ? null : Number(row.carbsG)
+  };
+}
+
+function partialTotals(values: readonly PartialNutrientValues[]): PartialNutrientValues {
+  const total = (key: keyof PartialNutrientValues): number | null =>
+    values.some((value) => value[key] === null)
+      ? null
+      : values.reduce((sum, value) => sum + (value[key] ?? 0), 0);
+  return {
+    caloriesKcal: total("caloriesKcal"),
+    proteinG: total("proteinG"),
+    fatG: total("fatG"),
+    carbsG: total("carbsG")
+  };
+}
+
 function serializeBrand(
   brand: NutritionBrandRow,
   version: NutritionBrandVersionRow
@@ -294,8 +321,12 @@ function serializeMeal(
     label: item.label,
     quantity: Number(item.quantity),
     unit: item.unit,
-    nutrients: nutrientsFromRow(item)
+    nutrients: partialNutrientsFromRow(item)
   }));
+  const totals = partialTotals(publicItems.map(({ nutrients }) => nutrients));
+  const nutritionCompleteness = Object.values(totals).every((value) => value !== null)
+    ? "complete" as const
+    : "partial" as const;
   return {
     id: meal.id,
     personId: meal.personId,
@@ -308,7 +339,8 @@ function serializeMeal(
     note: meal.note,
     photoMediaId: meal.photoMediaId,
     items: publicItems,
-    totals: sumMealNutrition(publicItems),
+    totals,
+    nutritionCompleteness,
     sourceReference: toSourceReference(sourceReference),
     dedupeKey: meal.dedupeKey,
     confidence:
@@ -1341,13 +1373,12 @@ export class NutritionRepository implements NutritionStore {
       const rows = await transaction
         .select({
           mealCount: sql<string>`count(distinct ${meals.id})::text`,
-          caloriesKcal:
-            sql<string>`coalesce(sum(${mealItems.caloriesKcal}), 0)::text`,
-          proteinG:
-            sql<string>`coalesce(sum(${mealItems.proteinG}), 0)::text`,
-          fatG: sql<string>`coalesce(sum(${mealItems.fatG}), 0)::text`,
-          carbsG:
-            sql<string>`coalesce(sum(${mealItems.carbsG}), 0)::text`
+          itemCount: sql<string>`count(${mealItems.id})::text`,
+          caloriesKcal: sql<string | null>`case when count(${mealItems.id}) = 0 then '0' when count(${mealItems.caloriesKcal}) = count(${mealItems.id}) then sum(${mealItems.caloriesKcal})::text else null end`,
+          proteinG: sql<string | null>`case when count(${mealItems.id}) = 0 then '0' when count(${mealItems.proteinG}) = count(${mealItems.id}) then sum(${mealItems.proteinG})::text else null end`,
+          fatG: sql<string | null>`case when count(${mealItems.id}) = 0 then '0' when count(${mealItems.fatG}) = count(${mealItems.id}) then sum(${mealItems.fatG})::text else null end`,
+          carbsG: sql<string | null>`case when count(${mealItems.id}) = 0 then '0' when count(${mealItems.carbsG}) = count(${mealItems.id}) then sum(${mealItems.carbsG})::text else null end`,
+          incompleteMealCount: sql<string>`count(distinct ${meals.id}) filter (where ${mealItems.caloriesKcal} is null or ${mealItems.proteinG} is null or ${mealItems.fatG} is null or ${mealItems.carbsG} is null)::text`
         })
         .from(meals)
         .innerJoin(mealItems, eq(mealItems.mealId, meals.id))
@@ -1369,11 +1400,13 @@ export class NutritionRepository implements NutritionStore {
         localDate,
         mealCount: Number(row?.mealCount ?? 0),
         totals: {
-          caloriesKcal: Number(row?.caloriesKcal ?? 0),
-          proteinG: Number(row?.proteinG ?? 0),
-          fatG: Number(row?.fatG ?? 0),
-          carbsG: Number(row?.carbsG ?? 0)
-        }
+          caloriesKcal: row?.caloriesKcal === null ? null : Number(row?.caloriesKcal ?? 0),
+          proteinG: row?.proteinG === null ? null : Number(row?.proteinG ?? 0),
+          fatG: row?.fatG === null ? null : Number(row?.fatG ?? 0),
+          carbsG: row?.carbsG === null ? null : Number(row?.carbsG ?? 0)
+        },
+        nutritionCompleteness: Number(row?.incompleteMealCount ?? 0) > 0 ? "partial" : "complete",
+        incompleteMealCount: Number(row?.incompleteMealCount ?? 0)
       };
     });
   }

@@ -8,6 +8,8 @@ import type {
 /** PostgreSQL hooks supplied by one typed domain adapter. */
 export interface PostgresApplyAdapter<Snapshot, Target, Detail> {
   readonly domain: "weight" | "body" | "nutrition" | "training" | "recovery";
+  /** Whether any conflict or invalid record blocks all fact creation. */
+  readonly blockOnFindings?: boolean;
   readTarget(client: PoolClient, personId: string): Promise<readonly Target[]>;
   classify(snapshot: Snapshot, target: readonly Target[]): DryRunAdapterResult<Detail>;
   targetStateChecksum(target: readonly Target[]): string;
@@ -47,8 +49,9 @@ export class PostgresImportLifecycle {
       ]);
       const target = await input.adapter.readTarget(client, input.personId);
       const classified = input.adapter.classify(input.snapshot, target);
-      const blocked = classified.safeReport.counts.conflict > 0 ||
-        classified.safeReport.counts.invalid > 0;
+      const blocked = input.adapter.blockOnFindings !== false &&
+        (classified.safeReport.counts.conflict > 0 ||
+          classified.safeReport.counts.invalid > 0);
       const status = blocked ? "blocked" : "completed";
       const batchId = await insertBatch(client, {
         personId: input.personId,

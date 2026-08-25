@@ -45,6 +45,14 @@ closed date is read only in its recorded timezone; a different timezone is a
 conflict. Its coordinating read ports select every current fact for that exact
 local date and do not depend on public-list pagination.
 
+During controlled migration, an authoritative `Daily_Log` value `Closed` may
+create the same versioned closure with source `google_sheets`, after all
+same-run Nutrition facts for that date are persisted. Closure means the user
+finished the day; it does not assert that every optional activity happened or
+that every legacy nutrient value is known. In particular, Training is optional
+and a day with no Workout may close normally. The immutable snapshot exposes
+partial Nutrition explicitly rather than substituting zero.
+
 ## Evidence
 
 - Daily_Log validation; NL_Engine; AI_Inbox; Self_Healing; AI_Timeline;

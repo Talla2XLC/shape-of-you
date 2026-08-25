@@ -441,7 +441,7 @@ export const importBatches = pgTable(
     ),
     check(
       "import_batches_status_outcomes",
-      sql`(${table.status} = 'completed' AND ${table.conflictCount} = 0 AND ${table.invalidCount} = 0) OR (${table.status} = 'blocked' AND (${table.conflictCount} > 0 OR ${table.invalidCount} > 0))`
+      sql`${table.status} = 'completed' OR (${table.status} = 'blocked' AND (${table.conflictCount} > 0 OR ${table.invalidCount} > 0))`
     ),
     check(
       "import_batches_completion_order",
@@ -1449,10 +1449,10 @@ export const mealItems = pgTable(
     caloriesKcal: numeric("calories_kcal", {
       precision: 12,
       scale: 3
-    }).notNull(),
-    proteinG: numeric("protein_g", { precision: 12, scale: 3 }).notNull(),
-    fatG: numeric("fat_g", { precision: 12, scale: 3 }).notNull(),
-    carbsG: numeric("carbs_g", { precision: 12, scale: 3 }).notNull()
+    }),
+    proteinG: numeric("protein_g", { precision: 12, scale: 3 }),
+    fatG: numeric("fat_g", { precision: 12, scale: 3 }),
+    carbsG: numeric("carbs_g", { precision: 12, scale: 3 })
   },
   (table) => [
     foreignKey({
@@ -1532,6 +1532,7 @@ export const nutritionIngredientImportRecords = pgTable(
     ...nutritionImportBase(),
     normalizedName: varchar("normalized_name", { length: 256 }),
     normalizedCategory: varchar("normalized_category", { length: 256 }),
+    sourceDefaultUnit: varchar("source_default_unit", { length: 64 }),
     referenceQuantity: numeric("reference_quantity", { precision: 12, scale: 3 }),
     referenceUnit: nutritionUnit("reference_unit"),
     caloriesKcal: numeric("calories_kcal", { precision: 12, scale: 3 }),
@@ -1566,6 +1567,7 @@ export const nutritionFoodImportRecords = pgTable(
     normalizedName: varchar("normalized_name", { length: 256 }),
     normalizedType: varchar("normalized_type", { length: 256 }),
     normalizedCategory: varchar("normalized_category", { length: 256 }),
+    sourceDefaultPortion: varchar("source_default_portion", { length: 256 }),
     referenceQuantity: numeric("reference_quantity", { precision: 12, scale: 3 }),
     referenceUnit: nutritionUnit("reference_unit"),
     caloriesKcal: numeric("calories_kcal", { precision: 12, scale: 3 }),
@@ -1600,6 +1602,8 @@ export const nutritionCompositionImportRecords = pgTable(
     ...nutritionImportBase(),
     foodSourceId: varchar("food_source_id", { length: 512 }),
     ingredientSourceId: varchar("ingredient_source_id", { length: 512 }),
+    sourceQuantity: varchar("source_quantity", { length: 256 }),
+    sourceUnit: varchar("source_unit", { length: 64 }),
     normalizedQuantity: numeric("normalized_quantity", { precision: 12, scale: 3 }),
     normalizedUnit: nutritionUnit("normalized_unit"),
     normalizedPreparation: varchar("normalized_preparation", { length: 256 }),
@@ -1633,6 +1637,7 @@ export const nutritionMealImportRecords = pgTable(
     ...nutritionImportBase(),
     normalizedLocalDate: date("normalized_local_date", { mode: "string" }),
     normalizedKind: mealKind("normalized_kind"),
+    sourceKind: varchar("source_kind", { length: 128 }),
     normalizedLabel: varchar("normalized_label", { length: 256 }),
     normalizedDescription: text("normalized_description"),
     normalizedNote: text("normalized_note"),
@@ -1641,6 +1646,7 @@ export const nutritionMealImportRecords = pgTable(
     fatG: numeric("fat_g", { precision: 12, scale: 3 }),
     carbsG: numeric("carbs_g", { precision: 12, scale: 3 }),
     foodSourceId: varchar("food_source_id", { length: 512 }),
+    sourcePhotoReference: text("source_photo_reference"),
     normalizedConfidence: numeric("normalized_confidence", { precision: 4, scale: 3 }),
     targetMealId: uuid("target_meal_id")
   },
@@ -1656,6 +1662,33 @@ export const nutritionMealImportRecords = pgTable(
       foreignColumns: [meals.id, meals.personId]
     }),
     unique("nutrition_meal_import_record_uq").on(
+      table.batchId,
+      table.sourceLocator,
+      table.findingCode
+    )
+  ]
+);
+
+export const nutritionDayClosureImportRecords = pgTable(
+  "nutrition_day_closure_import_records",
+  {
+    ...nutritionImportBase(),
+    normalizedLocalDate: date("normalized_local_date", { mode: "string" }),
+    sourceStatus: varchar("source_status", { length: 64 }),
+    targetClosureId: uuid("target_closure_id")
+  },
+  (table) => [
+    foreignKey({
+      name: "nutrition_day_closure_import_batch_fk",
+      columns: [table.batchId, table.personId],
+      foreignColumns: [importBatches.id, importBatches.personId]
+    }),
+    foreignKey({
+      name: "nutrition_day_closure_import_target_fk",
+      columns: [table.targetClosureId, table.personId],
+      foreignColumns: [dayClosures.id, dayClosures.personId]
+    }),
+    unique("nutrition_day_closure_import_record_uq").on(
       table.batchId,
       table.sourceLocator,
       table.findingCode

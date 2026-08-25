@@ -8,13 +8,15 @@ const dateTime = { type: "string", format: "date-time" } as const;
 const nutritionTotalsSummarySchema = {
   type: "object",
   additionalProperties: false,
-  required: ["mealCount", "caloriesKcal", "proteinG", "fatG", "carbsG"],
+  required: ["mealCount", "caloriesKcal", "proteinG", "fatG", "carbsG", "nutritionCompleteness", "incompleteMealCount"],
   properties: {
     mealCount: { type: "integer", minimum: 0 },
-    caloriesKcal: { type: "number" },
-    proteinG: { type: "number" },
-    fatG: { type: "number" },
-    carbsG: { type: "number" }
+    caloriesKcal: { anyOf: [{ type: "number" }, { type: "null" }] },
+    proteinG: { anyOf: [{ type: "number" }, { type: "null" }] },
+    fatG: { anyOf: [{ type: "number" }, { type: "null" }] },
+    carbsG: { anyOf: [{ type: "number" }, { type: "null" }] },
+    nutritionCompleteness: { enum: ["complete", "partial"] },
+    incompleteMealCount: { type: "integer", minimum: 0 }
   }
 } as const;
 

@@ -78,6 +78,26 @@ export const NutrientValuesSchema = {
 /** Typed nutrition snapshot for one exact reference quantity or intake. */
 export type NutrientValues = FromSchema<typeof NutrientValuesSchema>;
 
+export const PartialNutrientValuesSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["caloriesKcal", "proteinG", "fatG", "carbsG"],
+  properties: {
+    caloriesKcal: { type: ["number", "null"], minimum: 0, maximum: 100000, multipleOf: 0.001 },
+    proteinG: { type: ["number", "null"], minimum: 0, maximum: 10000, multipleOf: 0.001 },
+    fatG: { type: ["number", "null"], minimum: 0, maximum: 10000, multipleOf: 0.001 },
+    carbsG: { type: ["number", "null"], minimum: 0, maximum: 10000, multipleOf: 0.001 }
+  }
+} as const;
+
+/** Nutrients read from historical evidence; null means unknown, never zero. */
+export type PartialNutrientValues = FromSchema<typeof PartialNutrientValuesSchema>;
+
+export const NutritionCompletenessSchema = {
+  type: "string",
+  enum: ["complete", "partial"]
+} as const;
+
 const catalogIdentityProperties = {
   id: { type: "string", format: "uuid" },
   visibility: CatalogVisibilitySchema,
@@ -528,10 +548,14 @@ export type MealItemInput = FromSchema<typeof MealItemInputSchema>;
 export const MealItemSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["position", ...MealItemInputSchema.required],
+  required: ["position", "foodVersionId", "label", "quantity", "unit", "nutrients"],
   properties: {
     position: { type: "integer", minimum: 1 },
-    ...MealItemInputSchema.properties
+    foodVersionId: nullableUuidSchema,
+    label: { type: "string", minLength: 1, maxLength: 256 },
+    quantity: MealItemInputSchema.properties.quantity,
+    unit: NutritionUnitSchema,
+    nutrients: PartialNutrientValuesSchema
   }
 } as const;
 
@@ -554,6 +578,7 @@ export const MealSchema = {
     "photoMediaId",
     "items",
     "totals",
+    "nutritionCompleteness",
     "sourceReference",
     "dedupeKey",
     "confidence",
@@ -583,7 +608,8 @@ export const MealSchema = {
       maxItems: 100,
       items: MealItemSchema
     },
-    totals: NutrientValuesSchema,
+    totals: PartialNutrientValuesSchema,
+    nutritionCompleteness: NutritionCompletenessSchema,
     sourceReference: SourceReferenceSchema,
     dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
     confidence: nullableConfidenceSchema,
@@ -727,12 +753,14 @@ export const DailyNutritionTotalsSchema = {
   $id: "DailyNutritionTotals",
   type: "object",
   additionalProperties: false,
-  required: ["personId", "localDate", "mealCount", "totals"],
+  required: ["personId", "localDate", "mealCount", "totals", "nutritionCompleteness", "incompleteMealCount"],
   properties: {
     personId: { type: "string", format: "uuid" },
     localDate: { type: "string", format: "date" },
     mealCount: { type: "integer", minimum: 0 },
-    totals: NutrientValuesSchema
+    totals: PartialNutrientValuesSchema,
+    nutritionCompleteness: NutritionCompletenessSchema,
+    incompleteMealCount: { type: "integer", minimum: 0 }
   }
 } as const;
 

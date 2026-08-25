@@ -415,7 +415,8 @@ const nutritionSnapshotCapture = (): FitnessTrackerNutritionSnapshotCapture => (
   ingredients: { sheetId: 402, title: "Ingredients", headers: ["Ingredient_ID", "Name", "Category", "Default_unit", "Calories_per_100g", "Protein_per_100g", "Fat_per_100g", "Carbs_per_100g", "Source", "Active"], rows: [] },
   foods: { sheetId: 403, title: "Foods", headers: ["Food_ID", "Name", "Type", "Category", "Default_portion", "Calories", "Protein", "Fat", "Carbs", "Source", "Confidence", "Active", "Brand_ID"], rows: [] },
   foodIngredients: { sheetId: 404, title: "Food_Ingredients", headers: ["Food_ID", "Ingredient_ID", "Quantity", "Unit", "Preparation", "Required", "Notes", "Confidence"], rows: [] },
-  meals: { sheetId: 405, title: "Meals", headers: ["Date", "Meal", "Description", "Calories", "Protein", "Fat", "Carbs", "Photo", "Notes", "Food_ID", "Confidence", "Meal_ID"], rows: [] }
+  meals: { sheetId: 405, title: "Meals", headers: ["Date", "Meal", "Description", "Calories", "Protein", "Fat", "Carbs", "Photo", "Notes", "Food_ID", "Confidence", "Meal_ID"], rows: [] },
+  dailyLog: { sheetId: 406, title: "Daily_Log", headers: ["Date", "DayStatus"], rows: [] }
 });
 
 describe("Private Fitness Tracker snapshot", () => {
@@ -471,7 +472,7 @@ describe("Private Fitness Tracker snapshot", () => {
     }
   });
 
-  it("round-trips a Body-only schema v2 capture", async () => {
+  it("round-trips a Body-only current-schema capture", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
     const snapshotPath = path.join(directory, "body.json");
     try {
@@ -617,7 +618,7 @@ describe("Private Fitness Tracker snapshot", () => {
   it("rejects invalid version, metadata, locators, cells and bounds", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
     const cases: Array<[string, unknown, string]> = [
-      ["version", { ...snapshotCapture(), schemaVersion: 3 }, "schema version"],
+      ["version", { ...snapshotCapture(), schemaVersion: 4 }, "schema version"],
       ["metadata", { ...snapshotCapture(), workbookTitle: "Another book" }, "metadata"],
       [
         "locator",

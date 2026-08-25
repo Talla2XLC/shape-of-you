@@ -63,7 +63,8 @@ operator authorizes a specific write.
 - Treat workbook as one operational system with domain modules/adapters, not a
   service or target table per sheet.
 - Domain runs capture only required sheets: Body alone for Body; Weight and
-  Daily_Log for Weight; and the five linked Nutrition sheets for Nutrition.
+  Daily_Log for Weight; and the five linked Nutrition sheets plus the bounded
+  Daily_Log closure projection for Nutrition.
   Body Notes and Source are private, Measurement_ID is stable identity, and
   Photo remains a blocking unsupported reference. Nutrition uses durable
   catalog IDs/Meal_ID and treats Photo markers and incomplete linked rows as

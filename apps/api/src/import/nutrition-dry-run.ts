@@ -20,7 +20,8 @@ export type NutritionImportRecordKind =
   | "ingredient"
   | "food"
   | "composition"
-  | "meal";
+  | "meal"
+  | "day_closure";
 
 /** Comparable current Nutrition record returned by the target reader. */
 export interface NutritionImportTarget {
@@ -35,6 +36,13 @@ interface Nutrients {
   readonly proteinG: number;
   readonly fatG: number;
   readonly carbsG: number;
+}
+
+interface PartialNutrients {
+  readonly caloriesKcal: number | null;
+  readonly proteinG: number | null;
+  readonly fatG: number | null;
+  readonly carbsG: number | null;
 }
 
 interface CandidateBase {
@@ -92,13 +100,22 @@ export interface NutritionMealCandidate extends CandidateBase {
   readonly kind: "meal";
   readonly localDate: string;
   readonly temporalPrecision: "local_date";
-  readonly mealKind: "breakfast" | "lunch" | "dinner" | "snack";
+  readonly mealKind: "breakfast" | "lunch" | "dinner" | "snack" | "other";
+  readonly sourceMealKind: string;
   readonly label: string;
   readonly description: string | null;
   readonly note: string | null;
-  readonly nutrients: Nutrients;
+  readonly nutrients: PartialNutrients;
   readonly foodSourceKey: string | null;
+  readonly sourcePhotoReference: string | null;
   readonly confidence: number | null;
+}
+
+/** Source-authoritative closed-day decision imported after same-run facts. */
+export interface NutritionDayClosureCandidate extends CandidateBase {
+  readonly kind: "day_closure";
+  readonly localDate: string;
+  readonly sourceStatus: "Closed";
 }
 
 /** Valid normalized Nutrition candidates accepted by dry-run and apply. */
@@ -107,7 +124,50 @@ export type NutritionImportCandidate =
   | NutritionIngredientCandidate
   | NutritionFoodCandidate
   | NutritionCompositionCandidate
-  | NutritionMealCandidate;
+  | NutritionMealCandidate
+  | NutritionDayClosureCandidate;
+
+type NutritionImportEvidence =
+  | {
+      readonly kind: "ingredient";
+      readonly name: string | null;
+      readonly category: string | null;
+      readonly sourceDefaultUnit: string | null;
+      readonly nutrients: PartialNutrients;
+    }
+  | {
+      readonly kind: "food";
+      readonly name: string | null;
+      readonly type: string | null;
+      readonly category: string | null;
+      readonly sourceDefaultPortion: string | null;
+      readonly nutrients: PartialNutrients;
+      readonly brandSourceKey: string | null;
+    }
+  | {
+      readonly kind: "composition";
+      readonly foodSourceKey: string | null;
+      readonly ingredientSourceKey: string | null;
+      readonly sourceQuantity: string | null;
+      readonly sourceUnit: string | null;
+      readonly preparation: string | null;
+      readonly required: boolean | null;
+      readonly note: string | null;
+      readonly confidence: number | null;
+    }
+  | {
+      readonly kind: "meal";
+      readonly localDate: string | null;
+      readonly mealKind: "breakfast" | "lunch" | "dinner" | "snack" | "other" | null;
+      readonly sourceMealKind: string | null;
+      readonly label: string | null;
+      readonly description: string | null;
+      readonly note: string | null;
+      readonly nutrients: PartialNutrients;
+      readonly foodSourceKey: string | null;
+      readonly sourcePhotoReference: string | null;
+      readonly confidence: number | null;
+    };
 
 /** Typed relational evidence for one Nutrition reconciliation result. */
 export interface NutritionImportAuditRecord {
@@ -120,6 +180,7 @@ export interface NutritionImportAuditRecord {
   readonly findingCode: string;
   readonly targetId: string | null;
   readonly candidate: NutritionImportCandidate | null;
+  readonly evidence: NutritionImportEvidence | null;
 }
 
 /** Private Nutrition result written only to protected files or relational audit. */
@@ -141,7 +202,7 @@ interface InvalidRow {
   readonly record: NutritionImportAuditRecord;
 }
 
-/** Deterministic five-sheet Nutrition classifier used by dry-run and apply. */
+/** Deterministic Nutrition-and-closure classifier used by dry-run and apply. */
 export class NutritionDryRunAdapter implements DryRunImportAdapter<
   FitnessTrackerNutritionSnapshot,
   NutritionImportTarget,
@@ -164,7 +225,8 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
       ingredient: snapshot.ingredients.sheetId,
       food: snapshot.foods.sheetId,
       composition: snapshot.foodIngredients.sheetId,
-      meal: snapshot.meals.sheetId
+      meal: snapshot.meals.sheetId,
+      day_closure: snapshot.dailyLog.sheetId
     };
     const invalidIdentityKeys = new Set(normalized.invalid.flatMap(({ record }) =>
       record.sourceSheetId === null || record.sourceRecordId === null
@@ -269,7 +331,8 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
               outcome: item.outcome,
               findingCode: item.code,
               targetId: item.targetId ?? null,
-              candidate: item.candidate ?? null
+              candidate: item.candidate ?? null,
+              evidence: null
             }))
         ]
       }
@@ -288,7 +351,29 @@ function normalizeSnapshot(snapshot: FitnessTrackerNutritionSnapshot): {
   normalizeSheet(snapshot.foods, (row, columns) => normalizeFood(row, columns, snapshot), candidates, invalid);
   normalizeSheet(snapshot.foodIngredients, (row, columns) => normalizeComposition(row, columns, snapshot), candidates, invalid);
   normalizeSheet(snapshot.meals, (row, columns) => normalizeMeal(row, columns, snapshot), candidates, invalid);
+  normalizeClosedDays(snapshot.dailyLog, candidates, invalid);
   return { candidates, invalid };
+}
+
+function normalizeClosedDays(
+  sheet: BoundedSheetSnapshot,
+  candidates: NutritionImportCandidate[],
+  invalid: InvalidRow[]
+): void {
+  const columns = Object.fromEntries(sheet.headers.map((header, index) => [header, index]));
+  for (const row of sheet.rows) {
+    const status = optionalText(row, columns, "DayStatus", 64);
+    if (status !== "Closed") continue;
+    const localDate = dateValue(value(row, columns, "Date"));
+    if (!localDate) {
+      invalid.push(invalidRow("day_closure", row, sheet.sheetId, null, "invalid_closed_day_row"));
+      continue;
+    }
+    candidates.push(candidateBase("day_closure", row, sheet.sheetId, localDate, {
+      localDate,
+      sourceStatus: "Closed" as const
+    }));
+  }
 }
 
 function normalizeSheet(
@@ -336,7 +421,15 @@ function normalizeIngredient(
     "Calories_per_100g", "Protein_per_100g", "Fat_per_100g", "Carbs_per_100g"
   ]);
   if (!id || !name || category === undefined || !unit || !isGram(unit) || !nutrients) {
-    return invalidRow("ingredient", row, snapshot.ingredients.sheetId, id, "invalid_ingredient_row");
+    return invalidRow("ingredient", row, snapshot.ingredients.sheetId, id, "invalid_ingredient_row", {
+      kind: "ingredient",
+      name,
+      category: category ?? null,
+      sourceDefaultUnit: unit ?? null,
+      nutrients: partialNutrientColumns(row, columns, [
+        "Calories_per_100g", "Protein_per_100g", "Fat_per_100g", "Carbs_per_100g"
+      ]) ?? emptyPartialNutrients()
+    });
   }
   return candidateBase("ingredient", row, snapshot.ingredients.sheetId, id, {
     name,
@@ -361,7 +454,16 @@ function normalizeFood(
   const brandSourceKey = optionalText(row, columns, "Brand_ID", 512);
   if (!id || !name || type === undefined || category === undefined || !portion ||
       !nutrients || brandSourceKey === undefined) {
-    return invalidRow("food", row, snapshot.foods.sheetId, id, "invalid_food_row");
+    return invalidRow("food", row, snapshot.foods.sheetId, id, "invalid_food_row", {
+      kind: "food",
+      name,
+      type: type ?? null,
+      category: category ?? null,
+      sourceDefaultPortion: evidenceText(value(row, columns, "Default_portion")),
+      nutrients: partialNutrientColumns(row, columns, ["Calories", "Protein", "Fat", "Carbs"])
+        ?? emptyPartialNutrients(),
+      brandSourceKey: brandSourceKey ?? null
+    });
   }
   return candidateBase("food", row, snapshot.foods.sheetId, id, {
     name,
@@ -393,7 +495,17 @@ function normalizeComposition(
   if (!foodSourceKey || !ingredientSourceKey || !quantity || !unit ||
       preparation === undefined || note === undefined || required === null ||
       confidence === undefined) {
-    return invalidRow("composition", row, snapshot.foodIngredients.sheetId, sourceKey, "invalid_composition_row");
+    return invalidRow("composition", row, snapshot.foodIngredients.sheetId, sourceKey, "invalid_composition_row", {
+      kind: "composition",
+      foodSourceKey,
+      ingredientSourceKey,
+      sourceQuantity: evidenceText(value(row, columns, "Quantity")),
+      sourceUnit: optionalText(row, columns, "Unit", 64) ?? null,
+      preparation: preparation ?? null,
+      required,
+      note: note ?? null,
+      confidence: confidence ?? null
+    });
   }
   return candidateBase(
     "composition",
@@ -420,42 +532,43 @@ function normalizeMeal(
 ): NutritionMealCandidate | InvalidRow {
   const id = text(row, columns, "Meal_ID", 512);
   const localDate = dateValue(value(row, columns, "Date"));
-  const mealKind = mealKindValue(optionalText(row, columns, "Meal", 128));
+  const sourceMealKind = optionalText(row, columns, "Meal", 128);
+  const mealKind = mealKindValue(sourceMealKind);
   const label = text(row, columns, "Description", 256);
   const description = optionalText(row, columns, "Description", 4096);
   const note = optionalText(row, columns, "Notes", 4096);
-  const nutrients = nutrientColumns(row, columns, ["Calories", "Protein", "Fat", "Carbs"]);
+  const nutrients = partialNutrientColumns(row, columns, ["Calories", "Protein", "Fat", "Carbs"]);
   const photo = optionalText(row, columns, "Photo", 4096);
   const foodSourceKey = optionalText(row, columns, "Food_ID", 512);
   const confidence = confidenceValue(value(row, columns, "Confidence"));
   if (!id || !uuid(id) || !localDate || !mealKind || !label ||
-      description === undefined || note === undefined || !nutrients ||
+      description === undefined || note === undefined || nutrients === undefined ||
       photo === undefined || foodSourceKey === undefined || confidence === undefined) {
-    return invalidRow("meal", row, snapshot.meals.sheetId, id, "invalid_meal_row");
-  }
-  if (photo !== null) {
-    const candidate = candidateBase("meal", row, snapshot.meals.sheetId, id, {
+    return invalidRow("meal", row, snapshot.meals.sheetId, id, "invalid_meal_row", {
+      kind: "meal",
       localDate,
-      temporalPrecision: "local_date" as const,
       mealKind,
+      sourceMealKind: sourceMealKind ?? null,
       label,
-      description,
-      note,
-      nutrients,
-      foodSourceKey,
-      confidence
+      description: description ?? null,
+      note: note ?? null,
+      nutrients: nutrients ?? emptyPartialNutrients(),
+      foodSourceKey: foodSourceKey ?? null,
+      sourcePhotoReference: photo ?? null,
+      confidence: confidence ?? null
     });
-    return conflictRow(candidate, "unsupported_photo_reference");
   }
   return candidateBase("meal", row, snapshot.meals.sheetId, id, {
     localDate,
     temporalPrecision: "local_date" as const,
     mealKind,
+    sourceMealKind: sourceMealKind!,
     label,
     description,
     note,
     nutrients,
     foodSourceKey,
+    sourcePhotoReference: photo,
     confidence
   });
 }
@@ -490,12 +603,6 @@ function dependencyBlocker(
       return "unresolved_ingredient_reference";
     }
   }
-  if (candidate.kind === "meal" && candidate.foodSourceKey) {
-    if (invalidKeys.has(dependencyKey("food", candidate.foodSourceKey)) ||
-        !find("food", candidate.foodSourceKey)) {
-      return "unresolved_food_reference";
-    }
-  }
   return null;
 }
 
@@ -524,7 +631,8 @@ function invalidRow(
   row: BoundedSheetRow,
   sheetId: number,
   sourceKey: string | null,
-  code: string
+  code: string,
+  evidence: NutritionImportEvidence | null = null
 ): InvalidRow {
   const safeKey = sourceKey ?? row.locator;
   return {
@@ -545,24 +653,8 @@ function invalidRow(
       outcome: "invalid",
       findingCode: code,
       targetId: null,
-      candidate: null
-    }
-  };
-}
-
-function conflictRow(candidate: NutritionImportCandidate, code: string): InvalidRow {
-  return {
-    finding: finding(candidate, "conflict", code),
-    record: {
-      kind: candidate.kind,
-      sourceSheetId: candidate.sourceIdentity.sheetId,
-      sourceLocator: candidate.locator,
-      sourceRecordId: candidate.sourceIdentity.sourceKey,
-      sourceChecksum: candidate.checksum,
-      outcome: "conflict",
-      findingCode: code,
-      targetId: null,
-      candidate
+      candidate: null,
+      evidence
     }
   };
 }
@@ -669,6 +761,37 @@ function nutrientColumns(
   };
 }
 
+function partialNutrientColumns(
+  row: BoundedSheetRow,
+  columns: Readonly<Record<string, number>>,
+  headers: readonly [string, string, string, string]
+): PartialNutrients | undefined {
+  const values = headers.map((header) => {
+    const raw = value(row, columns, header);
+    if (raw === null || raw === "") return null;
+    return numeric(raw) ?? undefined;
+  });
+  if (values.some((item) => item === undefined || (item !== null && item < 0))) {
+    return undefined;
+  }
+  return {
+    caloriesKcal: values[0]!,
+    proteinG: values[1]!,
+    fatG: values[2]!,
+    carbsG: values[3]!
+  };
+}
+
+function emptyPartialNutrients(): PartialNutrients {
+  return { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null };
+}
+
+function evidenceText(value: SheetCellValue): string | null {
+  if (value === null || value === "") return null;
+  const normalized = String(value).trim();
+  return normalized ? normalized.slice(0, 256) : null;
+}
+
 function isGram(value: string): boolean {
   return ["g", "г", "gram", "grams"].includes(value.trim().toLowerCase());
 }
@@ -710,13 +833,14 @@ function confidenceValue(value: SheetCellValue): number | null | undefined {
 }
 
 function mealKindValue(value: string | null | undefined):
-  "breakfast" | "lunch" | "dinner" | "snack" | null {
+  "breakfast" | "lunch" | "dinner" | "snack" | "other" | null {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
   if (normalized === "breakfast") return "breakfast";
   if (normalized === "lunch") return "lunch";
   if (normalized === "dinner") return "dinner";
   if (normalized === "snack") return "snack";
+  if (["all day", "evening drink", "evening drinks", "lunch add-on", "lunch-dinner"].includes(normalized)) return "other";
   return null;
 }
 

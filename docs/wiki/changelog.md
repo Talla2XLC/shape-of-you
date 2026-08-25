@@ -18,6 +18,20 @@ stages.
 
 ## Content
 
+### 2026-08-25 — Partial Nutrition evidence and imported closed days
+
+- Replaced Nutrition-wide blocking with identity-scoped reconciliation inside
+  the same importer transaction; unrelated valid Meals are no longer suppressed
+  by incomplete catalog evidence.
+- Added partial historical Meal reads with nullable nutrients, explicit
+  completeness, null-not-zero daily totals, and chart gaps for incomplete days
+  while keeping public HTTP/MCP writes complete-only.
+- Preserved raw legacy meal kind, Photo marker, and unresolved source Food ID in
+  typed relational audit instead of discarding or inventing target data.
+- Added bounded `Daily_Log` closure input. `Closed` is applied after same-run
+  Meals as an idempotent source-authoritative `DayClosure`; Training remains
+  optional and is not a closure prerequisite.
+
 ### 2026-08-24 — Nutrition adapter in the unified Fitness Tracker importer
 
 - Added one Nutrition adapter to the existing `fitness-tracker:import` command
