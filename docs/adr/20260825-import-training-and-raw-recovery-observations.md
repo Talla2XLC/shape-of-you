@@ -67,6 +67,11 @@ Source `Exercise_ID` отображается на private Training exercise/ver
 отдельную typed relational mapping table. Имя создаётся только из фактического
 `Exercise` source cell. Отсутствующий или противоречивый ID даёт локальный
 `invalid/conflict`, а не name-based guessing.
+Сам `Exercise_ID` остаётся stable external identity: если его фактический
+source label исторически менялся, каждое встреченное имя создаёт или повторно
+использует typed version того же private exercise. Выполненная строка хранит
+свой исходный label; importer не требует ручной правки истории и не объединяет
+упражнения по одному лишь имени.
 
 `PerformedSet` получает nullable `reps`, `durationSeconds` и `distanceMeters`.
 Минимум одно значение обязательно. Силовые строки заполняют reps; timed holds

@@ -87,6 +87,9 @@ TASK-0052 extends the same command and lifecycle with `training` and `recovery`
 adapters. Training groups performed facts by the stable source `Session_ID`,
 maps `Exercise_ID` through typed relational records, and represents strength,
 timed holds, and runs with explicit reps, duration, and distance fields.
+An `Exercise_ID` remains the external identity when its source label changes:
+each observed label resolves to a typed version of the same private exercise,
+while the performed row retains its historical label.
 Recovery imports only known raw `Daily_Log` observations: sleep and stages,
 HRV, resting/night heart rate, average/minimum SpO2, temperature deviation,
 respiration, and Body Battery. Readiness, AI, recovery-status, planning, and

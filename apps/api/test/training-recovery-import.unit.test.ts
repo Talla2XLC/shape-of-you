@@ -34,16 +34,19 @@ describe("unified Fitness Tracker Training dry-run", () => {
     expect(repeat.safeReport.counts.unchanged).toBe(1);
     expect(repeat.safeReport.counts.created).toBe(1);
 
-    const mappingConflict = new TrainingDryRunAdapter().classify(source, [{
+    const renamedExercise = new TrainingDryRunAdapter().classify(source, [{
       kind: "exercise_mapping",
       id: "00000000-0000-4000-8000-000000000002",
       sourceExerciseId: "ex-1",
       sourceName: "Renamed without a version",
-      checksum: "f".repeat(64)
+      checksum: "d65fcccd83b6a5a25a405e6df2e83c9f54472f68df120d5bde1b95992460bd20"
     }]);
-    expect(mappingConflict.safeReport.findings).toContainEqual(
-      expect.objectContaining({ outcome: "conflict", code: "exercise_mapping_mismatch" })
-    );
+    expect(renamedExercise.safeReport.counts).toEqual({
+      created: 2,
+      unchanged: 0,
+      conflict: 0,
+      invalid: 1
+    });
   });
 });
 

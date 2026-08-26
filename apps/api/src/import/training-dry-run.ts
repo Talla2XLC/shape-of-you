@@ -131,13 +131,10 @@ export class TrainingDryRunAdapter implements DryRunImportAdapter<
       const matches = targetByKey.get(identityKey(candidate.sourceIdentity)) ?? [];
       const mappingConflict = candidate.exercises.some((exercise) => {
         const mapping = mappingByExerciseId.get(exercise.sourceExerciseId);
-        return mapping !== undefined && (
-          mapping.sourceName !== exercise.sourceName ||
-          mapping.checksum !== hash({
-            sourceExerciseId: exercise.sourceExerciseId,
-            sourceName: exercise.sourceName
-          })
-        );
+        return mapping !== undefined && mapping.checksum !== hash({
+          sourceExerciseId: mapping.sourceExerciseId,
+          sourceName: mapping.sourceName
+        });
       });
       if (mappingConflict) {
         findings.push(finding(candidate, "conflict", "exercise_mapping_mismatch", null));

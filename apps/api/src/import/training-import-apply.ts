@@ -83,8 +83,45 @@ async function ensureExercise(client: PoolClient, personId: string, sourceSystem
     [personId, sourceSystem, sourceExerciseId]
   );
   if (existing.rows[0]) {
-    if (existing.rows[0].source_name !== sourceName || existing.rows[0].source_checksum !== checksum) throw new Error("Training exercise source mapping conflicts with current source");
-    return { exerciseId: existing.rows[0].exercise_id, exerciseVersionId: existing.rows[0].exercise_version_id };
+    const mappingChecksum = digest({
+      sourceExerciseId,
+      sourceName: existing.rows[0].source_name
+    });
+    if (existing.rows[0].source_checksum !== mappingChecksum) {
+      throw new Error("Training exercise source mapping checksum is invalid");
+    }
+    if (existing.rows[0].source_name === sourceName) {
+      return { exerciseId: existing.rows[0].exercise_id, exerciseVersionId: existing.rows[0].exercise_version_id };
+    }
+    const version = await client.query<{ id: string }>(
+      `select id from training_exercise_versions
+        where exercise_id = $1 and name = $2
+        order by version
+        limit 1`,
+      [existing.rows[0].exercise_id, sourceName]
+    );
+    if (version.rows[0]) {
+      return {
+        exerciseId: existing.rows[0].exercise_id,
+        exerciseVersionId: version.rows[0].id
+      };
+    }
+    const createdVersion = await client.query<{ id: string }>(
+      `insert into training_exercise_versions (exercise_id, version, name)
+       select $1, coalesce(max(version), 0) + 1, $2
+         from training_exercise_versions
+        where exercise_id = $1
+       returning id`,
+      [existing.rows[0].exercise_id, sourceName]
+    );
+    await client.query(
+      "update training_exercises set current_version_id = $1 where id = $2",
+      [createdVersion.rows[0]!.id, existing.rows[0].exercise_id]
+    );
+    return {
+      exerciseId: existing.rows[0].exercise_id,
+      exerciseVersionId: createdVersion.rows[0]!.id
+    };
   }
   const exercise = await client.query<{ id: string }>("insert into training_exercises (visibility, owner_person_id) values ('private', $1) returning id", [personId]);
   const version = await client.query<{ id: string }>("insert into training_exercise_versions (exercise_id, version, name) values ($1, 1, $2) returning id", [exercise.rows[0]!.id, sourceName]);

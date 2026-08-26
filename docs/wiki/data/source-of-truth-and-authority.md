@@ -66,6 +66,9 @@ For Training, only the `Training` sheet supplies performed WorkoutSession
 facts. `Program`, Personal Records, and planning fields remain projections.
 Stable identity uses the exact workbook, numeric sheet ID, and `Session_ID`;
 `Exercise_ID` maps through typed relational records rather than a guessed name.
+Historical labels for one stable `Exercise_ID` resolve to versions of the same
+private exercise, and each performed row retains the label actually supplied by
+the workbook.
 Strength, timed, and distance evidence remains explicit, while the malformed
 meal row is local `invalid` and creates no workout.
 

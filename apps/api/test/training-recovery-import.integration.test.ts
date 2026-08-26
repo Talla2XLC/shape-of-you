@@ -39,13 +39,13 @@ describe("unified Training and Recovery apply", () => {
     const recoveryFirst = await recoveryService.apply(personId, recoverySnapshot());
     const recoveryRepeat = await recoveryService.apply(personId, recoverySnapshot());
 
-    expect(trainingFirst).toMatchObject({ status: "completed", counts: { created: 2, unchanged: 0, conflict: 0, invalid: 1 } });
-    expect(trainingRepeat).toMatchObject({ status: "completed", counts: { created: 0, unchanged: 2, conflict: 0, invalid: 1 } });
+    expect(trainingFirst).toMatchObject({ status: "completed", counts: { created: 3, unchanged: 0, conflict: 0, invalid: 1 } });
+    expect(trainingRepeat).toMatchObject({ status: "completed", counts: { created: 0, unchanged: 3, conflict: 0, invalid: 1 } });
     expect(recoveryFirst).toMatchObject({ status: "completed", counts: { created: 9, unchanged: 0, conflict: 0, invalid: 1 } });
     expect(recoveryRepeat).toMatchObject({ status: "completed", counts: { created: 0, unchanged: 9, conflict: 0, invalid: 1 } });
 
     const state = await pool.query<{
-      sessions: string; sets: string; mappings: string; training_audits: string;
+      sessions: string; sets: string; mappings: string; training_versions: string; training_audits: string;
       observations: string; recovery_audits: string; sleep_stages: string;
       date_only_sessions: string; date_only_observations: string;
     }>(
@@ -53,6 +53,7 @@ describe("unified Training and Recovery apply", () => {
         (select count(*) from workout_sessions where person_id = $1)::text sessions,
         (select count(*) from performed_sets ps join performed_exercises pe on pe.id = ps.performed_exercise_id join workout_sessions ws on ws.id = pe.session_id where ws.person_id = $1)::text sets,
         (select count(*) from training_import_exercise_mappings where person_id = $1)::text mappings,
+        (select count(*) from training_exercise_versions tev join training_exercises te on te.id = tev.exercise_id where te.owner_person_id = $1)::text training_versions,
         (select count(*) from training_import_records where person_id = $1)::text training_audits,
         (select count(*) from recovery_observations where person_id = $1)::text observations,
         (select count(*) from recovery_import_records where person_id = $1)::text recovery_audits,
@@ -62,14 +63,15 @@ describe("unified Training and Recovery apply", () => {
       [personId]
     );
     expect(state.rows[0]).toEqual({
-      sessions: "2",
-      sets: "4",
+      sessions: "3",
+      sets: "6",
       mappings: "2",
-      training_audits: "6",
+      training_versions: "3",
+      training_audits: "8",
       observations: "9",
       recovery_audits: "20",
       sleep_stages: "1",
-      date_only_sessions: "2",
+      date_only_sessions: "3",
       date_only_observations: "9"
     });
   });
@@ -81,7 +83,8 @@ function trainingSnapshot(): FitnessTrackerTrainingSnapshot {
     training: { sheetId: 1052535761, title: "Training", headers: ["Date", "Workout", "Exercise", "Weight_kg", "Sets", "Reps", "RIR", "Feeling", "Notes", "Exercise_ID", "Session_ID"], rows: [
       { locator: "Training!2", values: ["2026-08-20", "A", "Squat", 20, 3, 10, 2, "ok", "", "ex-1", "session-1"] },
       { locator: "Training!3", values: ["2026-08-21", "Run", "Easy run", "Собственный вес", 1, "4,22 км / 31:38", "", "", "", "run-1", "session-2"] },
-      { locator: "Training!4", values: ["2026-08-22", "Lunch", "Meal", 750, 62, 27, 63, "", "", "", "meal-1"] }
+      { locator: "Training!4", values: ["2026-08-22", "B", "Barbell squat", 30, 2, 8, 2, "ok", "", "ex-1", "session-3"] },
+      { locator: "Training!5", values: ["2026-08-23", "Lunch", "Meal", 750, 62, 27, 63, "", "", "", "meal-1"] }
     ] }
   };
 }
