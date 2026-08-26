@@ -29,6 +29,7 @@ export interface NutritionImportTarget {
   readonly kind: NutritionImportRecordKind;
   readonly sourceIdentity: ImportSourceIdentity;
   readonly checksum: string | null;
+  readonly semanticChecksum?: string | null;
 }
 
 interface Nutrients {
@@ -238,10 +239,17 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
           })]
     ));
     const targetByKey = new Map<string, NutritionImportTarget[]>();
+    const targetByStableKey = new Map<string, NutritionImportTarget[]>();
     for (const row of target) {
       const key = identityKey(row.sourceIdentity);
       targetByKey.set(key, [...(targetByKey.get(key) ?? []), row]);
+      const stableKey = stableIdentityKey(row.kind, row.sourceIdentity);
+      targetByStableKey.set(
+        stableKey,
+        [...(targetByStableKey.get(stableKey) ?? []), row]
+      );
     }
+    const claimedTargetIds = new Set<string>();
 
     for (const candidate of candidates) {
       const key = identityKey(candidate.sourceIdentity);
@@ -261,10 +269,26 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
       }
       const matches = targetByKey.get(key) ?? [];
       if (matches.length === 0) {
-        findings.push(finding(candidate, "created", "target_absent"));
+        const drifted = targetByStableKey.get(
+          stableIdentityKey(candidate.kind, candidate.sourceIdentity)
+        ) ?? [];
+        for (const row of drifted) claimedTargetIds.add(row.id);
+        if (drifted.length === 0) {
+          findings.push(finding(candidate, "created", "target_absent"));
+        } else if (drifted.length === 1) {
+          findings.push(finding(
+            candidate,
+            "conflict",
+            "source_identity_mismatch",
+            drifted[0]!.id
+          ));
+        } else {
+          findings.push(finding(candidate, "conflict", "duplicate_target_identity"));
+        }
       } else if (matches.length !== 1) {
         findings.push(finding(candidate, "conflict", "duplicate_target_identity"));
-      } else if (matches[0]!.checksum === candidate.checksum) {
+      } else if (matches[0]!.checksum === candidate.checksum ||
+        hasSemanticMatch(matches[0]!, candidate)) {
         findings.push(finding(
           candidate,
           "unchanged",
@@ -286,7 +310,8 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
       ...invalidIdentityKeys
     ]);
     for (const row of target) {
-      if (!sourceKeys.has(identityKey(row.sourceIdentity))) {
+      if (!sourceKeys.has(identityKey(row.sourceIdentity)) &&
+          !claimedTargetIds.has(row.id)) {
         findings.push({
           kind: row.kind,
           outcome: "conflict",
@@ -338,6 +363,57 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
       }
     };
   }
+}
+
+/** Stable semantic checksum for a normalized Brand representation. */
+export function nutritionBrandSemanticChecksum(input: {
+  readonly name: string;
+  readonly type: string | null;
+  readonly note: string | null;
+}): string {
+  return digest({ kind: "brand", ...input });
+}
+
+/** Stable semantic checksum for the relational fields of an imported Meal. */
+export function nutritionMealSemanticChecksum(input: {
+  readonly localDate: string;
+  readonly mealKind: NutritionMealCandidate["mealKind"];
+  readonly label: string;
+  readonly description: string | null;
+  readonly note: string | null;
+  readonly nutrients: PartialNutrients;
+  readonly confidence: number | null;
+}): string {
+  return digest({ kind: "meal", ...input });
+}
+
+/** Stable semantic checksum for a source-authoritative closed local day. */
+export function nutritionDayClosureSemanticChecksum(localDate: string): string {
+  return digest({ kind: "day_closure", localDate, sourceStatus: "Closed" });
+}
+
+function candidateSemanticChecksum(
+  candidate: NutritionImportCandidate
+): string | null {
+  if (candidate.kind === "brand") {
+    return nutritionBrandSemanticChecksum(candidate);
+  }
+  if (candidate.kind === "meal") {
+    return nutritionMealSemanticChecksum(candidate);
+  }
+  if (candidate.kind === "day_closure") {
+    return nutritionDayClosureSemanticChecksum(candidate.localDate);
+  }
+  return null;
+}
+
+function hasSemanticMatch(
+  target: NutritionImportTarget,
+  candidate: NutritionImportCandidate
+): boolean {
+  const candidateChecksum = candidateSemanticChecksum(candidate);
+  return candidateChecksum !== null && target.semanticChecksum != null &&
+    target.semanticChecksum === candidateChecksum;
 }
 
 function normalizeSnapshot(snapshot: FitnessTrackerNutritionSnapshot): {
@@ -684,6 +760,13 @@ function duplicateIdentityKeys(candidates: readonly NutritionImportCandidate[]):
 
 function identityKey(identity: ImportSourceIdentity): string {
   return `${identity.spreadsheetId}:${identity.sheetId}:${identity.sourceKey}`;
+}
+
+function stableIdentityKey(
+  kind: NutritionImportRecordKind,
+  identity: ImportSourceIdentity
+): string {
+  return `${kind}:${identity.spreadsheetId}:${identity.sourceKey}`;
 }
 
 function compareCandidates(left: NutritionImportCandidate, right: NutritionImportCandidate): number {

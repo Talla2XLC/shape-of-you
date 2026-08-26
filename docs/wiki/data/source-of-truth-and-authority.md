@@ -48,6 +48,13 @@ facts plus provenance and typed audit; it never writes Sheets or overwrites an
 existing fact. Date-only source evidence is not converted to an invented
 timestamp.
 
+The operator can run all five domains through one deterministic orchestration,
+but each domain still receives its own bounded typed snapshot and transaction.
+The aggregate report does not transfer authority. The latest staging
+reconciliation has no missing facts eligible for automatic creation, while
+Nutrition retains explicit source-data and provenance conflicts; therefore the
+cutover gate remains closed.
+
 For Body, the `Body` sheet is migration authority. Stable source identity is
 the exact workbook, numeric sheet ID, and `Measurement_ID`. The importer reads
 only Body for this domain. Notes and source labels remain private evidence; a
@@ -100,6 +107,10 @@ resume. Any rollback write to Sheets requires separate operator approval.
 - Accepted Weight dry-run/apply evidence, TASK-0048 Body evidence, and
   TASK-0049/0050 Nutrition-and-closure dry-run, identity-scoped apply, privacy, and typed
   relational audit evidence.
+- TASK-0055 all-domain staging evidence: zero remaining `created`, no execution
+  failures, twelve unresolved composition references, and three detected Brand
+  numeric-sheet provenance mismatches. No duplicate or corrective mutation was
+  performed.
 
 ## Decisions
 

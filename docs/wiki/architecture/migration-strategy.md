@@ -96,6 +96,22 @@ respiration, and Body Battery. Readiness, AI, recovery-status, planning, and
 `Load_Risk` projections are excluded. Malformed or narrative source evidence
 remains a local `invalid`; it does not block independent valid facts.
 
+TASK-0055 adds one operator-facing `--domain all` invocation over the same five
+typed adapters. It requires a separate versioned private snapshot path for
+each domain, runs them in fixed Weight, Body, Nutrition, Training, Recovery
+order, preserves each domain transaction, and emits per-domain plus aggregate
+safe counts. A failed domain is reported without suppressing the remaining
+comparisons; this orchestration is not a second migrator and does not weaken
+the existing one-domain commands.
+
+Nutrition target reads compare exact relational projections for imported
+Brands, Meals, and accepted Sheets day closures when legacy capture rendering
+changed a row checksum without changing the stored fact. This compatibility
+does not apply to unsupported entity kinds or day closures without accepted
+Sheets provenance. Numeric-sheet provenance drift is detected by stable source
+ID across workbook-scoped catalog sources and remains an explicit conflict;
+the importer neither creates a duplicate nor repairs provenance automatically.
+
 Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
 date; row position is locator evidence and content checksum remains separate.
 Date-only Weight evidence is stored with explicit `local_date` precision and a
@@ -184,6 +200,15 @@ automatically changes closed days or ambiguous facts.
   dry-run returned `created=0`, `unchanged=240`, and `conflict=0`.
   Google Sheets was read-only throughout, private snapshots were removed, and
   no cutover occurred.
+- TASK-0055 completed a single bounded all-domain connector capture and staging
+  run. The approved apply created two independent facts that were absent at
+  capture time. The final read-only reconciliation returned `created=0`,
+  `unchanged=418`, `conflict=15`, and `invalid=41`, with no domain execution
+  failure. The conflicts are twelve unresolved Food references in composition
+  rows and three Brand records whose historical catalog provenance carries the
+  Foods numeric sheet ID instead of the Brands numeric sheet ID. The importer
+  detected those identities and created no duplicate. Google Sheets remained
+  read-only, temporary snapshots were removed, and no cutover occurred.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
@@ -191,11 +216,12 @@ automatically changes closed days or ambiguous facts.
 - Pull-based import, typed adapters, exclusive-writer cutover, and rollback are
   accepted in the linked ADR.
 - Weight, Body, Nutrition, Training, and Recovery dry-run/apply adapters are
-  implemented through one command and lifecycle. Body apply has not been
-  executed because its authoritative source is empty; the revised Nutrition
-  apply has not been executed because its blockers remain unresolved. Weight,
-  Training, and Recovery have completed controlled real-data staging apply and
-  same-snapshot idempotency verification. Recurring reconciliation and
+  implemented through one command and lifecycle, with one all-domain operator
+  orchestration over separate typed snapshots. Body apply has not been needed
+  because its authoritative source is empty. Weight, Nutrition, Training, and
+  Recovery have completed controlled real-data staging apply; the latest
+  all-domain verification is duplicate-safe but still contains explicit
+  Nutrition source-data and provenance blockers. Recurring reconciliation and
   authority transfer remain separately gated.
 
 ## Open questions

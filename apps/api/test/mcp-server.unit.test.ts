@@ -9,8 +9,12 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 
 import { RequestPersonContext } from "../src/application/person-context.js";
 import {
+  MCP_BODY_MEASUREMENT_WRITE_SCOPE,
+  MCP_MEAL_WRITE_SCOPE,
   MCP_READ_SCOPE,
   MCP_RECOVERY_WRITE_SCOPE,
+  MCP_WEIGHT_WRITE_SCOPE,
+  MCP_WORKOUT_WRITE_SCOPE,
   McpAuthorizer,
   McpAuthorizationError,
   type McpAuthorizationBoundary
@@ -85,12 +89,21 @@ describe("MCP HTTP adapter", () => {
     expect(body.result.tools[0].securitySchemes).toEqual([
       { type: "oauth2", scopes: [MCP_READ_SCOPE] }
     ]);
-    expect(body.result.tools.find(({ name }: { name: string }) => name === "list_recovery_observations")?.securitySchemes).toEqual([
-      { type: "oauth2", scopes: [MCP_READ_SCOPE] }
-    ]);
-    expect(body.result.tools.find(({ name }: { name: string }) => name === "record_recovery_observation")?.securitySchemes).toEqual([
-      { type: "oauth2", scopes: [MCP_RECOVERY_WRITE_SCOPE] }
-    ]);
+    expect(Object.fromEntries(body.result.tools.map((tool: {
+      name: string;
+      securitySchemes: Array<{ scopes: string[] }>;
+    }) => [tool.name, tool.securitySchemes[0]?.scopes[0]]))).toEqual({
+      list_weight_measurements: MCP_READ_SCOPE,
+      record_weight_measurement: MCP_WEIGHT_WRITE_SCOPE,
+      list_body_measurements: MCP_READ_SCOPE,
+      record_body_measurements: MCP_BODY_MEASUREMENT_WRITE_SCOPE,
+      list_meals: MCP_READ_SCOPE,
+      record_meal: MCP_MEAL_WRITE_SCOPE,
+      list_workout_sessions: MCP_READ_SCOPE,
+      record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
+      list_recovery_observations: MCP_READ_SCOPE,
+      record_recovery_observation: MCP_RECOVERY_WRITE_SCOPE
+    });
   });
 
   it("returns the OAuth challenge from a protected tool call", async () => {

@@ -94,6 +94,15 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       FITNESS_TRACKER_SPREADSHEET_ID,
       sheetIds
     ).readTarget(personId);
+    await pool.query(
+      "update nutrition_day_closure_import_records set outcome = 'conflict' where person_id = $1",
+      [personId]
+    );
+    const targetAfterConflictAudit = await new PostgresNutritionTargetReader(
+      pool,
+      FITNESS_TRACKER_SPREADSHEET_ID,
+      sheetIds
+    ).readTarget(personId);
 
     expect(first).toEqual(expect.objectContaining({
       status: "completed",
@@ -117,6 +126,10 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       occurred_at: null
     });
     expect(target).toHaveLength(6);
+    expect(target.find(({ kind }) => kind === "brand")?.semanticChecksum).toBeTruthy();
+    expect(target.find(({ kind }) => kind === "meal")?.semanticChecksum).toBeTruthy();
+    expect(targetAfterConflictAudit.find(({ kind }) => kind === "day_closure"))
+      .toEqual(expect.objectContaining({ checksum: null, semanticChecksum: null }));
   });
 
   it("preserves photo evidence without blocking independent facts", async () => {

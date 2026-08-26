@@ -1,7 +1,13 @@
 import type { Pool, PoolClient } from "pg";
 
 import type { ImportTargetReader } from "./contracts.js";
-import type { NutritionImportTarget, NutritionImportRecordKind } from "./nutrition-dry-run.js";
+import {
+  nutritionBrandSemanticChecksum,
+  nutritionDayClosureSemanticChecksum,
+  nutritionMealSemanticChecksum,
+  type NutritionImportTarget,
+  type NutritionImportRecordKind
+} from "./nutrition-dry-run.js";
 
 /** Numeric sheet identities required to reconstruct Nutrition source identities. */
 export interface NutritionSheetIds {
@@ -17,6 +23,22 @@ interface TargetRow {
   readonly id: string;
   readonly source_key: string;
   readonly checksum: string | null;
+  readonly semantic_checksum?: string | null;
+  readonly source_sheet_id?: number;
+  readonly source_provenance_accepted?: boolean;
+}
+
+interface MealTargetRow extends TargetRow {
+  readonly local_date: string;
+  readonly kind: "breakfast" | "lunch" | "dinner" | "snack" | "other";
+  readonly description: string | null;
+  readonly note: string | null;
+  readonly confidence: string | null;
+  readonly label: string;
+  readonly calories_kcal: string | null;
+  readonly protein_g: string | null;
+  readonly fat_g: string | null;
+  readonly carbs_g: string | null;
 }
 
 /** Read-only PostgreSQL projection for Nutrition reconciliation. */
@@ -43,10 +65,13 @@ export class PostgresNutritionTargetReader
     const ingredients = await this.catalogRows(client, personId, "ingredient");
     const foods = await this.catalogRows(client, personId, "food");
     const compositions = await this.catalogRows(client, personId, "composition");
-    const meals = await client.query<TargetRow>(
-        `select m.id, sr.external_record_id as source_key, sr.checksum
+    const meals = await client.query<MealTargetRow>(
+        `select m.id, sr.external_record_id as source_key, sr.checksum,
+                m.local_date::text, m.kind, m.description, m.note, m.confidence,
+                mi.label, mi.calories_kcal, mi.protein_g, mi.fat_g, mi.carbs_g
            from meals m
            join source_references sr on sr.id = m.source_reference_id
+           join meal_items mi on mi.meal_id = m.id
           where m.person_id = $1
             and m.source = 'google_sheets'
             and sr.external_system = $2`,
@@ -58,7 +83,30 @@ export class PostgresNutritionTargetReader
       ...mapRows("ingredient", ingredients.rows, this.spreadsheetId, this.sheetIds.ingredients),
       ...mapRows("food", foods.rows, this.spreadsheetId, this.sheetIds.foods),
       ...mapRows("composition", compositions.rows, this.spreadsheetId, this.sheetIds.foodIngredients),
-      ...mapRows("meal", meals.rows, this.spreadsheetId, this.sheetIds.meals),
+      ...meals.rows.map((row) => ({
+        id: row.id,
+        kind: "meal" as const,
+        sourceIdentity: {
+          spreadsheetId: this.spreadsheetId,
+          sheetId: this.sheetIds.meals,
+          sourceKey: row.source_key
+        },
+        checksum: row.checksum,
+        semanticChecksum: nutritionMealSemanticChecksum({
+          localDate: row.local_date,
+          mealKind: row.kind,
+          label: row.label,
+          description: row.description,
+          note: row.note,
+          nutrients: {
+            caloriesKcal: numeric(row.calories_kcal),
+            proteinG: numeric(row.protein_g),
+            fatG: numeric(row.fat_g),
+            carbsG: numeric(row.carbs_g)
+          },
+          confidence: numeric(row.confidence)
+        })
+      })),
       ...mapRows("day_closure", closures.rows, this.spreadsheetId, this.sheetIds.dailyLog)
     ];
   }
@@ -78,17 +126,50 @@ export class PostgresNutritionTargetReader
     if (kind === "composition") {
       return this.compositionRows(client, personId);
     }
-    const query =
-      `select root.id, r.external_record_id as source_key, r.checksum
+    const query = kind === "brand"
+      ? `select root.id, r.external_record_id as source_key, r.checksum,
+                version.name, version.type, version.note,
+                split_part(s.key, ':', 3)::int as source_sheet_id
            from ${config.root} root
            join ${config.version} version on version.id = root.current_version_id
            join nutrition_catalog_source_records r on r.id = version.source_record_id
            join nutrition_catalog_sources s on s.id = r.source_id
-          where root.visibility = 'private' and root.owner_person_id = $1 and s.key = $2`;
-    return client.query<TargetRow>(query, [
+          where root.visibility = 'private' and root.owner_person_id = $1
+            and split_part(s.key, ':', 1) = 'fitness_tracker'
+            and split_part(s.key, ':', 2) = $2
+            and split_part(s.key, ':', 3) ~ '^[0-9]+$'
+            and split_part(s.key, ':', 4) = $3`
+      : `select root.id, r.external_record_id as source_key, r.checksum,
+                split_part(s.key, ':', 3)::int as source_sheet_id
+           from ${config.root} root
+           join ${config.version} version on version.id = root.current_version_id
+           join nutrition_catalog_source_records r on r.id = version.source_record_id
+           join nutrition_catalog_sources s on s.id = r.source_id
+          where root.visibility = 'private' and root.owner_person_id = $1
+            and split_part(s.key, ':', 1) = 'fitness_tracker'
+            and split_part(s.key, ':', 2) = $2
+            and split_part(s.key, ':', 3) ~ '^[0-9]+$'
+            and split_part(s.key, ':', 4) = $3`;
+    return client.query<TargetRow & {
+      readonly name?: string;
+      readonly type?: string | null;
+      readonly note?: string | null;
+    }>(query, [
       personId,
-      catalogSourceKey(this.spreadsheetId, config.source, kind)
-    ]);
+      this.spreadsheetId,
+      kind
+    ]).then((result) => ({
+      rows: result.rows.map((row) => kind === "brand"
+        ? {
+            ...row,
+            semantic_checksum: nutritionBrandSemanticChecksum({
+              name: row.name!,
+              type: row.type ?? null,
+              note: row.note ?? null
+            })
+          }
+        : row)
+    }));
   }
 
   private async dayClosureRows(
@@ -103,15 +184,17 @@ export class PostgresNutritionTargetReader
       `with imported as (
          select distinct on (r.source_record_id)
            r.target_closure_id as id, r.source_record_id as source_key,
-           r.source_checksum as checksum
+           r.source_checksum as checksum, true as source_provenance_accepted
           from nutrition_day_closure_import_records r
           join day_closures c on c.id = r.target_closure_id and c.person_id = r.person_id
          where r.person_id = $1 and r.target_closure_id is not null
+           and r.outcome in ('created', 'unchanged')
          order by r.source_record_id, r.created_at desc
        )
        select * from imported
        union all
-       select c.id, c.local_date::text as source_key, null::varchar as checksum
+       select c.id, c.local_date::text as source_key, null::varchar as checksum,
+              false as source_provenance_accepted
          from day_closures c
         where c.person_id = $1 and c.status = 'active'
           and not exists (select 1 from imported i where i.id = c.id)`,
@@ -133,20 +216,21 @@ export class PostgresNutritionTargetReader
     );
     if (!capability.rows[0]?.available) return { rows: [] };
     return client.query<TargetRow>(
-      `select c.id, r.external_record_id as source_key, r.checksum
+      `select c.id, r.external_record_id as source_key, r.checksum,
+              split_part(s.key, ':', 3)::int as source_sheet_id
          from nutrition_food_version_ingredients c
          join nutrition_food_versions v on v.id = c.food_version_id
          join nutrition_foods f on f.current_version_id = v.id
          join nutrition_catalog_source_records r on r.id = c.source_record_id
          join nutrition_catalog_sources s on s.id = r.source_id
-        where f.visibility = 'private' and f.owner_person_id = $1 and s.key = $2`,
+        where f.visibility = 'private' and f.owner_person_id = $1
+          and split_part(s.key, ':', 1) = 'fitness_tracker'
+          and split_part(s.key, ':', 2) = $2
+          and split_part(s.key, ':', 3) ~ '^[0-9]+$'
+          and split_part(s.key, ':', 4) = 'composition'`,
       [
         personId,
-        catalogSourceKey(
-          this.spreadsheetId,
-          this.sheetIds.foodIngredients,
-          "composition"
-        )
+        this.spreadsheetId
       ]
     );
   }
@@ -184,7 +268,20 @@ function mapRows(
   return rows.map((row) => ({
     id: row.id,
     kind,
-    sourceIdentity: { spreadsheetId, sheetId, sourceKey: row.source_key },
-    checksum: row.checksum
+    sourceIdentity: {
+      spreadsheetId,
+      sheetId: row.source_sheet_id ?? sheetId,
+      sourceKey: row.source_key
+    },
+    checksum: row.checksum,
+    semanticChecksum: row.semantic_checksum ?? (
+      kind === "day_closure" && row.source_provenance_accepted === true
+        ? nutritionDayClosureSemanticChecksum(row.source_key)
+        : null
+    )
   }));
+}
+
+function numeric(value: string | null): number | null {
+  return value === null ? null : Number(value);
 }

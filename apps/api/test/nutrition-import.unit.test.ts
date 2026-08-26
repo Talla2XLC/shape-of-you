@@ -6,6 +6,9 @@ import {
 } from "../src/import/fitness-tracker-sheets-reader.js";
 import {
   NutritionDryRunAdapter,
+  nutritionBrandSemanticChecksum,
+  nutritionDayClosureSemanticChecksum,
+  nutritionMealSemanticChecksum,
   type NutritionImportTarget
 } from "../src/import/nutrition-dry-run.js";
 
@@ -138,6 +141,100 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     expect(codes).toContain("invalid_ingredient_row");
     expect(codes).not.toContain("unresolved_food_reference");
     expect(codes).not.toContain("target_only");
+  });
+
+  it("accepts relationally equal Brands, Meals, and closed days despite raw changes", () => {
+    const source = snapshot();
+    const initial = new NutritionDryRunAdapter().classify(source, []);
+    const projected = initial.privateDetail.candidates.map((candidate, index) => {
+      const semanticChecksum = candidate.kind === "brand"
+        ? nutritionBrandSemanticChecksum(candidate)
+        : candidate.kind === "meal"
+          ? nutritionMealSemanticChecksum(candidate)
+          : candidate.kind === "day_closure"
+            ? nutritionDayClosureSemanticChecksum(candidate.localDate)
+            : null;
+      return {
+        id: `target-${index}`,
+        kind: candidate.kind,
+        sourceIdentity: candidate.sourceIdentity,
+        checksum: `different-${index}`,
+        semanticChecksum
+      } satisfies NutritionImportTarget;
+    });
+
+    const result = new NutritionDryRunAdapter().classify(source, projected);
+    const outcomes = new Map(result.privateDetail.records
+      .filter(({ candidate }) => candidate !== null)
+      .map(({ kind, outcome }) => [kind, outcome]));
+
+    expect(outcomes.get("brand")).toBe("unchanged");
+    expect(outcomes.get("meal")).toBe("unchanged");
+    expect(outcomes.get("day_closure")).toBe("unchanged");
+    expect(outcomes.get("ingredient")).toBe("conflict");
+    expect(outcomes.get("food")).toBe("conflict");
+    expect(outcomes.get("composition")).toBe("conflict");
+  });
+
+  it("does not treat missing semantic projections as equal", () => {
+    const source = snapshot();
+    const ingredient = new NutritionDryRunAdapter().classify(source, [])
+      .privateDetail.candidates.find(({ kind }) => kind === "ingredient")!;
+    const target: NutritionImportTarget[] = [{
+      id: "ingredient-target",
+      kind: "ingredient",
+      sourceIdentity: ingredient.sourceIdentity,
+      checksum: "different",
+      semanticChecksum: null
+    }];
+
+    const result = new NutritionDryRunAdapter().classify({
+      ...source,
+      brands: { ...source.brands, rows: [] },
+      foods: { ...source.foods, rows: [] },
+      foodIngredients: { ...source.foodIngredients, rows: [] },
+      meals: { ...source.meals, rows: [] },
+      dailyLog: { ...source.dailyLog, rows: [] }
+    }, target);
+
+    expect(result.safeReport.counts).toEqual({
+      created: 0,
+      unchanged: 0,
+      conflict: 1,
+      invalid: 0
+    });
+    expect(result.safeReport.findings[0]?.code).toBe("target_mismatch");
+  });
+
+  it("blocks duplicate creation when a stable ID has drifted to another sheet identity", () => {
+    const source = snapshot();
+    const brand = new NutritionDryRunAdapter().classify(source, [])
+      .privateDetail.candidates.find(({ kind }) => kind === "brand")!;
+    if (brand.kind !== "brand") throw new Error("Brand fixture is missing");
+    const target: NutritionImportTarget[] = [{
+      id: "brand-with-wrong-sheet",
+      kind: "brand",
+      sourceIdentity: { ...brand.sourceIdentity, sheetId: source.foods.sheetId },
+      checksum: brand.checksum,
+      semanticChecksum: nutritionBrandSemanticChecksum(brand)
+    }];
+
+    const result = new NutritionDryRunAdapter().classify({
+      ...source,
+      ingredients: { ...source.ingredients, rows: [] },
+      foods: { ...source.foods, rows: [] },
+      foodIngredients: { ...source.foodIngredients, rows: [] },
+      meals: { ...source.meals, rows: [] },
+      dailyLog: { ...source.dailyLog, rows: [] }
+    }, target);
+
+    expect(result.safeReport.counts).toEqual({
+      created: 0,
+      unchanged: 0,
+      conflict: 1,
+      invalid: 0
+    });
+    expect(result.safeReport.findings[0]?.code).toBe("source_identity_mismatch");
   });
 });
 
