@@ -55,6 +55,11 @@ export const TrainingLoadBasisSchema = {
   enum: ["external_weight", "body_weight", "assisted"]
 } as const;
 
+export const WorkoutTemporalPrecisionSchema = {
+  type: "string",
+  enum: ["instant", "local_date"]
+} as const;
+
 const exerciseVersionProperties = {
   name: { type: "string", minLength: 1, maxLength: 256 },
   category: nullableShortTextSchema,
@@ -373,9 +378,31 @@ const performedSetInputSchema = {
   required: ["weightKg", "reps", "rir"],
   properties: {
     weightKg: nullableWeightSchema,
-    reps: { type: "integer", minimum: 1, maximum: 10000 },
+    reps: {
+      anyOf: [
+        { type: "integer", minimum: 1, maximum: 10000 },
+        { type: "null" }
+      ]
+    },
+    durationSeconds: {
+      anyOf: [
+        { type: "integer", minimum: 1, maximum: 604800 },
+        { type: "null" }
+      ]
+    },
+    distanceMeters: {
+      anyOf: [
+        { type: "number", exclusiveMinimum: 0, maximum: 1000000, multipleOf: 0.001 },
+        { type: "null" }
+      ]
+    },
     rir: nullableRirSchema
-  }
+  },
+  anyOf: [
+    { properties: { reps: { type: "integer" } } },
+    { properties: { durationSeconds: { type: "integer" } } },
+    { properties: { distanceMeters: { type: "number" } } }
+  ]
 } as const;
 
 const performedExerciseInputSchema = {
@@ -473,7 +500,15 @@ export type CorrectWorkoutSession = FromSchema<
 export const PerformedSetSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "position", "weightKg", "reps", "rir"],
+  required: [
+    "id",
+    "position",
+    "weightKg",
+    "reps",
+    "durationSeconds",
+    "distanceMeters",
+    "rir"
+  ],
   properties: {
     id: uuidSchema,
     position: { type: "integer", minimum: 1 },
@@ -516,6 +551,7 @@ export const WorkoutSessionSchema = {
     "id",
     "personId",
     "occurredAt",
+    "temporalPrecision",
     "localDate",
     "timezone",
     "programVersionId",
@@ -533,7 +569,13 @@ export const WorkoutSessionSchema = {
   properties: {
     id: uuidSchema,
     personId: uuidSchema,
-    occurredAt: { type: "string", format: "date-time" },
+    occurredAt: {
+      anyOf: [
+        { type: "string", format: "date-time" },
+        { type: "null" }
+      ]
+    },
+    temporalPrecision: WorkoutTemporalPrecisionSchema,
     localDate: { type: "string", format: "date" },
     timezone: { type: "string", minLength: 1, maxLength: 64 },
     programVersionId: nullableUuidSchema,

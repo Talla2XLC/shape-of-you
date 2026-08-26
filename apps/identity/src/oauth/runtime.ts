@@ -22,6 +22,7 @@ export const initialOAuthResourceScopes = [
   "body-measurement:write",
   "meal:write",
   "person:read",
+  "recovery:write",
   "weight:write",
   "workout:write"
 ] as const;

@@ -61,17 +61,42 @@ export interface FitnessTrackerNutritionSnapshot {
   readonly dailyLog: BoundedSheetSnapshot;
 }
 
+/** Source snapshot required by the Training import adapter. */
+export interface FitnessTrackerTrainingSnapshot {
+  readonly spreadsheetId: typeof FITNESS_TRACKER_SPREADSHEET_ID;
+  readonly locale: "ru_RU";
+  readonly timeZone: "Europe/Moscow";
+  readonly manifestChecksum: string;
+  readonly training: BoundedSheetSnapshot;
+}
+
+/** Source snapshot required by the raw Recovery import adapter. */
+export interface FitnessTrackerRecoverySnapshot {
+  readonly spreadsheetId: typeof FITNESS_TRACKER_SPREADSHEET_ID;
+  readonly locale: "ru_RU";
+  readonly timeZone: "Europe/Moscow";
+  readonly manifestChecksum: string;
+  readonly dailyLog: BoundedSheetSnapshot;
+}
+
 /** Workbook snapshot accepted by the shared domain router. */
 export type FitnessTrackerSnapshot =
   | FitnessTrackerWeightSnapshot
   | FitnessTrackerBodySnapshot
-  | FitnessTrackerNutritionSnapshot;
+  | FitnessTrackerNutritionSnapshot
+  | FitnessTrackerTrainingSnapshot
+  | FitnessTrackerRecoverySnapshot;
 
 /** Concrete source shape selected by the shared domain router. */
 export type FitnessTrackerSourceSnapshot = FitnessTrackerSnapshot;
 
 /** Domain selector that bounds every live source read. */
-export type FitnessTrackerImportDomain = "weight" | "body" | "nutrition";
+export type FitnessTrackerImportDomain =
+  | "weight"
+  | "body"
+  | "nutrition"
+  | "training"
+  | "recovery";
 
 /** Runtime identity values delivered by the existing environment mechanism. */
 export interface GoogleServiceIdentityCredential {
@@ -140,13 +165,17 @@ export class FitnessTrackerSheetsReader
       url.searchParams.append("ranges", "Daily_Log!A1:AZ5000");
     } else if (this.domain === "body") {
       url.searchParams.append("ranges", "Body!A1:J5000");
-    } else {
+    } else if (this.domain === "nutrition") {
       url.searchParams.append("ranges", "Brands!A1:F5000");
       url.searchParams.append("ranges", "Ingredients!A1:J5000");
       url.searchParams.append("ranges", "Foods!A1:M5000");
       url.searchParams.append("ranges", "Food_Ingredients!A1:H5000");
       url.searchParams.append("ranges", "Meals!A1:L5000");
       url.searchParams.append("ranges", "Daily_Log!A1:AZ5000");
+    } else if (this.domain === "training") {
+      url.searchParams.append("ranges", "Training!A1:K5000");
+    } else {
+      url.searchParams.append("ranges", "Daily_Log!A1:AJ5000");
     }
     const workbook = await this.fetchWorkbook(url, accessToken);
 
@@ -183,6 +212,30 @@ export class FitnessTrackerSheetsReader
         ...fields,
         manifestChecksum: computeFitnessTrackerManifestChecksum(fields)
       };
+    }
+
+    if (this.domain === "training") {
+      const training = parseSheet(workbook, "Training", 11);
+      requireHeaders(training, trainingHeaders);
+      const fields = {
+        spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+        locale: "ru_RU" as const,
+        timeZone: "Europe/Moscow" as const,
+        training
+      } as const;
+      return { ...fields, manifestChecksum: computeFitnessTrackerManifestChecksum(fields) };
+    }
+
+    if (this.domain === "recovery") {
+      const dailyLog = parseSheet(workbook, "Daily_Log", 36);
+      requireHeaders(dailyLog, recoveryHeaders);
+      const fields = {
+        spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
+        locale: "ru_RU" as const,
+        timeZone: "Europe/Moscow" as const,
+        dailyLog
+      } as const;
+      return { ...fields, manifestChecksum: computeFitnessTrackerManifestChecksum(fields) };
     }
 
     const brands = parseSheet(workbook, "Brands", 6);
@@ -318,6 +371,17 @@ const nutritionHeaders = {
     "Photo", "Notes", "Food_ID", "Confidence", "Meal_ID"
   ]
 } as const;
+
+const trainingHeaders = [
+  "Date", "Workout", "Exercise", "Weight_kg", "Sets", "Reps", "RIR",
+  "Feeling", "Notes", "Exercise_ID", "Session_ID"
+] as const;
+
+const recoveryHeaders = [
+  "Date", "Sleep", "HRV", "RHR", "NightHR", "SpO₂", "Temp",
+  "BodyBattery", "MinSpO₂", "Respiration", "DeepSleep", "REMSleep",
+  "LightSleep"
+] as const;
 
 function requireHeaders(
   sheet: BoundedSheetSnapshot,

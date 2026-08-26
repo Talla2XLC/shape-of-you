@@ -83,6 +83,16 @@ source `Food_ID` remain relational provenance instead of blockers. Progress
 series omit incomplete daily nutrient points rather than reporting partial sums
 as exact totals.
 
+TASK-0052 extends the same command and lifecycle with `training` and `recovery`
+adapters. Training groups performed facts by the stable source `Session_ID`,
+maps `Exercise_ID` through typed relational records, and represents strength,
+timed holds, and runs with explicit reps, duration, and distance fields.
+Recovery imports only known raw `Daily_Log` observations: sleep and stages,
+HRV, resting/night heart rate, average/minimum SpO2, temperature deviation,
+respiration, and Body Battery. Readiness, AI, recovery-status, planning, and
+`Load_Risk` projections are excluded. Malformed or narrative source evidence
+remains a local `invalid`; it does not block independent valid facts.
+
 Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
 date; row position is locator evidence and content checksum remains separate.
 Date-only Weight evidence is stored with explicit `local_date` precision and a
@@ -119,10 +129,13 @@ automation is needed. The apply capability is implemented, but real-data
 execution, recurring dual-run, live service-identity use, and cutover remain
 separately approved operations.
 
-Before cutover, Shape of You MCP must provide tested typed write tools for
-every fact type used by the ChatGPT project, including Garmin/Recovery
-observations. Cutover pauses the Sheets writer, captures a source checkpoint,
-runs final import/reconciliation, switches ChatGPT to MCP-only writes, verifies
+The repository now provides typed MCP list/record tools for Recovery and an
+expanded WorkoutSession contract, including the granular `recovery:write`
+scope. These additions are not yet deployed or consented and therefore do not
+complete the cutover gate by themselves. Before cutover, the full writer
+operation matrix must still be verified in the deployed connector. Cutover
+pauses the Sheets writer, captures a source checkpoint, runs final
+import/reconciliation, switches ChatGPT to MCP-only writes, verifies
 write/read-back, and transfers authority only through explicit approval.
 Rollback also uses one writer at a time; post-checkpoint PostgreSQL facts must
 be reconciled and replayed through a controlled one-time procedure before the
@@ -155,24 +168,33 @@ automatically changes closed days or ambiguous facts.
   `unchanged=0`, `conflict=81`, and `invalid=40`. These blockers reflect source
   gaps and unsupported evidence; no apply occurred. The private snapshot and
   SSH tunnel were removed after the run.
+- TASK-0052 Quality accepted the Training and raw Recovery implementation after
+  92 API unit tests, 39 Identity unit tests, focused importer/migration
+  integration tests, build, lint, documentation validation, and source-boundary
+  review. Bounded live source inspection found eight valid Training sessions,
+  one malformed meal row, and typed raw Recovery candidates. No deployed
+  Training/Recovery target-aware dry-run or database apply has occurred.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
 
 - Pull-based import, typed adapters, exclusive-writer cutover, and rollback are
   accepted in the linked ADR.
-- Weight, Body, and Nutrition dry-run/apply adapters are implemented through
-  one command and lifecycle. Body apply has not been executed because its
-  authoritative source is empty; the revised Nutrition apply has not yet been
-  executed against real data. Recurring reconciliation and authority
-  transfer remain separately gated.
+- Weight, Body, Nutrition, Training, and Recovery dry-run/apply adapters are
+  implemented through one command and lifecycle. Body apply has not been
+  executed because its authoritative source is empty; the revised Nutrition
+  apply and the Training/Recovery apply paths have not been executed against
+  real data. Recurring reconciliation and authority transfer remain separately
+  gated.
 
 ## Open questions
 
 - Complete verified formula/validation/script/workflow catalog, identifier
   quality, reconciliation tolerances, cutover duration, and rollback window.
 - Operational source checkpoint and run cadence for recurring dual-run.
-- MCP coverage sequence for remaining fact types, including Recovery/Garmin.
+- Deployed connector consent and end-to-end smoke for the expanded Training and
+  Recovery tools, plus confirmation that the full legacy writer operation
+  matrix is covered.
 
 ## Related material
 
@@ -183,3 +205,4 @@ automatically changes closed days or ambiguous facts.
 - [Operator-workstation import ADR](../../adr/20260823-run-controlled-sheets-imports-from-operator-workstation.md)
 - [Body import precision and audit ADR](../../adr/20260824-use-explicit-body-temporal-precision-and-typed-import-records.md)
 - [Partial Nutrition and source closures ADR](../../adr/20260825-import-partial-nutrition-and-source-day-closures.md)
+- [Training and raw Recovery import ADR](../../adr/20260825-import-training-and-raw-recovery-observations.md)

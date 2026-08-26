@@ -13,7 +13,7 @@ import {
 } from "./fitness-tracker-sheets-reader.js";
 
 /** Current private snapshot envelope emitted by connector orchestration. */
-export const FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION = 3;
+export const FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION = 4;
 const legacySnapshotSchemaVersion = 1;
 
 const maxSnapshotBytes = 16 * 1024 * 1024;
@@ -51,11 +51,25 @@ export interface FitnessTrackerNutritionSnapshotCapture
   readonly dailyLog: BoundedSheetSnapshot;
 }
 
+/** Connector-owned Training capture before the canonical checksum is attached. */
+export interface FitnessTrackerTrainingSnapshotCapture
+  extends FitnessTrackerSnapshotCaptureBase {
+  readonly training: BoundedSheetSnapshot;
+}
+
+/** Connector-owned Recovery capture before the canonical checksum is attached. */
+export interface FitnessTrackerRecoverySnapshotCapture
+  extends FitnessTrackerSnapshotCaptureBase {
+  readonly dailyLog: BoundedSheetSnapshot;
+}
+
 /** Exactly one typed domain subset captured from the authoritative workbook. */
 export type FitnessTrackerSnapshotCapture =
   | FitnessTrackerWeightSnapshotCapture
   | FitnessTrackerBodySnapshotCapture
-  | FitnessTrackerNutritionSnapshotCapture;
+  | FitnessTrackerNutritionSnapshotCapture
+  | FitnessTrackerTrainingSnapshotCapture
+  | FitnessTrackerRecoverySnapshotCapture;
 
 type FitnessTrackerSnapshotFile = FitnessTrackerSnapshotCapture & {
   readonly manifestChecksum: string;
@@ -131,7 +145,12 @@ export function parseFitnessTrackerSnapshotCapture(
     "meals",
     "dailyLog"
   ]);
-  if (!hasWeightShape && !hasBodyShape && !hasNutritionShape) {
+  const hasTrainingShape = hasExactKeys(root, [...commonKeys, "training"]);
+  const hasRecoveryShape = hasExactKeys(root, [...commonKeys, "dailyLog"]);
+  if (
+    !hasWeightShape && !hasBodyShape && !hasNutritionShape &&
+    !hasTrainingShape && !hasRecoveryShape
+  ) {
     throw new Error("Fitness Tracker snapshot contains unknown or missing fields");
   }
   if (root.schemaVersion !== FITNESS_TRACKER_SNAPSHOT_SCHEMA_VERSION) {
@@ -162,6 +181,21 @@ export function parseFitnessTrackerSnapshotCapture(
   }
   if (hasBodyShape) {
     return { ...base, body: sheet(root.body, "Body", 10) };
+  }
+  if (hasTrainingShape) {
+    return { ...base, training: sheet(root.training, "Training", 11) };
+  }
+  if (hasRecoveryShape) {
+    const dailyLog = sheet(root.dailyLog, "Daily_Log", 36);
+    const requiredRecoveryHeaders = [
+      "Date", "Sleep", "HRV", "RHR", "NightHR", "SpO₂", "Temp",
+      "BodyBattery", "MinSpO₂", "Respiration", "DeepSleep", "REMSleep",
+      "LightSleep"
+    ];
+    if (!requiredRecoveryHeaders.every((header) => dailyLog.headers.includes(header))) {
+      throw new Error("Daily_Log Recovery headers are missing");
+    }
+    return { ...base, dailyLog };
   }
   const brands = sheet(root.brands, "Brands", 6);
   const ingredients = sheet(root.ingredients, "Ingredients", 10);
@@ -214,6 +248,10 @@ function toSnapshot(
     ? { ...base, body: capture.body }
     : "weight" in capture
       ? { ...base, weight: capture.weight, dailyLog: capture.dailyLog }
+      : "training" in capture
+        ? { ...base, training: capture.training }
+        : !("brands" in capture)
+          ? { ...base, dailyLog: capture.dailyLog }
       : {
           ...base,
           brands: capture.brands,
@@ -232,7 +270,7 @@ function toSnapshot(
 function sheet(
   input: unknown,
   title: "Weight" | "Daily_Log" | "Body" | "Brands" | "Ingredients" |
-    "Foods" | "Food_Ingredients" | "Meals",
+    "Foods" | "Food_Ingredients" | "Meals" | "Training",
   columns: number
 ) {
   const value = record(input, `${title} sheet`);
@@ -265,7 +303,12 @@ function sheet(
           "Measurement_ID",
           "Source"
         ]
-        : nutritionRequiredHeaders[title];
+        : title === "Training"
+          ? [
+            "Date", "Workout", "Exercise", "Weight_kg", "Sets", "Reps",
+            "RIR", "Feeling", "Notes", "Exercise_ID", "Session_ID"
+          ]
+          : nutritionRequiredHeaders[title];
   if (!required.every((header) => headers.includes(header))) {
     throw new Error(`${title} required headers are missing`);
   }
@@ -288,7 +331,7 @@ function sheet(
 function row(
   input: unknown,
   title: "Weight" | "Daily_Log" | "Body" | "Brands" | "Ingredients" |
-    "Foods" | "Food_Ingredients" | "Meals",
+    "Foods" | "Food_Ingredients" | "Meals" | "Training",
   columns: number
 ): BoundedSheetRow {
   const value = record(input, `${title} row`);

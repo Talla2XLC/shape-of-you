@@ -618,7 +618,7 @@ describe("Private Fitness Tracker snapshot", () => {
   it("rejects invalid version, metadata, locators, cells and bounds", async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "fitness-tracker-snapshot-"));
     const cases: Array<[string, unknown, string]> = [
-      ["version", { ...snapshotCapture(), schemaVersion: 4 }, "schema version"],
+      ["version", { ...snapshotCapture(), schemaVersion: 5 }, "schema version"],
       ["metadata", { ...snapshotCapture(), workbookTitle: "Another book" }, "metadata"],
       [
         "locator",

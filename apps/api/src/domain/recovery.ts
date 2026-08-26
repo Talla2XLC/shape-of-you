@@ -62,7 +62,18 @@ export interface RecoveryEvaluation {
  */
 export function validateRecoveryObservation(
   input: CreateRecoveryObservation
-): { readonly from: Date; readonly until: Date; readonly localDate: string } {
+): { readonly from: Date | null; readonly until: Date | null; readonly localDate: string; readonly temporalPrecision: "instant" | "local_date" } {
+  const temporalPrecision = input.temporalPrecision ?? "instant";
+  if (temporalPrecision === "local_date") {
+    if (input.observedFrom !== null || input.observedUntil !== null || !input.localDate || !/^\d{4}-\d{2}-\d{2}$/u.test(input.localDate)) {
+      throw new DomainValidationError("Date-only Recovery observation shape is invalid");
+    }
+    validateRecoveryObservationContent(input);
+    return { from: null, until: null, localDate: input.localDate, temporalPrecision };
+  }
+  if (input.observedFrom === null || input.observedUntil === null) {
+    throw new DomainValidationError("Instant Recovery observation requires an interval");
+  }
   const from = new Date(input.observedFrom);
   const until = new Date(input.observedUntil);
   if (Number.isNaN(from.valueOf()) || Number.isNaN(until.valueOf())) {
@@ -71,6 +82,16 @@ export function validateRecoveryObservation(
   if (until < from) {
     throw new DomainValidationError("observedUntil cannot precede observedFrom");
   }
+  validateRecoveryObservationContent(input);
+  return {
+    from,
+    until,
+    localDate: deriveLocalDate(until, input.timezone),
+    temporalPrecision
+  };
+}
+
+function validateRecoveryObservationContent(input: CreateRecoveryObservation): void {
   if (input.kind !== input.detail.type) {
     throw new DomainValidationError("Observation kind must match its typed detail");
   }
@@ -80,18 +101,19 @@ export function validateRecoveryObservation(
       "Device observations require connectionId and consentId; other sources forbid them"
     );
   }
-  if (
-    input.detail.type === "metric" &&
-    ((input.detail.metric === "hrv_rmssd" && input.detail.unit !== "ms") ||
-      (input.detail.metric === "resting_heart_rate" && input.detail.unit !== "bpm"))
-  ) {
+  const expectedUnits = {
+    hrv_rmssd: "ms",
+    resting_heart_rate: "bpm",
+    night_heart_rate: "bpm",
+    oxygen_saturation: "percent",
+    minimum_oxygen_saturation: "percent",
+    temperature_deviation: "celsius",
+    respiration_rate: "breaths_per_minute",
+    body_battery: "score"
+  } as const;
+  if (input.detail.type === "metric" && input.detail.unit !== expectedUnits[input.detail.metric]) {
     throw new DomainValidationError("Recovery metric unit is incompatible");
   }
-  return {
-    from,
-    until,
-    localDate: deriveLocalDate(until, input.timezone)
-  };
 }
 
 const round = (value: number, digits = 3): number => {

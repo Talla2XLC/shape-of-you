@@ -57,6 +57,15 @@ operator authorizes a specific write.
   `Foods`, `Food_Ingredients`, and `Meals`. Existing populated Meal rows have a
   durable UUIDv4 `Meal_ID`; the active external writer must provide a new
   immutable `Meal_ID` for every future Meal row.
+- The bounded `Training!A:K` projection contains 39 rows in nine stable
+  `Session_ID` groups and 14 `Exercise_ID` values. Eight groups are valid
+  performed sessions; one malformed meal row has no `Exercise_ID`. Two run rows
+  carry distance and duration instead of reps.
+- Raw Garmin-derived observations are columns in bounded `Daily_Log`, not a
+  separate Garmin sheet: sleep duration and stages, HRV, resting/night heart
+  rate, average/minimum SpO2, temperature deviation, respiration, and Body
+  Battery. Readiness, AI, recovery status, next-workout guidance, and
+  `Load_Risk` are derived projections.
 
 ## Decisions
 
@@ -64,16 +73,21 @@ operator authorizes a specific write.
   service or target table per sheet.
 - Domain runs capture only required sheets: Body alone for Body; Weight and
   Daily_Log for Weight; and the five linked Nutrition sheets plus the bounded
-  Daily_Log closure projection for Nutrition.
+  Daily_Log closure projection for Nutrition. Training captures only
+  `Training`; Recovery captures only the approved raw `Daily_Log` columns.
   Body Notes and Source are private, Measurement_ID is stable identity, and
   Photo remains a blocking unsupported reference. Nutrition uses durable
   catalog IDs/Meal_ID and treats Photo markers and incomplete linked rows as
   blockers.
+- Training uses `Session_ID` as group identity and preserves exact row locators,
+  checksums, and `Exercise_ID` mappings. Recovery uses local date plus metric
+  kind. Known source structure is typed relationally; malformed/narrative rows
+  stay invalid and projections are not imported.
 
 ## Open questions
 
-- Body and Meal media migration lifecycle; repeated recipe ingredients; Rules classification;
-  authoritative exercise catalog; status vocabularies; historical requiredness.
+- Body and Meal media migration lifecycle; repeated recipe ingredients; Rules
+  classification; status vocabularies; historical requiredness.
 
 ## Related material
 

@@ -136,7 +136,14 @@ describe("Recovery PostgreSQL vertical", () => {
         externalRecordId: "sleep-2026-10-25",
         occurredAt: "2026-10-25T06:00:00.000Z"
       },
-      detail: { type: "sleep" as const, totalSleepMinutes: 480, sleepQuality: 4 }
+      detail: {
+        type: "sleep" as const,
+        totalSleepMinutes: 480,
+        deepSleepMinutes: null,
+        remSleepMinutes: null,
+        lightSleepMinutes: null,
+        sleepQuality: 4
+      }
     };
     const concurrent = await Promise.all([
       repository.createObservation(personA, input),
@@ -170,7 +177,14 @@ describe("Recovery PostgreSQL vertical", () => {
       consentId: null,
       dedupeKey: "manual:sleep:2",
       sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: input.observedUntil },
-      detail: { type: "sleep", totalSleepMinutes: 420, sleepQuality: 3 },
+      detail: {
+        type: "sleep",
+        totalSleepMinutes: 420,
+        deepSleepMinutes: null,
+        remSleepMinutes: null,
+        lightSleepMinutes: null,
+        sleepQuality: 3
+      },
       reason: "Исправлена длительность"
     });
     const history = await repository.observationHistory(personA, corrected.observation.id);

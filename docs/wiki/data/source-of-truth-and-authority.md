@@ -62,18 +62,33 @@ automatically. Missing nutrients or quantities, broken links, unsupported Meal
 kinds, and Photo markers remain explicit blockers rather than discarded or
 invented data.
 
+For Training, only the `Training` sheet supplies performed WorkoutSession
+facts. `Program`, Personal Records, and planning fields remain projections.
+Stable identity uses the exact workbook, numeric sheet ID, and `Session_ID`;
+`Exercise_ID` maps through typed relational records rather than a guessed name.
+Strength, timed, and distance evidence remains explicit, while the malformed
+meal row is local `invalid` and creates no workout.
+
+For Recovery, only the known raw `Daily_Log` columns supply observations.
+Readiness, AI, recovery-status, next-workout, progression, and `Load_Risk`
+values are not migrated as raw facts. Provenance states the actual path as
+`google_sheets` and `garmin-via-fitness-tracker`; it does not invent a direct
+device connection or consent record.
+
 After cutover, Brand/Ingredient/FoodVersion are shared definitions; personal
 catalog stores overlays/private items. Until then, Sheets remains authority for
 current catalog/Meals. Meal snapshots never recalculate from later catalog
 versions; daily totals remain derived.
 
 Writer authority changes as one exclusive switch, not a dual-write period.
-Before that switch, MCP must cover every fact type used by the ChatGPT writer,
-including Recovery/Garmin. The Sheets writer is paused before the final source
-checkpoint; ChatGPT is then switched to MCP-only writes and verified before
-PostgreSQL authority is approved. A rollback pauses MCP first and reconciles
-post-checkpoint PostgreSQL facts before Sheets writing can resume. Any rollback
-write to Sheets requires separate operator approval.
+Before that switch, deployed MCP must cover every fact type used by the ChatGPT
+writer. Repository contracts now include typed Recovery list/record tools and
+expanded WorkoutSession evidence, but deployment, consent, and end-to-end
+writer-matrix verification remain pending. The Sheets writer is paused before
+the final source checkpoint; ChatGPT is then switched to MCP-only writes and
+verified before PostgreSQL authority is approved. A rollback pauses MCP first
+and reconciles post-checkpoint PostgreSQL facts before Sheets writing can
+resume. Any rollback write to Sheets requires separate operator approval.
 
 ## Evidence
 
@@ -87,8 +102,8 @@ write to Sheets requires separate operator approval.
 
 - Authority follows field/record type. The Google Sheets cutover ADR remains
   unchanged.
-- Weight, Body, and Nutrition importer work changes neither the active writer
-  nor operational authority.
+- Weight, Body, Nutrition, Training, and Recovery importer work changes neither
+  the active writer nor operational authority.
 
 ## Open questions
 
@@ -103,3 +118,4 @@ write to Sheets requires separate operator approval.
 - [Domain invariants](../domain/invariants.md)
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md)
+- [Training and raw Recovery import ADR](../../adr/20260825-import-training-and-raw-recovery-observations.md)

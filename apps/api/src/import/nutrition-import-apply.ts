@@ -422,14 +422,14 @@ async function composeDaySnapshot(
       where m.person_id = $1 and m.local_date = $2
         and not exists (select 1 from meals x where x.supersedes_id = m.id)
       order by m.id, i.position`, [personId, localDate]);
-  const workouts = await client.query<{ id: string; occurred_at: Date; workout_name: string }>(
-    `select w.id, w.occurred_at, w.workout_name from workout_sessions w
+  const workouts = await client.query<{ id: string; occurred_at: Date | null; temporal_precision: "instant" | "local_date"; workout_name: string }>(
+    `select w.id, w.occurred_at, w.temporal_precision, w.workout_name from workout_sessions w
       where w.person_id = $1 and w.local_date = $2
         and not exists (select 1 from workout_sessions x where x.supersedes_id = w.id)`,
     [personId, localDate]
   );
-  const observations = await client.query<{ id: string; kind: string; observed_until: Date }>(
-    `select o.id, o.kind, o.observed_until from recovery_observations o
+  const observations = await client.query<{ id: string; kind: string; observed_until: Date | null; temporal_precision: "instant" | "local_date" }>(
+    `select o.id, o.kind, o.observed_until, o.temporal_precision from recovery_observations o
       where o.person_id = $1 and o.local_date = $2
         and not exists (select 1 from recovery_observations x where x.supersedes_id = o.id)`,
     [personId, localDate]
@@ -497,11 +497,17 @@ async function composeDaySnapshot(
       }))
     },
     training: { workoutSessions: workouts.rows.map((row) => ({
-      id: row.id, occurredAt: row.occurred_at.toISOString(), workoutName: row.workout_name
+      id: row.id,
+      occurredAt: row.occurred_at?.toISOString() ?? null,
+      temporalPrecision: row.temporal_precision,
+      workoutName: row.workout_name
     })) },
     recovery: {
       observations: observations.rows.map((row) => ({
-        id: row.id, kind: row.kind, observedUntil: row.observed_until.toISOString()
+        id: row.id,
+        kind: row.kind,
+        observedUntil: row.observed_until?.toISOString() ?? null,
+        temporalPrecision: row.temporal_precision
       })),
       assessments: assessments.rows.map((row) => ({
         id: row.id, readinessScore: Number(row.readiness_score), riskLevel: row.risk_level

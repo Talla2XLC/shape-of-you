@@ -337,7 +337,7 @@ export class RecoveryRepository implements RecoveryStore {
         eq(recoveryConnections.status, "active"),
         eq(recoveryConsentKinds.kind, input.kind),
         eq(recoveryDeviceCapabilities.kind, input.kind),
-        or(isNull(recoveryConsents.retainUntil), gte(recoveryConsents.retainUntil, new Date(input.observedUntil)))
+        or(isNull(recoveryConsents.retainUntil), gte(recoveryConsents.retainUntil, new Date(input.observedUntil!)))
       )).limit(1);
     if (!rows[0]) {
       throw new ConflictError("Device observation is not permitted by active consent and retention");
@@ -365,6 +365,7 @@ export class RecoveryRepository implements RecoveryStore {
       kind: input.kind,
       observedFrom: time.from,
       observedUntil: time.until,
+      temporalPrecision: time.temporalPrecision,
       localDate: time.localDate,
       timezone: input.timezone,
       quality: input.quality,
@@ -397,7 +398,14 @@ export class RecoveryRepository implements RecoveryStore {
 
   private async insertObservationDetail(transaction: DatabaseTransaction, observationId: string, detail: RecoveryObservationDetail): Promise<void> {
     if (detail.type === "sleep") {
-      await transaction.insert(recoverySleepDetails).values({ observationId, totalSleepMinutes: detail.totalSleepMinutes, sleepQuality: detail.sleepQuality });
+      await transaction.insert(recoverySleepDetails).values({
+        observationId,
+        totalSleepMinutes: detail.totalSleepMinutes,
+        deepSleepMinutes: detail.deepSleepMinutes ?? null,
+        remSleepMinutes: detail.remSleepMinutes ?? null,
+        lightSleepMinutes: detail.lightSleepMinutes ?? null,
+        sleepQuality: detail.sleepQuality
+      });
     } else if (detail.type === "metric") {
       await transaction.insert(recoveryMetricDetails).values({ observationId, metric: detail.metric, value: detail.value.toFixed(3), unit: detail.unit });
     } else {
@@ -508,7 +516,14 @@ export class RecoveryRepository implements RecoveryStore {
     if (row.kind === "sleep") {
       const item = await transaction.query.recoverySleepDetails.findFirst({ where: eq(recoverySleepDetails.observationId, row.id) });
       if (!item) throw new Error("Recovery sleep detail is missing");
-      detail = { type: "sleep", totalSleepMinutes: item.totalSleepMinutes, sleepQuality: item.sleepQuality };
+      detail = {
+        type: "sleep",
+        totalSleepMinutes: item.totalSleepMinutes,
+        deepSleepMinutes: item.deepSleepMinutes,
+        remSleepMinutes: item.remSleepMinutes,
+        lightSleepMinutes: item.lightSleepMinutes,
+        sleepQuality: item.sleepQuality
+      };
     } else if (row.kind === "metric") {
       const item = await transaction.query.recoveryMetricDetails.findFirst({ where: eq(recoveryMetricDetails.observationId, row.id) });
       if (!item) throw new Error("Recovery metric detail is missing");
@@ -522,8 +537,9 @@ export class RecoveryRepository implements RecoveryStore {
       id: row.id,
       personId: row.personId,
       kind: row.kind,
-      observedFrom: row.observedFrom.toISOString(),
-      observedUntil: row.observedUntil.toISOString(),
+      observedFrom: row.observedFrom?.toISOString() ?? null,
+      observedUntil: row.observedUntil?.toISOString() ?? null,
+      temporalPrecision: row.temporalPrecision,
       localDate: row.localDate,
       timezone: row.timezone,
       quality: row.quality,

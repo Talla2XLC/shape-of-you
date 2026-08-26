@@ -70,6 +70,10 @@ export const bodyMeasurementTemporalPrecision = pgEnum(
   "body_measurement_temporal_precision",
   ["instant", "local_date"]
 );
+export const workoutTemporalPrecision = pgEnum(
+  "workout_temporal_precision",
+  ["instant", "local_date"]
+);
 export const bodyMeasurementMetric = pgEnum("body_measurement_metric", [
   "waist",
   "chest",
@@ -150,11 +154,28 @@ export const recoveryObservationQuality = pgEnum("recovery_observation_quality",
   "estimated",
   "poor"
 ]);
+export const recoveryObservationTemporalPrecision = pgEnum(
+  "recovery_observation_temporal_precision",
+  ["instant", "local_date"]
+);
 export const recoveryMetric = pgEnum("recovery_metric", [
   "hrv_rmssd",
-  "resting_heart_rate"
+  "resting_heart_rate",
+  "night_heart_rate",
+  "oxygen_saturation",
+  "minimum_oxygen_saturation",
+  "temperature_deviation",
+  "respiration_rate",
+  "body_battery"
 ]);
-export const recoveryMetricUnit = pgEnum("recovery_metric_unit", ["ms", "bpm"]);
+export const recoveryMetricUnit = pgEnum("recovery_metric_unit", [
+  "ms",
+  "bpm",
+  "percent",
+  "celsius",
+  "breaths_per_minute",
+  "score"
+]);
 export const recoveryConnectionStatus = pgEnum("recovery_connection_status", [
   "active",
   "disconnected"
@@ -1830,6 +1851,40 @@ export const trainingExerciseVersions = pgTable(
   ]
 );
 
+export const trainingImportExerciseMappings = pgTable(
+  "training_import_exercise_mappings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    sourceSystem: varchar("source_system", { length: 128 }).notNull(),
+    sourceExerciseId: varchar("source_exercise_id", { length: 512 }).notNull(),
+    sourceName: varchar("source_name", { length: 256 }).notNull(),
+    sourceChecksum: varchar("source_checksum", { length: 64 }).notNull(),
+    exerciseId: uuid("exercise_id").notNull(),
+    exerciseVersionId: uuid("exercise_version_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_import_exercise_mapping_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    foreignKey({
+      name: "training_import_exercise_mapping_version_fk",
+      columns: [table.exerciseVersionId, table.exerciseId],
+      foreignColumns: trainingExerciseVersionOwnershipColumns()
+    }),
+    unique("training_import_exercise_mapping_source_uq").on(
+      table.personId,
+      table.sourceSystem,
+      table.sourceExerciseId
+    )
+  ]
+);
+
 export const trainingExerciseOverlays = pgTable(
   "training_exercise_overlays",
   {
@@ -2028,7 +2083,10 @@ export const workoutSessions = pgTable(
     occurredAt: timestamp("occurred_at", {
       withTimezone: true,
       mode: "date"
-    }).notNull(),
+    }),
+    temporalPrecision: workoutTemporalPrecision("temporal_precision")
+      .default("instant")
+      .notNull(),
     localDate: date("local_date", { mode: "string" }).notNull(),
     timezone: varchar("timezone", { length: 64 }).notNull(),
     programVersionId: uuid("program_version_id"),
@@ -2078,6 +2136,11 @@ export const workoutSessions = pgTable(
     uniqueIndex("workout_sessions_supersedes_uq")
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
+    check(
+      "workout_sessions_temporal_shape",
+      sql`(${table.temporalPrecision} = 'instant' AND ${table.occurredAt} IS NOT NULL)
+          OR (${table.temporalPrecision} = 'local_date' AND ${table.occurredAt} IS NULL)`
+    ),
     check(
       "workout_sessions_confidence_range",
       sql`${table.confidence} IS NULL
@@ -2134,7 +2197,9 @@ export const performedSets = pgTable(
     performedExerciseId: uuid("performed_exercise_id").notNull(),
     position: smallint("position").notNull(),
     weightKg: numeric("weight_kg", { precision: 12, scale: 3 }),
-    reps: integer("reps").notNull(),
+    reps: integer("reps"),
+    durationSeconds: integer("duration_seconds"),
+    distanceMeters: numeric("distance_meters", { precision: 12, scale: 3 }),
     rir: numeric("rir", { precision: 4, scale: 1 })
   },
   (table) => [
@@ -2151,8 +2216,79 @@ export const performedSets = pgTable(
       "performed_sets_values",
       sql`${table.position} > 0
           AND (${table.weightKg} IS NULL OR ${table.weightKg} >= 0)
-          AND ${table.reps} > 0
+          AND (${table.reps} IS NULL OR ${table.reps} > 0)
+          AND (${table.durationSeconds} IS NULL OR ${table.durationSeconds} > 0)
+          AND (${table.distanceMeters} IS NULL OR ${table.distanceMeters} > 0)
+          AND (${table.reps} IS NOT NULL OR ${table.durationSeconds} IS NOT NULL OR ${table.distanceMeters} IS NOT NULL)
           AND (${table.rir} IS NULL OR ${table.rir} >= 0)`
+    )
+  ]
+);
+
+export const trainingImportRecords = pgTable(
+  "training_import_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    sourceSheetId: integer("source_sheet_id"),
+    sourceLocator: varchar("source_locator", { length: 128 }).notNull(),
+    sourceSessionId: varchar("source_session_id", { length: 512 }),
+    sourceLocalDate: date("source_local_date", { mode: "string" }),
+    sourceChecksum: varchar("source_checksum", { length: 64 }),
+    normalizedWorkoutName: varchar("normalized_workout_name", { length: 256 }),
+    outcome: importRecordOutcome("outcome").notNull(),
+    findingCode: varchar("finding_code", { length: 64 }).notNull(),
+    targetSessionId: uuid("target_session_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_import_records_batch_person_fk",
+      columns: [table.batchId, table.personId],
+      foreignColumns: [importBatches.id, importBatches.personId]
+    }),
+    foreignKey({
+      name: "training_import_records_target_person_fk",
+      columns: [table.targetSessionId, table.personId],
+      foreignColumns: [workoutSessions.id, workoutSessions.personId]
+    }),
+    unique("training_import_records_batch_locator_code_uq").on(
+      table.batchId,
+      table.sourceLocator,
+      table.findingCode
+    )
+  ]
+);
+
+export const trainingImportRecordExercises = pgTable(
+  "training_import_record_exercises",
+  {
+    recordId: uuid("record_id").notNull(),
+    position: smallint("position").notNull(),
+    sourceLocator: varchar("source_locator", { length: 128 }).notNull(),
+    sourceExerciseId: varchar("source_exercise_id", { length: 512 }).notNull(),
+    sourceName: varchar("source_name", { length: 256 }).notNull(),
+    sourceReps: varchar("source_reps", { length: 128 }).notNull(),
+    loadBasis: trainingLoadBasis("load_basis").notNull(),
+    setCount: smallint("set_count").notNull(),
+    reps: integer("reps"),
+    durationSeconds: integer("duration_seconds"),
+    distanceMeters: numeric("distance_meters", { precision: 12, scale: 3 }),
+    weightKg: numeric("weight_kg", { precision: 12, scale: 3 }),
+    rir: numeric("rir", { precision: 4, scale: 1 })
+  },
+  (table) => [
+    foreignKey({
+      name: "training_import_record_exercise_record_fk",
+      columns: [table.recordId],
+      foreignColumns: [trainingImportRecords.id]
+    }).onDelete("cascade"),
+    unique("training_import_record_exercise_position_uq").on(
+      table.recordId,
+      table.position
     )
   ]
 );
@@ -2371,8 +2507,11 @@ export const recoveryObservations = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     personId: uuid("person_id").notNull(),
     kind: recoveryObservationKind("kind").notNull(),
-    observedFrom: timestamp("observed_from", { withTimezone: true, mode: "date" }).notNull(),
-    observedUntil: timestamp("observed_until", { withTimezone: true, mode: "date" }).notNull(),
+    observedFrom: timestamp("observed_from", { withTimezone: true, mode: "date" }),
+    observedUntil: timestamp("observed_until", { withTimezone: true, mode: "date" }),
+    temporalPrecision: recoveryObservationTemporalPrecision("temporal_precision")
+      .default("instant")
+      .notNull(),
     localDate: date("local_date", { mode: "string" }).notNull(),
     timezone: varchar("timezone", { length: 64 }).notNull(),
     quality: recoveryObservationQuality("quality").notNull(),
@@ -2412,7 +2551,11 @@ export const recoveryObservations = pgTable(
     uniqueIndex("recovery_observations_supersedes_uq")
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
-    check("recovery_observations_time_order", sql`${table.observedUntil} >= ${table.observedFrom}`),
+    check(
+      "recovery_observations_temporal_shape",
+      sql`(${table.temporalPrecision} = 'instant' AND ${table.observedFrom} IS NOT NULL AND ${table.observedUntil} IS NOT NULL AND ${table.observedUntil} >= ${table.observedFrom})
+          OR (${table.temporalPrecision} = 'local_date' AND ${table.observedFrom} IS NULL AND ${table.observedUntil} IS NULL)`
+    ),
     check(
       "recovery_observations_device_shape",
       sql`(${table.source}::text = 'device' AND ${table.connectionId} IS NOT NULL AND ${table.consentId} IS NOT NULL)
@@ -2435,6 +2578,9 @@ export const recoverySleepDetails = pgTable(
   {
     observationId: uuid("observation_id").primaryKey(),
     totalSleepMinutes: smallint("total_sleep_minutes").notNull(),
+    deepSleepMinutes: smallint("deep_sleep_minutes"),
+    remSleepMinutes: smallint("rem_sleep_minutes"),
+    lightSleepMinutes: smallint("light_sleep_minutes"),
     sleepQuality: smallint("sleep_quality")
   },
   (table) => [
@@ -2446,6 +2592,9 @@ export const recoverySleepDetails = pgTable(
     check(
       "recovery_sleep_details_values",
       sql`${table.totalSleepMinutes} >= 0 AND ${table.totalSleepMinutes} <= 1440
+          AND (${table.deepSleepMinutes} IS NULL OR (${table.deepSleepMinutes} >= 0 AND ${table.deepSleepMinutes} <= 1440))
+          AND (${table.remSleepMinutes} IS NULL OR (${table.remSleepMinutes} >= 0 AND ${table.remSleepMinutes} <= 1440))
+          AND (${table.lightSleepMinutes} IS NULL OR (${table.lightSleepMinutes} >= 0 AND ${table.lightSleepMinutes} <= 1440))
           AND (${table.sleepQuality} IS NULL OR (${table.sleepQuality} >= 1 AND ${table.sleepQuality} <= 5))`
     )
   ]
@@ -2467,9 +2616,58 @@ export const recoveryMetricDetails = pgTable(
     }).onDelete("cascade"),
     check(
       "recovery_metric_details_shape",
-      sql`${table.value} > 0 AND ${table.value} <= 1000
-          AND ((${table.metric} = 'hrv_rmssd' AND ${table.unit} = 'ms')
-            OR (${table.metric} = 'resting_heart_rate' AND ${table.unit} = 'bpm'))`
+      sql`${table.value} >= -100 AND ${table.value} <= 1000
+          AND ((${table.metric} = 'hrv_rmssd' AND ${table.value} > 0 AND ${table.unit} = 'ms')
+            OR (${table.metric} IN ('resting_heart_rate', 'night_heart_rate') AND ${table.value} > 0 AND ${table.unit} = 'bpm')
+            OR (${table.metric} IN ('oxygen_saturation', 'minimum_oxygen_saturation') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'percent')
+            OR (${table.metric} = 'temperature_deviation' AND ${table.value} >= -20 AND ${table.value} <= 20 AND ${table.unit} = 'celsius')
+            OR (${table.metric} = 'respiration_rate' AND ${table.value} > 0 AND ${table.value} <= 100 AND ${table.unit} = 'breaths_per_minute')
+            OR (${table.metric} = 'body_battery' AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'score'))`
+    )
+  ]
+);
+
+export const recoveryImportRecords = pgTable(
+  "recovery_import_records",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    batchId: uuid("batch_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    sourceSheetId: integer("source_sheet_id"),
+    sourceLocator: varchar("source_locator", { length: 128 }).notNull(),
+    sourceKey: varchar("source_key", { length: 512 }),
+    sourceLocalDate: date("source_local_date", { mode: "string" }),
+    sourceChecksum: varchar("source_checksum", { length: 64 }),
+    observationKind: recoveryObservationKind("observation_kind"),
+    metric: recoveryMetric("metric"),
+    metricValue: numeric("metric_value", { precision: 10, scale: 3 }),
+    metricUnit: recoveryMetricUnit("metric_unit"),
+    totalSleepMinutes: smallint("total_sleep_minutes"),
+    deepSleepMinutes: smallint("deep_sleep_minutes"),
+    remSleepMinutes: smallint("rem_sleep_minutes"),
+    lightSleepMinutes: smallint("light_sleep_minutes"),
+    outcome: importRecordOutcome("outcome").notNull(),
+    findingCode: varchar("finding_code", { length: 64 }).notNull(),
+    targetObservationId: uuid("target_observation_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_import_records_batch_person_fk",
+      columns: [table.batchId, table.personId],
+      foreignColumns: [importBatches.id, importBatches.personId]
+    }),
+    foreignKey({
+      name: "recovery_import_records_target_person_fk",
+      columns: [table.targetObservationId, table.personId],
+      foreignColumns: [recoveryObservations.id, recoveryObservations.personId]
+    }),
+    unique("recovery_import_records_batch_locator_code_uq").on(
+      table.batchId,
+      table.sourceLocator,
+      table.findingCode
     )
   ]
 );

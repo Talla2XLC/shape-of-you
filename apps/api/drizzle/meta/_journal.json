@@ -134,6 +134,20 @@
       "when": 1787643285192,
       "tag": "20260825073445_allow_completed_batches_with_local_findings",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787688872852,
+      "tag": "20260825201432_bizarre_dreadnoughts",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787690898998,
+      "tag": "20260825204818_military_black_widow",
+      "breakpoints": true
     }
   ]
 }

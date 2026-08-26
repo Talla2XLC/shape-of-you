@@ -33,6 +33,7 @@ describe("predefined OAuth clients", () => {
           "weight:write",
           "body-measurement:write",
           "meal:write",
+          "recovery:write",
           "workout:write"
         ],
         refreshTokensEnabled: true

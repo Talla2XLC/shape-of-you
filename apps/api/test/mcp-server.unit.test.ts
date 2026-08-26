@@ -10,6 +10,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { RequestPersonContext } from "../src/application/person-context.js";
 import {
   MCP_READ_SCOPE,
+  MCP_RECOVERY_WRITE_SCOPE,
   McpAuthorizer,
   McpAuthorizationError,
   type McpAuthorizationBoundary
@@ -39,7 +40,8 @@ registerMcpRoutes({
     weights: { list: unreachable, create: unreachable },
     bodyMeasurements: { list: unreachable, create: unreachable },
     nutrition: { listMeals: unreachable, createMeal: unreachable },
-    training: { listWorkoutSessions: unreachable, createWorkoutSession: unreachable }
+    training: { listWorkoutSessions: unreachable, createWorkoutSession: unreachable },
+    recovery: { listObservations: unreachable, createObservation: unreachable }
   }
 });
 
@@ -76,12 +78,18 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(8);
+    expect(body.result.tools).toHaveLength(10);
     expect(body.result.tools[0]._meta.securitySchemes).toEqual([
       { type: "oauth2", scopes: [MCP_READ_SCOPE] }
     ]);
     expect(body.result.tools[0].securitySchemes).toEqual([
       { type: "oauth2", scopes: [MCP_READ_SCOPE] }
+    ]);
+    expect(body.result.tools.find(({ name }: { name: string }) => name === "list_recovery_observations")?.securitySchemes).toEqual([
+      { type: "oauth2", scopes: [MCP_READ_SCOPE] }
+    ]);
+    expect(body.result.tools.find(({ name }: { name: string }) => name === "record_recovery_observation")?.securitySchemes).toEqual([
+      { type: "oauth2", scopes: [MCP_RECOVERY_WRITE_SCOPE] }
     ]);
   });
 
@@ -159,7 +167,8 @@ describe("MCP HTTP adapter", () => {
         weights: { list, create: unreachable },
         bodyMeasurements: { list: unreachable, create: unreachable },
         nutrition: { listMeals: unreachable, createMeal: unreachable },
-        training: { listWorkoutSessions: unreachable, createWorkoutSession: unreachable }
+        training: { listWorkoutSessions: unreachable, createWorkoutSession: unreachable },
+        recovery: { listObservations: unreachable, createObservation: unreachable }
       }
     });
 

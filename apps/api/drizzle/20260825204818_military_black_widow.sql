@@ -1,0 +1,1 @@
+ALTER TABLE "training_import_record_exercises" ADD COLUMN "source_locator" varchar(128) NOT NULL;

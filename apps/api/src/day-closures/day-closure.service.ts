@@ -211,6 +211,7 @@ export class DayClosureService {
         workoutSessions: workoutSessions.map((item) => ({
           id: item.id,
           occurredAt: item.occurredAt,
+          temporalPrecision: item.temporalPrecision,
           workoutName: item.workoutName
         }))
       },
@@ -218,7 +219,8 @@ export class DayClosureService {
         observations: observations.map((item) => ({
           id: item.id,
           kind: item.kind,
-          observedUntil: item.observedUntil
+          observedUntil: item.observedUntil,
+          temporalPrecision: item.temporalPrecision
         })),
         assessments: assessments.map((item) => ({
           id: item.id,

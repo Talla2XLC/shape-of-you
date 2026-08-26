@@ -143,8 +143,13 @@ export const DaySnapshotSchema = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["id", "occurredAt", "workoutName"],
-            properties: { id: uuid, occurredAt: dateTime, workoutName: { type: "string" } }
+            required: ["id", "occurredAt", "temporalPrecision", "workoutName"],
+            properties: {
+              id: uuid,
+              occurredAt: { anyOf: [dateTime, { type: "null" }] },
+              temporalPrecision: { enum: ["instant", "local_date"] },
+              workoutName: { type: "string" }
+            }
           }
         }
       }
@@ -159,8 +164,13 @@ export const DaySnapshotSchema = {
           items: {
             type: "object",
             additionalProperties: false,
-            required: ["id", "kind", "observedUntil"],
-            properties: { id: uuid, kind: { type: "string" }, observedUntil: dateTime }
+            required: ["id", "kind", "observedUntil", "temporalPrecision"],
+            properties: {
+              id: uuid,
+              kind: { type: "string" },
+              observedUntil: { anyOf: [dateTime, { type: "null" }] },
+              temporalPrecision: { enum: ["instant", "local_date"] }
+            }
           }
         },
         assessments: {

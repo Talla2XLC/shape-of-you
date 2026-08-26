@@ -920,6 +920,7 @@ export class TrainingRepository implements TrainingStore {
       .values({
         personId,
         occurredAt,
+        temporalPrecision: "instant",
         localDate: deriveLocalDate(occurredAt, input.timezone),
         timezone: input.timezone,
         programVersionId: input.programVersionId,
@@ -977,6 +978,9 @@ export class TrainingRepository implements TrainingStore {
           position: index + 1,
           weightKg: set.weightKg === null ? null : set.weightKg.toFixed(3),
           reps: set.reps,
+          durationSeconds: set.durationSeconds ?? null,
+          distanceMeters:
+            set.distanceMeters == null ? null : set.distanceMeters.toFixed(3),
           rir: set.rir === null ? null : set.rir.toFixed(1)
         }))
       );
@@ -1027,6 +1031,8 @@ export class TrainingRepository implements TrainingStore {
           position: set.position,
           weightKg: numberOrNull(set.weightKg),
           reps: set.reps,
+          durationSeconds: set.durationSeconds,
+          distanceMeters: numberOrNull(set.distanceMeters),
           rir: numberOrNull(set.rir)
         }))
       });
@@ -1034,7 +1040,8 @@ export class TrainingRepository implements TrainingStore {
     return {
       id: session.id,
       personId: session.personId,
-      occurredAt: session.occurredAt.toISOString(),
+      occurredAt: session.occurredAt?.toISOString() ?? null,
+      temporalPrecision: session.temporalPrecision,
       localDate: session.localDate,
       timezone: session.timezone,
       programVersionId: session.programVersionId,
@@ -1379,8 +1386,8 @@ export class TrainingRepository implements TrainingStore {
           .orderBy(asc(performedSets.position));
         const suggested = calculateProgressionWeight(
           prescription,
-          sets.map((set) => ({
-            reps: set.reps,
+          sets.filter((set) => set.reps !== null).map((set) => ({
+            reps: set.reps!,
             rir: numberOrNull(set.rir)
           }))
         );

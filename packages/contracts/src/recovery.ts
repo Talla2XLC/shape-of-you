@@ -23,12 +23,21 @@ export const RecoveryObservationQualitySchema = {
 
 export const RecoveryMetricSchema = {
   type: "string",
-  enum: ["hrv_rmssd", "resting_heart_rate"]
+  enum: [
+    "hrv_rmssd",
+    "resting_heart_rate",
+    "night_heart_rate",
+    "oxygen_saturation",
+    "minimum_oxygen_saturation",
+    "temperature_deviation",
+    "respiration_rate",
+    "body_battery"
+  ]
 } as const;
 
 export const RecoveryMetricUnitSchema = {
   type: "string",
-  enum: ["ms", "bpm"]
+  enum: ["ms", "bpm", "percent", "celsius", "breaths_per_minute", "score"]
 } as const;
 
 export const RecoveryRiskLevelSchema = {
@@ -43,8 +52,22 @@ export const RecoveryAssessmentDataQualitySchema = {
 
 export type RecoveryObservationKind = "sleep" | "metric" | "subjective";
 export type RecoveryObservationQuality = "reliable" | "estimated" | "poor";
-export type RecoveryMetric = "hrv_rmssd" | "resting_heart_rate";
-export type RecoveryMetricUnit = "ms" | "bpm";
+export type RecoveryMetric =
+  | "hrv_rmssd"
+  | "resting_heart_rate"
+  | "night_heart_rate"
+  | "oxygen_saturation"
+  | "minimum_oxygen_saturation"
+  | "temperature_deviation"
+  | "respiration_rate"
+  | "body_battery";
+export type RecoveryMetricUnit =
+  | "ms"
+  | "bpm"
+  | "percent"
+  | "celsius"
+  | "breaths_per_minute"
+  | "score";
 export type RecoveryRiskLevel = "low" | "moderate" | "high" | "blocked";
 export type RecoveryAssessmentDataQuality = "insufficient" | "limited" | "sufficient";
 
@@ -230,6 +253,9 @@ export const RevokeRecoveryConsentSchema = {
 export interface SleepObservationDetail {
   readonly type: "sleep";
   readonly totalSleepMinutes: number;
+  readonly deepSleepMinutes?: number | null;
+  readonly remSleepMinutes?: number | null;
+  readonly lightSleepMinutes?: number | null;
   readonly sleepQuality: number | null;
 }
 
@@ -260,8 +286,26 @@ export const SleepObservationDetailSchema = {
   properties: {
     type: { const: "sleep" },
     totalSleepMinutes: { type: "integer", minimum: 0, maximum: 1440 },
+    deepSleepMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    remSleepMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    lightSleepMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
     sleepQuality: { anyOf: [{ type: "integer", minimum: 1, maximum: 5 }, { type: "null" }] }
-  }
+  },
+  allOf: [{
+    if: {
+      required: ["deepSleepMinutes", "remSleepMinutes", "lightSleepMinutes"],
+      properties: {
+        deepSleepMinutes: { type: "integer" },
+        remSleepMinutes: { type: "integer" },
+        lightSleepMinutes: { type: "integer" }
+      }
+    },
+    then: {
+      properties: {
+        totalSleepMinutes: { type: "integer", minimum: 0, maximum: 1440 }
+      }
+    }
+  }]
 } as const;
 
 export const MetricObservationDetailSchema = {
@@ -271,15 +315,16 @@ export const MetricObservationDetailSchema = {
   properties: {
     type: { const: "metric" },
     metric: RecoveryMetricSchema,
-    value: { type: "number", exclusiveMinimum: 0, maximum: 1000 },
+    value: { type: "number", minimum: -100, maximum: 1000 },
     unit: RecoveryMetricUnitSchema
   },
   allOf: [
-    {
-      if: { properties: { metric: { const: "hrv_rmssd" } } },
-      then: { properties: { unit: { const: "ms" } } },
-      else: { properties: { unit: { const: "bpm" } } }
-    }
+    { if: { properties: { metric: { const: "hrv_rmssd" } } }, then: { properties: { value: { exclusiveMinimum: 0 }, unit: { const: "ms" } } } },
+    { if: { properties: { metric: { enum: ["resting_heart_rate", "night_heart_rate"] } } }, then: { properties: { value: { exclusiveMinimum: 0 }, unit: { const: "bpm" } } } },
+    { if: { properties: { metric: { enum: ["oxygen_saturation", "minimum_oxygen_saturation"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "percent" } } } },
+    { if: { properties: { metric: { const: "temperature_deviation" } } }, then: { properties: { value: { minimum: -20, maximum: 20 }, unit: { const: "celsius" } } } },
+    { if: { properties: { metric: { const: "respiration_rate" } } }, then: { properties: { value: { exclusiveMinimum: 0, maximum: 100 }, unit: { const: "breaths_per_minute" } } } },
+    { if: { properties: { metric: { const: "body_battery" } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } }
   ]
 } as const;
 
@@ -301,8 +346,10 @@ export const SubjectiveObservationDetailSchema = {
 
 const observationInputProperties = {
   kind: RecoveryObservationKindSchema,
-  observedFrom: dateTime,
-  observedUntil: dateTime,
+  observedFrom: { anyOf: [dateTime, { type: "null" }] },
+  observedUntil: { anyOf: [dateTime, { type: "null" }] },
+  temporalPrecision: { type: "string", enum: ["instant", "local_date"] },
+  localDate: { anyOf: [localDate, { type: "null" }] },
   timezone: { type: "string", minLength: 1, maxLength: 64 },
   quality: RecoveryObservationQualitySchema,
   connectionId: { anyOf: [uuid, { type: "null" }] },
@@ -316,8 +363,10 @@ const observationInputProperties = {
 
 export interface CreateRecoveryObservation {
   readonly kind: RecoveryObservationKind;
-  readonly observedFrom: string;
-  readonly observedUntil: string;
+  readonly observedFrom: string | null;
+  readonly observedUntil: string | null;
+  readonly temporalPrecision?: "instant" | "local_date";
+  readonly localDate?: string | null;
   readonly timezone: string;
   readonly quality: RecoveryObservationQuality;
   readonly connectionId: string | null;
@@ -350,10 +399,14 @@ export const CorrectRecoveryObservationSchema = {
   }
 } as const;
 
-export interface RecoveryObservation extends Omit<CreateRecoveryObservation, "sourceReference"> {
+export interface RecoveryObservation extends Omit<
+  CreateRecoveryObservation,
+  "sourceReference" | "temporalPrecision" | "localDate"
+> {
   readonly id: string;
   readonly personId: string;
   readonly localDate: string;
+  readonly temporalPrecision: "instant" | "local_date";
   readonly sourceReference: SourceReference;
   readonly supersedesId: string | null;
   readonly correctionReason: string | null;
@@ -364,7 +417,7 @@ export const RecoveryObservationSchema = {
   $id: "RecoveryObservation",
   type: "object",
   additionalProperties: false,
-  required: ["id", "personId", "kind", "observedFrom", "observedUntil", "localDate", "timezone", "quality", "connectionId", "consentId", "dedupeKey", "sourceReference", "detail", "supersedesId", "correctionReason", "createdAt"],
+  required: ["id", "personId", "kind", "observedFrom", "observedUntil", "temporalPrecision", "localDate", "timezone", "quality", "connectionId", "consentId", "dedupeKey", "sourceReference", "detail", "supersedesId", "correctionReason", "createdAt"],
   properties: {
     id: uuid,
     personId: uuid,

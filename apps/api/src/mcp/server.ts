@@ -6,21 +6,26 @@ import {
   BodyMeasurementSessionListSchema,
   CreateBodyMeasurementSessionSchema,
   CreateMealSchema,
+  CreateRecoveryObservationSchema,
   CreateWeightMeasurementSchema,
   CreateWorkoutSessionSchema,
   ListBodyMeasurementSessionsQuerySchema,
   ListMealsQuerySchema,
+  ListRecoveryObservationsQuerySchema,
   ListWeightMeasurementsQuerySchema,
   ListWorkoutSessionsQuerySchema,
   MealListSchema,
+  RecoveryObservationListSchema,
   WeightMeasurementListSchema,
   WorkoutSessionListSchema,
   type CreateBodyMeasurementSession,
   type CreateMeal,
+  type CreateRecoveryObservation,
   type CreateWeightMeasurement,
   type CreateWorkoutSession,
   type ListBodyMeasurementSessionsQuery,
   type ListMealsQuery,
+  type ListRecoveryObservationsQuery,
   type ListWeightMeasurementsQuery,
   type ListWorkoutSessionsQuery
 } from "@shape-of-you/contracts";
@@ -37,12 +42,14 @@ import {
 import type { RequestPersonContext } from "../application/person-context.js";
 import type { BodyMeasurementSessionService } from "../body-measurement-sessions/body-measurement-session.service.js";
 import type { NutritionService } from "../nutrition/nutrition.service.js";
+import type { RecoveryService } from "../recovery/recovery.service.js";
 import type { TrainingService } from "../training/training.service.js";
 import type { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_MEAL_WRITE_SCOPE,
   MCP_READ_SCOPE,
+  MCP_RECOVERY_WRITE_SCOPE,
   MCP_WEIGHT_WRITE_SCOPE,
   MCP_WORKOUT_WRITE_SCOPE,
   McpAuthorizationError,
@@ -55,6 +62,7 @@ interface McpServices {
   readonly bodyMeasurements: Pick<BodyMeasurementSessionService, "list" | "create">;
   readonly nutrition: Pick<NutritionService, "listMeals" | "createMeal">;
   readonly training: Pick<TrainingService, "listWorkoutSessions" | "createWorkoutSession">;
+  readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation">;
 }
 
 /** Dependencies required by the API-owned stateless MCP transport adapter. */
@@ -96,7 +104,8 @@ export function registerMcpRoutes(options: McpRouteOptions): void {
       MCP_WEIGHT_WRITE_SCOPE,
       MCP_BODY_MEASUREMENT_WRITE_SCOPE,
       MCP_MEAL_WRITE_SCOPE,
-      MCP_WORKOUT_WRITE_SCOPE
+      MCP_WORKOUT_WRITE_SCOPE,
+      MCP_RECOVERY_WRITE_SCOPE
     ],
     bearer_methods_supported: ["header"]
   }));
@@ -241,6 +250,25 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       MCP_WORKOUT_WRITE_SCOPE,
       async (input) =>
         (await services.training.createWorkoutSession(input as CreateWorkoutSession)).session
+    ),
+    defineTool(
+      "list_recovery_observations",
+      "Read the authorized person's current raw recovery observations.",
+      ListRecoveryObservationsQuerySchema,
+      RecoveryObservationListSchema,
+      false,
+      MCP_READ_SCOPE,
+      (input) => services.recovery.listObservations(input as ListRecoveryObservationsQuery)
+    ),
+    defineTool(
+      "record_recovery_observation",
+      "Record one idempotent typed recovery observation after user confirmation.",
+      CreateRecoveryObservationSchema,
+      undefined,
+      true,
+      MCP_RECOVERY_WRITE_SCOPE,
+      async (input) =>
+        (await services.recovery.createObservation(input as unknown as CreateRecoveryObservation)).observation
     )
   ];
 }

@@ -203,8 +203,8 @@ does not revoke the passkey session; explicit session revocation remains the
 shared lifecycle boundary.
 
 The initial protocol scopes are `openid` and `offline_access`. Resource scopes
-are `person:read`, `weight:write`, `body-measurement:write`, `meal:write`, and
-`workout:write`.
+are `person:read`, `weight:write`, `body-measurement:write`, `meal:write`,
+`workout:write`, and `recovery:write`.
 
 ### ChatGPT and MCP
 
@@ -214,19 +214,22 @@ the API deployable. Its internal endpoint is `/mcp`; staging exposes it as
 protected-resource metadata, advertises per-tool security schemes, and returns
 standards-complete OAuth challenges.
 
-Eight allowlisted tools list or record weight measurements, body measurement
-sessions, meals, and workout sessions. Reads require `person:read`; each write
-uses its domain-specific scope. Tools delegate to existing application
-contracts, so validation, idempotency, provenance, correction policy, and
-audit remain domain responsibilities rather than MCP-specific logic.
+Ten allowlisted tools list or record weight measurements, body measurement
+sessions, meals, workout sessions, and raw Recovery observations. Reads require
+`person:read`; each write uses its domain-specific scope. Workout sets support
+typed reps, duration, and distance; Recovery supports typed sleep stages and
+raw Garmin-derived metrics. Tools delegate to existing application contracts,
+so validation, idempotency, provenance, correction policy, and audit remain
+domain responsibilities rather than MCP-specific logic.
 
-The current MCP allowlist does not cover Recovery/Garmin observations and is
-therefore not sufficient for migration cutover of the active ChatGPT fitness
-writer. DEV-024 requires a source-backed fact-type coverage matrix and tested
-typed tools/scopes for every operation the legacy ChatGPT project performs.
-ChatGPT continues writing only to Google Sheets until that gate and the final
-reconciliation pass. Direct client dual-write is not an allowed transition;
-the project switches to MCP-only writes at an explicit cutover checkpoint.
+The source code now covers Recovery/Garmin observations, but this expanded
+allowlist and predefined-client scope have not yet been deployed, consented, or
+smoke-tested through the external ChatGPT connector. DEV-024 still requires a
+source-backed full writer-operation matrix and deployed verification before
+cutover. ChatGPT continues writing only to Google Sheets until that gate and
+the final reconciliation pass. Direct client dual-write is not an allowed
+transition; the project switches to MCP-only writes at an explicit cutover
+checkpoint.
 
 The migration reader uses a separate API-owned Google service identity, not
 the ChatGPT writer identity. Runtime configuration supplies its credential;
@@ -288,6 +291,7 @@ lifecycle.
 - [Same-origin browser return routes](../../adr/20260817-preserve-same-origin-browser-return-routes-through-oauth.md)
 - [Progress overview authenticated default](../../adr/20260818-make-progress-overview-the-authenticated-default.md)
 - [Refresh tokens by registered client policy](../../adr/20260825-issue-refresh-tokens-by-registered-client-policy.md)
+- [Training and raw Recovery import](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 
 ## Open questions
 

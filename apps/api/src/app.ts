@@ -62,6 +62,7 @@ import { WeightMeasurementService } from "./weight-measurements/weight-measureme
 import { BodyMeasurementSessionService } from "./body-measurement-sessions/body-measurement-session.service.js";
 import { NutritionService } from "./nutrition/nutrition.service.js";
 import { TrainingService } from "./training/training.service.js";
+import { RecoveryService } from "./recovery/recovery.service.js";
 import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
 import { McpAuthorizer } from "./mcp/oauth.js";
 import { registerMcpRoutes } from "./mcp/server.js";
@@ -264,7 +265,8 @@ export async function buildApp(
         weights: app.get(WeightMeasurementService),
         bodyMeasurements: app.get(BodyMeasurementSessionService),
         nutrition: app.get(NutritionService),
-        training: app.get(TrainingService)
+        training: app.get(TrainingService),
+        recovery: app.get(RecoveryService)
       }
     });
   }
