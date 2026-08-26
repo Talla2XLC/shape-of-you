@@ -163,8 +163,7 @@ jobs:
           test -n "$IDENTITY_CHATGPT_REDIRECT_URI"
           test -n "$IDENTITY_WEB_REDIRECT_URI"
           test -n "$API_BROWSER_SESSION_KEYS"
-          printf '%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI" |
-            grep -Eq '^https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{8,200}$'
+          test "$IDENTITY_CHATGPT_REDIRECT_URI" = 'https://chatgpt.com/connector_platform_oauth_redirect'
           test "$IDENTITY_WEB_REDIRECT_URI" = 'https://staging.shape-of-you.ru/api/browser-auth/callback'
           test -n "$GHCR_TOKEN"
           target="$VM_USER@$VM_HOST"

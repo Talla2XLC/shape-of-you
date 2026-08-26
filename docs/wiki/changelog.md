@@ -18,6 +18,17 @@ stages.
 
 ## Content
 
+### 2026-08-27 — Stable ChatGPT connector OAuth callback contract
+
+- Replaced the retired per-connector opaque ChatGPT redirect with the stable
+  exact callback `https://chatgpt.com/connector_platform_oauth_redirect` for
+  the predefined staging client.
+- Kept public-client PKCE, approved scopes, rotating refresh tokens, Person
+  authorization, service boundaries, and data ownership unchanged.
+- Aligned Identity validation, deployment configuration, workflow guards, and
+  contract tests on the same literal callback; legacy, normalized, or decorated
+  redirect variants remain rejected.
+
 ### 2026-08-26 — Training/Recovery staging evidence and continuous trends
 
 - Completed controlled Training and Recovery staging apply with same-snapshot

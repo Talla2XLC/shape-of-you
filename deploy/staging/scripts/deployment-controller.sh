@@ -160,8 +160,7 @@ if [ -n "$IDENTITY_DIGEST" ] || [ -n "$IDENTITY_DATABASE_URL" ] ||
     true|false) ;;
     *) fail 'Invalid IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE.' ;;
   esac
-  printf '%s\n' "$IDENTITY_CHATGPT_REDIRECT_URI" |
-    grep -Eq '^https://chatgpt\.com/connector/oauth/[A-Za-z0-9_-]{8,200}$' ||
+  [ "$IDENTITY_CHATGPT_REDIRECT_URI" = 'https://chatgpt.com/connector_platform_oauth_redirect' ] ||
     fail 'Invalid IDENTITY_CHATGPT_REDIRECT_URI.'
   [ "$IDENTITY_WEB_REDIRECT_URI" = 'https://staging.shape-of-you.ru/api/browser-auth/callback' ] ||
     fail 'Invalid IDENTITY_WEB_REDIRECT_URI.'

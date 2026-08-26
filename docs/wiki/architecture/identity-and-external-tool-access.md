@@ -97,6 +97,9 @@ DCR and CIMD are deferred for the first single-operator connection.
 The Identity release owns a typed, versioned manifest for reserved predefined
 client IDs, display names, refresh-token capability, and exact scope
 allowlists. Environment configuration owns the exact external callback.
+The ChatGPT predefined client uses only the stable callback
+`https://chatgpt.com/connector_platform_oauth_redirect`; legacy opaque
+`/connector/oauth/<id>` callbacks and normalized alternatives are rejected.
 Deployment applies that split authority through a one-shot transactional
 reconcile after Identity migrations; ordinary runtime startup performs no
 client writes, and the general operator command cannot manage reserved IDs.
@@ -291,6 +294,7 @@ lifecycle.
 - [Same-origin browser return routes](../../adr/20260817-preserve-same-origin-browser-return-routes-through-oauth.md)
 - [Progress overview authenticated default](../../adr/20260818-make-progress-overview-the-authenticated-default.md)
 - [Refresh tokens by registered client policy](../../adr/20260825-issue-refresh-tokens-by-registered-client-policy.md)
+- [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 - [Training and raw Recovery import](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 
 ## Open questions

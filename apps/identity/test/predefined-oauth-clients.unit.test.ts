@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { formatOAuthClientReconcileResult } from "../src/commands/oauth-client-reconcile-output.js";
 import {
+  CHATGPT_CONNECTOR_REDIRECT_URI,
   assertOAuthClientIdIsOperatorManaged,
   isPredefinedOAuthClientId,
   parseChatGptRedirectUri,
@@ -10,7 +11,7 @@ import {
 } from "../src/oauth/predefined-clients.js";
 
 describe("predefined OAuth clients", () => {
-  const callback = "https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh";
+  const callback = CHATGPT_CONNECTOR_REDIRECT_URI;
   const webCallback = "https://staging.shape-of-you.ru/api/browser-auth/callback";
 
   it("resolves the reserved first-party and ChatGPT policies with exact callbacks", () => {
@@ -45,11 +46,15 @@ describe("predefined OAuth clients", () => {
 
   it.each([
     undefined,
-    "http://chatgpt.com/connector/oauth/42Qr-Z4hTGXh",
-    "https://example.com/connector/oauth/42Qr-Z4hTGXh",
-    "https://chatgpt.com/connector/oauth/short",
-    "https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh?leak=value",
-    "https://user@chatgpt.com/connector/oauth/42Qr-Z4hTGXh"
+    "http://chatgpt.com/connector_platform_oauth_redirect",
+    "https://example.com/connector_platform_oauth_redirect",
+    "https://chatgpt.com:443/connector_platform_oauth_redirect",
+    "https://CHATGPT.com/connector_platform_oauth_redirect",
+    "https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh",
+    "https://chatgpt.com/connector_platform_oauth_redirect/",
+    "https://chatgpt.com/connector_platform_oauth_redirect?leak=value",
+    "https://chatgpt.com/connector_platform_oauth_redirect#fragment",
+    "https://user@chatgpt.com/connector_platform_oauth_redirect"
   ])("rejects an invalid callback without including it in the error", (value) => {
     expect(() => parseChatGptRedirectUri(value)).toThrow(
       /^Predefined ChatGPT OAuth redirect URI (is required|is invalid)$/

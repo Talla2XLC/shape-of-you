@@ -163,9 +163,10 @@ automatic deployment racing the old wrapper. All later controller protocol
 changes use the normal automatic `main` flow. Create the exact API subject
 binding through the provided operator CLI. For the reserved ChatGPT client,
 set the non-secret staging Environment variable
-`STAGING_IDENTITY_CHATGPT_REDIRECT_URI` to the exact credential-free callback
-copied from ChatGPT. Every Identity deployment validates it, runs migrations,
-then executes `oauth-client:reconcile-predefined` before replacing runtime.
+`STAGING_IDENTITY_CHATGPT_REDIRECT_URI` to the exact stable callback
+`https://chatgpt.com/connector_platform_oauth_redirect`. Every Identity
+deployment rejects any other value, runs migrations, then executes
+`oauth-client:reconcile-predefined` before replacing runtime.
 Missing or invalid configuration and database drift that cannot be reconciled
 abort before replacement. Subject binding remains an explicit operation;
 reserved client reconciliation is automatic and never deletes clients absent
@@ -249,6 +250,7 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Dedicated identity ADR](../../adr/20260729-use-dedicated-staging-deployment-identity.md)
 - [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
+- [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 
 ## Open questions
 

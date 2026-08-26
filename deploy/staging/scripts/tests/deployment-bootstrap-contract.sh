@@ -135,11 +135,12 @@ rm -f "$unknown_request"
 
 assert_callback_rejected_without_echo ''
 assert_callback_rejected_without_echo 'not-a-url'
-assert_callback_rejected_without_echo 'https://user@chatgpt.com/connector/oauth/42Qr-Z4hTGXh'
-assert_callback_rejected_without_echo 'https://example.com/connector/oauth/42Qr-Z4hTGXh'
-assert_callback_rejected_without_echo 'https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh?leak=value'
-assert_callback_rejected_without_echo 'https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh#fragment'
-multiline_callback=$(printf 'https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh\nFUTURE_FIELD=injected')
+assert_callback_rejected_without_echo 'https://user@chatgpt.com/connector_platform_oauth_redirect'
+assert_callback_rejected_without_echo 'https://example.com/connector_platform_oauth_redirect'
+assert_callback_rejected_without_echo 'https://chatgpt.com/connector/oauth/42Qr-Z4hTGXh'
+assert_callback_rejected_without_echo 'https://chatgpt.com/connector_platform_oauth_redirect?leak=value'
+assert_callback_rejected_without_echo 'https://chatgpt.com/connector_platform_oauth_redirect#fragment'
+multiline_callback=$(printf 'https://chatgpt.com/connector_platform_oauth_redirect\nFUTURE_FIELD=injected')
 assert_callback_rejected_without_echo "$multiline_callback"
 
 sh -n "$BOOTSTRAP"

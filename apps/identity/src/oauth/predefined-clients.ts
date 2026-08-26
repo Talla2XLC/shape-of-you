@@ -1,5 +1,9 @@
 import type { OAuthPublicClientInput } from "./client-store.js";
 
+/** Exact callback owned by the stable ChatGPT connector platform. */
+export const CHATGPT_CONNECTOR_REDIRECT_URI =
+  "https://chatgpt.com/connector_platform_oauth_redirect";
+
 /** Stable policy for an Identity-owned predefined public OAuth client. */
 export interface PredefinedOAuthClientPolicy {
   readonly clientId: string;
@@ -77,20 +81,7 @@ export function parseChatGptRedirectUri(value: string | undefined): string {
   if (!value) {
     throw new Error("Predefined ChatGPT OAuth redirect URI is required");
   }
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    throw new Error("Predefined ChatGPT OAuth redirect URI is invalid");
-  }
-  if (
-    url.origin !== "https://chatgpt.com" ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    !/^\/connector\/oauth\/[A-Za-z0-9_-]{8,200}$/.test(url.pathname)
-  ) {
+  if (value !== CHATGPT_CONNECTOR_REDIRECT_URI) {
     throw new Error("Predefined ChatGPT OAuth redirect URI is invalid");
   }
   return value;
