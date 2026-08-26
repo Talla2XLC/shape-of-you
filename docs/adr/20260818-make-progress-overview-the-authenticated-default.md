@@ -90,9 +90,12 @@ inclusive range максимум 366 дней. Response содержит:
   timestamp/id tie-break.
 
 Metric points sparse. Если owning fact отсутствует, point не возвращается; Web
-chart показывает gap, а при отсутствии points выбранной metric — **No entries**.
-Числовой ноль возвращается только как значение существующего факта или
-aggregate по существующим фактам. API не создаёт zero-filled dates.
+chart соединяет соседние фактические points одной trend line, сохраняет
+пропорциональное расстояние календарных дат и не рисует point/guide для
+пропущенного дня. При отсутствии points выбранной metric показывается
+**No entries**. Числовой ноль возвращается только как значение существующего
+факта или aggregate по существующим фактам. API и Web не создают zero-filled
+или interpolated dates.
 
 Overview coordinator использует bounded range read ports, экспортируемые
 существующими API-owned modules. Каждый owning module выбирает current,

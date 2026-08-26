@@ -32,11 +32,13 @@ The fixed `progress-metrics-v1` set contains:
 - `workout_session_count`: count of current WorkoutSessions for the date;
 - `readiness_score`: latest RecoveryAssessment for the date.
 
-Metric series are sparse. A missing fact produces no point and therefore a
-chart gap. Numeric zero is returned only when an existing fact or aggregate of
-existing facts is genuinely zero. The response also contains a newest-first
-union of dates with current facts and bounded counts for Physical State,
-Nutrition, Training, Recovery, and Coaching.
+Metric series are sparse. A missing fact produces no point or marker. Web keeps
+calendar-proportional horizontal spacing and connects the surrounding factual
+points with one continuous trend line; it does not create an interpolated
+value for the missing date. Numeric zero is returned only when an existing fact
+or aggregate of existing facts is genuinely zero. The response also contains a
+newest-first union of dates with current facts and bounded counts for Physical
+State, Nutrition, Training, Recovery, and Coaching.
 
 The application coordinator performs a constant number of module-owned range
 reads; it does not loop over dates or call exact-day HTTP endpoints. Each owner

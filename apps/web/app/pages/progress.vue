@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { beginBrowserSignIn } from "~/lib/browser-auth";
-import { createLatestRequestGate, dayRoute, fetchProgressOverview, splitConsecutiveDates, trailingRange, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
+import { createLatestRequestGate, dayRoute, fetchProgressOverview, trailingRange, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
 
 definePageMeta({ middleware: "api-session" });
 useHead({ bodyAttrs: { class: "page-progress" } });
@@ -16,7 +16,7 @@ const requestGate = createLatestRequestGate();
 let requestController: AbortController | null = null;
 const selectedSeries = computed(() => overview.value?.metrics.find((metric) => metric.key === selectedMetric.value) ?? null);
 const latestPoint = computed(() => selectedSeries.value?.points.at(-1) ?? null);
-const chartSegments = computed(() => {
+const chartPoints = computed(() => {
   const series = selectedSeries.value;
   if (!series?.points.length || !overview.value) return [];
   const start = Date.parse(`${overview.value.from}T00:00:00Z`) / 86_400_000;
@@ -28,7 +28,7 @@ const chartSegments = computed(() => {
     const y = min === max ? 104 : 176 - ((point.value - min) / spread) * 144;
     return { ...point, day, x: 32 + ((day - start) / Math.max(1, end - start)) * 696, y };
   });
-  return splitConsecutiveDates(positioned);
+  return positioned;
 });
 
 async function load(): Promise<void> {
@@ -58,7 +58,7 @@ onMounted(load);
         <p class="eyebrow">
           Progress
         </p><h1>Your shape, over time.</h1><p class="lede">
-          Only recorded facts appear. Missing days stay visible as gaps.
+          Only recorded facts appear. Missing days stay visible through spacing.
         </p>
       </div>
       <div
@@ -155,15 +155,11 @@ onMounted(load);
             y2="176"
             class="chart-axis"
           />
-          <g
-            v-for="(segment, index) in chartSegments"
-            :key="index"
-          ><polyline
-            v-if="segment.length > 1"
-            :points="segment.map(point => `${point.x},${point.y}`).join(' ')"
+          <g><polyline
+            :points="chartPoints.map(point => `${point.x},${point.y}`).join(' ')"
             class="chart-line"
           /><line
-            v-for="point in segment"
+            v-for="point in chartPoints"
             :key="`${point.localDate}-guide`"
             :x1="point.x"
             :x2="point.x"
@@ -171,7 +167,7 @@ onMounted(load);
             y2="176"
             class="chart-guide"
           /><circle
-            v-for="point in segment"
+            v-for="point in chartPoints"
             :key="point.localDate"
             :cx="point.x"
             :cy="point.y"

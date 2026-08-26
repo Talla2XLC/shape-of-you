@@ -175,8 +175,15 @@ automatically changes closed days or ambiguous facts.
   92 API unit tests, 39 Identity unit tests, focused importer/migration
   integration tests, build, lint, documentation validation, and source-boundary
   review. Bounded live source inspection found eight valid Training sessions,
-  one malformed meal row, and typed raw Recovery candidates. No deployed
-  Training/Recovery target-aware dry-run or database apply has occurred.
+  one malformed meal row, and typed raw Recovery candidates.
+- TASK-0053 deployed the historical `Exercise_ID` label-version correction,
+  then completed a same-snapshot staging apply. Training created eight sessions
+  and retained one local invalid row; its repeated dry-run returned
+  `created=0`, `unchanged=8`, and `conflict=0`. Recovery created 240 typed
+  observations and retained two local invalid sleep values; its repeated
+  dry-run returned `created=0`, `unchanged=240`, and `conflict=0`.
+  Google Sheets was read-only throughout, private snapshots were removed, and
+  no cutover occurred.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
@@ -186,9 +193,10 @@ automatically changes closed days or ambiguous facts.
 - Weight, Body, Nutrition, Training, and Recovery dry-run/apply adapters are
   implemented through one command and lifecycle. Body apply has not been
   executed because its authoritative source is empty; the revised Nutrition
-  apply and the Training/Recovery apply paths have not been executed against
-  real data. Recurring reconciliation and authority transfer remain separately
-  gated.
+  apply has not been executed because its blockers remain unresolved. Weight,
+  Training, and Recovery have completed controlled real-data staging apply and
+  same-snapshot idempotency verification. Recurring reconciliation and
+  authority transfer remain separately gated.
 
 ## Open questions
 

@@ -30,20 +30,6 @@ export function trailingRange(to: string, days: 7 | 30 | 365): { from: string; t
   return { from: date.toISOString().slice(0, 10), to };
 }
 
-/** Splits sparse points whenever at least one local calendar date is missing. */
-export function splitConsecutiveDates<T extends { readonly localDate: string }>(points: readonly T[]): T[][] {
-  const segments: T[][] = [];
-  for (const point of points) {
-    const current = segments.at(-1);
-    const previous = current?.at(-1);
-    const gap = previous
-      ? (Date.parse(`${point.localDate}T00:00:00Z`) - Date.parse(`${previous.localDate}T00:00:00Z`)) / 86_400_000
-      : 0;
-    if (!current || gap > 1) segments.push([point]); else current.push(point);
-  }
-  return segments;
-}
-
 /** Creates monotonic request tokens so only the newest response may update UI state. */
 export function createLatestRequestGate(): { begin(): number; isCurrent(token: number): boolean } {
   let current = 0;

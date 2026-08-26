@@ -18,14 +18,25 @@ stages.
 
 ## Content
 
+### 2026-08-26 — Training/Recovery staging evidence and continuous trends
+
+- Completed controlled Training and Recovery staging apply with same-snapshot
+  idempotency verification while keeping Google Sheets read-only and
+  authoritative.
+- Preserved stable external `Exercise_ID` identity across historical source
+  labels through typed private exercise versions.
+- Changed sparse progress visualization to one date-proportional continuous
+  trend line while retaining points, guides, and values only for recorded
+  facts.
+
 ### 2026-08-25 — Partial Nutrition evidence and imported closed days
 
 - Replaced Nutrition-wide blocking with identity-scoped reconciliation inside
   the same importer transaction; unrelated valid Meals are no longer suppressed
   by incomplete catalog evidence.
 - Added partial historical Meal reads with nullable nutrients, explicit
-  completeness, null-not-zero daily totals, and chart gaps for incomplete days
-  while keeping public HTTP/MCP writes complete-only.
+  completeness, null-not-zero daily totals, and omitted metric points for
+  incomplete days while keeping public HTTP/MCP writes complete-only.
 - Preserved raw legacy meal kind, Photo marker, and unresolved source Food ID in
   typed relational audit instead of discarding or inventing target data.
 - Added bounded `Daily_Log` closure input. `Closed` is applied after same-run

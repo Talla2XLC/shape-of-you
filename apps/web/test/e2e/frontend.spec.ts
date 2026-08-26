@@ -261,6 +261,38 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   await expect(page.getByRole("button", { name: "Year" })).toBeVisible();
 });
 
+test("progress connects sparse observations without inventing missing-day markers", async ({ page }) => {
+  await mockApiSession(page, 204);
+  await page.clock.setFixedTime(new Date("2026-08-18T12:00:00.000Z"));
+  await page.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
+    from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
+    metrics: [
+      {
+        key: "weight_kg", label: "Weight", unit: "kg",
+        points: [
+          { localDate: "2026-08-10", value: 78.2 },
+          { localDate: "2026-08-11", value: 78 },
+          { localDate: "2026-08-18", value: 77.8 }
+        ]
+      },
+      { key: "calories_kcal", label: "Calories", unit: "kcal", points: [] },
+      { key: "protein_g", label: "Protein", unit: "g", points: [] },
+      { key: "workout_session_count", label: "Workout sessions", unit: "sessions", points: [] },
+      { key: "readiness_score", label: "Readiness", unit: "score", points: [] }
+    ],
+    days: []
+  }));
+
+  await page.goto("/progress");
+
+  await expect(page.locator(".chart-line")).toHaveCount(1);
+  await expect(page.locator(".chart-point")).toHaveCount(3);
+  await expect(page.locator(".chart-guide")).toHaveCount(3);
+  const coordinates = (await page.locator(".chart-line").getAttribute("points"))?.trim().split(/\s+/u);
+  expect(coordinates).toHaveLength(3);
+  await expect(page.getByText("Missing days stay visible through spacing.")).toBeVisible();
+});
+
 test("legacy day query safely replaces itself with the canonical dated route", async ({ page }) => {
   await mockApiSession(page, 204);
   await page.route("**/api/v1/day-projections?*", (route) => fulfillJson(route, { localDate: "2026-08-17", timezone: "Europe/Moscow", state: "open", closure: null, isStale: false, snapshot: { physical: { weightMeasurements: [] }, nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } } } }));
