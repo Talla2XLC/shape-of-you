@@ -2,7 +2,7 @@
 
 ## Статус и разрешение
 
-- Статус: implementation and review complete; release gates pending.
+- Статус: completed.
 - Оператор подтвердил рекомендуемое решение и staging deployment командой
   `го` 2026-08-27 после явного предложения выполнить изменение и deployment.
 - Разрешены ADR, план, реализация, tests, independent Quality, affected Wiki и
@@ -45,8 +45,8 @@
 6. [x] Пройти focused и repository validation.
 7. [x] Пройти independent Quality и Architecture Review.
 8. [x] Обновить affected current-state Wiki.
-9. [ ] Подготовить release plan, commit/push и staging deployment по gates.
-10. [ ] Проверить OAuth и deployed 23-tool catalog без write calls в отдельной
+9. [x] Подготовить release plan, commit/push и staging deployment по gates.
+10. [x] Проверить OAuth и deployed 23-tool catalog без write calls в отдельной
     post-release задаче, не смешивая live evidence с pre-release Quality gate.
 
 ## Критерии приёмки

@@ -102,4 +102,4 @@ callback. Старый коннектор уже не предоставляет
 - [Инвалидировать одноразовые OAuth-артефакты при ротации callback](20260827-retire-obsolete-oauth-protocol-artifacts-during-callback-rotation.md)
 - [Durable OAuth connections](20260810-require-offline-access-for-durable-oauth-connections.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
-- [TASK-0058 implementation plan](../../plans/2026/08/2026-08-27-task-0058-stable-chatgpt-oauth-callback.md)
+- [TASK-0058 implementation plan](../../plans/2026/08/completed/2026-08-27-task-0058-stable-chatgpt-oauth-callback.md)

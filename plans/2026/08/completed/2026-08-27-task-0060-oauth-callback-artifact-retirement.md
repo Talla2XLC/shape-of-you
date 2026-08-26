@@ -2,7 +2,7 @@
 
 ## Статус и разрешение
 
-- Статус: implementation and review complete; release gates pending.
+- Статус: completed.
 - Оператор утвердил рекомендуемую архитектуру командой `го` 2026-08-27.
 - Разрешены ADR, implementation, tests, independent Quality, affected Wiki и
   повторный staging deployment в ранее утверждённом scope.
@@ -25,8 +25,8 @@ protocol artifacts старого URI и сохраняя durable authorization 
 6. [x] Пройти Identity, docs и deployment validation.
 7. [x] Пройти independent Quality и Architecture Review.
 8. [x] Обновить affected current-state Wiki.
-9. [ ] Подготовить release plan и пройти отдельные commit/push gates.
-10. [ ] Повторить staging deployment и no-write OAuth/catalog verification.
+9. [x] Подготовить release plan и пройти отдельные commit/push gates.
+10. [x] Повторить staging deployment и no-write OAuth/catalog verification.
 
 ## Критерии приёмки
 

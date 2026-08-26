@@ -92,4 +92,4 @@ product data. Существующие внешние ключи и schema со�
 - [Использовать стабильный OAuth callback платформы коннекторов ChatGPT](20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 - [Reconcile predefined OAuth clients during deployment](20260811-reconcile-predefined-oauth-clients-during-deployment.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
-- [TASK-0060 implementation plan](../../plans/2026/08/2026-08-27-task-0060-oauth-callback-artifact-retirement.md)
+- [TASK-0060 implementation plan](../../plans/2026/08/completed/2026-08-27-task-0060-oauth-callback-artifact-retirement.md)
