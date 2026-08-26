@@ -77,14 +77,22 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     const result = new NutritionDryRunAdapter().classify(broken, []);
 
     expect(result.safeReport.counts.invalid).toBeGreaterThan(0);
-    expect(result.safeReport.counts.conflict).toBeGreaterThan(0);
+    expect(result.safeReport.counts.conflict).toBe(0);
     expect(result.safeReport.findings.map(({ code }) => code)).toEqual(
       expect.arrayContaining([
         "invalid_ingredient_row",
-        "unresolved_ingredient_reference"
+        "invalid_catalog_dependency"
       ])
     );
     expect(result.safeReport.findings.map(({ code }) => code)).not.toContain("unsupported_photo_reference");
+    expect(result.privateDetail.records).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "composition",
+        outcome: "invalid",
+        findingCode: "invalid_catalog_dependency",
+        candidate: expect.objectContaining({ kind: "composition" })
+      })
+    ]));
     const meals = result.privateDetail.candidates.filter(({ kind }) => kind === "meal");
     expect(meals).toHaveLength(2);
     expect(meals[0]).toMatchObject({ mealKind: "other", sourceMealKind: "Lunch-Dinner" });
@@ -110,6 +118,46 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     expect(result.privateDetail.candidates.find(({ kind }) => kind === "meal")).toMatchObject({
       nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
     });
+  });
+
+  it("imports a complete Food as one source-defined serving", () => {
+    const source = snapshot();
+    const result = new NutritionDryRunAdapter().classify({
+      ...source,
+      foods: {
+        ...source.foods,
+        rows: [{
+          locator: "Foods!2",
+          values: ["food-1", "Food", "Meal", "Lunch", "source portion text", 500,
+            30, 20, 40, "manual", "High", true, "brand-1"]
+        }]
+      }
+    }, []);
+
+    expect(result.privateDetail.candidates.find(({ kind }) => kind === "food"))
+      .toMatchObject({
+        sourceDefaultPortion: "source portion text",
+        referenceQuantity: 1,
+        referenceUnit: "serving"
+      });
+  });
+
+  it("keeps an absent catalog dependency as conflict", () => {
+    const source = snapshot();
+    const result = new NutritionDryRunAdapter().classify({
+      ...source,
+      foodIngredients: {
+        ...source.foodIngredients,
+        rows: [{
+          locator: "Food_Ingredients!2",
+          values: ["missing-food", "ingredient-1", 250, "г", "", true, "", "High"]
+        }]
+      }
+    }, []);
+
+    expect(result.safeReport.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ outcome: "conflict", code: "unresolved_food_reference" })
+    ]));
   });
 
   it("keeps invalid identities scoped to their exact sheet", () => {

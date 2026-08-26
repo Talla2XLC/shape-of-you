@@ -109,8 +109,20 @@ Brands, Meals, and accepted Sheets day closures when legacy capture rendering
 changed a row checksum without changing the stored fact. This compatibility
 does not apply to unsupported entity kinds or day closures without accepted
 Sheets provenance. Numeric-sheet provenance drift is detected by stable source
-ID across workbook-scoped catalog sources and remains an explicit conflict;
-the importer neither creates a duplicate nor repairs provenance automatically.
+ID across workbook-scoped catalog sources; the importer neither creates a
+duplicate nor repairs provenance automatically. TASK-0056 corrected the three
+known Brand records through an exact idempotent data migration, repointed their
+versions to the Brands numeric sheet ID, and retained the previous source
+records as audit evidence. This is a bounded historical correction, not a
+generic self-healing mechanism.
+
+Complete Food rows treat any non-empty source `Default_portion` as one
+source-defined `serving`. The original text remains in typed relational audit;
+the importer does not parse or assert an unknown physical portion size. A
+catalog dependency that is present but structurally invalid in the same
+snapshot is terminal `invalid`. An absent or ambiguous dependency remains a
+`conflict`. Missing Ingredient nutrients and composition quantities are never
+synthesized or deferred for manual backfill.
 
 Source identity combines spreadsheet ID, numeric sheet ID, and Person-local
 date; row position is locator evidence and content checksum remains separate.
@@ -209,6 +221,16 @@ automatically changes closed days or ambiguous facts.
   Foods numeric sheet ID instead of the Brands numeric sheet ID. The importer
   detected those identities and created no duplicate. Google Sheets remained
   read-only, temporary snapshots were removed, and no cutover occurred.
+- TASK-0056 applied the exact Brand provenance migration and imported seven
+  complete Foods as source-defined servings. The post-migration pre-apply
+  comparison returned `created=7`, `unchanged=421`, `conflict=0`, and
+  `invalid=46`. The repeated post-apply comparison returned `created=0`,
+  `unchanged=428`, `conflict=0`, and `invalid=46`, with no failures. Aggregate
+  verification found three corrected Brand versions and three preserved prior
+  source records. The invalid findings are terminal typed evidence for
+  incomplete historical source rows, not deferred manual work. Sheets remained
+  read-only, temporary snapshots and the SSH tunnel were removed, and no
+  cutover occurred.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
@@ -219,10 +241,11 @@ automatically changes closed days or ambiguous facts.
   implemented through one command and lifecycle, with one all-domain operator
   orchestration over separate typed snapshots. Body apply has not been needed
   because its authoritative source is empty. Weight, Nutrition, Training, and
-  Recovery have completed controlled real-data staging apply; the latest
-  all-domain verification is duplicate-safe but still contains explicit
-  Nutrition source-data and provenance blockers. Recurring reconciliation and
-  authority transfer remain separately gated.
+  Recovery have completed controlled real-data staging apply. The latest
+  all-domain verification is duplicate-safe and conflict-free; terminal
+  historical invalid evidence does not require manual completion. Recurring
+  reconciliation, the final writer checkpoint, deployed MCP writer-matrix
+  verification, and authority transfer remain separately gated.
 
 ## Open questions
 
@@ -243,3 +266,4 @@ automatically changes closed days or ambiguous facts.
 - [Body import precision and audit ADR](../../adr/20260824-use-explicit-body-temporal-precision-and-typed-import-records.md)
 - [Partial Nutrition and source closures ADR](../../adr/20260825-import-partial-nutrition-and-source-day-closures.md)
 - [Training and raw Recovery import ADR](../../adr/20260825-import-training-and-raw-recovery-observations.md)
+- [Nutrition provenance remediation ADR](../../adr/20260826-remediate-nutrition-provenance-and-terminal-catalog-evidence.md)

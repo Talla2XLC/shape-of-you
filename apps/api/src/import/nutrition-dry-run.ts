@@ -77,7 +77,8 @@ export interface NutritionFoodCandidate extends CandidateBase {
   readonly name: string;
   readonly type: string | null;
   readonly category: string | null;
-  readonly referenceQuantity: number;
+  readonly sourceDefaultPortion: string;
+  readonly referenceQuantity: 1;
   readonly referenceUnit: "serving";
   readonly nutrients: Nutrients;
   readonly brandSourceKey: string | null;
@@ -264,7 +265,7 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
         continue;
       }
       if (blocker) {
-        findings.push(finding(candidate, "conflict", blocker));
+        findings.push(finding(candidate, blocker.outcome, blocker.code));
         continue;
       }
       const matches = targetByKey.get(key) ?? [];
@@ -346,7 +347,7 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
         records: [
           ...normalized.invalid.map(({ record }) => record),
           ...findings
-            .filter(({ outcome }) => outcome !== "invalid")
+            .filter((item) => item.outcome !== "invalid" || item.candidate !== undefined)
             .map((item) => ({
               kind: item.kind,
               sourceSheetId: item.candidate?.sourceIdentity.sheetId ?? null,
@@ -525,10 +526,11 @@ function normalizeFood(
   const name = text(row, columns, "Name", 256);
   const type = optionalText(row, columns, "Type", 256);
   const category = optionalText(row, columns, "Category", 256);
-  const portion = positiveNumber(value(row, columns, "Default_portion"));
+  const sourceDefaultPortion = optionalText(row, columns, "Default_portion", 256);
   const nutrients = nutrientColumns(row, columns, ["Calories", "Protein", "Fat", "Carbs"]);
   const brandSourceKey = optionalText(row, columns, "Brand_ID", 512);
-  if (!id || !name || type === undefined || category === undefined || !portion ||
+  if (!id || !name || type === undefined || category === undefined ||
+      !sourceDefaultPortion ||
       !nutrients || brandSourceKey === undefined) {
     return invalidRow("food", row, snapshot.foods.sheetId, id, "invalid_food_row", {
       kind: "food",
@@ -545,7 +547,8 @@ function normalizeFood(
     name,
     type,
     category,
-    referenceQuantity: portion,
+    sourceDefaultPortion,
+    referenceQuantity: 1 as const,
     referenceUnit: "serving" as const,
     nutrients,
     brandSourceKey
@@ -654,7 +657,7 @@ function dependencyBlocker(
   candidates: ReadonlyMap<string, NutritionImportCandidate>,
   invalidKeys: ReadonlySet<string>,
   sheetIds: Readonly<Record<NutritionImportRecordKind, number>>
-): string | null {
+): { readonly outcome: "conflict" | "invalid"; readonly code: string } | null {
   const dependencyKey = (kind: NutritionImportRecordKind, key: string) =>
     identityKey({
       spreadsheetId: candidate.sourceIdentity.spreadsheetId,
@@ -664,19 +667,25 @@ function dependencyBlocker(
   const find = (kind: NutritionImportRecordKind, key: string) =>
     candidates.get(dependencyKey(kind, key));
   if (candidate.kind === "food" && candidate.brandSourceKey) {
-    if (invalidKeys.has(dependencyKey("brand", candidate.brandSourceKey)) ||
-        !find("brand", candidate.brandSourceKey)) {
-      return "unresolved_brand_reference";
+    if (invalidKeys.has(dependencyKey("brand", candidate.brandSourceKey))) {
+      return { outcome: "invalid", code: "invalid_catalog_dependency" };
+    }
+    if (!find("brand", candidate.brandSourceKey)) {
+      return { outcome: "conflict", code: "unresolved_brand_reference" };
     }
   }
   if (candidate.kind === "composition") {
-    if (invalidKeys.has(dependencyKey("food", candidate.foodSourceKey)) ||
-        !find("food", candidate.foodSourceKey)) {
-      return "unresolved_food_reference";
+    if (invalidKeys.has(dependencyKey("food", candidate.foodSourceKey))) {
+      return { outcome: "invalid", code: "invalid_catalog_dependency" };
     }
-    if (invalidKeys.has(dependencyKey("ingredient", candidate.ingredientSourceKey)) ||
-        !find("ingredient", candidate.ingredientSourceKey)) {
-      return "unresolved_ingredient_reference";
+    if (!find("food", candidate.foodSourceKey)) {
+      return { outcome: "conflict", code: "unresolved_food_reference" };
+    }
+    if (invalidKeys.has(dependencyKey("ingredient", candidate.ingredientSourceKey))) {
+      return { outcome: "invalid", code: "invalid_catalog_dependency" };
+    }
+    if (!find("ingredient", candidate.ingredientSourceKey)) {
+      return { outcome: "conflict", code: "unresolved_ingredient_reference" };
     }
   }
   return null;

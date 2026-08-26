@@ -66,6 +66,9 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       audits: string;
       temporal_precision: string;
       occurred_at: Date | null;
+      food_reference_quantity: string;
+      food_reference_unit: string;
+      source_default_portion: string | null;
     }>(
       `select
          (select count(*) from nutrition_brands where owner_person_id = $1)::text brands,
@@ -85,7 +88,15 @@ describe("unified Fitness Tracker Nutrition apply", () => {
           (select count(*) from nutrition_composition_import_records where person_id = $1) +
           (select count(*) from nutrition_meal_import_records where person_id = $1) +
           (select count(*) from nutrition_day_closure_import_records where person_id = $1))::text audits,
-         m.temporal_precision, m.occurred_at
+         m.temporal_precision, m.occurred_at,
+         (select reference_quantity::text from nutrition_food_versions v
+           join nutrition_foods f on f.current_version_id = v.id
+          where f.owner_person_id = $1 limit 1) food_reference_quantity,
+         (select reference_unit::text from nutrition_food_versions v
+           join nutrition_foods f on f.current_version_id = v.id
+          where f.owner_person_id = $1 limit 1) food_reference_unit,
+         (select source_default_portion from nutrition_food_import_records
+          where person_id = $1 and outcome = 'created' limit 1) source_default_portion
        from meals m where m.person_id = $1`,
       [personId]
     );
@@ -123,7 +134,10 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       closure_source: "google_sheets",
       audits: "12",
       temporal_precision: "local_date",
-      occurred_at: null
+      occurred_at: null,
+      food_reference_quantity: "1.000",
+      food_reference_unit: "serving",
+      source_default_portion: "250"
     });
     expect(target).toHaveLength(6);
     expect(target.find(({ kind }) => kind === "brand")?.semanticChecksum).toBeTruthy();
@@ -189,12 +203,12 @@ describe("unified Fitness Tracker Nutrition apply", () => {
         ...source.foods,
         rows: [{
           locator: "Foods!2",
-          values: ["food-1", "Food", "Meal", "Lunch", "250 г", 500, 30, 20, 40, "manual", "High", true, "brand-1"]
+          values: ["food-partial", "Food", "Meal", "Lunch", "250 г", 500, 30, 20, 40, "manual", "High", true, "brand-1"]
         }]
       },
       foodIngredients: {
         ...source.foodIngredients,
-        rows: [["food-1", "ingredient-1", "", "часть порции", "", true, "", "High"]]
+        rows: [["food-partial", "ingredient-1", "", "часть порции", "", true, "", "High"]]
           .map((values) => ({ locator: "Food_Ingredients!2", values }))
       },
       meals: {
@@ -230,11 +244,15 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       ingredient_unit: string | null;
       food_portion: string | null;
       composition_unit: string | null;
+      composition_outcome: string | null;
+      composition_finding: string | null;
     }>(
       `select
          (select source_default_unit from nutrition_ingredient_import_records where person_id = $1) ingredient_unit,
          (select source_default_portion from nutrition_food_import_records where person_id = $1) food_portion,
-         (select source_unit from nutrition_composition_import_records where person_id = $1) composition_unit`,
+         (select source_unit from nutrition_composition_import_records where person_id = $1) composition_unit,
+         (select outcome::text from nutrition_composition_import_records where person_id = $1) composition_outcome,
+         (select finding_code from nutrition_composition_import_records where person_id = $1) composition_finding`,
       [personId]
     );
 
@@ -249,7 +267,9 @@ describe("unified Fitness Tracker Nutrition apply", () => {
     expect(evidence.rows[0]).toEqual({
       ingredient_unit: "шт",
       food_portion: "250 г",
-      composition_unit: "часть порции"
+      composition_unit: "часть порции",
+      composition_outcome: "invalid",
+      composition_finding: "invalid_composition_row"
     });
   });
 });

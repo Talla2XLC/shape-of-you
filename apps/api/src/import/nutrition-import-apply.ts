@@ -638,7 +638,7 @@ async function persistAudit(
         [...base, value?.name ?? evidence?.name ?? null,
           value?.type ?? evidence?.type ?? null,
           value?.category ?? evidence?.category ?? null,
-          evidence?.sourceDefaultPortion ?? (value ? String(value.referenceQuantity) : null),
+          value?.sourceDefaultPortion ?? evidence?.sourceDefaultPortion ?? null,
           value?.referenceQuantity ?? null, value?.referenceUnit ?? null,
           value?.nutrients.caloriesKcal ?? evidence?.nutrients.caloriesKcal ?? null,
           value?.nutrients.proteinG ?? evidence?.nutrients.proteinG ?? null,

@@ -51,9 +51,11 @@ timestamp.
 The operator can run all five domains through one deterministic orchestration,
 but each domain still receives its own bounded typed snapshot and transaction.
 The aggregate report does not transfer authority. The latest staging
-reconciliation has no missing facts eligible for automatic creation, while
-Nutrition retains explicit source-data and provenance conflicts; therefore the
-cutover gate remains closed.
+reconciliation has no missing facts eligible for automatic creation and no
+conflicts. Historical incomplete Nutrition evidence remains terminal
+`invalid`, not deferred manual work. The cutover gate remains closed for the
+separate final checkpoint, deployed MCP writer-matrix verification, explicit
+switch approval, and rollback readiness.
 
 For Body, the `Body` sheet is migration authority. Stable source identity is
 the exact workbook, numeric sheet ID, and `Measurement_ID`. The importer reads
@@ -65,9 +67,15 @@ For Nutrition, `Brands`, `Ingredients`, `Foods`, `Food_Ingredients`, and
 workbook, numeric sheet ID, and the sheet's durable ID (`Brand_ID`,
 `Ingredient_ID`, `Food_ID`, the Food/Ingredient pair, or `Meal_ID`). Imported
 catalog definitions remain Person-private and are never promoted to shared
-automatically. Missing nutrients or quantities, broken links, unsupported Meal
-kinds, and Photo markers remain explicit blockers rather than discarded or
-invented data.
+automatically. Complete Food rows with a non-empty textual `Default_portion`
+are recorded as one source-defined `serving`, with the exact source text kept
+in typed relational audit and no inferred physical size. Missing Ingredient
+nutrients or composition quantities remain terminal `invalid`; a dependency
+that is present but structurally invalid in the same snapshot is also terminal
+`invalid`. Absent or ambiguous catalog references remain `conflict`. Raw Meal
+kind, Photo markers, and unresolved source identifiers remain typed evidence
+where the accepted importer contract permits them; none is silently discarded
+or invented.
 
 For Training, only the `Training` sheet supplies performed WorkoutSession
 facts. `Program`, Personal Records, and planning fields remain projections.
@@ -111,6 +119,12 @@ resume. Any rollback write to Sheets requires separate operator approval.
   failures, twelve unresolved composition references, and three detected Brand
   numeric-sheet provenance mismatches. No duplicate or corrective mutation was
   performed.
+- TASK-0056 remediation evidence: three Brand versions now use the exact Brands
+  numeric-sheet source while all three prior source records remain preserved;
+  seven complete Foods were imported as source-defined servings. The repeated
+  all-domain dry-run returned `created=0`, `unchanged=428`, `conflict=0`, and
+  `invalid=46` with no failures. Sheets was not modified and no cutover
+  occurred.
 
 ## Decisions
 
@@ -133,3 +147,4 @@ resume. Any rollback write to Sheets requires separate operator approval.
 - [Pull-based import and writer cutover ADR](../../adr/20260821-use-pull-based-sheets-import-and-exclusive-writer-cutover.md)
 - [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md)
 - [Training and raw Recovery import ADR](../../adr/20260825-import-training-and-raw-recovery-observations.md)
+- [Nutrition provenance remediation ADR](../../adr/20260826-remediate-nutrition-provenance-and-terminal-catalog-evidence.md)
