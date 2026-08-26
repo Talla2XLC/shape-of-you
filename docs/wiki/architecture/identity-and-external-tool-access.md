@@ -103,6 +103,10 @@ The ChatGPT predefined client uses only the stable callback
 Deployment applies that split authority through a one-shot transactional
 reconcile after Identity migrations; ordinary runtime startup performs no
 client writes, and the general operator command cannot manage reserved IDs.
+When an exact callback is retired, reconciliation invalidates only
+authorization codes and interaction state bound to that URI before removing
+the allowlist row. It never rebinds a credential to a different callback and
+preserves grants, sessions, refresh credentials, and security events.
 
 Local development and staging supply private ES256 keys through a versioned
 runtime secret key ring. PostgreSQL stores only public SPKI material, lifecycle

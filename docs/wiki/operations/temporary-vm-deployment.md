@@ -170,7 +170,10 @@ deployment rejects any other value, runs migrations, then executes
 Missing or invalid configuration and database drift that cannot be reconciled
 abort before replacement. Subject binding remains an explicit operation;
 reserved client reconciliation is automatic and never deletes clients absent
-from the manifest.
+from the manifest. Exact callback rotation invalidates only transient
+authorization codes and interaction rows that reference a retired callback;
+durable grants, sessions, refresh credentials, and security events survive the
+transaction.
 
 The initial HTTP-to-HTTPS cutover used a temporary deployment gate. With
 separate approval, the operator:

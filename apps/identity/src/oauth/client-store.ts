@@ -101,7 +101,9 @@ export class OAuthClientStore {
    *
    * Calls for the same client ID are serialized inside PostgreSQL. An exact repeat
    * performs no writes, preserving the client's existing `updated_at` value.
-   * Existing grants, sessions, and authorization history are never mutated.
+   * Existing grants, sessions, refresh credentials, and security events are
+   * never mutated. Retiring a redirect invalidates only callback-bound
+   * authorization codes and interaction state that cannot be safely rebound.
    */
   public async reconcilePublicClient(
     input: OAuthPublicClientInput
@@ -139,7 +141,13 @@ export class OAuthClientStore {
           [input.clientId, input.displayName, input.refreshTokensEnabled]
         );
       }
-      await reconcileRedirectUris(client, input);
+      await reconcileRedirectUris(
+        client,
+        input,
+        current?.redirectUris.filter(
+          (redirectUri) => !input.redirectUris.includes(redirectUri)
+        ) ?? []
+      );
       await reconcileScopes(client, input);
       await client.query("commit");
       return current ? "updated" : "created";
@@ -247,12 +255,9 @@ function validatePublicClient(input: OAuthPublicClientInput): void {
 
 async function reconcileRedirectUris(
   client: PoolClient,
-  input: OAuthPublicClientInput
+  input: OAuthPublicClientInput,
+  retiredRedirectUris: readonly string[]
 ): Promise<void> {
-  await client.query(
-    "delete from oauth_client_redirect_uris where client_id = $1 and not (redirect_uri = any($2::text[]))",
-    [input.clientId, input.redirectUris]
-  );
   for (const redirectUri of input.redirectUris) {
     await client.query(
       `insert into oauth_client_redirect_uris (id, client_id, redirect_uri)
@@ -261,6 +266,39 @@ async function reconcileRedirectUris(
       [randomUUID(), input.clientId, redirectUri]
     );
   }
+  if (retiredRedirectUris.length === 0) return;
+
+  await client.query(
+    `delete from oauth_interaction_requested_resources resources
+      using oauth_interactions interactions
+      where resources.interaction_id = interactions.id
+        and interactions.client_id = $1
+        and interactions.redirect_uri = any($2::text[])`,
+    [input.clientId, retiredRedirectUris]
+  );
+  await client.query(
+    `delete from oauth_interaction_requested_scopes scopes
+      using oauth_interactions interactions
+      where scopes.interaction_id = interactions.id
+        and interactions.client_id = $1
+        and interactions.redirect_uri = any($2::text[])`,
+    [input.clientId, retiredRedirectUris]
+  );
+  await client.query(
+    `delete from oauth_authorization_codes
+      where client_id = $1 and redirect_uri = any($2::text[])`,
+    [input.clientId, retiredRedirectUris]
+  );
+  await client.query(
+    `delete from oauth_interactions
+      where client_id = $1 and redirect_uri = any($2::text[])`,
+    [input.clientId, retiredRedirectUris]
+  );
+  await client.query(
+    `delete from oauth_client_redirect_uris
+      where client_id = $1 and redirect_uri = any($2::text[])`,
+    [input.clientId, retiredRedirectUris]
+  );
 }
 
 async function reconcileScopes(

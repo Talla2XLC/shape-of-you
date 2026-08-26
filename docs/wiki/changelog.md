@@ -28,6 +28,9 @@ stages.
 - Aligned Identity validation, deployment configuration, workflow guards, and
   contract tests on the same literal callback; legacy, normalized, or decorated
   redirect variants remain rejected.
+- Made exact callback rotation atomically invalidate only codes and interaction
+  state bound to a retired URI while preserving grants, sessions, refresh
+  credentials, security events, and all product data.
 
 ### 2026-08-26 — Training/Recovery staging evidence and continuous trends
 

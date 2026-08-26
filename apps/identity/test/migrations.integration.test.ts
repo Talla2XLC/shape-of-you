@@ -564,6 +564,12 @@ describe("Identity migration chain", () => {
     const clientId = "predefined-reconcile-test";
     const accountId = randomUUID();
     const grantId = randomUUID();
+    const sessionId = randomUUID();
+    const interactionId = randomUUID();
+    const authorizationCodeId = randomUUID();
+    const refreshFamilyId = randomUUID();
+    const refreshTokenId = randomUUID();
+    const securityEventId = randomUUID();
     const initial = {
       clientId,
       displayName: "Initial client",
@@ -595,6 +601,95 @@ describe("Identity migration chain", () => {
         `insert into oauth_grant_oidc_scopes (grant_id, client_id, scope)
          values ($1, $2, 'openid')`,
         [grantId, clientId]
+      );
+      await pool.query(
+        `insert into oauth_sessions
+           (id, account_id, credential_hash, csrf_token_hash, provider_uid,
+            authenticated_at, acr, amr, last_activity_at, expires_at)
+         values ($1, $2, $3, $4, $5, now() - interval '1 second',
+                 'urn:shape-of-you:acr:passkey', array['recovery_code'], now(),
+                 now() + interval '1 day')`,
+        [sessionId, accountId, randomBytes(32), randomBytes(32), randomUUID()]
+      );
+      await pool.query(
+        `insert into oauth_interactions
+           (id, credential_hash, client_id, account_id, session_id, grant_id,
+            prompt, status, provider_cid, provider_return_to, redirect_uri,
+            code_challenge, code_challenge_method, created_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, 'consent', 'pending', $7, $8, $9,
+                 $10, 'S256', now(), now() + interval '10 minutes')`,
+        [
+          interactionId,
+          randomBytes(32),
+          clientId,
+          accountId,
+          sessionId,
+          grantId,
+          "P".repeat(43),
+          "https://identity.example.test/interaction/return",
+          initial.redirectUris[0],
+          "C".repeat(43)
+        ]
+      );
+      await pool.query(
+        `insert into oauth_interaction_requested_scopes
+           (interaction_id, client_id, scope)
+         values ($1, $2, 'openid')`,
+        [interactionId, clientId]
+      );
+      await pool.query(
+        `insert into oauth_interaction_requested_resources
+           (interaction_id, resource)
+         values ($1, 'https://api.example.test/mcp')`,
+        [interactionId]
+      );
+      await pool.query(
+        `insert into oauth_authorization_codes
+           (id, code_hash, account_id, client_id, session_id, grant_id,
+            redirect_uri, code_challenge, code_challenge_method, resource,
+            issued_scopes, created_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 'S256',
+                 'https://api.example.test/mcp', array['openid'], now(),
+                 now() + interval '10 minutes')`,
+        [
+          authorizationCodeId,
+          randomBytes(32),
+          accountId,
+          clientId,
+          sessionId,
+          grantId,
+          initial.redirectUris[0],
+          "A".repeat(43)
+        ]
+      );
+      await pool.query(
+        `insert into oauth_refresh_token_families
+           (id, account_id, client_id, session_id, grant_id, expires_at)
+         values ($1, $2, $3, $4, $5, now() + interval '30 days')`,
+        [refreshFamilyId, accountId, clientId, sessionId, grantId]
+      );
+      await pool.query(
+        `insert into oauth_refresh_tokens
+           (id, family_id, generation, token_hash, account_id, client_id,
+            session_id, grant_id, resource, issued_scopes, expires_at)
+         values ($1, $2, 0, $3, $4, $5, $6, $7,
+                 'https://api.example.test/mcp', array['openid'],
+                 now() + interval '30 days')`,
+        [
+          refreshTokenId,
+          refreshFamilyId,
+          randomBytes(32),
+          accountId,
+          clientId,
+          sessionId,
+          grantId
+        ]
+      );
+      await pool.query(
+        `insert into identity_security_events
+           (id, event_type, outcome, actor_kind, client_id, correlation_id)
+         values ($1, 'oauth_authorization', 'succeeded', 'system', $2, $3)`,
+        [securityEventId, clientId, interactionId]
       );
       await expect(store.reconcilePublicClient(desired)).resolves.toBe("updated");
       const beforeRepeat = await pool.query<{ updated_at: Date }>(
@@ -629,6 +724,65 @@ describe("Identity migration chain", () => {
           [grantId]
         )
       ).resolves.toMatchObject({ rows: [{ grant_id: grantId }] });
+      await expect(
+        pool.query<{ count: string }>(
+          `select (
+             (select count(*) from oauth_authorization_codes where id = $1) +
+             (select count(*) from oauth_interactions where id = $2) +
+             (select count(*) from oauth_interaction_requested_scopes where interaction_id = $2) +
+             (select count(*) from oauth_interaction_requested_resources where interaction_id = $2)
+           )::text as count`,
+          [authorizationCodeId, interactionId]
+        )
+      ).resolves.toMatchObject({ rows: [{ count: "0" }] });
+      await expect(
+        pool.query<{
+          grant_id: string;
+          session_id: string;
+          family_id: string;
+          token_id: string;
+          event_id: string;
+        }>(
+          `select g.id as grant_id, s.id as session_id, f.id as family_id,
+                  t.id as token_id, e.id as event_id
+             from oauth_grants g
+             join oauth_sessions s on s.id = $2
+             join oauth_refresh_token_families f on f.id = $3
+             join oauth_refresh_tokens t on t.id = $4
+             join identity_security_events e on e.id = $5
+            where g.id = $1`,
+          [grantId, sessionId, refreshFamilyId, refreshTokenId, securityEventId]
+        )
+      ).resolves.toMatchObject({
+        rows: [{
+          grant_id: grantId,
+          session_id: sessionId,
+          family_id: refreshFamilyId,
+          token_id: refreshTokenId,
+          event_id: securityEventId
+        }]
+      });
+
+      const rollbackCodeId = randomUUID();
+      await pool.query(
+        `insert into oauth_authorization_codes
+           (id, code_hash, account_id, client_id, session_id, grant_id,
+            redirect_uri, code_challenge, code_challenge_method, resource,
+            issued_scopes, created_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, 'S256',
+                 'https://api.example.test/mcp', array['openid'], now(),
+                 now() + interval '10 minutes')`,
+        [
+          rollbackCodeId,
+          randomBytes(32),
+          accountId,
+          clientId,
+          sessionId,
+          grantId,
+          desired.redirectUris[0],
+          "R".repeat(43)
+        ]
+      );
 
       const beforeRejectedRemoval = await pool.query<{
         display_name: string;
@@ -682,6 +836,12 @@ describe("Identity migration chain", () => {
           [grantId]
         )
       ).resolves.toMatchObject({ rows: [{ grant_id: grantId }] });
+      await expect(
+        pool.query<{ id: string }>(
+          "select id from oauth_authorization_codes where id = $1",
+          [rollbackCodeId]
+        )
+      ).resolves.toMatchObject({ rows: [{ id: rollbackCodeId }] });
 
       const concurrentClientId = "predefined-concurrent-create-test";
       const concurrentDesired = { ...desired, clientId: concurrentClientId };
