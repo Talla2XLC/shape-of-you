@@ -27,6 +27,7 @@ import { NutritionService } from "../nutrition/nutrition.service.js";
 import { RecoveryService } from "../recovery/recovery.service.js";
 import { TrainingService } from "../training/training.service.js";
 import { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
+import { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
 
 /** Coordinates daily views while domain modules remain owners of their facts. */
 @Injectable()
@@ -44,6 +45,8 @@ export class DayClosureService {
     private readonly training: TrainingService,
     @Inject(RecoveryService)
     private readonly recovery: RecoveryService,
+    @Inject(DailyContextNoteService)
+    private readonly dailyContextNotes: DailyContextNoteService,
     @Inject(CoachingService)
     private readonly coaching: CoachingService
   ) {}
@@ -156,6 +159,7 @@ export class DayClosureService {
       dailyTotals,
       meals,
       workoutSessions,
+      contextNotes,
       observations,
       assessments,
       recommendations
@@ -165,6 +169,7 @@ export class DayClosureService {
       this.nutrition.dailyTotals(localDate),
       this.nutrition.listMealsForLocalDate(localDate),
       this.training.listWorkoutSessionsForLocalDate(localDate),
+      this.dailyContextNotes.listForLocalDate(localDate),
       this.recovery.listObservationsForLocalDate(localDate),
       this.recovery.listAssessmentsForLocalDate(localDate),
       this.coaching.listForLocalDate(localDate, timezone)
@@ -215,6 +220,14 @@ export class DayClosureService {
           workoutName: item.workoutName
         }))
       },
+      ...(contextNotes.items.length > 0
+        ? {
+            contextNotes: contextNotes.items.map((item) => ({
+              id: item.id,
+              text: item.text
+            }))
+          }
+        : {}),
       recovery: {
         observations: observations.map((item) => ({
           id: item.id,

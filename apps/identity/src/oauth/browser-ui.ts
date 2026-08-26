@@ -241,6 +241,8 @@ let consentPending=false;document.getElementById('consent')?.addEventListener('s
 function scopeLabel(scope: string): string {
   return {
     "body-measurement:write": "Record body measurements",
+    "daily-context-note:write": "Record daily context notes",
+    "day-closure:write": "Close and reopen days",
     "meal:write": "Record meals",
     "offline_access": "Keep this connection active",
     "openid": "Sign you in",

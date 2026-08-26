@@ -66,6 +66,10 @@ export function snapshotReferences(
       kind: "workout_session" as const,
       id: item.id
     })),
+    ...(snapshot.contextNotes ?? []).map((item) => ({
+      kind: "daily_context_note" as const,
+      id: item.id
+    })),
     ...snapshot.recovery.observations.map((item) => ({
       kind: "recovery_observation" as const,
       id: item.id

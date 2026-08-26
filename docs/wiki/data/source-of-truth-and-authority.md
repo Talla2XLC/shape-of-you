@@ -100,13 +100,22 @@ versions; daily totals remain derived.
 
 Writer authority changes as one exclusive switch, not a dual-write period.
 Before that switch, deployed MCP must cover every fact type used by the ChatGPT
-writer. Repository contracts now include typed Recovery list/record tools and
-expanded WorkoutSession evidence, but deployment, consent, and end-to-end
-writer-matrix verification remain pending. The Sheets writer is paused before
-the final source checkpoint; ChatGPT is then switched to MCP-only writes and
-verified before PostgreSQL authority is approved. A rollback pauses MCP first
-and reconciles post-checkpoint PostgreSQL facts before Sheets writing can
-resume. Any rollback write to Sheets requires separate operator approval.
+writer. The verified writer operations are Weight, Meal, Workout result, raw
+Garmin/Recovery observations, standalone daily context note, and explicit day
+closure; Body remains supported even though the current source is empty.
+TASK-0057 implements the complete repository-side MCP target: typed
+append-only corrections, lifecycle tools, active Training reference lookup,
+and a narrow relational `DailyContextNote`. The implementation is
+Quality-accepted but is not deployed behavior until a separately approved
+release, connector consent update, and canary verification.
+
+The Sheets writer is paused before a local executable preflight records and
+re-verifies the final source checkpoint. ChatGPT is then switched to MCP-only
+writes and its complete tool/scope/canary matrix is verified before PostgreSQL
+authority is approved. A rollback pauses MCP first and produces a typed plan
+for post-checkpoint PostgreSQL facts before Sheets writing can resume. Any
+rollback write to Sheets requires separate operator approval; no automatic
+reverse sync exists.
 
 ## Evidence
 
@@ -125,6 +134,11 @@ resume. Any rollback write to Sheets requires separate operator approval.
   all-domain dry-run returned `created=0`, `unchanged=428`, `conflict=0`, and
   `invalid=46` with no failures. Sheets was not modified and no cutover
   occurred.
+- TASK-0057 repository evidence: the 23-tool MCP writer/reference/lifecycle
+  matrix, granular OAuth policy, relational `DailyContextNote`, and phased
+  cutover preflight passed unit, PostgreSQL integration, migration-prefix,
+  typecheck, build, lint, and documentation gates. No deployment, connector
+  switch, Sheets write, or authority transfer occurred.
 
 ## Decisions
 
@@ -148,3 +162,4 @@ resume. Any rollback write to Sheets requires separate operator approval.
 - [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md)
 - [Training and raw Recovery import ADR](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 - [Nutrition provenance remediation ADR](../../adr/20260826-remediate-nutrition-provenance-and-terminal-catalog-evidence.md)
+- [Typed MCP writer and cutover preflight ADR](../../adr/20260826-complete-typed-mcp-writer-parity-and-use-executable-cutover-preflight.md)

@@ -6,6 +6,7 @@ import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { RecoveryModule } from "../recovery/recovery.module.js";
 import { TrainingModule } from "../training/training.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
+import { DailyContextNoteModule } from "../daily-context-notes/daily-context-note.module.js";
 import { DayClosureController } from "./day-closure.controller.js";
 import { DayClosureService } from "./day-closure.service.js";
 
@@ -17,9 +18,11 @@ import { DayClosureService } from "./day-closure.service.js";
     NutritionModule,
     TrainingModule,
     RecoveryModule,
-    CoachingModule
+    CoachingModule,
+    DailyContextNoteModule
   ],
   controllers: [DayClosureController],
-  providers: [DayClosureService]
+  providers: [DayClosureService],
+  exports: [DayClosureService]
 })
 export class DayClosureModule {}

@@ -49,6 +49,87 @@ afterAll(async () => {
 });
 
 describe("DayClosure PostgreSQL lifecycle", () => {
+  it("includes current daily context notes and marks a closure stale after correction", async () => {
+    const fastify = getFastifyInstance(app);
+    const notePayload = {
+      localDate: "2026-08-15",
+      timezone: "Europe/Moscow",
+      text: "Travel day with an unusual schedule",
+      dedupeKey: "daily-note:2026-08-15:1",
+      sourceReference: {
+        channel: "manual",
+        externalSystem: "chatgpt-fitness-tracker",
+        externalRecordId: "message-1",
+        occurredAt: "2026-08-15T20:00:00.000Z"
+      }
+    };
+    const created = await fastify.inject({
+      method: "POST",
+      url: "/v1/daily-context-notes",
+      payload: notePayload
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const replay = await fastify.inject({
+      method: "POST",
+      url: "/v1/daily-context-notes",
+      payload: notePayload
+    });
+    expect(replay.statusCode, replay.body).toBe(200);
+    expect(replay.json().id).toBe(created.json().id);
+
+    const closed = await fastify.inject({
+      method: "POST",
+      url: "/v1/day-closures",
+      payload: {
+        localDate: "2026-08-15",
+        timezone: "Europe/Moscow",
+        idempotencyKey: "daily-note:close:1"
+      }
+    });
+    expect(closed.statusCode, closed.body).toBe(201);
+    expect(closed.json().snapshot.contextNotes).toEqual([
+      { id: created.json().id, text: notePayload.text }
+    ]);
+    expect(closed.json().references).toContainEqual({
+      kind: "daily_context_note",
+      id: created.json().id
+    });
+
+    const corrected = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-context-notes/${created.json().id as string}/corrections`,
+      payload: {
+        ...notePayload,
+        text: "Travel day; schedule confirmed after arrival",
+        dedupeKey: "daily-note:2026-08-15:2",
+        reason: "Clarified the previously uncertain context",
+        sourceReference: {
+          ...notePayload.sourceReference,
+          externalRecordId: "message-2"
+        }
+      }
+    });
+    expect(corrected.statusCode, corrected.body).toBe(201);
+    expect(corrected.json()).toMatchObject({
+      supersedesId: created.json().id,
+      correctionReason: "Clarified the previously uncertain context"
+    });
+
+    const projection = await fastify.inject({
+      method: "GET",
+      url: "/v1/day-projections?localDate=2026-08-15&timezone=Europe%2FMoscow"
+    });
+    expect(projection.statusCode, projection.body).toBe(200);
+    expect(projection.json()).toMatchObject({ state: "stale", isStale: true });
+
+    const history = await fastify.inject({
+      method: "GET",
+      url: `/v1/daily-context-notes/${created.json().id as string}/history`
+    });
+    expect(history.statusCode, history.body).toBe(200);
+    expect(history.json().items).toHaveLength(2);
+  });
+
   it("keeps open projections live and closes, reopens, and recloses append-only", async () => {
     const fastify = getFastifyInstance(app);
     const query = "localDate=2026-08-12&timezone=Europe%2FMoscow";

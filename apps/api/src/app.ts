@@ -57,12 +57,18 @@ import {
   DayClosureRepository,
   type DayClosureStore
 } from "./storage/day-closure-repository.js";
+import {
+  DailyContextNoteRepository,
+  type DailyContextNoteStore
+} from "./storage/daily-context-note-repository.js";
 import type { IntakeParser } from "./domain/intake.js";
 import { WeightMeasurementService } from "./weight-measurements/weight-measurement.service.js";
 import { BodyMeasurementSessionService } from "./body-measurement-sessions/body-measurement-session.service.js";
 import { NutritionService } from "./nutrition/nutrition.service.js";
 import { TrainingService } from "./training/training.service.js";
 import { RecoveryService } from "./recovery/recovery.service.js";
+import { DailyContextNoteService } from "./daily-context-notes/daily-context-note.service.js";
+import { DayClosureService } from "./day-closures/day-closure.service.js";
 import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
 import { McpAuthorizer } from "./mcp/oauth.js";
 import { registerMcpRoutes } from "./mcp/server.js";
@@ -94,6 +100,8 @@ export interface BuildAppOptions {
   readonly intakeStore?: IntakeStore;
   /** Optional daily-closure persistence used for isolated application tests. */
   readonly dayClosureStore?: DayClosureStore;
+  /** Optional DailyContextNote persistence used for isolated application tests. */
+  readonly dailyContextNoteStore?: DailyContextNoteStore;
   /** Optional provider-neutral parser that enables the background worker. */
   readonly intakeParser?: IntakeParser;
   /** Optional Person resolution boundary, primarily for isolated tests. */
@@ -163,6 +171,9 @@ export async function buildApp(
   const dayClosureStore =
     options.dayClosureStore ??
     (database ? new DayClosureRepository(database) : undefined);
+  const dailyContextNoteStore =
+    options.dailyContextNoteStore ??
+    (database ? new DailyContextNoteRepository(database) : undefined);
 
   if (
     !store ||
@@ -173,7 +184,8 @@ export async function buildApp(
     !recoveryStore ||
     !coachingStore ||
     !intakeStore ||
-    !dayClosureStore
+    !dayClosureStore ||
+    !dailyContextNoteStore
   ) {
     throw new Error("All application persistence stores are required");
   }
@@ -233,6 +245,7 @@ export async function buildApp(
       coachingStore,
       intakeStore,
       dayClosureStore,
+      dailyContextNoteStore,
       intakeParser: options.intakeParser ?? null,
       personContext,
       readinessProbe,
@@ -266,7 +279,9 @@ export async function buildApp(
         bodyMeasurements: app.get(BodyMeasurementSessionService),
         nutrition: app.get(NutritionService),
         training: app.get(TrainingService),
-        recovery: app.get(RecoveryService)
+        recovery: app.get(RecoveryService),
+        dailyContextNotes: app.get(DailyContextNoteService),
+        dayClosures: app.get(DayClosureService)
       }
     });
   }

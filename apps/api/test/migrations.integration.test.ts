@@ -652,7 +652,11 @@ describe("API migration chain", () => {
     const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-body-prefix-"));
     await mkdir(path.join(prefixFolder, "meta"));
     try {
-      const prefixEntries = journal.entries.slice(0, -1);
+      const remediationIndex = journal.entries.findIndex(
+        (entry) => entry.tag === "20260826144733_remediate_nutrition_brand_provenance"
+      );
+      expect(remediationIndex).toBeGreaterThan(0);
+      const prefixEntries = journal.entries.slice(0, remediationIndex);
       for (const entry of prefixEntries) {
         await cp(
           new URL(`${entry.tag}.sql`, migrationsFolder),
@@ -751,7 +755,11 @@ describe("API migration chain", () => {
     const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-brand-prefix-"));
     await mkdir(path.join(prefixFolder, "meta"));
     try {
-      const prefixEntries = journal.entries.slice(0, -1);
+      const remediationIndex = journal.entries.findIndex(
+        (entry) => entry.tag === "20260826144733_remediate_nutrition_brand_provenance"
+      );
+      expect(remediationIndex).toBeGreaterThan(0);
+      const prefixEntries = journal.entries.slice(0, remediationIndex);
       for (const entry of prefixEntries) {
         await cp(
           new URL(`${entry.tag}.sql`, migrationsFolder),

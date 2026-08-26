@@ -8,9 +8,11 @@ import {
   BrandSchema,
   CatalogIdParamsSchema,
   CorrectBodyMeasurementSessionSchema,
+  CorrectDailyContextNoteSchema,
   CorrectMealSchema,
   CorrectWorkoutSessionSchema,
   CreateBodyMeasurementSessionSchema,
+  CreateDailyContextNoteSchema,
   CreateBrandSchema,
   CreateBrandVersionSchema,
   CreateFoodSchema,
@@ -45,6 +47,11 @@ import {
   PhysicalGoalVersionParamsSchema,
   DailyNutritionTotalsQuerySchema,
   DailyNutritionTotalsSchema,
+  DailyContextNoteHistorySchema,
+  DailyContextNoteIdParamsSchema,
+  DailyContextNoteListSchema,
+  DailyContextNoteSchema,
+  ListDailyContextNotesQuerySchema,
   MealHistorySchema,
   MealIdParamsSchema,
   MealListSchema,
@@ -1174,6 +1181,66 @@ function dayClosurePaths(): Record<string, object> {
   };
 }
 
+function dailyContextNotePaths(): Record<string, object> {
+  const idParameter = schemaParameter(
+    "id",
+    "path",
+    true,
+    DailyContextNoteIdParamsSchema.properties.id
+  );
+  return {
+    "/v1/daily-context-notes": {
+      post: {
+        tags: ["daily-context-notes"],
+        summary: "Create an immutable Person-local context note",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: CreateDailyContextNoteSchema } }
+        },
+        responses: {
+          "200": { description: "Existing idempotent note", content: { "application/json": { schema: DailyContextNoteSchema } } },
+          "201": { description: "Context note created", content: { "application/json": { schema: DailyContextNoteSchema } } }
+        }
+      },
+      get: {
+        tags: ["daily-context-notes"],
+        summary: "List current notes for one Person-local date",
+        parameters: [
+          schemaParameter("localDate", "query", true, ListDailyContextNotesQuerySchema.properties.localDate)
+        ],
+        responses: {
+          "200": { description: "Current context notes", content: { "application/json": { schema: DailyContextNoteListSchema } } }
+        }
+      }
+    },
+    "/v1/daily-context-notes/{id}/corrections": {
+      post: {
+        tags: ["daily-context-notes"],
+        summary: "Append an immutable context note correction",
+        parameters: [idParameter],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: CorrectDailyContextNoteSchema } }
+        },
+        responses: {
+          "200": { description: "Existing idempotent correction", content: { "application/json": { schema: DailyContextNoteSchema } } },
+          "201": { description: "Correction created", content: { "application/json": { schema: DailyContextNoteSchema } } }
+        }
+      }
+    },
+    "/v1/daily-context-notes/{id}/history": {
+      get: {
+        tags: ["daily-context-notes"],
+        summary: "Read the append-only context note correction chain",
+        parameters: [idParameter],
+        responses: {
+          "200": { description: "Context note history", content: { "application/json": { schema: DailyContextNoteHistorySchema } } }
+        }
+      }
+    }
+  };
+}
+
 function progressOverviewPaths(): Record<string, object> {
   return {
     "/v1/progress-overview": {
@@ -1495,6 +1562,7 @@ export function createOpenApiDocument(): object {
       ...trainingPaths(),
       ...recoveryPaths(),
       ...coachingPaths(),
+      ...dailyContextNotePaths(),
       ...dayClosurePaths(),
       ...progressOverviewPaths(),
       ...intakePaths()

@@ -20,6 +20,8 @@ export const initialOAuthProtocolScopes = ["openid", "offline_access"] as const;
 /** Resource permissions exposed by the initial Shape of You MCP server. */
 export const initialOAuthResourceScopes = [
   "body-measurement:write",
+  "daily-context-note:write",
+  "day-closure:write",
   "meal:write",
   "person:read",
   "recovery:write",

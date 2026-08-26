@@ -34,6 +34,7 @@ export const DayReferenceKindSchema = {
     "body_measurement_session",
     "meal",
     "workout_session",
+    "daily_context_note",
     "recovery_observation",
     "recovery_assessment",
     "coaching_recommendation"
@@ -151,6 +152,18 @@ export const DaySnapshotSchema = {
               workoutName: { type: "string" }
             }
           }
+        }
+      }
+    },
+    contextNotes: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "text"],
+        properties: {
+          id: uuid,
+          text: { type: "string", minLength: 1, maxLength: 4_000 }
         }
       }
     },

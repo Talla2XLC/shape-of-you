@@ -160,17 +160,31 @@ automation is needed. The apply capability is implemented, but real-data
 execution, recurring dual-run, live service-identity use, and cutover remain
 separately approved operations.
 
-The repository now provides typed MCP list/record tools for Recovery and an
-expanded WorkoutSession contract, including the granular `recovery:write`
-scope. These additions are not yet deployed or consented and therefore do not
-complete the cutover gate by themselves. Before cutover, the full writer
-operation matrix must still be verified in the deployed connector. Cutover
-pauses the Sheets writer, captures a source checkpoint, runs final
-import/reconciliation, switches ChatGPT to MCP-only writes, verifies
-write/read-back, and transfers authority only through explicit approval.
-Rollback also uses one writer at a time; post-checkpoint PostgreSQL facts must
-be reconciled and replayed through a controlled one-time procedure before the
-Sheets writer can resume.
+The verified live writer contract has six active operations: Weight, Meal,
+Workout result, raw Garmin/Recovery observations, standalone daily context
+note, and explicit day closure. Body is currently unused but remains a
+supported writer capability. Repository MCP already has list/record tools for
+the five existing fact modules, including Recovery, but complete cutover parity
+also requires append-only corrections, day projection/close/reopen/history,
+active Training reference lookup, and a typed `DailyContextNote` fact.
+
+TASK-0057 keeps separate typed domain tools and does not expand the Weight-only
+Intake parser into a generic event queue or persist a `CutoverSession`. The API
+now exposes the complete 23-tool writer/reference/lifecycle surface, including
+append-only corrections, `DailyContextNote`, active Training lookup, and day
+projection/close/reopen/history. A local phased preflight command produces an
+immutable private manifest for checkpoint checksums and final reconciliation,
+verifies deployed tool/scope and canary evidence, and rehearses a typed,
+Person-isolated rollback plan without writing Sheets. Deployment, connector
+consent, canary execution, and cutover remain separately gated.
+
+Cutover pauses the Sheets writer, captures and re-verifies the source
+checkpoint, runs final import/reconciliation, switches ChatGPT to MCP-only
+writes, verifies typed write/read-back, and transfers authority only through
+explicit approval. Rollback also uses one writer at a time; post-checkpoint
+PostgreSQL facts must be reconciled and replayed through a controlled one-time
+procedure before the Sheets writer can resume. Any Sheets write requires a
+separate explicit approval.
 
 Never invent missing data. Ambiguous mapping remains an open question.
 Self-healing begins in dry-run, records before/after, uses an allowlist,
@@ -237,6 +251,10 @@ automatically changes closed days or ambiguous facts.
 
 - Pull-based import, typed adapters, exclusive-writer cutover, and rollback are
   accepted in the linked ADR.
+- Typed MCP writer parity, narrow append-only `DailyContextNote`, and the
+  executable local cutover preflight are implemented and Quality-accepted in
+  the repository. They are not deployed runtime behavior until a separately
+  approved release and connector consent update.
 - Weight, Body, Nutrition, Training, and Recovery dry-run/apply adapters are
   implemented through one command and lifecycle, with one all-domain operator
   orchestration over separate typed snapshots. Body apply has not been needed
@@ -251,10 +269,10 @@ automatically changes closed days or ambiguous facts.
 
 - Complete verified formula/validation/script/workflow catalog, identifier
   quality, reconciliation tolerances, cutover duration, and rollback window.
-- Operational source checkpoint and run cadence for recurring dual-run.
-- Deployed connector consent and end-to-end smoke for the expanded Training and
-  Recovery tools, plus confirmation that the full legacy writer operation
-  matrix is covered.
+- Operational rollback window and whether recurring dual-run is still needed
+  before the bounded final checkpoint.
+- Deployment, connector consent, and end-to-end smoke for the complete
+  TASK-0057 writer matrix.
 
 ## Related material
 

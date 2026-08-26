@@ -227,6 +227,7 @@ export const dayClosureReferenceKind = pgEnum("day_closure_reference_kind", [
   "body_measurement_session",
   "meal",
   "workout_session",
+  "daily_context_note",
   "recovery_observation",
   "recovery_assessment",
   "coaching_recommendation"
@@ -508,6 +509,71 @@ export const sourceReferences = pgTable(
     check(
       "source_references_external_pair",
       sql`(${table.externalSystem} IS NULL) = (${table.externalRecordId} IS NULL)`
+    )
+  ]
+);
+
+/** Narrow append-only Person-local context fact; it owns no other daily facts. */
+export const dailyContextNotes = pgTable(
+  "daily_context_notes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    text: text("text").notNull(),
+    source: sourceChannel("source").notNull(),
+    sourceReferenceId: uuid("source_reference_id").notNull(),
+    dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }),
+    supersedesId: uuid("supersedes_id"),
+    correctionReason: varchar("correction_reason", { length: 512 }),
+    createdAt: timestamp("created_at", {
+      withTimezone: true,
+      mode: "date"
+    })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    unique("daily_context_notes_id_person_uq").on(table.id, table.personId),
+    foreignKey({
+      name: "daily_context_notes_source_person_fk",
+      columns: [table.sourceReferenceId, table.personId],
+      foreignColumns: [sourceReferences.id, sourceReferences.personId]
+    }),
+    foreignKey({
+      name: "daily_context_notes_supersedes_person_fk",
+      columns: [table.supersedesId, table.personId],
+      foreignColumns: [table.id, table.personId]
+    }),
+    uniqueIndex("daily_context_notes_person_source_dedupe_uq").on(
+      table.personId,
+      table.source,
+      table.dedupeKey
+    ),
+    uniqueIndex("daily_context_notes_supersedes_uq")
+      .on(table.supersedesId)
+      .where(sql`${table.supersedesId} IS NOT NULL`),
+    index("daily_context_notes_person_date_idx").on(
+      table.personId,
+      table.localDate,
+      table.createdAt
+    ),
+    check("daily_context_notes_text_nonempty", sql`length(${table.text}) > 0`),
+    check(
+      "daily_context_notes_confidence_range",
+      sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`
+    ),
+    check(
+      "daily_context_notes_correction_shape",
+      sql`(${table.supersedesId} IS NULL AND ${table.correctionReason} IS NULL) OR (${table.supersedesId} IS NOT NULL AND ${table.correctionReason} IS NOT NULL)`
+    ),
+    check(
+      "daily_context_notes_no_self_supersession",
+      sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
     )
   ]
 );
@@ -3463,6 +3529,10 @@ export const intakeTimelineEntries = pgTable(
 
 /** Persisted SourceReference row returned by Drizzle queries. */
 export type SourceReferenceRow = typeof sourceReferences.$inferSelect;
+/** Persisted DailyContextNote row returned by Drizzle queries. */
+export type DailyContextNoteRow = typeof dailyContextNotes.$inferSelect;
+/** Insertable DailyContextNote row accepted by Drizzle mutations. */
+export type NewDailyContextNoteRow = typeof dailyContextNotes.$inferInsert;
 /** Persisted versioned Person-local closure coordination artifact. */
 export type DayClosureRow = typeof dayClosures.$inferSelect;
 /** Persisted idempotency record for a closure operation. */

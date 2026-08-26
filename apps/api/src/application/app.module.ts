@@ -15,6 +15,7 @@ import type { CoachingStore } from "../storage/coaching-repository.js";
 import type { IntakeStore } from "../storage/intake-repository.js";
 import type { IntakeParser } from "../domain/intake.js";
 import type { DayClosureStore } from "../storage/day-closure-repository.js";
+import type { DailyContextNoteStore } from "../storage/daily-context-note-repository.js";
 import { BodyMeasurementSessionModule } from "../body-measurement-sessions/body-measurement-session.module.js";
 import { PhysicalGoalModule } from "../physical-goals/physical-goal.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
@@ -24,6 +25,7 @@ import { RecoveryModule } from "../recovery/recovery.module.js";
 import { CoachingModule } from "../coaching/coaching.module.js";
 import { IntakeModule } from "../intake/intake.module.js";
 import { DayClosureModule } from "../day-closures/day-closure.module.js";
+import { DailyContextNoteModule } from "../daily-context-notes/daily-context-note.module.js";
 import { ProgressOverviewModule } from "../progress-overview/progress-overview.module.js";
 import {
   PERSON_CONTEXT,
@@ -37,7 +39,8 @@ import {
   INTAKE_STORE,
   READINESS_PROBE,
   WEIGHT_MEASUREMENT_STORE,
-  DAY_CLOSURE_STORE
+  DAY_CLOSURE_STORE,
+  DAILY_CONTEXT_NOTE_STORE
 } from "./tokens.js";
 
 /** Explicit runtime dependencies composed before Nest creates the module graph. */
@@ -64,6 +67,8 @@ export interface AppModuleOptions {
   readonly intakeParser: IntakeParser | null;
   /** Persistence boundary for versioned Person-local daily closures. */
   readonly dayClosureStore: DayClosureStore;
+  /** Persistence boundary for append-only Person-local context notes. */
+  readonly dailyContextNoteStore: DailyContextNoteStore;
   /** Probe that resolves only when required dependencies are ready. */
   readonly readinessProbe: ReadinessProbe;
   /** Database context available to the application, when configured. */
@@ -124,6 +129,10 @@ class RuntimeDependenciesModule {
           useValue: options.dayClosureStore
         },
         {
+          provide: DAILY_CONTEXT_NOTE_STORE,
+          useValue: options.dailyContextNoteStore
+        },
+        {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
@@ -146,6 +155,7 @@ class RuntimeDependenciesModule {
         INTAKE_STORE,
         INTAKE_PARSER,
         DAY_CLOSURE_STORE,
+        DAILY_CONTEXT_NOTE_STORE,
         WEIGHT_MEASUREMENT_STORE,
         READINESS_PROBE,
         DatabaseLifecycle
@@ -177,6 +187,7 @@ export class AppModule {
         RecoveryModule,
         CoachingModule,
         IntakeModule,
+        DailyContextNoteModule,
         DayClosureModule,
         ProgressOverviewModule
       ]
