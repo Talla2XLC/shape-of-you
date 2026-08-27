@@ -47,8 +47,9 @@ coordinator over bounded module-owned range reads. It returns sparse current
 facts for at most 366 local dates without a materialized aggregate, new data
 owner, cross-service SQL, or expansion of the per-day `DayClosure` boundary.
 
-PostgreSQL stores API-created data, but Google Sheets remains authoritative for
-operational fitness data until dual-run and cutover.
+Staging PostgreSQL is operational authority for fitness data through the typed
+API/MCP domain contracts. Google Sheets is a non-authoritative frozen legacy
+workbook; it is not a second writer or live projection.
 
 ## Evidence
 

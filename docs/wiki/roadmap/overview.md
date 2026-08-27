@@ -26,16 +26,18 @@ controlled data migration to web and mobile clients.
    Recovery, Coaching, and a PostgreSQL Intake queue with the Weight route.
    Versioned daily closure and the bounded progress overview are implemented.
    Missing: production parser and remaining Intake routes.
-3. **DEV-024 — PostgreSQL migration and dual-run:** pull-based typed import,
-   backfill, reconciliation, and controlled coexistence while the legacy
-   ChatGPT project writes only to Google Sheets. TASK-0044 implements the first
-   slice: a typed Weight dry-run with exact read-only Sheets access,
-   deterministic outcomes, source identity/checksum separation, mirror
-   reconciliation, safe reporting, and zero-write PostgreSQL comparison.
-   Apply/backfill and recurring dual-run remain future work. Cutover additionally
-   requires complete MCP writer coverage, including Recovery/Garmin, an
-   exclusive writer checkpoint, verification, authority approval, and
-   rehearsed rollback.
+3. **DEV-024 — PostgreSQL migration and cutover:** pull-based typed import,
+   backfill, reconciliation, and an exclusive-writer transition without
+   dual-write. All five bounded domain adapters, controlled apply for non-empty
+   domains, conflict-free staging reconciliation, deployed 23-tool MCP coverage,
+   14 writer/lifecycle canaries, the frozen switch-time checkpoint, and the
+   ChatGPT MCP-only writer switch are complete. The bounded post-switch
+   observation is Quality- and Architecture-accepted as `READY`: the project,
+   23-tool surface, existing synthetic read-back, and frozen workbook evidence
+   remained stable. TASK-0067 completed the explicit staging PostgreSQL
+   authority transfer without creating a second writer. Google Sheets is now a
+   non-authoritative frozen legacy workbook. Remaining work is a separately
+   approved workbook archive/read-only ACL disposition and any future rollback.
 4. **DEV-025 — Web MVP — in progress:** static passkey-first Nuxt client,
    API-owned browser session, bounded progress overview, and dated daily
    drill-down are implemented; broader MVP workflow remains future scope.
@@ -44,6 +46,8 @@ controlled data migration to web and mobile clients.
 Mandatory gates: product/context review before service design; ADR before
 architecture implementation; stable backend before clients; verified dual-run
 before authority transfer; Architecture Review before every major completion.
+The DEV-024 authority gate is now complete; these rules remain the required
+pattern for any future migration.
 
 ## Evidence
 

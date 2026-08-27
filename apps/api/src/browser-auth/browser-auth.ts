@@ -146,6 +146,10 @@ export class BrowserAuth {
         done();
         return;
       }
+      if (request.url.startsWith("/v1/chat-assistant/launch")) {
+        reply.header("cache-control", "no-store");
+        reply.header("referrer-policy", "no-referrer");
+      }
       const authorize = request.method === "GET" || request.method === "HEAD"
         ? this.requireRead(request)
         : this.requireWrite(request);

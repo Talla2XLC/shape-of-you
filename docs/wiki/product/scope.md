@@ -36,15 +36,16 @@ product slice, later scope, and explicit non-goals.
 
 ### Proposed MVP
 
-After DEV-023 and DEV-024, provide a web-facing stable backend, controlled
-Google Sheets coexistence, unified history/trends, confirmed input, and a safe
+After DEV-023 and DEV-024, provide a web-facing stable backend, PostgreSQL
+authority with a frozen legacy workbook, unified history/trends, confirmed input, and a safe
 daily plan based on the existing training program, recovery, load risk, and
 exercise progression rules.
 
 ### Later
 
 - DEV-026 mobile client.
-- Final Google Sheets cutover after verified dual-run criteria.
+- Legacy Google Sheets archive/read-only ACL disposition and separately
+  approved rollback operations.
 - Additional wearable sources beyond confirmed Garmin data.
 - Broader automation/analytics after sufficient evidence.
 - Audience and commercial expansion after product discovery.
@@ -58,7 +59,7 @@ exercise progression rules.
 - Punitive fasting, double sessions, or excessive cardio.
 - Independent business-rule implementations in clients.
 - Premature microservices or deployable decomposition.
-- Immediate Google Sheets shutdown before reconciliation and cutover.
+- Automatic reverse sync or rollback to Google Sheets.
 - Custom dashboards, saved layouts, arbitrary formulas, forecasts, and
   persisted cross-domain progress aggregates.
 
@@ -73,7 +74,7 @@ exercise progression rules.
 
 ## Open questions
 
-- Exact UX and acceptance metrics, mandatory first-release Sheets behavior,
+- Exact UX and acceptance metrics, legacy workbook disposition,
   authentication/privacy/retention/export, and target availability/latency.
 
 ## Related material

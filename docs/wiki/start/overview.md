@@ -36,15 +36,16 @@ corrections, Physical State and Goals, Nutrition, Training, Recovery, Coaching,
 and a durable Intake queue with the first Weight route. The independently
 deployed Identity service provides passkey authentication, TOTP recovery, and
 the initial OAuth profile. The API contains the accepted OAuth-protected MCP
-resource server for weight, body measurement, meal, and workout operations;
-staging key/client/subject provisioning and external ChatGPT smoke remain
-separately approved operational work. The static Nuxt client now opens
+resource server with the deployed 23-tool typed writer/reference/lifecycle
+surface. PostgreSQL through the single Shape of You Staging connector is now
+staging operational authority. The static Nuxt client now opens
 authenticated users on `/progress`, reads bounded factual trends, and drills
 down through canonical dated daily projections and closure history.
 
 A production Intake parser and remaining Intake routes are not implemented.
-Google Sheets remains authoritative for operational fitness data until
-verified dual-run and approved cutover.
+The former Google Sheets authority is now a non-authoritative frozen legacy
+workbook; its ACL/archive disposition and any rollback writes remain separately
+approved operations.
 
 ## Evidence
 
@@ -58,8 +59,7 @@ verified dual-run and approved cutover.
 
 ## Open questions
 
-- Remaining DEV-023 ordering and completion of the Google Sheets behavior
-  catalog.
+- Remaining DEV-023 ordering and the legacy workbook disposition.
 
 ## Related material
 

@@ -33,6 +33,13 @@ export const personAccessGrantStatus = pgEnum(
   "person_access_grant_status",
   ["active", "revoked"]
 );
+export const chatAssistantSurface = pgEnum("chat_assistant_surface", [
+  "chatgpt_work"
+]);
+export const chatAssistantBindingStatus = pgEnum(
+  "chat_assistant_binding_status",
+  ["active", "disabled"]
+);
 export const sourceChannel = pgEnum("source_channel", [
   "manual",
   "google_sheets",
@@ -341,6 +348,37 @@ export const persons = pgTable("persons", {
     .defaultNow()
     .notNull()
 });
+
+/** Person-owned pointer to one externally hosted assistant conversation. */
+export const chatAssistantConversationBindings = pgTable(
+  "chat_assistant_conversation_bindings",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id")
+      .notNull()
+      .references(() => persons.id),
+    surface: chatAssistantSurface("surface").notNull(),
+    externalConversationId: varchar("external_conversation_id", {
+      length: 128
+    }).notNull(),
+    status: chatAssistantBindingStatus("status").default("active").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    uniqueIndex("chat_assistant_binding_active_uq")
+      .on(table.personId, table.surface)
+      .where(sql`${table.status} = 'active'`),
+    check(
+      "chat_assistant_binding_external_id_shape",
+      sql`${table.externalConversationId} ~ '^[A-Za-z0-9_-]{16,128}$'`
+    )
+  ]
+);
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -3555,6 +3593,8 @@ export type IntakeItemRow = typeof intakeItems.$inferSelect;
 export type IntakeWeightDetailRow = typeof intakeWeightDetails.$inferSelect;
 /** Persisted durable Intake work item. */
 export type IntakeJobRow = typeof intakeJobs.$inferSelect;
+export type ChatAssistantConversationBindingRow =
+  typeof chatAssistantConversationBindings.$inferSelect;
 /** Persisted BodyMeasurementSession root returned by Drizzle queries. */
 export type BodyMeasurementSessionRow =
   typeof bodyMeasurementSessions.$inferSelect;

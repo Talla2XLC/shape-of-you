@@ -27,6 +27,8 @@ import { IntakeModule } from "../intake/intake.module.js";
 import { DayClosureModule } from "../day-closures/day-closure.module.js";
 import { DailyContextNoteModule } from "../daily-context-notes/daily-context-note.module.js";
 import { ProgressOverviewModule } from "../progress-overview/progress-overview.module.js";
+import { ChatAssistantModule } from "../chat-assistant/chat-assistant.module.js";
+import type { ChatAssistantConversationBindingStore } from "../storage/chat-assistant-conversation-binding-repository.js";
 import {
   PERSON_CONTEXT,
   BODY_MEASUREMENT_SESSION_STORE,
@@ -40,7 +42,8 @@ import {
   READINESS_PROBE,
   WEIGHT_MEASUREMENT_STORE,
   DAY_CLOSURE_STORE,
-  DAILY_CONTEXT_NOTE_STORE
+  DAILY_CONTEXT_NOTE_STORE,
+  CHAT_ASSISTANT_CONVERSATION_BINDING_STORE
 } from "./tokens.js";
 
 /** Explicit runtime dependencies composed before Nest creates the module graph. */
@@ -69,6 +72,8 @@ export interface AppModuleOptions {
   readonly dayClosureStore: DayClosureStore;
   /** Persistence boundary for append-only Person-local context notes. */
   readonly dailyContextNoteStore: DailyContextNoteStore;
+  /** Persistence boundary for Person-owned assistant conversation bindings. */
+  readonly chatAssistantConversationBindingStore: ChatAssistantConversationBindingStore;
   /** Probe that resolves only when required dependencies are ready. */
   readonly readinessProbe: ReadinessProbe;
   /** Database context available to the application, when configured. */
@@ -133,6 +138,10 @@ class RuntimeDependenciesModule {
           useValue: options.dailyContextNoteStore
         },
         {
+          provide: CHAT_ASSISTANT_CONVERSATION_BINDING_STORE,
+          useValue: options.chatAssistantConversationBindingStore
+        },
+        {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
@@ -156,6 +165,7 @@ class RuntimeDependenciesModule {
         INTAKE_PARSER,
         DAY_CLOSURE_STORE,
         DAILY_CONTEXT_NOTE_STORE,
+        CHAT_ASSISTANT_CONVERSATION_BINDING_STORE,
         WEIGHT_MEASUREMENT_STORE,
         READINESS_PROBE,
         DatabaseLifecycle
@@ -189,7 +199,8 @@ export class AppModule {
         IntakeModule,
         DailyContextNoteModule,
         DayClosureModule,
-        ProgressOverviewModule
+        ProgressOverviewModule,
+        ChatAssistantModule
       ]
     };
   }

@@ -12,20 +12,23 @@ tags:
 
 ## Summary
 
-Google Sheets to PostgreSQL migration is controlled, evidence-based,
-reversible, and transfers no authority before reconciliation and cutover.
+Google Sheets to staging PostgreSQL migration completed through a controlled,
+evidence-based, reversible exclusive-writer cutover and explicit authority
+transfer.
 
 ## Content
 
 DEV-023 extracts backend contracts and domain logic. DEV-024 performs migration
 and dual-run. Web/mobile work cannot bypass the stable-backend gate.
 
-The active legacy writer is the separate ChatGPT project `Fitness Tracker`.
-It continues writing operational facts, including Garmin/Recovery evidence,
-only to Google Sheets until cutover. Direct ChatGPT dual-write to Sheets and
-PostgreSQL is forbidden. The backend migration path is pull-based: it reads
-bounded Sheets snapshots, imports through typed domain adapters, and compares
-PostgreSQL while Sheets remains authoritative.
+The separate ChatGPT project `Fitness Tracker` now has one active writer: the
+Shape of You Staging MCP connector. Its instructions prohibit Google Sheets
+writes and do not permit fallback to the legacy writer. Direct ChatGPT
+dual-write to Sheets and PostgreSQL remains forbidden. The completed backend
+migration path was pull-based: it read bounded Sheets snapshots, imported
+through typed domain adapters, and compared PostgreSQL while Sheets remained
+authoritative. TASK-0067 transferred operational authority to staging
+PostgreSQL; Sheets is now a non-authoritative frozen legacy reference.
 
 Required stages:
 
@@ -156,9 +159,9 @@ credential, or dedicated runtime environment.
 
 The existing service-identity reader remains available for a future approved
 unattended cadence, but provisioning and scheduling it are deferred until such
-automation is needed. The apply capability is implemented, but real-data
-execution, recurring dual-run, live service-identity use, and cutover remain
-separately approved operations.
+automation is needed. Controlled real-data apply has completed for every
+non-empty supported domain. Unattended recurring reconciliation and live
+service-identity use remain separately approved operations.
 
 The verified live writer contract has six active operations: Weight, Meal,
 Workout result, raw Garmin/Recovery observations, standalone daily context
@@ -175,8 +178,10 @@ append-only corrections, `DailyContextNote`, active Training lookup, and day
 projection/close/reopen/history. A local phased preflight command produces an
 immutable private manifest for checkpoint checksums and final reconciliation,
 verifies deployed tool/scope and canary evidence, and rehearses a typed,
-Person-isolated rollback plan without writing Sheets. Deployment, connector
-consent, canary execution, and cutover remain separately gated.
+Person-isolated rollback plan without writing Sheets. The complete surface is
+deployed and the single staging connector has passed all 14 required
+writer/lifecycle canaries. TASK-0065 completed the exclusive writer switch;
+TASK-0067 completed the separately approved authority transfer.
 
 Cutover pauses the Sheets writer, captures and re-verifies the source
 checkpoint, runs final import/reconciliation, switches ChatGPT to MCP-only
@@ -185,6 +190,27 @@ explicit approval. Rollback also uses one writer at a time; post-checkpoint
 PostgreSQL facts must be reconciled and replayed through a controlled one-time
 procedure before the Sheets writer can resume. Any Sheets write requires a
 separate explicit approval.
+
+TASK-0065 completed the pause, switch-time checkpoint, final reconciliation,
+MCP-only switch, and bounded typed write/read-back. Google Sheets remained
+unchanged and authoritative. The bounded verification created one synthetic
+post-checkpoint `DailyContextNote` in PostgreSQL, so the current transition
+state has a non-zero, Person-isolated rollback scope. That provisional fact is
+not a second authority: rollback must stop MCP and obtain explicit approval for
+replay or a documented synthetic-canary exception before Sheets writing can
+resume. TASK-0066 completed a bounded post-switch observation and returned
+`READY` for a separate authority-transfer decision. TASK-0067 then executed
+that explicit decision: staging PostgreSQL became operational authority, the
+existing synthetic note became authoritative state, and Sheets became a
+non-authoritative frozen legacy reference.
+
+Observation reloaded the same MCP-only project configuration, confirmed the
+23-tool surface and the existing synthetic note read-back, and compared two
+exact nine-range workbook captures. The captures matched, and Drive metadata
+showed that the workbook's last modification preceded the switch-time
+checkpoint. This readiness evidence expires if the workbook drifts, MCP
+surface/read-back becomes unavailable, or an unclassified post-checkpoint fact
+appears before operator approval.
 
 Never invent missing data. Ambiguous mapping remains an open question.
 Self-healing begins in dry-run, records before/after, uses an allowlist,
@@ -245,6 +271,28 @@ automatically changes closed days or ambiguous facts.
   returned `created=0`, `unchanged=434`, `conflict=0`, and `invalid=48`, with
   no failures. `prepare` and a fresh exact recapture passed `verify-frozen`.
   Sheets remained read-only and no writer switch or cutover occurred.
+- TASK-0063 verified the deployed 23-tool connector surface and all 14 required
+  writer/lifecycle canaries with read-back; `verify-writer` passed. TASK-0064
+  then repeated the exact-workbook read-only reconciliation with
+  `created=0`, `unchanged=434`, `conflict=0`, `invalid=48`, and `failures=0`.
+  A second bounded capture passed `verify-frozen`; zero-write rollback rehearsal
+  found no post-checkpoint facts. Private evidence was removed and the tunnel
+  closed without changing either writer or authority.
+- TASK-0065 paused the legacy writer, repeated switch-time reconciliation with
+  `created=0`, `unchanged=434`, `conflict=0`, `invalid=48`, and `failures=0`,
+  proved the workbook frozen before and after the switch, changed ChatGPT to
+  MCP-only writes, and read back one bounded synthetic `DailyContextNote`.
+  Rollback rehearsal now identifies exactly that one post-checkpoint fact;
+  Sheets writes, permissions, and authority were unchanged.
+- TASK-0066 reloaded and verified the MCP-only project configuration, confirmed
+  all 23 tools and the existing synthetic note read-back, and matched two exact
+  bounded workbook captures. Drive modification metadata predates the switch
+  checkpoint. Independent Quality and Architecture Review accepted `READY` for
+  a separate authority-transfer decision; no write or transfer occurred.
+- TASK-0067 repeated the READY pin, persisted and reloaded the same project's
+  PostgreSQL-authority contract, and repeated the MCP/read-back and Drive pins.
+  No new fact or workbook mutation occurred. The existing synthetic note is
+  now part of authoritative PostgreSQL state; Sheets is non-authoritative.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
@@ -253,8 +301,8 @@ automatically changes closed days or ambiguous facts.
   accepted in the linked ADR.
 - Typed MCP writer parity, narrow append-only `DailyContextNote`, and the
   executable local cutover preflight are implemented and Quality-accepted in
-  the repository. They are not deployed runtime behavior until a separately
-  approved release and connector consent update.
+  the deployed staging runtime. The single connector has accepted the complete
+  surface and passed the required canary/read-back matrix.
 - Weight, Body, Nutrition, Training, and Recovery dry-run/apply adapters are
   implemented through one command and lifecycle, with one all-domain operator
   orchestration over separate typed snapshots. Body apply has not been needed
@@ -262,18 +310,21 @@ automatically changes closed days or ambiguous facts.
   Recovery have completed controlled real-data staging apply. The latest
   all-domain verification is duplicate-safe and conflict-free; terminal
   historical invalid evidence does not require manual completion. Recurring
-  reconciliation and the frozen source checkpoint are complete. Deployed MCP
-  writer-matrix/canary verification, the writer switch, rollback readiness, and
-  authority transfer remain separately gated.
+  reconciliation is not currently required to repair target state. The Sheets
+  writer pause, switch-time checkpoint, MCP-only switch, deployed writer-matrix
+  verification, bounded observation, and explicit authority transfer are
+  complete. Staging PostgreSQL is operational authority; Google Sheets is a
+  non-authoritative frozen legacy reference. Current rollback scope starts with
+  the authoritative TASK-0065 synthetic `DailyContextNote` and grows with all
+  post-checkpoint MCP facts. It requires an explicit disposition before the
+  legacy writer could resume.
 
 ## Open questions
 
-- Complete verified formula/validation/script/workflow catalog, identifier
-  quality, reconciliation tolerances, cutover duration, and rollback window.
-- Operational rollback window and whether recurring dual-run is still needed
-  before the bounded final checkpoint.
-- Deployment, connector consent, and end-to-end smoke for the complete
-  TASK-0057 writer matrix.
+- Complete verified formula/validation/script/workflow catalog and identifier
+  quality where they affect future source maintenance.
+- Exact rollback window and disposition of every post-checkpoint fact before
+  any rollback.
 
 ## Related material
 

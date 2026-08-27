@@ -19,14 +19,17 @@ sheet into an authoritative table.
 
 ## Content
 
-Google Sheets remains operational authority until accepted dual-run,
-reconciliation, and cutover.
+Staging PostgreSQL is operational authority after the explicit TASK-0067
+transfer. Authority is exercised only through API-owned typed domain contracts
+and the single Shape of You Staging MCP writer.
 
-The separate ChatGPT project `Fitness Tracker` is currently the active
-operational writer. It writes facts, including Garmin/Recovery observations,
-to Google Sheets only. PostgreSQL does not receive a direct copy from ChatGPT;
-the backend may only pull, import, and reconcile Sheets data through the
-controlled migration path.
+The separate ChatGPT project `Fitness Tracker` now has one active operational
+writer: the Shape of You Staging MCP connector. Its project instructions route
+typed facts to PostgreSQL through MCP, prohibit Google Sheets writes, and do not
+permit fallback. The frozen workbook remains the accepted pre-switch history
+checkpoint but is no longer current authority. Post-checkpoint
+PostgreSQL facts, including the synthetic cutover note, are authoritative and
+form a dynamically growing rollback scope.
 
 - facts retain provenance and domain owner;
 - configuration/policy is not historical measurement;
@@ -37,11 +40,13 @@ controlled migration path.
 
 Authority is assigned per information type, not per whole sheet.
 
-For Weight, `Weight` is migration authority and `Daily_Log.Weight` is legacy
-mirror/reconciliation evidence. Equal mirror values create no second fact;
-discrepancy blocks automatic import and requires investigation.
+For the completed Weight migration, the Sheets `Weight` tab was the approved
+legacy journal and `Daily_Log.Weight` was mirror/reconciliation evidence.
+Staging PostgreSQL `WeightMeasurement` is now current authority. Equal legacy
+mirror values create no second fact; discrepancy blocks automatic import and
+requires investigation.
 
-The unified importer preserves this authority boundary for Weight and Body.
+The unified importer preserves this migration-source boundary for Weight and Body.
 Dry-run classifies source candidates against PostgreSQL and persists nothing.
 Apply is a separately invoked transactional mode that creates only missing
 facts plus provenance and typed audit; it never writes Sheets or overwrites an
@@ -53,15 +58,24 @@ but each domain still receives its own bounded typed snapshot and transaction.
 The aggregate report does not transfer authority. The latest staging
 reconciliation has no missing facts eligible for automatic creation and no
 conflicts. Historical incomplete Nutrition evidence remains terminal
-`invalid`, not deferred manual work. The bounded source checkpoint has been
-captured and re-verified without drift. The cutover gate remains closed for
-deployed MCP writer-matrix/canary verification, explicit switch approval,
-rollback readiness, and authority transfer.
+`invalid`, not deferred manual work. TASK-0065 paused the Sheets writer,
+captured and re-verified the switch-time checkpoint without drift, completed
+the exclusive MCP-only writer switch, and verified one bounded typed write with
+read-back while the workbook remained frozen. Deployed MCP writer-matrix/canary
+verification is complete. TASK-0066 accepted a bounded observation as `READY`
+for a separate authority-transfer decision: project configuration remained
+MCP-only, all 23 tools and the existing note read-back were available, two
+exact workbook captures matched, and the last Drive modification preceded the
+switch checkpoint. TASK-0067 then completed the separately approved transfer.
+At transfer time rollback scope contained exactly one synthetic post-checkpoint
+`DailyContextNote`; subsequent operational MCP facts extend that scope.
 
-For Body, the `Body` sheet is migration authority. Stable source identity is
-the exact workbook, numeric sheet ID, and `Measurement_ID`. The importer reads
-only Body for this domain. Notes and source labels remain private evidence; a
-Photo reference blocks automatic import until media handling is designed.
+For the completed Body migration, the empty `Body` sheet was the approved
+legacy source. Stable source identity is the exact workbook, numeric sheet ID,
+and `Measurement_ID`. Staging PostgreSQL `BodyMeasurementSession` is current
+authority. The importer reads only Body for this legacy domain. Notes and source
+labels remain private evidence; a Photo reference blocks automatic import until
+media handling is designed.
 
 For Nutrition, `Brands`, `Ingredients`, `Foods`, `Food_Ingredients`, and
 `Meals` form one linked migration boundary. Stable identity uses the exact
@@ -94,10 +108,10 @@ values are not migrated as raw facts. Provenance states the actual path as
 `google_sheets` and `garmin-via-fitness-tracker`; it does not invent a direct
 device connection or consent record.
 
-After cutover, Brand/Ingredient/FoodVersion are shared definitions; personal
-catalog stores overlays/private items. Until then, Sheets remains authority for
-current catalog/Meals. Meal snapshots never recalculate from later catalog
-versions; daily totals remain derived.
+After authority transfer, Brand/Ingredient/FoodVersion are shared definitions;
+personal catalog stores overlays/private items. Sheets retains only the frozen
+legacy catalog/Meals checkpoint and is not current authority. Meal snapshots never
+recalculate from later catalog versions; daily totals remain derived.
 
 Writer authority changes as one exclusive switch, not a dual-write period.
 Before that switch, deployed MCP must cover every fact type used by the ChatGPT
@@ -106,17 +120,23 @@ Garmin/Recovery observations, standalone daily context note, and explicit day
 closure; Body remains supported even though the current source is empty.
 TASK-0057 implements the complete repository-side MCP target: typed
 append-only corrections, lifecycle tools, active Training reference lookup,
-and a narrow relational `DailyContextNote`. The implementation is
-Quality-accepted but is not deployed behavior until a separately approved
-release, connector consent update, and canary verification.
+and a narrow relational `DailyContextNote`. The complete 23-tool surface is
+deployed through the single staging connector, and all 14 required synthetic
+writer/lifecycle canaries have passed with read-back. TASK-0065 completed the
+exclusive switch: MCP is now the only active writer, Google Sheets writes are
+prohibited. TASK-0067 made staging PostgreSQL operational authority and demoted
+Google Sheets to a non-authoritative frozen legacy reference.
 
-The Sheets writer is paused before a local executable preflight records and
-re-verifies the final source checkpoint. ChatGPT is then switched to MCP-only
-writes and its complete tool/scope/canary matrix is verified before PostgreSQL
-authority is approved. A rollback pauses MCP first and produces a typed plan
-for post-checkpoint PostgreSQL facts before Sheets writing can resume. Any
-rollback write to Sheets requires separate operator approval; no automatic
-reverse sync exists.
+The Sheets writer was paused before a local executable preflight recorded and
+re-verified the final source checkpoint. ChatGPT was then switched to MCP-only
+writes and its complete tool/scope/canary matrix was verified. PostgreSQL
+authority was approved and transferred in TASK-0067. A rollback pauses MCP
+first and produces a
+typed plan for post-checkpoint PostgreSQL facts before Sheets writing can
+resume. The initial rollback scope contains one synthetic `DailyContextNote`
+and expands with post-checkpoint operational facts; any replay, exception, or
+other Sheets write requires separate operator approval. No
+automatic reverse sync exists.
 
 ## Evidence
 
@@ -143,13 +163,33 @@ reverse sync exists.
   cutover preflight passed unit, PostgreSQL integration, migration-prefix,
   typecheck, build, lint, and documentation gates. No deployment, connector
   switch, Sheets write, or authority transfer occurred.
+- TASK-0065 switch evidence: final reconciliation returned `created=0`,
+  `unchanged=434`, `conflict=0`, `invalid=48`, and `failures=0`; independent
+  recaptures proved the workbook frozen before and after the MCP canary. The
+  only post-checkpoint fact is one synthetic `DailyContextNote`.
+- TASK-0066 bounded observation: MCP-only configuration, the 23-tool surface,
+  and the existing synthetic read-back remained stable; two exact nine-range
+  captures matched, and Drive modification metadata predates the checkpoint.
+  `READY` means evidence is sufficient for a separate operator decision, not
+  that authority has transferred.
+- TASK-0067 authority-transfer evidence: the immediate READY pin passed, the
+  same project's PostgreSQL-authority contract persisted through reload, and
+  the post-transfer MCP/read-back and Drive pins remained stable. No new fact,
+  Sheets mutation, permission change, or production action occurred.
 
 ## Decisions
 
 - Authority follows field/record type. The Google Sheets cutover ADR remains
   unchanged.
-- Weight, Body, Nutrition, Training, and Recovery importer work changes neither
-  the active writer nor operational authority.
+- Weight, Body, Nutrition, Training, and Recovery importer work did not change
+  authority. TASK-0065 changed only the active writer; authority transfer is a
+  separate decision.
+- TASK-0066 completed the bounded observation. Readiness must be revalidated if
+  Sheets drifts, MCP access changes, or an unclassified post-checkpoint fact
+  appears before authority approval.
+- TASK-0067 completed that separate decision. Staging PostgreSQL is now
+  operational authority; Google Sheets is non-authoritative legacy evidence.
+  Rollback and workbook disposition remain separately gated.
 
 ## Open questions
 

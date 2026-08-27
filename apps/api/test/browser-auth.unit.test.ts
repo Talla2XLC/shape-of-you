@@ -285,8 +285,23 @@ describe("API browser session boundary", () => {
     auth().guardApiRoutes(fastify, personContext);
     fastify.get("/v1/person", () => ({ personId: personContext.getPersonId() }));
     fastify.post("/v1/person", () => ({ personId: personContext.getPersonId() }));
+    fastify.get("/v1/chat-assistant/launch", () => ({ ok: true }));
 
     const cookie = `__Host-shape_of_you_api_session=${await session()}; __Host-shape_of_you_api_csrf=csrf-value`;
+    const unauthenticatedLauncher = await fastify.inject({
+      method: "GET",
+      url: "/v1/chat-assistant/launch"
+    });
+    expect(unauthenticatedLauncher.statusCode).toBe(401);
+    expect(unauthenticatedLauncher.headers["cache-control"]).toBe("no-store");
+    expect(unauthenticatedLauncher.headers["referrer-policy"]).toBe("no-referrer");
+    const authenticatedLauncher = await fastify.inject({
+      method: "GET",
+      url: "/v1/chat-assistant/launch",
+      headers: { cookie }
+    });
+    expect(authenticatedLauncher.statusCode).toBe(200);
+    expect(authenticatedLauncher.json()).toEqual({ ok: true });
     await expect(fastify.inject({ method: "GET", url: "/v1/person" })).resolves.toMatchObject({ statusCode: 401 });
     await expect(fastify.inject({ method: "GET", url: "/v1/person", headers: { cookie } })).resolves.toMatchObject({ statusCode: 200 });
     const read = await fastify.inject({ method: "GET", url: "/v1/person", headers: { cookie } });

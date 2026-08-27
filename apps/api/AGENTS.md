@@ -10,7 +10,9 @@ credentials or databases.
 
 - The API owns its PostgreSQL schema and migrations in `apps/api/drizzle/`.
 - Cross-service SQL is forbidden.
-- Google Sheets remains the authoritative source until a separate cutover ADR.
+- PostgreSQL is the operational authority after TASK-0067. The Google Sheets
+  Fitness Tracker is a non-authoritative read-only legacy reference and is
+  never an interactive writer or fallback.
 - Credentials enter only through the runtime environment. Never store secrets
   in the repository, logs, test snapshots, or documentation.
 

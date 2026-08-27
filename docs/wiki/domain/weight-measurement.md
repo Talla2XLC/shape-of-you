@@ -42,8 +42,9 @@ Invariants:
 
 ## Decisions
 
-- Google Sheets remains authoritative. `Weight` is the migration journal;
-  `Daily_Log.Weight` is reconciliation evidence and creates no second fact.
+- PostgreSQL `WeightMeasurement` is authoritative. The frozen Sheets `Weight`
+  tab is a legacy migration journal/checkpoint; `Daily_Log.Weight` is
+  reconciliation evidence and creates no second fact.
 - Multiple real measurements per local day are allowed. Current lists order by
   local date descending, then known instant with nulls last, then UUID.
 

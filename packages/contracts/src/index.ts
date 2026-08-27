@@ -1,4 +1,5 @@
 export * from "./common.js";
+export * from "./chat-assistant.js";
 export * from "./daily-context-note.js";
 export * from "./day-closure.js";
 export * from "./coaching.js";

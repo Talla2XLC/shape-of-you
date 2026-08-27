@@ -169,6 +169,13 @@
       "when": 1787816400000,
       "tag": "20260827074000_correct_fitness_tracker_catalog_sheet_ids",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787851301062,
+      "tag": "20260827172141_typical_blink",
+      "breakpoints": true
     }
   ]
 }

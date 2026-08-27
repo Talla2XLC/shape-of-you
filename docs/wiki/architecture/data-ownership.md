@@ -12,13 +12,16 @@ tags:
 
 ## Summary
 
-Google Sheets remains authoritative for operational fitness data. Future
-persistence follows domain boundaries and forbids cross-service database access.
+Staging PostgreSQL is authoritative for operational fitness data through
+API-owned domain modules. Persistence follows domain boundaries and forbids
+cross-service database access.
 
 ## Content
 
-Before verified dual-run, reconciliation, and cutover, backend/PostgreSQL
-representations are not operational authority.
+TASK-0067 completed the approved authority transfer after reconciliation,
+exclusive-writer switch, and bounded observation. Google Sheets is now a
+non-authoritative frozen legacy source; governance still prohibits writes, and
+its ACL/archive disposition remains separate.
 
 Each deployable owns its database, Drizzle schema, migrations, seed data,
 credentials, and lifecycle. A shared physical PostgreSQL cluster does not

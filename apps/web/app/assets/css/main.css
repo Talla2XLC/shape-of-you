@@ -531,6 +531,14 @@ button.button {
   margin-bottom: 0;
 }
 
+.coach-launcher {
+  margin-top: 24px;
+}
+
+.coach-stop {
+  max-width: 760px;
+}
+
 .period-picker {
   flex: none;
   display: flex;

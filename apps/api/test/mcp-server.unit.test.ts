@@ -21,7 +21,10 @@ import {
   McpAuthorizationError,
   type McpAuthorizationBoundary
 } from "../src/mcp/oauth.js";
-import { registerMcpRoutes } from "../src/mcp/server.js";
+import {
+  MCP_OPERATIONAL_INSTRUCTIONS,
+  registerMcpRoutes
+} from "../src/mcp/server.js";
 
 const fastify = Fastify();
 const unreachable = async (): Promise<never> => {
@@ -73,6 +76,27 @@ afterAll(async () => {
 });
 
 describe("MCP HTTP adapter", () => {
+  it("publishes durable PostgreSQL authority and fail-closed instructions", async () => {
+    const response = await fastify.inject({
+      method: "POST",
+      url: "/mcp",
+      headers: { accept: "application/json, text/event-stream" },
+      payload: {
+        jsonrpc: "2.0",
+        id: 0,
+        method: "initialize",
+        params: {
+          protocolVersion: "2025-06-18",
+          capabilities: {},
+          clientInfo: { name: "authority-policy-test", version: "1.0.0" }
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().result.instructions).toBe(MCP_OPERATIONAL_INSTRUCTIONS);
+  });
+
   it("publishes OAuth protected-resource metadata", async () => {
     const response = await fastify.inject({
       method: "GET",
@@ -102,6 +126,13 @@ describe("MCP HTTP adapter", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.result.tools).toHaveLength(23);
+    expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
+      tools.every((tool) =>
+        tool.description?.startsWith(
+          "PostgreSQL authority; no Google Sheets fallback. Fail closed"
+        )
+      )
+    );
     expect(body.result.tools[0]._meta.securitySchemes).toEqual([
       { type: "oauth2", scopes: [MCP_READ_SCOPE] }
     ]);

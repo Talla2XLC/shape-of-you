@@ -73,6 +73,10 @@ import { IdentitySubjectMappingRepository } from "./storage/identity-subject-map
 import { McpAuthorizer } from "./mcp/oauth.js";
 import { registerMcpRoutes } from "./mcp/server.js";
 import { BrowserAuth } from "./browser-auth/browser-auth.js";
+import {
+  ChatAssistantConversationBindingRepository,
+  type ChatAssistantConversationBindingStore
+} from "./storage/chat-assistant-conversation-binding-repository.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -102,6 +106,8 @@ export interface BuildAppOptions {
   readonly dayClosureStore?: DayClosureStore;
   /** Optional DailyContextNote persistence used for isolated application tests. */
   readonly dailyContextNoteStore?: DailyContextNoteStore;
+  /** Optional assistant binding persistence used for isolated tests. */
+  readonly chatAssistantConversationBindingStore?: ChatAssistantConversationBindingStore;
   /** Optional provider-neutral parser that enables the background worker. */
   readonly intakeParser?: IntakeParser;
   /** Optional Person resolution boundary, primarily for isolated tests. */
@@ -174,6 +180,13 @@ export async function buildApp(
   const dailyContextNoteStore =
     options.dailyContextNoteStore ??
     (database ? new DailyContextNoteRepository(database) : undefined);
+  const chatAssistantConversationBindingStore =
+    options.chatAssistantConversationBindingStore ??
+    (database
+      ? new ChatAssistantConversationBindingRepository(database)
+      : {
+          resolveActive: async () => ({ status: "missing" as const })
+        });
 
   if (
     !store ||
@@ -246,6 +259,7 @@ export async function buildApp(
       intakeStore,
       dayClosureStore,
       dailyContextNoteStore,
+      chatAssistantConversationBindingStore,
       intakeParser: options.intakeParser ?? null,
       personContext,
       readinessProbe,

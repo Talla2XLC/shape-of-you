@@ -92,9 +92,9 @@
 5. [x] Получить independent Quality acceptance.
 6. [x] Выполнить approved minimal commit/push и дождаться успешного staging
    deployment.
-7. [ ] Повторить Workout record/correct/read-back, обновить writer evidence и
+7. [x] Повторить Workout record/correct/read-back, обновить writer evidence и
    пройти `verify-writer`.
-8. [ ] Провести terminal Quality/Architecture Review; cutover оставить за
+8. [x] Провести terminal Quality/Architecture Review; cutover оставить за
    отдельным operator decision.
 
 ## Compatibility rework в текущей задаче Codex

@@ -12,11 +12,48 @@ tags: []
 
 The project knowledge baseline was created on 2026-07-28. Core DEV-023 backend
 verticals, asynchronous Intake foundations, an explicit shared day lifecycle,
-and the first DEV-024 controlled Weight importer are implemented. Production
-parsing, real-data execution, recurring dual-run, and cutover remain separate
-stages.
+and the controlled DEV-024 migration/import path are implemented. The staging
+ChatGPT project now uses one MCP-only writer and staging PostgreSQL is
+operational authority. Google Sheets is an unchanged, non-authoritative frozen
+legacy workbook. Production parsing, workbook ACL/archive disposition, rollback
+operations, and production deployment remain separate stages.
 
 ## Content
+
+### 2026-08-27 — Fitness Tracker exclusive writer switched to MCP
+
+- Deployed the complete 23-tool Shape of You MCP
+  writer/reference/lifecycle surface and verified all 14 required synthetic
+  writer/lifecycle canaries with read-back through the single staging
+  connector.
+- Repeated the exact-workbook all-domain read-only reconciliation with
+  `created=0`, `unchanged=434`, `conflict=0`, `invalid=48`, and `failures=0`;
+  historical invalid rows remain terminal evidence rather than manual work.
+- Passed independent bounded recaptures with `verify-frozen=true` and accepted
+  the deployed matrix with `verify-writer=true`.
+- Paused the legacy Sheets writer, repeated the switch-time reconciliation,
+  changed the ChatGPT project to one MCP-only writer, and prohibited Sheets
+  fallback without changing workbook permissions or authority.
+- Read back one bounded synthetic `DailyContextNote` through MCP and proved the
+  workbook still frozen. Rollback scope now contains exactly that Person-local
+  post-checkpoint fact; replay or an exception requires separate approval.
+- Removed all private evidence and closed the temporary SSH tunnel. At that
+  switch checkpoint Google Sheets was still authoritative; transfer remained
+  separately gated until TASK-0067.
+- Completed a bounded post-switch observation: the project remained MCP-only,
+  all 23 tools and the existing synthetic note read-back remained available,
+  two exact nine-range captures matched, and the workbook's last Drive
+  modification preceded the switch checkpoint.
+- Independent Quality and Architecture Review accepted `READY` for a separate
+  authority-transfer decision. No fact, Sheets write, permission change, or
+  authority transfer was performed by the observation.
+- With explicit operator approval, TASK-0067 transferred staging operational
+  authority to PostgreSQL through the existing Shape of You Staging MCP
+  contract. The same project retained one writer and prohibited Sheets
+  writes/fallback.
+- The existing synthetic cutover note became authoritative PostgreSQL state.
+  Post-transfer read-back and Drive pins passed without a new fact or workbook
+  mutation. Workbook ACL/archive disposition and rollback remain separate.
 
 ### 2026-08-27 — Stable ChatGPT connector OAuth callback contract
 

@@ -38,3 +38,8 @@ export const DAY_CLOSURE_STORE = Symbol("DAY_CLOSURE_STORE");
 
 /** Injection token for append-only Person-local context note persistence. */
 export const DAILY_CONTEXT_NOTE_STORE = Symbol("DAILY_CONTEXT_NOTE_STORE");
+
+/** Injection token for Person-owned external assistant conversation bindings. */
+export const CHAT_ASSISTANT_CONVERSATION_BINDING_STORE = Symbol(
+  "CHAT_ASSISTANT_CONVERSATION_BINDING_STORE"
+);

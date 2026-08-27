@@ -230,6 +230,10 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   await page.route("**/api/v1/day-projections?*", (route) => { dayReads += 1; return route.abort(); });
   await page.goto("/progress");
   await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Open Shape of You Coach" })).toHaveAttribute(
+    "href",
+    "/api/v1/chat-assistant/launch"
+  );
   const browserTimezone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   await expect(page.getByRole("link", { name: /August 18, 2026/ })).toHaveAttribute(
     "href",
@@ -259,6 +263,48 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   await page.setViewportSize({ width: 390, height: 844 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await expect(page.getByRole("button", { name: "Year" })).toBeVisible();
+});
+
+test("progress launcher follows the resolved top-level navigation", async ({ page }) => {
+  await mockApiSession(page, 204);
+  const resolvedTarget = "/existing-shape-of-you-conversation";
+  let launcherReads = 0;
+  await page.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
+    from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
+    metrics: [], days: []
+  }));
+  await page.route("**/api/v1/chat-assistant/launch", (route) => {
+    launcherReads += 1;
+    return route.fulfill({
+      status: 303,
+      headers: { location: resolvedTarget, "cache-control": "no-store" }
+    });
+  });
+  await page.goto("/progress");
+  await page.getByRole("link", { name: "Open Shape of You Coach" }).click();
+
+  await expect(page).toHaveURL(new RegExp(`${resolvedTarget}$`, "u"));
+  expect(launcherReads).toBe(1);
+});
+
+test("progress launcher renders a bounded fail-closed coach state", async ({ page }) => {
+  await mockApiSession(page, 204);
+  await page.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
+    from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
+    metrics: [], days: []
+  }));
+  await page.route("**/api/v1/chat-assistant/launch", (route) => route.fulfill({
+    status: 303,
+    headers: { location: "/progress?coach=misconfigured", "cache-control": "no-store" }
+  }));
+
+  await page.goto("/progress");
+  await page.getByRole("link", { name: "Open Shape of You Coach" }).click();
+
+  await expect(page).toHaveURL(/\/progress\?coach=misconfigured$/u);
+  await expect(page.getByRole("alert")).toContainText("No fallback was used");
+  await expect(page.getByRole("link", { name: "Open Shape of You Coach" })).toHaveCount(1);
+  await expect(page.locator('a[href*="chatgpt.com"]')).toHaveCount(0);
 });
 
 test("progress connects sparse observations without inventing missing-day markers", async ({ page }) => {

@@ -211,7 +211,8 @@ shared lifecycle boundary.
 
 The initial protocol scopes are `openid` and `offline_access`. Resource scopes
 are `person:read`, `weight:write`, `body-measurement:write`, `meal:write`,
-`workout:write`, and `recovery:write`.
+`workout:write`, `recovery:write`, `daily-context-note:write`, and
+`day-closure:write`.
 
 ### ChatGPT and MCP
 
@@ -221,29 +222,32 @@ the API deployable. Its internal endpoint is `/mcp`; staging exposes it as
 protected-resource metadata, advertises per-tool security schemes, and returns
 standards-complete OAuth challenges.
 
-Ten allowlisted tools list or record weight measurements, body measurement
-sessions, meals, workout sessions, and raw Recovery observations. Reads require
-`person:read`; each write uses its domain-specific scope. Workout sets support
-typed reps, duration, and distance; Recovery supports typed sleep stages and
-raw Garmin-derived metrics. Tools delegate to existing application contracts,
-so validation, idempotency, provenance, correction policy, and audit remain
+The deployed allowlist contains 23 tools covering reads, typed writes,
+append-only corrections, active Training references, daily projection and
+closure lifecycle for Weight, Body, Meal, WorkoutSession,
+RecoveryObservation, and DailyContextNote. Reads require `person:read`; each
+write uses its domain-specific scope. Workout sets support typed reps,
+duration, and distance; Recovery supports typed sleep stages and raw
+Garmin-derived metrics. Tools delegate to existing application contracts, so
+validation, idempotency, provenance, correction policy, and audit remain
 domain responsibilities rather than MCP-specific logic.
 
-The source code now covers Recovery/Garmin observations, but this expanded
-allowlist and predefined-client scope have not yet been deployed, consented, or
-smoke-tested through the external ChatGPT connector. DEV-024 still requires a
-source-backed full writer-operation matrix and deployed verification before
-cutover. ChatGPT continues writing only to Google Sheets until that gate and
-the final reconciliation pass. Direct client dual-write is not an allowed
-transition; the project switches to MCP-only writes at an explicit cutover
-checkpoint.
+The single staging connector has completed the deployed 23-tool discovery and
+all 14 required synthetic writer/lifecycle canaries with read-back. TASK-0065
+then paused the legacy writer, froze and reconciled the switch-time checkpoint,
+and changed the `Fitness Tracker` ChatGPT project to one MCP-only writer. Its
+instructions prohibit Google Sheets writes and fail closed instead of falling
+back to the legacy writer. TASK-0067 then transferred staging operational
+authority to PostgreSQL through that same connector. Google Sheets is now a
+non-authoritative frozen legacy reference; direct client dual-write remains
+forbidden.
 
-The migration reader uses a separate API-owned Google service identity, not
-the ChatGPT writer identity. Runtime configuration supplies its credential;
-the adapter requests only `spreadsheets.readonly`, is hard-bound to the exact
-`Fitness Tracker` spreadsheet ID, and exposes no Sheets mutation operation.
-Workbook sharing must grant that identity read-only access only to the approved
-workbook. Live credential use remains an explicit operational gate.
+Controlled legacy/rollback reads run from the operator workstation. The
+Codex Google connector reads metadata and bounded ranges from the exact
+`Fitness Tracker` spreadsheet through the operator's connected account, then
+passes private mode-`0600` typed snapshots to the local importer. Connector
+credentials and tokens are never extracted or delivered to staging; the API
+has no Google credential or Sheets mutation operation.
 
 Every tool call verifies the ES256 signature through Identity JWKS and checks
 the exact issuer, audience/resource, expiry, and required scope. The API then

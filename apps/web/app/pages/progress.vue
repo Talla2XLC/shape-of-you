@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { beginBrowserSignIn } from "~/lib/browser-auth";
+import { chatAssistantLaunchRoute, chatAssistantStopMessage } from "~/lib/chat-assistant";
 import { createLatestRequestGate, dayRoute, fetchProgressOverview, trailingRange, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
 
 definePageMeta({ middleware: "api-session" });
@@ -12,6 +13,7 @@ const selectedMetric = ref<ProgressMetricKey>("weight_kg");
 const overview = ref<ProgressOverview | null>(null);
 const busy = ref(false);
 const error = ref<string | null>(null);
+const coachStopMessage = computed(() => chatAssistantStopMessage(route.query.coach));
 const requestGate = createLatestRequestGate();
 let requestController: AbortController | null = null;
 const selectedSeries = computed(() => overview.value?.metrics.find((metric) => metric.key === selectedMetric.value) ?? null);
@@ -60,6 +62,10 @@ onMounted(load);
         </p><h1>Your shape, over time.</h1><p class="lede">
           Only recorded facts appear. Missing days stay visible through spacing.
         </p>
+        <a
+          class="button coach-launcher"
+          :href="chatAssistantLaunchRoute"
+        >Open Shape of You Coach</a>
       </div>
       <div
         class="period-picker"
@@ -76,6 +82,13 @@ onMounted(load);
         </button>
       </div>
     </header>
+    <p
+      v-if="coachStopMessage"
+      role="alert"
+      class="notice-error coach-stop"
+    >
+      {{ coachStopMessage }}
+    </p>
     <p
       v-if="busy"
       role="status"

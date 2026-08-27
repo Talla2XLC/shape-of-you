@@ -127,6 +127,15 @@ type OAuthProtectedTool = Tool & {
 const closedDayWriteInstruction =
   "First call get_daily_projection for the target local date. If it is closed or stale, obtain explicit confirmation and call reopen_day before writing, then close_day again.";
 
+/** Durable operational policy published by the API-owned MCP server. */
+export const MCP_OPERATIONAL_INSTRUCTIONS =
+  "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
+  "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
+  "Use only the authorized Person-scoped typed tools. Confirm writes, read back successful writes, and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent.";
+
+const toolAuthorityInstruction =
+  "PostgreSQL authority; no Google Sheets fallback. Fail closed if this tool or its authorization is unavailable.";
+
 const createWorkoutSessionToolInputSchema = connectorWorkoutSchema(
   "CreateWorkoutSessionToolInput",
   CreateWorkoutSessionSchema
@@ -182,7 +191,10 @@ function createServer(
 ): Server {
   const server = new Server(
     { name: "shape-of-you-api", version: "1.0.0" },
-    { capabilities: { tools: {} } }
+    {
+      capabilities: { tools: {} },
+      instructions: MCP_OPERATIONAL_INSTRUCTIONS
+    }
   );
   const tools = createTools(options.services);
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -578,7 +590,7 @@ function defineTool(
   return {
     tool: {
       name,
-      description,
+      description: `${toolAuthorityInstruction} ${description}`,
       inputSchema: inputSchema as Tool["inputSchema"],
       ...(outputSchema
         ? { outputSchema: outputSchema as Tool["outputSchema"] }

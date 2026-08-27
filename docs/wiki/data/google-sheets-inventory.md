@@ -13,9 +13,10 @@ tags:
 
 ## Summary
 
-Observed inventory of `Fitness Tracker` for DEV-023. The workbook remains
-operational authority until verified dual-run/cutover. This page describes the
-source, not a target database schema.
+Observed inventory of the former `Fitness Tracker` authority for DEV-023. After
+TASK-0067 the workbook is a non-authoritative frozen legacy source for approved
+historical or rollback reads. This page describes that source, not a target
+database schema.
 
 ## Content
 
@@ -33,7 +34,7 @@ Sheets mix facts, policies, workflow state, and projections. Sheet boundaries
 are discovery evidence, not aggregate/table/module/service boundaries.
 `Daily_Log` is primarily a legacy projection.
 
-Authoritative workbook pointer:
+Legacy workbook pointer:
 
 - title: `Fitness Tracker`;
 - spreadsheet ID: `1yUPcU-2RGIOPyfz8HzR6NSHuztwps81PHbzlGzcK2Ik`;
@@ -42,8 +43,9 @@ Authoritative workbook pointer:
 - timezone: `Europe/Moscow`.
 
 Connector reads use exact URL/ID. Failed Drive title search does not prove
-missing access. Read metadata before ranges. Workbook is read-only unless the
-operator authorizes a specific write.
+missing access. Read metadata before ranges. Governance prohibits workbook
+writes. Any rollback write and any ACL/archive change require their own
+explicit operator approval.
 
 ## Evidence
 
@@ -55,8 +57,7 @@ operator authorizes a specific write.
   rows.
 - Nutrition migration uses one bounded snapshot of `Brands`, `Ingredients`,
   `Foods`, `Food_Ingredients`, and `Meals`. Existing populated Meal rows have a
-  durable UUIDv4 `Meal_ID`; the active external writer must provide a new
-  immutable `Meal_ID` for every future Meal row.
+  durable UUIDv4 `Meal_ID`; historical rows preserve that source identity.
 - The bounded `Training!A:K` projection contains 39 rows in nine stable
   `Session_ID` groups and 14 `Exercise_ID` values. Eight groups are valid
   performed sessions; one malformed meal row has no `Exercise_ID`. Two run rows
@@ -69,8 +70,8 @@ operator authorizes a specific write.
 
 ## Decisions
 
-- Treat workbook as one operational system with domain modules/adapters, not a
-  service or target table per sheet.
+- Treat the legacy workbook as one historical source with domain
+  modules/adapters, not a service or target table per sheet.
 - Domain runs capture only required sheets: Body alone for Body; Weight and
   Daily_Log for Weight; and the five linked Nutrition sheets plus the bounded
   Daily_Log closure projection for Nutrition. Training captures only
