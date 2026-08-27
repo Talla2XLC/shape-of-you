@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { beginBrowserSignIn } from "~/lib/browser-auth";
 import { chatAssistantLaunchRoute, chatAssistantStopMessage } from "~/lib/chat-assistant";
+import { dayApi, DayApiError, type DailyProjection } from "~/lib/day-api";
 import { createLatestRequestGate, dayRoute, fetchProgressOverview, trailingRange, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
 
 definePageMeta({ middleware: "api-session" });
@@ -13,11 +14,15 @@ const selectedMetric = ref<ProgressMetricKey>("weight_kg");
 const overview = ref<ProgressOverview | null>(null);
 const busy = ref(false);
 const error = ref<string | null>(null);
+const todayProjection = ref<DailyProjection | null>(null);
+const todayBusy = ref(false);
+const todayError = ref<string | null>(null);
 const coachStopMessage = computed(() => chatAssistantStopMessage(route.query.coach));
 const requestGate = createLatestRequestGate();
 let requestController: AbortController | null = null;
 const selectedSeries = computed(() => overview.value?.metrics.find((metric) => metric.key === selectedMetric.value) ?? null);
 const latestPoint = computed(() => selectedSeries.value?.points.at(-1) ?? null);
+const todayRecovery = computed(() => todayProjection.value?.snapshot.recovery.assessments.at(0) ?? null);
 const chartPoints = computed(() => {
   const series = selectedSeries.value;
   if (!series?.points.length || !overview.value) return [];
@@ -49,8 +54,30 @@ async function load(): Promise<void> {
     if (requestGate.isCurrent(token)) error.value = "Progress is temporarily unavailable.";
   } finally { if (requestGate.isCurrent(token)) busy.value = false; }
 }
+async function loadToday(): Promise<void> {
+  todayBusy.value = true;
+  todayError.value = null;
+  try {
+    const result = await dayApi.projection(today, timezone);
+    if (result.state === "superseded") {
+      todayProjection.value = null;
+      todayError.value = "Today's authoritative state is unavailable.";
+      return;
+    }
+    todayProjection.value = result;
+  } catch (caught) {
+    todayProjection.value = null;
+    if (caught instanceof DayApiError && caught.status === 401) {
+      beginBrowserSignIn(route.fullPath);
+      return;
+    }
+    todayError.value = "Today's authoritative state is temporarily unavailable.";
+  } finally {
+    todayBusy.value = false;
+  }
+}
 function choosePeriod(value: 7 | 30 | 365): void { period.value = value; void load(); }
-onMounted(load);
+onMounted(() => { void load(); void loadToday(); });
 </script>
 
 <template>
@@ -89,6 +116,61 @@ onMounted(load);
     >
       {{ coachStopMessage }}
     </p>
+    <section
+      class="today-card"
+      aria-labelledby="today-state-heading"
+    >
+      <div class="today-card-heading">
+        <div>
+          <p class="eyebrow">
+            Today
+          </p>
+          <h2 id="today-state-heading">
+            Your day, right now.
+          </h2>
+        </div>
+        <time :datetime="today">{{ new Date(`${today}T12:00:00Z`).toLocaleDateString(undefined, { dateStyle: 'long' }) }}</time>
+      </div>
+      <p
+        v-if="todayBusy"
+        role="status"
+      >
+        Loading today's authoritative state…
+      </p>
+      <p
+        v-else-if="todayError"
+        role="alert"
+        class="notice-error today-error"
+      >
+        {{ todayError }} No fallback was used.
+      </p>
+      <template v-else-if="todayProjection">
+        <p class="today-lifecycle">
+          <strong>{{ todayProjection.state === "open" ? "Open and live" : todayProjection.state === "stale" ? "Closed snapshot needs review" : `Closed · version ${todayProjection.closure?.version ?? "unknown"}` }}</strong>
+          <span v-if="todayProjection.isStale">New or corrected evidence must be reviewed before editing.</span>
+        </p>
+        <dl class="today-facts">
+          <div>
+            <dt>Nutrition recorded</dt>
+            <dd>{{ todayProjection.snapshot.nutrition.totals.mealCount }} meals · {{ todayProjection.snapshot.nutrition.totals.caloriesKcal }} kcal</dd>
+          </div>
+          <div>
+            <dt>Training completed</dt>
+            <dd>{{ todayProjection.snapshot.training.workoutSessions.length }} {{ todayProjection.snapshot.training.workoutSessions.length === 1 ? "workout" : "workouts" }}</dd>
+          </div>
+          <div>
+            <dt>Recovery evidence</dt>
+            <dd>{{ todayRecovery ? `Readiness ${todayRecovery.readinessScore} · ${todayRecovery.riskLevel} risk` : "No assessment" }}</dd>
+          </div>
+        </dl>
+        <NuxtLink
+          class="today-record-link"
+          :to="dayRoute(todayProjection.localDate, todayProjection.timezone)"
+        >
+          Review today's record
+        </NuxtLink>
+      </template>
+    </section>
     <p
       v-if="busy"
       role="status"

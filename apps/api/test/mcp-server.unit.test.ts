@@ -95,6 +95,27 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json().result.instructions).toBe(MCP_OPERATIONAL_INSTRUCTIONS);
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "call get_daily_projection first"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Planned, Proposed now, and Actually completed separately"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "an accepted recommendation is not executed"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "one clear Next step"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "state missing evidence instead of inventing a plan"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Do not write until the user reports a completed action"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "separately confirmed reopen, edit, and reclose"
+    );
   });
 
   it("publishes OAuth protected-resource metadata", async () => {
@@ -169,7 +190,10 @@ describe("MCP HTTP adapter", () => {
     });
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
-    )?.description).toContain("call reopen_day before writing");
+    )?.description).toContain("call reopen_day");
+    expect(body.result.tools.find((tool: { name: string }) =>
+      tool.name === "record_daily_context_note"
+    )?.description).toContain("separately confirm close_day");
     const workoutSetSchema = body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_workout_session"
     )?.inputSchema.properties.exercises.items.properties.sets.items;

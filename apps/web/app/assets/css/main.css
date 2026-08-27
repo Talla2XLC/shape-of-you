@@ -539,6 +539,82 @@ button.button {
   max-width: 760px;
 }
 
+.today-card {
+  display: grid;
+  gap: 22px;
+  border: 1px solid var(--line);
+  border-radius: 26px;
+  padding: clamp(22px, 4vw, 32px);
+  background: var(--surface-strong);
+}
+
+.today-card-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.today-card-heading .eyebrow,
+.today-card-heading h2,
+.today-lifecycle,
+.today-facts,
+.today-error {
+  margin: 0;
+}
+
+.today-card-heading h2 {
+  margin-top: 6px;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+}
+
+.today-card-heading time,
+.today-lifecycle span,
+.today-facts dt {
+  color: var(--muted);
+}
+
+.today-lifecycle {
+  display: grid;
+  gap: 5px;
+}
+
+.today-lifecycle strong {
+  color: var(--lime);
+}
+
+.today-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.today-facts div {
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 16px;
+  background: rgba(247, 244, 237, 0.04);
+}
+
+.today-facts dt {
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.today-facts dd {
+  margin: 0;
+  font-weight: 700;
+}
+
+.today-record-link {
+  width: fit-content;
+  color: var(--lime);
+  font-weight: 700;
+}
+
 .period-picker {
   flex: none;
   display: flex;
@@ -739,6 +815,10 @@ button.button {
     flex-direction: column;
   }
 
+  .today-facts {
+    grid-template-columns: 1fr;
+  }
+
   .page-day .main-content {
     padding-top: 32px;
     padding-bottom: 48px;
@@ -787,6 +867,11 @@ button.button {
   .latest-reading {
     justify-items: start;
     text-align: left;
+  }
+
+  .today-card-heading {
+    flex-direction: column;
+    gap: 10px;
   }
 
   .single-entry-state {

@@ -125,13 +125,17 @@ type OAuthProtectedTool = Tool & {
 };
 
 const closedDayWriteInstruction =
-  "First call get_daily_projection for the target local date. If it is closed or stale, obtain explicit confirmation and call reopen_day before writing, then close_day again.";
+  "First call get_daily_projection for the target local date. If it is closed or stale, stop and obtain explicit confirmation for reopen, edit, and reclose: call reopen_day, read back the open projection, perform a separately confirmed write and typed read-back, then separately confirm close_day and read back projection and history.";
 
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
-  "Use only the authorized Person-scoped typed tools. Confirm writes, read back successful writes, and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent.";
+  "Use only the authorized Person-scoped typed tools. Confirm writes, read back successful writes, and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
+  "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
+  "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
+  "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
+  "Do not write until the user reports a completed action, the atomic typed command is unambiguous, and the user confirms it. For a closed or stale day, require separately confirmed reopen, edit, and reclose steps with typed read-back after each mutation.";
 
 const toolAuthorityInstruction =
   "PostgreSQL authority; no Google Sheets fallback. Fail closed if this tool or its authorization is unavailable.";

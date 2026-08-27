@@ -99,7 +99,7 @@ onMounted(load);
         >
           Close day
         </button>
-        <template v-else>
+        <template v-else-if="projection.state === 'closed' || projection.state === 'stale'">
           <label class="field">Reason to reopen <input
             v-model="reason"
             maxlength="512"
@@ -111,6 +111,13 @@ onMounted(load);
             Reopen day
           </button>
         </template>
+        <p
+          v-else
+          role="alert"
+          class="notice-error"
+        >
+          This day version is not active. No changes are available.
+        </p>
         <section
           v-if="history?.items.length"
           class="signal-card day-card"

@@ -45,6 +45,15 @@ reads; it does not loop over dates or call exact-day HTTP endpoints. Each owner
 keeps Person isolation, correction, supersession, and ordering rules. The read
 model has no table, cache, migration, database, credential, or deployable.
 
+The authenticated `/progress` screen also presents a compact factual today
+card. That card is intentionally not part of the range overview: it performs
+one separate read through the existing daily projection contract for the
+browser's exact local date and IANA timezone. It shows the projection lifecycle,
+recorded Meal totals, WorkoutSession count, available Recovery evidence, and a
+link to the canonical dated record. It does not calculate coaching advice or
+fall back to progress history when the projection is unavailable, stale, or
+superseded.
+
 ## Evidence
 
 - Shared runtime schemas and OpenAPI route in `packages/contracts` and
@@ -55,6 +64,7 @@ model has no table, cache, migration, database, credential, or deployable.
 ## Decisions
 
 - [Progress overview authenticated default](../../adr/20260818-make-progress-overview-the-authenticated-default.md)
+- [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 - [Independent facts instead of a broad DayRecord](../../adr/20260728-prefer-independent-facts-over-broad-day-record.md)
 
 ## Open questions

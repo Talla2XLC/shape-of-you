@@ -252,6 +252,23 @@ chat switching. Disconnecting the source stops protected reads; reconnect and
 OAuth consent resume them in the same conversation rather than creating a new
 one.
 
+Daily Coach is an interaction protocol inside that same conversation, not a
+new chat runtime or persisted daily-plan boundary. MCP initialization guidance
+requires an exact Person-local date and IANA timezone, calls
+`get_daily_projection` first, and uses only the additional typed reads needed
+for the answer. The response separates typed planned artifacts, current Coach
+proposals, and owning-domain facts that are actually completed, then presents
+one clear next step plus bounded nutrition, training, and recovery proposals.
+Missing tools, MCP/OAuth authority, or typed read-back stop the workflow without
+another data source or chat-history fallback.
+
+A user-reported completed action is written only through an existing typed
+Person-scoped tool after native confirmation and is followed by an owning-domain
+typed read-back. A closed or stale day requires separately confirmed
+`reopen_day`, domain write, and `close_day` steps with read-back after each
+mutation. Accepted advice is not execution, and neither reopen nor reclose is
+automatic.
+
 The single staging connector has completed the deployed 23-tool discovery and
 all 14 required synthetic writer/lifecycle canaries with read-back. TASK-0065
 then paused the legacy writer, froze and reconciled the switch-time checkpoint,
@@ -324,6 +341,7 @@ lifecycle.
 - [Refresh tokens by registered client policy](../../adr/20260825-issue-refresh-tokens-by-registered-client-policy.md)
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 - [Training and raw Recovery import](../../adr/20260825-import-training-and-raw-recovery-observations.md)
+- [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 
 ## Open questions
 

@@ -34,6 +34,14 @@ TrainingProgramVersion/assignment, and optional sessions. It may hold the
 assignment, propose target weight, or propose a repetition range, changing at
 most one parameter. It creates no program/session change.
 
+The Daily Coach presentation preserves the same boundary across existing MCP
+tools. `Planned` contains only typed plan artifacts, currently the active
+TrainingProgramVersion and prescriptions. `Proposed now` contains bounded,
+evidence-linked conversation advice and is not a persisted fact. `Actually
+completed` contains only current owning-domain facts verified through typed
+reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
+chat message never proves execution.
+
 ## Evidence
 
 - Coaching schema/contracts/integration tests.
@@ -41,6 +49,7 @@ most one parameter. It creates no program/session change.
 ## Decisions
 
 - [Coaching ADR](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md).
+- [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md).
 
 ## Open questions
 

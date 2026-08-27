@@ -5,9 +5,26 @@ const csrfCookieName = "__Host-shape_of_you_api_csrf";
 export interface DailyProjection {
   readonly localDate: string;
   readonly timezone: string;
-  readonly state: "open" | "closed" | "stale";
+  readonly state: "open" | "closed" | "stale" | "superseded";
   readonly closure: { readonly version: number; readonly status: string } | null;
-  readonly snapshot: { readonly physical: { readonly weightMeasurements: readonly { readonly weightKg: number }[] }; readonly nutrition: { readonly totals: { readonly caloriesKcal: number; readonly mealCount: number } } };
+  readonly snapshot: {
+    readonly physical: {
+      readonly weightMeasurements: readonly { readonly weightKg: number }[];
+    };
+    readonly nutrition: {
+      readonly totals: { readonly caloriesKcal: number; readonly mealCount: number };
+    };
+    readonly training: {
+      readonly workoutSessions: readonly { readonly id: string }[];
+    };
+    readonly recovery: {
+      readonly assessments: readonly {
+        readonly id: string;
+        readonly readinessScore: number;
+        readonly riskLevel: string;
+      }[];
+    };
+  };
   readonly isStale: boolean;
 }
 
