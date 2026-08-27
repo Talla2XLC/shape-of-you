@@ -2,7 +2,7 @@
 
 ## Статус и разрешение
 
-- Статус: compatibility rework in progress; operator approved schema fixes,
+- Статус: completed; operator approved schema fixes,
   commit/push, staging deployment и повторный canary без cutover.
 - Оператор явно разрешил `synthetic canary writes в staging, без cutover`
   2026-08-27.
@@ -31,19 +31,14 @@
 1. [x] Восстановить workspace, проверить board/docs/Git и deployed read surface.
 2. [x] Зафиксировать отдельную operational task и границы разрешения.
 3. [x] Проверить discovery и exact scope для всех 23 tools.
-4. [ ] Выполнить record/correct/read-back для Weight, Body, Meal,
+4. [x] Выполнить record/correct/read-back для Weight, Body, Meal,
    WorkoutSession, RecoveryObservation и DailyContextNote.
-   Weight, Body, Meal, RecoveryObservation и DailyContextNote пройдены;
-   WorkoutSession заблокирован опубликованной connector schema.
 5. [x] Выполнить close/read-back/reopen/read-back для synthetic day.
-6. [ ] Сформировать private writer evidence и пройти `verify-writer`.
-   Evidence сформирован, но verifier корректно отклонил
-   `record_workout_session`.
+6. [x] Сформировать private writer evidence и пройти `verify-writer`.
 7. [x] Выполнить Person-isolated zero-write `rehearse-rollback` либо зафиксировать
    технически проверяемый blocker без расширения разрешения.
 8. [x] Провести independent Quality и Architecture Review, обновить task
    timeline и перенести план в `completed`.
-   Quality отклонил acceptance; активный план не переносится в `completed`.
 
 ## Критерии приёмки
 
@@ -56,7 +51,8 @@
 6. Rollback rehearsal ничего не пишет и перечисляет только post-checkpoint
    staging facts текущего Person либо возвращает документированный blocker.
 7. Sheets writer, workbook, permissions, authority и production не изменены.
-8. Git source diff ограничен этим operational plan; commit/push не выполняются.
+8. Git source diff ограничен approved MCP compatibility rework и operational
+   plan; commit/push выполняются только после explicit operator approval.
 
 ## Architecture Review checklist
 
@@ -65,7 +61,7 @@
 - Canary evidence не становится новой domain authority или постоянным state.
 - Cutover остаётся отдельным операторским решением после Quality acceptance.
 
-## Результат текущего запуска
+## Результат первоначального запуска
 
 - Deployed discovery содержит все 23 ожидаемых tools; OAuth read/write scopes
   доступны через единственный подключённый connector.
@@ -118,7 +114,25 @@
    вызова domain service.
 4. [x] Покрыть record, correction и fail-closed invalid-set сценарии unit-тестом.
 5. [x] Пройти lint, typecheck, build, root unit и docs validation.
-6. [ ] Получить независимый Quality acceptance, commit/push и успешный staging
+6. [x] Получить независимый Quality acceptance, commit/push и успешный staging
    deployment.
-7. [ ] В этой же задаче повторить Workout record/correct/read-back и завершить
+7. [x] В этой же задаче повторить Workout record/correct/read-back и завершить
    writer evidence без cutover.
+
+## Итог compatibility rework
+
+- Commit `82c12e6` (`fix(mcp): support cached workout tool schemas`) отправлен в
+  `main`; GitHub Actions run `33062276745` полностью прошёл quality, image
+  publishing и staging deployment.
+- Единственный установленный `Shape of You Staging` connector обновил каталог
+  действий без создания новой версии и без повторного OAuth подключения.
+- `record_workout_session` и `correct_workout_session` выполнены idempotently
+  для synthetic date `2000-01-01`; read-back возвращает corrected current fact
+  со ссылкой `supersedesId` на исходный synthetic fact.
+- Все 14 обязательных writer/lifecycle canaries имеют `success=true` и
+  `readBack=true`; `verify-writer` вернул `verified=true`.
+- Append-only rollback scope содержит исходные 10 synthetic facts и 2 Workout
+  facts; повторный rollback plan остаётся zero-write и не требуется для
+  подтверждения уже проверенной Person isolation.
+- Cutover, Sheets writer, Google Sheets, permissions, authority, production и
+  secrets не изменялись.
