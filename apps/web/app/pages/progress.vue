@@ -17,9 +17,11 @@ const error = ref<string | null>(null);
 const todayProjection = ref<DailyProjection | null>(null);
 const todayBusy = ref(false);
 const todayError = ref<string | null>(null);
+const todayAutomaticRetryDelayMs = 1_000;
 const coachStopMessage = computed(() => chatAssistantStopMessage(route.query.coach));
 const requestGate = createLatestRequestGate();
 let requestController: AbortController | null = null;
+let todayRequestId = 0;
 const selectedSeries = computed(() => overview.value?.metrics.find((metric) => metric.key === selectedMetric.value) ?? null);
 const latestPoint = computed(() => selectedSeries.value?.points.at(-1) ?? null);
 const todayRecovery = computed(() => todayProjection.value?.snapshot.recovery.assessments.at(0) ?? null);
@@ -54,27 +56,48 @@ async function load(): Promise<void> {
     if (requestGate.isCurrent(token)) error.value = "Progress is temporarily unavailable.";
   } finally { if (requestGate.isCurrent(token)) busy.value = false; }
 }
-async function loadToday(): Promise<void> {
+function isTransientTodayFailure(caught: unknown): boolean {
+  return caught instanceof TypeError || (
+    caught instanceof DayApiError && [502, 503, 504].includes(caught.status)
+  );
+}
+async function loadToday(allowAutomaticRetry = true): Promise<void> {
+  const requestId = ++todayRequestId;
   todayBusy.value = true;
   todayError.value = null;
+  todayProjection.value = null;
   try {
-    const result = await dayApi.projection(today, timezone);
-    if (result.state === "superseded") {
-      todayProjection.value = null;
-      todayError.value = "Today's authoritative state is unavailable.";
-      return;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const result = await dayApi.projection(today, timezone);
+        if (requestId !== todayRequestId) return;
+        if (result.state === "superseded") {
+          todayError.value = "Today's authoritative state is unavailable.";
+          return;
+        }
+        todayProjection.value = result;
+        return;
+      } catch (caught) {
+        if (requestId !== todayRequestId) return;
+        if (caught instanceof DayApiError && caught.status === 401) {
+          beginBrowserSignIn(route.fullPath);
+          return;
+        }
+        if (attempt === 0 && allowAutomaticRetry && isTransientTodayFailure(caught)) {
+          await new Promise((resolve) => window.setTimeout(resolve, todayAutomaticRetryDelayMs));
+          if (requestId !== todayRequestId) return;
+          continue;
+        }
+        todayError.value = "Today's authoritative state is temporarily unavailable.";
+        return;
+      }
     }
-    todayProjection.value = result;
-  } catch (caught) {
-    todayProjection.value = null;
-    if (caught instanceof DayApiError && caught.status === 401) {
-      beginBrowserSignIn(route.fullPath);
-      return;
-    }
-    todayError.value = "Today's authoritative state is temporarily unavailable.";
   } finally {
-    todayBusy.value = false;
+    if (requestId === todayRequestId) todayBusy.value = false;
   }
+}
+function retryToday(): void {
+  void loadToday(false);
 }
 function choosePeriod(value: 7 | 30 | 365): void { period.value = value; void load(); }
 onMounted(() => { void load(); void loadToday(); });
@@ -137,13 +160,24 @@ onMounted(() => { void load(); void loadToday(); });
       >
         Loading today's authoritative state…
       </p>
-      <p
+      <div
         v-else-if="todayError"
-        role="alert"
-        class="notice-error today-error"
+        class="today-error-state"
       >
-        {{ todayError }} No fallback was used.
-      </p>
+        <p
+          role="alert"
+          class="notice-error today-error"
+        >
+          {{ todayError }} No fallback was used.
+        </p>
+        <button
+          type="button"
+          class="button button-secondary today-retry"
+          @click="retryToday"
+        >
+          Try again
+        </button>
+      </div>
       <template v-else-if="todayProjection">
         <p class="today-lifecycle">
           <strong>{{ todayProjection.state === "open" ? "Open and live" : todayProjection.state === "stale" ? "Closed snapshot needs review" : `Closed · version ${todayProjection.closure?.version ?? "unknown"}` }}</strong>

@@ -574,6 +574,17 @@ button.button {
   color: var(--muted);
 }
 
+.today-error-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.today-retry {
+  min-height: 42px;
+}
+
 .today-lifecycle {
   display: grid;
   gap: 5px;

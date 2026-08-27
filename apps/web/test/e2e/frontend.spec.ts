@@ -425,8 +425,67 @@ test("progress today card fails closed when the projection is unavailable", asyn
   await expect(todayCard.getByRole("alert")).toContainText(
     "Today's authoritative state is temporarily unavailable. No fallback was used."
   );
+  await expect(todayCard.getByRole("button", { name: "Try again" })).toBeVisible();
   await expect(todayCard).not.toContainText("Open and live");
   await expect(todayCard).not.toContainText("Nutrition recorded");
+});
+
+test("progress today card automatically recovers from one transient projection failure", async ({ page }) => {
+  await mockApiSession(page, 204);
+  await page.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
+    from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
+    metrics: [], days: []
+  }));
+  let projectionReads = 0;
+  await page.route("**/api/v1/day-projections?*", (route) => {
+    projectionReads += 1;
+    if (projectionReads === 1) return fulfillJson(route, {}, 503);
+    return fulfillJson(route, {
+      localDate: "2026-08-18", timezone: "UTC", state: "open", closure: null, isStale: false,
+      snapshot: {
+        physical: { weightMeasurements: [] },
+        nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } },
+        training: { workoutSessions: [] },
+        recovery: { assessments: [] }
+      }
+    });
+  });
+
+  await page.goto("/progress");
+
+  const todayCard = page.getByRole("region", { name: "Your day, right now." });
+  await expect(todayCard).toContainText("Open and live");
+  expect(projectionReads).toBe(2);
+  await expect(todayCard.getByRole("button", { name: "Try again" })).toHaveCount(0);
+});
+
+test("progress today card recovers through the explicit retry action", async ({ page }) => {
+  await mockApiSession(page, 204);
+  await page.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
+    from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
+    metrics: [], days: []
+  }));
+  let projectionReads = 0;
+  await page.route("**/api/v1/day-projections?*", (route) => {
+    projectionReads += 1;
+    if (projectionReads < 3) return fulfillJson(route, {}, 503);
+    return fulfillJson(route, {
+      localDate: "2026-08-18", timezone: "UTC", state: "open", closure: null, isStale: false,
+      snapshot: {
+        physical: { weightMeasurements: [] },
+        nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } },
+        training: { workoutSessions: [] },
+        recovery: { assessments: [] }
+      }
+    });
+  });
+
+  await page.goto("/progress");
+
+  const todayCard = page.getByRole("region", { name: "Your day, right now." });
+  await todayCard.getByRole("button", { name: "Try again" }).click();
+  await expect(todayCard).toContainText("Open and live");
+  expect(projectionReads).toBe(3);
 });
 
 test("legacy day query safely replaces itself with the canonical dated route", async ({ page }) => {
