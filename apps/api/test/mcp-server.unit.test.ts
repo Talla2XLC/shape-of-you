@@ -139,6 +139,26 @@ describe("MCP HTTP adapter", () => {
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
     )?.description).toContain("call reopen_day before writing");
+    const workoutSetVariants = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "record_workout_session"
+    )?.inputSchema.properties.exercises.items.properties.sets.items.anyOf;
+    expect(workoutSetVariants).toHaveLength(3);
+    for (const variant of workoutSetVariants) {
+      expect(variant).toMatchObject({
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          weightKg: expect.any(Object),
+          reps: expect.any(Object),
+          rir: expect.any(Object)
+        }
+      });
+      expect(variant.required).toEqual(expect.arrayContaining([
+        "weightKg",
+        "reps",
+        "rir"
+      ]));
+    }
   });
 
   it("returns the OAuth challenge from a protected tool call", async () => {

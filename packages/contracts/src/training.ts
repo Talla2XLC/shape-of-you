@@ -372,36 +372,63 @@ export type ActivateTrainingProgramVersion = FromSchema<
   typeof ActivateTrainingProgramVersionSchema
 >;
 
-const performedSetInputSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["weightKg", "reps", "rir"],
-  properties: {
-    weightKg: nullableWeightSchema,
-    reps: {
-      anyOf: [
-        { type: "integer", minimum: 1, maximum: 10000 },
-        { type: "null" }
-      ]
-    },
-    durationSeconds: {
-      anyOf: [
-        { type: "integer", minimum: 1, maximum: 604800 },
-        { type: "null" }
-      ]
-    },
-    distanceMeters: {
-      anyOf: [
-        { type: "number", exclusiveMinimum: 0, maximum: 1000000, multipleOf: 0.001 },
-        { type: "null" }
-      ]
-    },
-    rir: nullableRirSchema
+const performedSetInputProperties = {
+  weightKg: nullableWeightSchema,
+  reps: {
+    anyOf: [
+      { type: "integer", minimum: 1, maximum: 10000 },
+      { type: "null" }
+    ]
   },
+  durationSeconds: {
+    anyOf: [
+      { type: "integer", minimum: 1, maximum: 604800 },
+      { type: "null" }
+    ]
+  },
+  distanceMeters: {
+    anyOf: [
+      { type: "number", exclusiveMinimum: 0, maximum: 1000000, multipleOf: 0.001 },
+      { type: "null" }
+    ]
+  },
+  rir: nullableRirSchema
+} as const;
+
+const performedSetInputSchema = {
   anyOf: [
-    { properties: { reps: { type: "integer" } } },
-    { properties: { durationSeconds: { type: "integer" } } },
-    { properties: { distanceMeters: { type: "number" } } }
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["weightKg", "reps", "rir"],
+      properties: {
+        ...performedSetInputProperties,
+        reps: { type: "integer", minimum: 1, maximum: 10000 }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["weightKg", "reps", "durationSeconds", "rir"],
+      properties: {
+        ...performedSetInputProperties,
+        durationSeconds: { type: "integer", minimum: 1, maximum: 604800 }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["weightKg", "reps", "distanceMeters", "rir"],
+      properties: {
+        ...performedSetInputProperties,
+        distanceMeters: {
+          type: "number",
+          exclusiveMinimum: 0,
+          maximum: 1000000,
+          multipleOf: 0.001
+        }
+      }
+    }
   ]
 } as const;
 
@@ -512,7 +539,7 @@ export const PerformedSetSchema = {
   properties: {
     id: uuidSchema,
     position: { type: "integer", minimum: 1 },
-    ...performedSetInputSchema.properties
+    ...performedSetInputProperties
   }
 } as const;
 

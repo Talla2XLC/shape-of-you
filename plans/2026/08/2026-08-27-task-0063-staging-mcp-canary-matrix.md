@@ -1,0 +1,103 @@
+# TASK-0063 — Synthetic MCP canary matrix на staging
+
+## Статус и разрешение
+
+- Статус: rework in progress; operator approved schema fix, commit/push,
+  staging deployment и повторный canary без cutover.
+- Оператор явно разрешил `synthetic canary writes в staging, без cutover`
+  2026-08-27.
+- Разрешены только deployed MCP discovery, synthetic append-only canary writes,
+  corrections, read-back, DayClosure close/reopen и zero-write rollback rehearsal.
+- Не разрешены cutover, отключение Sheets writer, Google Sheets writes,
+  изменение permissions, authority transfer, production, secret disclosure,
+  commit или push.
+
+## Цель
+
+Проверить через единственный подключённый Shape of You Staging connector всю
+утверждённую MCP matrix из 23 tools и получить воспроизводимое writer evidence
+для будущего cutover, не выполняя сам cutover.
+
+## Изоляция canary
+
+- Все synthetic facts относятся к локальной дате `2000-01-01` и явно помечены
+  namespace `TASK-0063` в idempotency/dedupe/provenance полях.
+- Записи append-only и остаются только в staging; исходные факты не изменяются.
+- Read-back evidence содержит только статусы, количества и технические IDs без
+  пользовательских значений.
+- Private evidence хранится вне репозитория с mode `0600`.
+
+## План выполнения
+
+1. [x] Восстановить workspace, проверить board/docs/Git и deployed read surface.
+2. [x] Зафиксировать отдельную operational task и границы разрешения.
+3. [x] Проверить discovery и exact scope для всех 23 tools.
+4. [ ] Выполнить record/correct/read-back для Weight, Body, Meal,
+   WorkoutSession, RecoveryObservation и DailyContextNote.
+   Weight, Body, Meal, RecoveryObservation и DailyContextNote пройдены;
+   WorkoutSession заблокирован опубликованной connector schema.
+5. [x] Выполнить close/read-back/reopen/read-back для synthetic day.
+6. [ ] Сформировать private writer evidence и пройти `verify-writer`.
+   Evidence сформирован, но verifier корректно отклонил
+   `record_workout_session`.
+7. [x] Выполнить Person-isolated zero-write `rehearse-rollback` либо зафиксировать
+   технически проверяемый blocker без расширения разрешения.
+8. [x] Провести independent Quality и Architecture Review, обновить task
+   timeline и перенести план в `completed`.
+   Quality отклонил acceptance; активный план не переносится в `completed`.
+
+## Критерии приёмки
+
+1. Discovery содержит ровно утверждённые 23 tool/scope пары.
+2. Каждый обязательный writer canary имеет `success=true` и `readBack=true`.
+3. Corrections создают новые append-only facts и становятся текущими при чтении.
+4. Synthetic day явно закрывается и затем явно открывается; lifecycle виден в
+   history/projection.
+5. `verify-writer` принимает private evidence.
+6. Rollback rehearsal ничего не пишет и перечисляет только post-checkpoint
+   staging facts текущего Person либо возвращает документированный blocker.
+7. Sheets writer, workbook, permissions, authority и production не изменены.
+8. Git source diff ограничен этим operational plan; commit/push не выполняются.
+
+## Architecture Review checklist
+
+- Новые сервисы, базы, сущности и runtime boundaries не создаются.
+- Approved append-only correction и Person ownership invariants сохраняются.
+- Canary evidence не становится новой domain authority или постоянным state.
+- Cutover остаётся отдельным операторским решением после Quality acceptance.
+
+## Результат текущего запуска
+
+- Deployed discovery содержит все 23 ожидаемых tools; OAuth read/write scopes
+  доступны через единственный подключённый connector.
+- Успешны 10 record/correct canaries для пяти типов фактов и 2 lifecycle
+  canaries (`close_day`, `reopen_day`), каждый с read-back.
+- Synthetic date после проверки снова находится в состоянии `open`.
+- Zero-write rollback rehearsal перечислил 10 post-checkpoint facts: по два для
+  Weight, Body, Meal, RecoveryObservation и DailyContextNote; Workout — 0.
+- `verify-writer` fail-closed с ошибкой
+  `Writer canary is incomplete: record_workout_session`.
+- Root cause: опубликованная connector schema для performed Workout set требует
+  `weightKg` и `rir`, когда они отсутствуют, но запрещает их как
+  `additionalProperties`, когда они переданы. Корректный Workout request через
+  connector сейчас невыразим.
+- Для продолжения нужен отдельно разрешённый source fix, tests, commit/push и
+  staging deployment; cutover после такого исправления всё равно остаётся
+  отдельным решением.
+
+## Rework после первого Quality rejection
+
+1. [x] Получить отдельное operator approval на source fix, tests, commit/push,
+   staging deployment и повторный Workout canary без cutover.
+2. [x] Переписать performed-set schema как три полных connector-safe варианта,
+   сохранив исходную server-side validation semantics.
+3. [x] Добавить regression pin на фактически публикуемый `tools/list`
+   `record_workout_session.inputSchema`.
+4. [x] Пройти root lint, typecheck, build, unit и focused MCP/preflight tests.
+5. [x] Получить independent Quality acceptance.
+6. [ ] Выполнить approved minimal commit/push и дождаться успешного staging
+   deployment.
+7. [ ] Повторить Workout record/correct/read-back, обновить writer evidence и
+   пройти `verify-writer`.
+8. [ ] Провести terminal Quality/Architecture Review; cutover оставить за
+   отдельным operator decision.
