@@ -232,12 +232,32 @@ Garmin-derived metrics. Tools delegate to existing application contracts, so
 validation, idempotency, provenance, correction policy, and audit remain
 domain responsibilities rather than MCP-specific logic.
 
+The MCP initialization response and every tool description publish the same
+PostgreSQL-authority, no-Google-Sheets-fallback, and fail-closed guidance.
+This metadata guides ChatGPT behavior; hard enforcement remains Person-scoped
+OAuth authorization plus PostgreSQL-backed API/domain services with no Sheets
+writer or fallback dependency.
+
+Authenticated Web exposes one `Open Shape of You Coach` action. The API
+resolves the current Person's single active `chatgpt_work` conversation
+binding and constructs an allowlisted `https://chatgpt.com/c/{opaque-id}`
+redirect server-side. Missing, disabled, ambiguous, or malformed bindings fail
+closed on the Web origin without leaking the conversation identifier. The
+binding stores no OAuth token and does not own fitness data.
+
+The launcher targets one existing persistent ChatGPT Work conversation where
+the Shape of You Staging source survives reload and repeated opening. The
+daily path requires no plugin search, `Try in chat`, mention, project-chat, or
+chat switching. Disconnecting the source stops protected reads; reconnect and
+OAuth consent resume them in the same conversation rather than creating a new
+one.
+
 The single staging connector has completed the deployed 23-tool discovery and
 all 14 required synthetic writer/lifecycle canaries with read-back. TASK-0065
 then paused the legacy writer, froze and reconciled the switch-time checkpoint,
-and changed the `Fitness Tracker` ChatGPT project to one MCP-only writer. Its
-instructions prohibit Google Sheets writes and fail closed instead of falling
-back to the legacy writer. TASK-0067 then transferred staging operational
+and changed ChatGPT operations to one MCP-only writer. MCP initialization and
+tool metadata prohibit Google Sheets fallback and require fail-closed behavior.
+TASK-0067 then transferred staging operational
 authority to PostgreSQL through that same connector. Google Sheets is now a
 non-authoritative frozen legacy reference; direct client dual-write remains
 forbidden.

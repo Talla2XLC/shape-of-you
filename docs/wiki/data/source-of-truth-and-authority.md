@@ -23,10 +23,12 @@ Staging PostgreSQL is operational authority after the explicit TASK-0067
 transfer. Authority is exercised only through API-owned typed domain contracts
 and the single Shape of You Staging MCP writer.
 
-The separate ChatGPT project `Fitness Tracker` now has one active operational
-writer: the Shape of You Staging MCP connector. Its project instructions route
-typed facts to PostgreSQL through MCP, prohibit Google Sheets writes, and do not
-permit fallback. The frozen workbook remains the accepted pre-switch history
+The persistent ChatGPT Work conversation now has one active operational
+writer: the Shape of You Staging MCP connector. MCP initialization and all 23
+tool descriptions route typed facts to PostgreSQL, prohibit Google Sheets
+fallback, and require fail-closed behavior. Person-scoped OAuth and
+PostgreSQL-backed domain services enforce the data boundary. The frozen
+workbook remains the accepted pre-switch history
 checkpoint but is no longer current authority. Post-checkpoint
 PostgreSQL facts, including the synthetic cutover note, are authoritative and
 form a dynamically growing rollback scope.
@@ -189,7 +191,9 @@ automatic reverse sync exists.
   appears before authority approval.
 - TASK-0067 completed that separate decision. Staging PostgreSQL is now
   operational authority; Google Sheets is non-authoritative legacy evidence.
-  Rollback and workbook disposition remain separately gated.
+  The workbook remains an indefinite read-only legacy reference; archive,
+  delete, and ACL disposition are not roadmap items. Rollback remains
+  separately gated.
 
 ## Open questions
 

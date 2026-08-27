@@ -125,7 +125,7 @@ authorization и scope validation остаются без изменений. La
 ## Related material
 
 - [Superseded launcher decision](20260827-use-person-bound-chatgpt-work-launcher.md)
-- [TASK-0068 plan](../../plans/2026/08/2026-08-27-task-0068-production-ready-chatgpt-mcp-ux.md)
+- [TASK-0068 plan](../../plans/2026/08/completed/2026-08-27-task-0068-production-ready-chatgpt-mcp-ux.md)
 - [Durable OAuth connections](20260810-require-offline-access-for-durable-oauth-connections.md)
 - [Stable ChatGPT callback](20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 - [OpenAI Workspace Agents](https://help.openai.com/en/articles/20001143)

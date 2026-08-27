@@ -36,11 +36,14 @@ controlled data migration to web and mobile clients.
    23-tool surface, existing synthetic read-back, and frozen workbook evidence
    remained stable. TASK-0067 completed the explicit staging PostgreSQL
    authority transfer without creating a second writer. Google Sheets is now a
-   non-authoritative frozen legacy workbook. Remaining work is a separately
-   approved workbook archive/read-only ACL disposition and any future rollback.
+   non-authoritative frozen legacy workbook retained as an indefinite
+   read-only reference. Archive, delete, and ACL disposition are not roadmap
+   items. Any future rollback remains separately approved.
 4. **DEV-025 — Web MVP — in progress:** static passkey-first Nuxt client,
    API-owned browser session, bounded progress overview, and dated daily
-   drill-down are implemented; broader MVP workflow remains future scope.
+   drill-down are implemented. An authenticated one-action Coach launcher now
+   opens the Person-bound persistent ChatGPT Work conversation with the
+   Shape of You Staging MCP source; broader MVP workflow remains future scope.
 5. **DEV-026 — Mobile client:** mobile access through the same contract.
 
 Mandatory gates: product/context review before service design; ADR before

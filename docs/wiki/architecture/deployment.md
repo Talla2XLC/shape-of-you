@@ -19,6 +19,12 @@ edges; a dedicated `shape-deploy` identity invokes a constrained root-owned
 bootstrap. Shape of You nginx, Certbot, and a root-owned systemd timer own the
 project certificate lifecycle.
 
+Approved operator access to the current staging VM uses the operator-managed
+OpenSSH host alias `talking-to-ai`. CI continues to resolve its deployment
+target exclusively from the protected `STAGING_VM_HOST` Environment variable;
+the local alias is not deployment authority and carries no repository-managed
+credentials.
+
 The accepted first browser release adds a static Nuxt artifact to the existing
 Shape of You edge image. It does not add a frontend container or release
 coordinate.

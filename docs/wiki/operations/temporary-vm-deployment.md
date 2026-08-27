@@ -16,6 +16,12 @@ tags:
 Runbook for shared-VM Shape of You staging. VM, PostgreSQL, GitHub, migration,
 and deployment mutations always require the corresponding explicit approval.
 
+The current staging VM is available to approved operators through the
+operator-managed OpenSSH host alias `talking-to-ai`. This alias is a
+workstation access convention; the protected GitHub Environment variable
+`STAGING_VM_HOST` remains deployment authority for CI. Do not copy SSH
+configuration or credential material into the repository.
+
 ## Content
 
 ### Preconditions

@@ -13,12 +13,33 @@ tags: []
 The project knowledge baseline was created on 2026-07-28. Core DEV-023 backend
 verticals, asynchronous Intake foundations, an explicit shared day lifecycle,
 and the controlled DEV-024 migration/import path are implemented. The staging
-ChatGPT project now uses one MCP-only writer and staging PostgreSQL is
+ChatGPT operations now use one MCP-only writer and staging PostgreSQL is
 operational authority. Google Sheets is an unchanged, non-authoritative frozen
-legacy workbook. Production parsing, workbook ACL/archive disposition, rollback
-operations, and production deployment remain separate stages.
+legacy workbook retained as an indefinite read-only reference. Production
+parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
+
+### 2026-08-27 — Persistent one-action ChatGPT MCP coaching UX
+
+- Added a Person-owned `ChatAssistantConversationBinding`, authenticated
+  fail-closed API launcher, and one Web CTA that opens the same existing
+  ChatGPT Work conversation without exposing its identifier in the client.
+- Published PostgreSQL-authority, no-Google-Sheets-fallback, and fail-closed
+  guidance through MCP initialization plus all 23 typed tool descriptions;
+  Person-scoped OAuth and PostgreSQL-backed domain services remain the hard
+  enforcement boundary.
+- Deployed the change to staging, refreshed the existing connector in place,
+  provisioned the real Person binding, and verified launcher, reload/reopen,
+  discovery, read, native-confirmed write, and matching read-back in one
+  conversation.
+- Verified controlled OAuth disconnect and reinstall: the source disappeared
+  fail closed, then consent/reconnect resumed a protected typed read in the
+  same conversation. No new chat, OAuth client, production action, Google
+  Sheets write, ACL change, archive, or delete was introduced.
+- Kept the frozen Fitness Tracker workbook as an indefinite
+  non-authoritative read-only legacy reference; archive and ACL disposition
+  were removed from product scope and roadmap.
 
 ### 2026-08-27 — Fitness Tracker exclusive writer switched to MCP
 
@@ -53,7 +74,8 @@ operations, and production deployment remain separate stages.
   writes/fallback.
 - The existing synthetic cutover note became authoritative PostgreSQL state.
   Post-transfer read-back and Drive pins passed without a new fact or workbook
-  mutation. Workbook ACL/archive disposition and rollback remain separate.
+  mutation. The workbook remains an indefinite read-only legacy reference;
+  rollback remains separate.
 
 ### 2026-08-27 — Stable ChatGPT connector OAuth callback contract
 

@@ -33,6 +33,9 @@ product slice, later scope, and explicit non-goals.
   backend read model.
 - Provide passkey-only browser enrollment, sign-in, and account security
   management without moving Identity policy into the client.
+- Open one Person-bound persistent ChatGPT Work coaching conversation from the
+  authenticated Web product without plugin search, repeated app selection,
+  mentions, or chat switching.
 
 ### Proposed MVP
 
@@ -44,8 +47,8 @@ exercise progression rules.
 ### Later
 
 - DEV-026 mobile client.
-- Legacy Google Sheets archive/read-only ACL disposition and separately
-  approved rollback operations.
+- Separately approved rollback operations; the legacy Google Sheets workbook
+  remains an indefinite non-authoritative read-only reference.
 - Additional wearable sources beyond confirmed Garmin data.
 - Broader automation/analytics after sufficient evidence.
 - Audience and commercial expansion after product discovery.
@@ -74,8 +77,8 @@ exercise progression rules.
 
 ## Open questions
 
-- Exact UX and acceptance metrics, legacy workbook disposition,
-  authentication/privacy/retention/export, and target availability/latency.
+- Exact broader UX and acceptance metrics, authentication/privacy/retention/
+  export, and target availability/latency.
 
 ## Related material
 

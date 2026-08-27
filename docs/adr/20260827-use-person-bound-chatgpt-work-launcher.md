@@ -176,7 +176,7 @@ scope validation сохраняются. TASK-0068 проверяет refresh и
 
 ## Related material
 
-- [TASK-0068 plan](../../plans/2026/08/2026-08-27-task-0068-production-ready-chatgpt-mcp-ux.md)
+- [TASK-0068 plan](../../plans/2026/08/completed/2026-08-27-task-0068-production-ready-chatgpt-mcp-ux.md)
 - [Durable OAuth connections](20260810-require-offline-access-for-durable-oauth-connections.md)
 - [Stable ChatGPT callback](20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
