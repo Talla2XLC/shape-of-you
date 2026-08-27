@@ -5,7 +5,7 @@ title: "Исправить provenance Nutrition-каталога и заверш
 status: accepted
 date: 2026-08-26
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260827-correct-inverted-fitness-tracker-catalog-sheet-identities"
 tags:
   - "nutrition"
   - "data-migration"

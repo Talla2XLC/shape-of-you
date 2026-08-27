@@ -746,7 +746,7 @@ describe("API migration chain", () => {
     }
   }, 120_000);
 
-  it("repairs exact Brand sheet provenance without replacing facts or old evidence", async () => {
+  it("corrects exact Brand and Food sheet provenance without replacing facts or old evidence", async () => {
     const databaseName = "shape_of_you_brand_provenance_upgrade";
     const adminPool = new Pool({ connectionString: container.getConnectionUri() });
     await adminPool.query(`create database ${databaseName}`);
@@ -772,18 +772,18 @@ describe("API migration chain", () => {
       );
       const database = createDatabase(databaseConfig(url));
       await migrate(database.db, { migrationsFolder: prefixFolder });
-      const source = await database.pool.query<{ id: string }>(
+      const brandSource = await database.pool.query<{ id: string }>(
         `insert into nutrition_catalog_sources (key, name)
-         values ($1, 'Wrong Brand source') returning id`,
+         values ($1, 'Authoritative Brand source') returning id`,
         [`fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000008:brand`]
       );
-      const record = await database.pool.query<{ id: string }>(
+      const brandRecord = await database.pool.query<{ id: string }>(
         `insert into nutrition_catalog_source_records
            (source_id, external_record_id, fetched_at, checksum, parser_version,
             status)
          values ($1, 'brand-source-id', now(), 'brand-checksum',
            'fitness-tracker-nutrition-v1', 'matched') returning id`,
-        [source.rows[0]!.id]
+        [brandSource.rows[0]!.id]
       );
       const brand = await database.pool.query<{ id: string }>(
         `insert into nutrition_brands (visibility, owner_person_id)
@@ -794,52 +794,212 @@ describe("API migration chain", () => {
         `insert into nutrition_brand_versions
            (brand_id, version, name, source_record_id)
          values ($1, 1, 'Brand', $2) returning id`,
-        [brand.rows[0]!.id, record.rows[0]!.id]
+        [brand.rows[0]!.id, brandRecord.rows[0]!.id]
       );
       await database.pool.query(
         "update nutrition_brands set current_version_id = $1 where id = $2",
         [version.rows[0]!.id, brand.rows[0]!.id]
+      );
+      const foodSource = await database.pool.query<{ id: string }>(
+        `insert into nutrition_catalog_sources (key, name)
+         values ($1, 'Inverted Food source') returning id`,
+        [`fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000008:food`]
+      );
+      const foodRecord = await database.pool.query<{ id: string }>(
+        `insert into nutrition_catalog_source_records
+           (source_id, external_record_id, fetched_at, checksum, parser_version,
+            status)
+         values ($1, 'food-source-id', now(), 'food-checksum',
+           'fitness-tracker-nutrition-v1', 'matched') returning id`,
+        [foodSource.rows[0]!.id]
+      );
+      const food = await database.pool.query<{ id: string }>(
+        `insert into nutrition_foods (visibility, owner_person_id)
+         values ('private', $1) returning id`,
+        [syntheticPersonId]
+      );
+      const foodVersion = await database.pool.query<{ id: string }>(
+        `insert into nutrition_food_versions
+           (food_id, version, name, reference_quantity, reference_unit,
+            calories_kcal, protein_g, fat_g, carbs_g, source_record_id)
+         values ($1, 1, 'Food', 1, 'serving', 100, 10, 5, 12, $2)
+         returning id`,
+        [food.rows[0]!.id, foodRecord.rows[0]!.id]
+      );
+      await database.pool.query(
+        "update nutrition_foods set current_version_id = $1 where id = $2",
+        [foodVersion.rows[0]!.id, food.rows[0]!.id]
       );
       await database.pool.end();
 
       await runMigrations(url);
       await runMigrations(url);
       const verification = new Pool({ connectionString: url });
-      const result = await verification.query<{
-        brands: string;
+      const brandResult = await verification.query<{
+        brand_id: string;
+        brand_version_id: string;
         correct_records: string;
-        old_records: string;
+        inverted_records: string;
         source_key: string;
         checksum: string;
       }>(
         `select
-           (select count(*)::text from nutrition_brands
-             where owner_person_id = $1) brands,
+           brand.id brand_id, version.id brand_version_id,
            (select count(*)::text from nutrition_catalog_source_records r
              join nutrition_catalog_sources s on s.id = r.source_id
-            where s.key = $2 and r.external_record_id = 'brand-source-id') correct_records,
+            where s.key = $1 and r.external_record_id = 'brand-source-id') correct_records,
            (select count(*)::text from nutrition_catalog_source_records r
              join nutrition_catalog_sources s on s.id = r.source_id
-            where s.key = $3 and r.external_record_id = 'brand-source-id') old_records,
+            where s.key = $2 and r.external_record_id = 'brand-source-id') inverted_records,
            s.key source_key, r.checksum
-         from nutrition_brand_versions v
-         join nutrition_catalog_source_records r on r.id = v.source_record_id
+         from nutrition_brands brand
+         join nutrition_brand_versions version on version.id = brand.current_version_id
+         join nutrition_catalog_source_records r on r.id = version.source_record_id
          join nutrition_catalog_sources s on s.id = r.source_id
-        where v.id = $4`,
+        where brand.id = $3`,
         [
-          syntheticPersonId,
-          `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000006:brand`,
           `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000008:brand`,
-          version.rows[0]!.id
+          `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000006:brand`,
+          brand.rows[0]!.id
         ]
       );
-      expect(result.rows[0]).toEqual({
-        brands: "1",
+      expect(brandResult.rows[0]).toEqual({
+        brand_id: brand.rows[0]!.id,
+        brand_version_id: version.rows[0]!.id,
         correct_records: "1",
-        old_records: "1",
-        source_key: `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000006:brand`,
+        inverted_records: "1",
+        source_key: `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000008:brand`,
         checksum: "brand-checksum"
       });
+      const foodResult = await verification.query<{
+        food_id: string;
+        food_version_id: string;
+        correct_records: string;
+        inverted_records: string;
+        source_key: string;
+        checksum: string;
+      }>(
+        `select
+           food.id food_id, version.id food_version_id,
+           (select count(*)::text from nutrition_catalog_source_records r
+             join nutrition_catalog_sources s on s.id = r.source_id
+            where s.key = $1 and r.external_record_id = 'food-source-id') correct_records,
+           (select count(*)::text from nutrition_catalog_source_records r
+             join nutrition_catalog_sources s on s.id = r.source_id
+            where s.key = $2 and r.external_record_id = 'food-source-id') inverted_records,
+           s.key source_key, r.checksum
+         from nutrition_foods food
+         join nutrition_food_versions version on version.id = food.current_version_id
+         join nutrition_catalog_source_records r on r.id = version.source_record_id
+         join nutrition_catalog_sources s on s.id = r.source_id
+        where food.id = $3`,
+        [
+          `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000006:food`,
+          `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000008:food`,
+          food.rows[0]!.id
+        ]
+      );
+      expect(foodResult.rows[0]).toEqual({
+        food_id: food.rows[0]!.id,
+        food_version_id: foodVersion.rows[0]!.id,
+        correct_records: "1",
+        inverted_records: "1",
+        source_key: `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000006:food`,
+        checksum: "food-checksum"
+      });
+      await verification.end();
+    } finally {
+      await rm(prefixFolder, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  it("fails closed when exact corrected provenance conflicts with current evidence", async () => {
+    const databaseName = "shape_of_you_catalog_provenance_conflict";
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    await adminPool.query(`create database ${databaseName}`);
+    await adminPool.end();
+    const url = databaseUrl(databaseName);
+    const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-catalog-prefix-"));
+    await mkdir(path.join(prefixFolder, "meta"));
+    try {
+      const correctionIndex = journal.entries.findIndex(
+        (entry) => entry.tag === "20260827074000_correct_fitness_tracker_catalog_sheet_ids"
+      );
+      expect(correctionIndex).toBeGreaterThan(0);
+      const prefixEntries = journal.entries.slice(0, correctionIndex);
+      for (const entry of prefixEntries) {
+        await cp(
+          new URL(`${entry.tag}.sql`, migrationsFolder),
+          path.join(prefixFolder, `${entry.tag}.sql`)
+        );
+      }
+      await writeFile(
+        path.join(prefixFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: prefixEntries })
+      );
+      const database = createDatabase(databaseConfig(url));
+      await migrate(database.db, { migrationsFolder: prefixFolder });
+      const wrongSource = await database.pool.query<{ id: string }>(
+        `insert into nutrition_catalog_sources (key, name)
+         values ($1, 'Inverted Food source') returning id`,
+        [`fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000008:food`]
+      );
+      const correctSource = await database.pool.query<{ id: string }>(
+        `insert into nutrition_catalog_sources (key, name)
+         values ($1, 'Authoritative Food source') returning id`,
+        [`fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000006:food`]
+      );
+      const wrongRecord = await database.pool.query<{ id: string }>(
+        `insert into nutrition_catalog_source_records
+           (source_id, external_record_id, fetched_at, checksum, parser_version,
+            status)
+         values ($1, 'conflicting-food', now(), 'current-checksum',
+           'fitness-tracker-nutrition-v1', 'matched') returning id`,
+        [wrongSource.rows[0]!.id]
+      );
+      await database.pool.query(
+        `insert into nutrition_catalog_source_records
+           (source_id, external_record_id, fetched_at, checksum, parser_version,
+            status)
+         values ($1, 'conflicting-food', now(), 'different-checksum',
+           'fitness-tracker-nutrition-v1', 'matched')`,
+        [correctSource.rows[0]!.id]
+      );
+      const food = await database.pool.query<{ id: string }>(
+        `insert into nutrition_foods (visibility, owner_person_id)
+         values ('private', $1) returning id`,
+        [syntheticPersonId]
+      );
+      const version = await database.pool.query<{ id: string }>(
+        `insert into nutrition_food_versions
+           (food_id, version, name, reference_quantity, reference_unit,
+            calories_kcal, protein_g, fat_g, carbs_g, source_record_id)
+         values ($1, 1, 'Conflicting Food', 1, 'serving', 100, 10, 5, 12, $2)
+         returning id`,
+        [food.rows[0]!.id, wrongRecord.rows[0]!.id]
+      );
+      await database.pool.query(
+        "update nutrition_foods set current_version_id = $1 where id = $2",
+        [version.rows[0]!.id, food.rows[0]!.id]
+      );
+      await database.pool.end();
+
+      await expect(runMigrations(url)).rejects.toThrow(
+        "Conflicting exact Food provenance already exists"
+      );
+      const verification = new Pool({ connectionString: url });
+      const result = await verification.query<{ source_key: string }>(
+        `select source.key source_key
+           from nutrition_foods food
+           join nutrition_food_versions version on version.id = food.current_version_id
+           join nutrition_catalog_source_records record on record.id = version.source_record_id
+           join nutrition_catalog_sources source on source.id = record.source_id
+          where food.id = $1`,
+        [food.rows[0]!.id]
+      );
+      expect(result.rows[0]?.source_key).toBe(
+        `fitness_tracker:${FITNESS_TRACKER_SPREADSHEET_ID}:2000000008:food`
+      );
       await verification.end();
     } finally {
       await rm(prefixFolder, { force: true, recursive: true });

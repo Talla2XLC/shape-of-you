@@ -53,9 +53,10 @@ but each domain still receives its own bounded typed snapshot and transaction.
 The aggregate report does not transfer authority. The latest staging
 reconciliation has no missing facts eligible for automatic creation and no
 conflicts. Historical incomplete Nutrition evidence remains terminal
-`invalid`, not deferred manual work. The cutover gate remains closed for the
-separate final checkpoint, deployed MCP writer-matrix verification, explicit
-switch approval, and rollback readiness.
+`invalid`, not deferred manual work. The bounded source checkpoint has been
+captured and re-verified without drift. The cutover gate remains closed for
+deployed MCP writer-matrix/canary verification, explicit switch approval,
+rollback readiness, and authority transfer.
 
 For Body, the `Body` sheet is migration authority. Stable source identity is
 the exact workbook, numeric sheet ID, and `Measurement_ID`. The importer reads
@@ -128,12 +129,15 @@ reverse sync exists.
   failures, twelve unresolved composition references, and three detected Brand
   numeric-sheet provenance mismatches. No duplicate or corrective mutation was
   performed.
-- TASK-0056 remediation evidence: three Brand versions now use the exact Brands
-  numeric-sheet source while all three prior source records remain preserved;
-  seven complete Foods were imported as source-defined servings. The repeated
-  all-domain dry-run returned `created=0`, `unchanged=428`, `conflict=0`, and
-  `invalid=46` with no failures. Sheets was not modified and no cutover
-  occurred.
+- TASK-0056 imported seven complete Foods as source-defined servings and
+  preserved terminal historical evidence, but inverted the Brands/Foods
+  numeric sheet mapping. TASK-0062 corrected current provenance forward-only:
+  Brands use `2000000008`, Foods use `2000000006`, and all prior records remain.
+  One new Weight fact and five new Recovery observations were then imported.
+  The repeated all-domain dry-run returned `created=0`, `unchanged=434`,
+  `conflict=0`, and `invalid=48` with no failures. A private checkpoint and
+  fresh exact recapture passed `verify-frozen`. Sheets was not modified and no
+  cutover occurred.
 - TASK-0057 repository evidence: the 23-tool MCP writer/reference/lifecycle
   matrix, granular OAuth policy, relational `DailyContextNote`, and phased
   cutover preflight passed unit, PostgreSQL integration, migration-prefix,
@@ -162,4 +166,5 @@ reverse sync exists.
 - [Nutrition import ADR](../../adr/20260824-import-nutrition-as-one-typed-fitness-tracker-domain.md)
 - [Training and raw Recovery import ADR](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 - [Nutrition provenance remediation ADR](../../adr/20260826-remediate-nutrition-provenance-and-terminal-catalog-evidence.md)
+- [Corrected Brands/Foods identities ADR](../../adr/20260827-correct-inverted-fitness-tracker-catalog-sheet-identities.md)
 - [Typed MCP writer and cutover preflight ADR](../../adr/20260826-complete-typed-mcp-writer-parity-and-use-executable-cutover-preflight.md)

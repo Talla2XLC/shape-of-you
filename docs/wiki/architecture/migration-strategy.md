@@ -110,11 +110,11 @@ changed a row checksum without changing the stored fact. This compatibility
 does not apply to unsupported entity kinds or day closures without accepted
 Sheets provenance. Numeric-sheet provenance drift is detected by stable source
 ID across workbook-scoped catalog sources; the importer neither creates a
-duplicate nor repairs provenance automatically. TASK-0056 corrected the three
-known Brand records through an exact idempotent data migration, repointed their
-versions to the Brands numeric sheet ID, and retained the previous source
-records as audit evidence. This is a bounded historical correction, not a
-generic self-healing mechanism.
+duplicate nor repairs provenance automatically. TASK-0062 restored the exact
+authoritative identities after a prior remediation inverted them: current
+Foods use sheet `2000000006` and current Brands use sheet `2000000008`.
+Forward-only migrations retained every prior source record as audit evidence.
+This is a bounded historical correction, not a generic self-healing mechanism.
 
 Complete Food rows treat any non-empty source `Default_portion` as one
 source-defined `serving`. The original text remains in typed relational audit;
@@ -235,16 +235,16 @@ automatically changes closed days or ambiguous facts.
   Foods numeric sheet ID instead of the Brands numeric sheet ID. The importer
   detected those identities and created no duplicate. Google Sheets remained
   read-only, temporary snapshots were removed, and no cutover occurred.
-- TASK-0056 applied the exact Brand provenance migration and imported seven
-  complete Foods as source-defined servings. The post-migration pre-apply
-  comparison returned `created=7`, `unchanged=421`, `conflict=0`, and
-  `invalid=46`. The repeated post-apply comparison returned `created=0`,
-  `unchanged=428`, `conflict=0`, and `invalid=46`, with no failures. Aggregate
-  verification found three corrected Brand versions and three preserved prior
-  source records. The invalid findings are terminal typed evidence for
-  incomplete historical source rows, not deferred manual work. Sheets remained
-  read-only, temporary snapshots and the SSH tunnel were removed, and no
-  cutover occurred.
+- TASK-0056 imported seven complete Foods as source-defined servings and
+  retained terminal typed evidence, but its provenance remediation inverted
+  the authoritative Brands/Foods numeric sheet identities. TASK-0062 added a
+  forward-only correction without rewriting the applied migration or deleting
+  prior records. Staging now has three current Brands on sheet `2000000008`
+  and seven current Foods on sheet `2000000006`. After importing one new Weight
+  fact and five new Recovery observations, the repeated all-domain dry-run
+  returned `created=0`, `unchanged=434`, `conflict=0`, and `invalid=48`, with
+  no failures. `prepare` and a fresh exact recapture passed `verify-frozen`.
+  Sheets remained read-only and no writer switch or cutover occurred.
 - Operator migration roadmap and source-of-truth rules.
 
 ## Decisions
@@ -262,8 +262,9 @@ automatically changes closed days or ambiguous facts.
   Recovery have completed controlled real-data staging apply. The latest
   all-domain verification is duplicate-safe and conflict-free; terminal
   historical invalid evidence does not require manual completion. Recurring
-  reconciliation, the final writer checkpoint, deployed MCP writer-matrix
-  verification, and authority transfer remain separately gated.
+  reconciliation and the frozen source checkpoint are complete. Deployed MCP
+  writer-matrix/canary verification, the writer switch, rollback readiness, and
+  authority transfer remain separately gated.
 
 ## Open questions
 
@@ -285,3 +286,4 @@ automatically changes closed days or ambiguous facts.
 - [Partial Nutrition and source closures ADR](../../adr/20260825-import-partial-nutrition-and-source-day-closures.md)
 - [Training and raw Recovery import ADR](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 - [Nutrition provenance remediation ADR](../../adr/20260826-remediate-nutrition-provenance-and-terminal-catalog-evidence.md)
+- [Corrected Brands/Foods identities ADR](../../adr/20260827-correct-inverted-fitness-tracker-catalog-sheet-identities.md)
