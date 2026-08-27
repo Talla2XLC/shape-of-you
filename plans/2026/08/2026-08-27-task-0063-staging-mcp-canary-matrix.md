@@ -2,15 +2,14 @@
 
 ## Статус и разрешение
 
-- Статус: rework in progress; operator approved schema fix, commit/push,
-  staging deployment и повторный canary без cutover.
+- Статус: compatibility rework in progress; operator approved schema fixes,
+  commit/push, staging deployment и повторный canary без cutover.
 - Оператор явно разрешил `synthetic canary writes в staging, без cutover`
   2026-08-27.
 - Разрешены только deployed MCP discovery, synthetic append-only canary writes,
   corrections, read-back, DayClosure close/reopen и zero-write rollback rehearsal.
 - Не разрешены cutover, отключение Sheets writer, Google Sheets writes,
-  изменение permissions, authority transfer, production, secret disclosure,
-  commit или push.
+  изменение permissions, authority transfer, production и secret disclosure.
 
 ## Цель
 
@@ -95,9 +94,31 @@
    `record_workout_session.inputSchema`.
 4. [x] Пройти root lint, typecheck, build, unit и focused MCP/preflight tests.
 5. [x] Получить independent Quality acceptance.
-6. [ ] Выполнить approved minimal commit/push и дождаться успешного staging
+6. [x] Выполнить approved minimal commit/push и дождаться успешного staging
    deployment.
 7. [ ] Повторить Workout record/correct/read-back, обновить writer evidence и
    пройти `verify-writer`.
 8. [ ] Провести terminal Quality/Architecture Review; cutover оставить за
    отдельным operator decision.
+
+## Compatibility rework в текущей задаче Codex
+
+После успешного первого deploy staging начал публиковать полную строгую схему,
+но текущая задача Codex сохранила старый tool snapshot. Платформа применяет оба
+ограничения одновременно: snapshot запрещает `weightKg` и `rir`, а актуальная
+схема требует их. Оператор отдельно потребовал завершить canary в текущей
+задаче без перехода в новый чат.
+
+1. [x] Оставить REST/domain `CreateWorkoutSessionSchema` и
+   `CorrectWorkoutSessionSchema` строгими и неизменными.
+2. [x] Публиковать для MCP плоский connector-compatible performed-set schema,
+   допускающий старую минимальную форму `{ reps }`.
+3. [x] Нормализовать отсутствующие nullable set-поля в `null` внутри MCP
+   adapter и повторно валидировать полный объект исходной строгой схемой до
+   вызова domain service.
+4. [x] Покрыть record, correction и fail-closed invalid-set сценарии unit-тестом.
+5. [x] Пройти lint, typecheck, build, root unit и docs validation.
+6. [ ] Получить независимый Quality acceptance, commit/push и успешный staging
+   deployment.
+7. [ ] В этой же задаче повторить Workout record/correct/read-back и завершить
+   writer evidence без cutover.

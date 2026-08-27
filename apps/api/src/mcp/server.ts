@@ -127,6 +127,17 @@ type OAuthProtectedTool = Tool & {
 const closedDayWriteInstruction =
   "First call get_daily_projection for the target local date. If it is closed or stale, obtain explicit confirmation and call reopen_day before writing, then close_day again.";
 
+const createWorkoutSessionToolInputSchema = connectorWorkoutSchema(
+  "CreateWorkoutSessionToolInput",
+  CreateWorkoutSessionSchema
+);
+const correctWorkoutSessionToolInputSchema = connectorWorkoutSchema(
+  "CorrectWorkoutSessionToolInputBody",
+  CorrectWorkoutSessionSchema
+);
+const validateCreateWorkoutSession = compile(CreateWorkoutSessionSchema);
+const validateCorrectWorkoutSession = compile(CorrectWorkoutSessionSchema);
+
 /** Registers protected-resource metadata and the stateless Streamable HTTP endpoint. */
 export function registerMcpRoutes(options: McpRouteOptions): void {
   const metadataUrl = protectedResourceMetadataUrl(options.resource);
@@ -317,21 +328,30 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     defineTool(
       "record_workout_session",
       `Record one idempotent workout session after user confirmation. ${closedDayWriteInstruction}`,
-      CreateWorkoutSessionSchema,
+      createWorkoutSessionToolInputSchema,
       undefined,
       true,
       MCP_WORKOUT_WRITE_SCOPE,
       async (input) =>
-        (await services.training.createWorkoutSession(input as CreateWorkoutSession)).session
+        (await services.training.createWorkoutSession(normalizeWorkoutInput(
+          input,
+          validateCreateWorkoutSession
+        ) as CreateWorkoutSession)).session
     ),
     defineTool(
       "correct_workout_session",
       `Append one idempotent correction to a current workout session after user confirmation. ${closedDayWriteInstruction}`,
-      withIdSchema("CorrectWorkoutSessionToolInput", CorrectWorkoutSessionSchema),
+      withIdSchema(
+        "CorrectWorkoutSessionToolInput",
+        correctWorkoutSessionToolInputSchema
+      ),
       undefined,
       true,
       MCP_WORKOUT_WRITE_SCOPE,
-      async (input) => (await services.training.correctWorkoutSession(input.id as string, input as unknown as CorrectWorkoutSession)).session
+      async (input) => (await services.training.correctWorkoutSession(
+        input.id as string,
+        normalizeWorkoutInput(input, validateCorrectWorkoutSession) as unknown as CorrectWorkoutSession
+      )).session
     ),
     defineTool(
       "list_recovery_observations",
@@ -429,6 +449,89 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
 
 function emptyObjectSchema(id: string): Readonly<Record<string, unknown>> {
   return { $id: id, type: "object", additionalProperties: false, properties: {} };
+}
+
+function connectorWorkoutSchema(
+  id: string,
+  schema: {
+    readonly required: readonly string[];
+    readonly properties: {
+      readonly exercises: {
+        readonly items: {
+          readonly required: readonly string[];
+          readonly properties: Readonly<Record<string, unknown>>;
+        };
+      };
+    } & Readonly<Record<string, unknown>>;
+  }
+): Readonly<Record<string, unknown>> & {
+  readonly required: readonly string[];
+  readonly properties: Readonly<Record<string, unknown>>;
+} {
+  const exerciseSchema = schema.properties.exercises.items;
+  const strictSetsSchema = exerciseSchema.properties.sets as {
+    readonly items: {
+      readonly anyOf: readonly {
+        readonly properties: Readonly<Record<string, unknown>>;
+      }[];
+    };
+  };
+  const connectorPerformedSetInputSchema = {
+    type: "object",
+    additionalProperties: false,
+    properties: strictSetsSchema.items.anyOf[0]!.properties
+  } as const;
+  return {
+    $id: id,
+    type: "object",
+    additionalProperties: false,
+    required: schema.required,
+    properties: {
+      ...schema.properties,
+      exercises: {
+        ...(schema.properties.exercises as Readonly<Record<string, unknown>>),
+        items: {
+          ...exerciseSchema,
+          properties: {
+            ...exerciseSchema.properties,
+            sets: {
+              type: "array",
+              minItems: 1,
+              maxItems: 100,
+              items: connectorPerformedSetInputSchema
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
+function normalizeWorkoutInput(
+  input: Record<string, unknown>,
+  validate: ValidateFunction
+): Record<string, unknown> {
+  const workoutInput = { ...input };
+  delete workoutInput.id;
+  const normalized = {
+    ...workoutInput,
+    exercises: (workoutInput.exercises as Array<Record<string, unknown>>).map(
+      (exercise) => ({
+        ...exercise,
+        sets: (exercise.sets as Array<Record<string, unknown>>).map((set) => ({
+          weightKg: set.weightKg ?? null,
+          reps: set.reps ?? null,
+          durationSeconds: set.durationSeconds ?? null,
+          distanceMeters: set.distanceMeters ?? null,
+          rir: set.rir ?? null
+        }))
+      })
+    )
+  };
+  if (!validate(normalized)) {
+    throw new Error("Normalized WorkoutSession input does not match the domain contract");
+  }
+  return normalized;
 }
 
 function withIdSchema(

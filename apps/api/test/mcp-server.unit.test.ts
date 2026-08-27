@@ -139,26 +139,21 @@ describe("MCP HTTP adapter", () => {
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
     )?.description).toContain("call reopen_day before writing");
-    const workoutSetVariants = body.result.tools.find((tool: { name: string }) =>
+    const workoutSetSchema = body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_workout_session"
-    )?.inputSchema.properties.exercises.items.properties.sets.items.anyOf;
-    expect(workoutSetVariants).toHaveLength(3);
-    for (const variant of workoutSetVariants) {
-      expect(variant).toMatchObject({
-        type: "object",
-        additionalProperties: false,
-        properties: {
-          weightKg: expect.any(Object),
-          reps: expect.any(Object),
-          rir: expect.any(Object)
-        }
-      });
-      expect(variant.required).toEqual(expect.arrayContaining([
-        "weightKg",
-        "reps",
-        "rir"
-      ]));
-    }
+    )?.inputSchema.properties.exercises.items.properties.sets.items;
+    expect(workoutSetSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        weightKg: expect.any(Object),
+        reps: expect.any(Object),
+        durationSeconds: expect.any(Object),
+        distanceMeters: expect.any(Object),
+        rir: expect.any(Object)
+      }
+    });
+    expect(workoutSetSchema.required).toBeUndefined();
   });
 
   it("returns the OAuth challenge from a protected tool call", async () => {
@@ -183,6 +178,215 @@ describe("MCP HTTP adapter", () => {
         ]
       }
     });
+  });
+
+  it("normalizes connector-compatible Workout sets before domain dispatch", async () => {
+    const authorizedFastify = Fastify();
+    const pair = await generateKeyPair("ES256");
+    const jwk = await exportJWK(pair.publicKey);
+    const token = await new SignJWT({
+      client_id: "chatgpt-runtime",
+      scope: MCP_WORKOUT_WRITE_SCOPE
+    })
+      .setProtectedHeader({ alg: "ES256", kid: "workout-v1" })
+      .setIssuer("https://identity.example.test")
+      .setSubject("identity-account-1")
+      .setAudience("https://api.example.test/api/mcp")
+      .setIssuedAt()
+      .setExpirationTime("10m")
+      .sign(pair.privateKey);
+    const createWorkoutSession = vi.fn().mockResolvedValue({
+      created: true,
+      session: { id: "00000000-0000-4000-8000-000000000301" }
+    });
+    const correctWorkoutSession = vi.fn().mockResolvedValue({
+      created: true,
+      session: { id: "00000000-0000-4000-8000-000000000303" }
+    });
+    registerMcpRoutes({
+      fastify: authorizedFastify,
+      issuer: "https://identity.example.test",
+      resource: "https://api.example.test/api/mcp",
+      authorizer: new McpAuthorizer(
+        "https://identity.example.test",
+        "https://unused.test/jwks",
+        "https://api.example.test/api/mcp",
+        {
+          resolveAuthorizedPersons: async () => [{
+            personId: "00000000-0000-4000-8000-000000000001",
+            roles: ["owner"]
+          }]
+        },
+        createLocalJWKSet({
+          keys: [{ ...jwk, kid: "workout-v1", use: "sig" }]
+        })
+      ),
+      personContext: new RequestPersonContext(),
+      services: {
+        ...unavailableServices,
+        training: {
+          ...unavailableServices.training,
+          createWorkoutSession,
+          correctWorkoutSession
+        }
+      }
+    });
+    const workout = {
+      occurredAt: "2000-01-01T07:00:00.000Z",
+      timezone: "Europe/Moscow",
+      programVersionId: null,
+      workoutName: "Synthetic connector canary",
+      feeling: null,
+      note: null,
+      exercises: [{
+        exerciseVersionId: "00000000-0000-4000-8000-000000000302",
+        loadBasis: "external_weight",
+        feeling: null,
+        note: null,
+        sets: [{ reps: 1 }]
+      }],
+      sourceReference: {
+        channel: "manual",
+        externalSystem: "connector-canary",
+        externalRecordId: "workout-record-1",
+        occurredAt: "2000-01-01T07:00:00.000Z"
+      },
+      dedupeKey: "workout-record-1",
+      confidence: 1
+    };
+
+    try {
+      const response = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: { name: "record_workout_session", arguments: workout }
+        }
+      });
+
+      expect(response.json().result).toMatchObject({
+        structuredContent: { id: "00000000-0000-4000-8000-000000000301" }
+      });
+      expect(createWorkoutSession).toHaveBeenCalledWith({
+        ...workout,
+        exercises: [{
+          ...workout.exercises[0],
+          sets: [{
+            weightKg: null,
+            reps: 1,
+            durationSeconds: null,
+            distanceMeters: null,
+            rir: null
+          }]
+        }]
+      });
+      const invalidResponse = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: 6,
+          method: "tools/call",
+          params: {
+            name: "record_workout_session",
+            arguments: {
+              ...workout,
+              dedupeKey: "workout-record-invalid",
+              exercises: [{ ...workout.exercises[0], sets: [{}] }]
+            }
+          }
+        }
+      });
+      expect(invalidResponse.json().result).toMatchObject({
+        isError: true,
+        content: [{ text: "The Shape of You operation failed" }]
+      });
+      expect(createWorkoutSession).toHaveBeenCalledOnce();
+      const correction = {
+        id: "00000000-0000-4000-8000-000000000301",
+        ...workout,
+        dedupeKey: "workout-correction-1",
+        correctionReason: "Synthetic correction",
+        exercises: [{ ...workout.exercises[0], sets: [{ reps: 2 }] }]
+      };
+      const correctionResponse = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: 7,
+          method: "tools/call",
+          params: {
+            name: "correct_workout_session",
+            arguments: correction
+          }
+        }
+      });
+      expect(correctionResponse.json().result).toMatchObject({
+        structuredContent: { id: "00000000-0000-4000-8000-000000000303" }
+      });
+      expect(correctWorkoutSession).toHaveBeenCalledWith(
+        correction.id,
+        {
+          ...workout,
+          dedupeKey: "workout-correction-1",
+          correctionReason: "Synthetic correction",
+          exercises: [{
+            ...workout.exercises[0],
+            sets: [{
+              weightKg: null,
+              reps: 2,
+              durationSeconds: null,
+              distanceMeters: null,
+              rir: null
+            }]
+          }]
+        }
+      );
+      const invalidCorrectionResponse = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: 8,
+          method: "tools/call",
+          params: {
+            name: "correct_workout_session",
+            arguments: {
+              ...correction,
+              dedupeKey: "workout-correction-invalid",
+              exercises: [{ ...workout.exercises[0], sets: [{}] }]
+            }
+          }
+        }
+      });
+      expect(invalidCorrectionResponse.json().result).toMatchObject({
+        isError: true,
+        content: [{ text: "The Shape of You operation failed" }]
+      });
+      expect(correctWorkoutSession).toHaveBeenCalledOnce();
+    } finally {
+      await authorizedFastify.close();
+    }
   });
 
   it("completes a weight read with the post-expiry refreshed-token contract", async () => {
