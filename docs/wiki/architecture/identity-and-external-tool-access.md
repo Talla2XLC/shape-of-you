@@ -238,12 +238,14 @@ This metadata guides ChatGPT behavior; hard enforcement remains Person-scoped
 OAuth authorization plus PostgreSQL-backed API/domain services with no Sheets
 writer or fallback dependency.
 
-Authenticated Web exposes one `Open Shape of You Coach` action. The API
-resolves the current Person's single active `chatgpt_work` conversation
-binding and constructs an allowlisted `https://chatgpt.com/c/{opaque-id}`
-redirect server-side. Missing, disabled, ambiguous, or malformed bindings fail
-closed on the Web origin without leaking the conversation identifier. The
-binding stores no OAuth token and does not own fitness data.
+Authenticated Web exposes one `Chat with your AI Coach` action on Progress.
+The link opens the server-owned launcher in a new top-level browsing context
+with opener isolation, preserving the current Shape of You page. The API
+resolves the current Person's single active `chatgpt_work` conversation binding
+and constructs an allowlisted `https://chatgpt.com/c/{opaque-id}` redirect
+server-side. Missing, disabled, ambiguous, or malformed bindings fail closed on
+the Web origin without leaking the conversation identifier. The binding stores
+no OAuth token and does not own fitness data.
 
 The launcher targets one existing persistent ChatGPT Work conversation where
 the Shape of You Staging source survives reload and repeated opening. The

@@ -115,7 +115,9 @@ onMounted(() => { void load(); void loadToday(); });
         <a
           class="button coach-launcher"
           :href="chatAssistantLaunchRoute"
-        >Open Shape of You Coach</a>
+          target="_blank"
+          rel="noopener"
+        >Chat with your AI Coach</a>
       </div>
       <div
         class="period-picker"

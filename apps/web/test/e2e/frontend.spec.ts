@@ -1,6 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type BrowserContext, type Page, type Route } from "@playwright/test";
 
 const rpId = "localhost";
 
@@ -67,14 +67,14 @@ async function fulfillJson(route: Route, body: unknown, status = 200): Promise<v
   });
 }
 
-async function mockApiSession(page: Page, status: 204 | 401): Promise<void> {
-  await page.route("**/api/browser-auth/session", (route) =>
+async function mockApiSession(target: Page | BrowserContext, status: 204 | 401): Promise<void> {
+  await target.route("**/api/browser-auth/session", (route) =>
     route.fulfill({ status, headers: { "cache-control": "no-store" }, body: "" })
   );
 }
 
-async function mockOpenToday(page: Page): Promise<void> {
-  await page.route("**/api/v1/day-projections?*", (route) => {
+async function mockOpenToday(target: Page | BrowserContext): Promise<void> {
+  await target.route("**/api/v1/day-projections?*", (route) => {
     const requestUrl = new URL(route.request().url());
     return fulfillJson(route, {
       localDate: requestUrl.searchParams.get("localDate"),
@@ -264,10 +264,13 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   });
   await page.goto("/progress");
   await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open Shape of You Coach" })).toHaveAttribute(
+  const coachLauncher = page.getByRole("link", { name: "Chat with your AI Coach" });
+  await expect(coachLauncher).toHaveAttribute(
     "href",
     "/api/v1/chat-assistant/launch"
   );
+  await expect(coachLauncher).toHaveAttribute("target", "_blank");
+  await expect(coachLauncher).toHaveAttribute("rel", "noopener");
   const browserTimezone = await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC");
   await expect(page.getByRole("link", { name: /August 18, 2026/ })).toHaveAttribute(
     "href",
@@ -308,7 +311,7 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   await expect(page.getByRole("button", { name: "Year" })).toBeVisible();
 });
 
-test("progress launcher follows the resolved top-level navigation", async ({ page }) => {
+test("progress launcher opens the resolved conversation without replacing Progress", async ({ page }) => {
   await mockApiSession(page, 204);
   await mockOpenToday(page);
   const resolvedTarget = "/existing-shape-of-you-conversation";
@@ -317,7 +320,7 @@ test("progress launcher follows the resolved top-level navigation", async ({ pag
     from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
     metrics: [], days: []
   }));
-  await page.route("**/api/v1/chat-assistant/launch", (route) => {
+  await page.context().route("**/api/v1/chat-assistant/launch", (route) => {
     launcherReads += 1;
     return route.fulfill({
       status: 303,
@@ -325,31 +328,40 @@ test("progress launcher follows the resolved top-level navigation", async ({ pag
     });
   });
   await page.goto("/progress");
-  await page.getByRole("link", { name: "Open Shape of You Coach" }).click();
+  const [coachPage] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("link", { name: "Chat with your AI Coach" }).click()
+  ]);
 
-  await expect(page).toHaveURL(new RegExp(`${resolvedTarget}$`, "u"));
+  await expect(page).toHaveURL(/\/progress$/u);
+  await expect(coachPage).toHaveURL(new RegExp(`${resolvedTarget}$`, "u"));
   expect(launcherReads).toBe(1);
 });
 
 test("progress launcher renders a bounded fail-closed coach state", async ({ page }) => {
-  await mockApiSession(page, 204);
-  await mockOpenToday(page);
-  await page.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
+  const browserContext = page.context();
+  await mockApiSession(browserContext, 204);
+  await mockOpenToday(browserContext);
+  await browserContext.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
     from: "2026-07-20", to: "2026-08-18", timezone: "UTC", metricSetVersion: "progress-metrics-v1",
     metrics: [], days: []
   }));
-  await page.route("**/api/v1/chat-assistant/launch", (route) => route.fulfill({
+  await browserContext.route("**/api/v1/chat-assistant/launch", (route) => route.fulfill({
     status: 303,
     headers: { location: "/progress?coach=misconfigured", "cache-control": "no-store" }
   }));
 
   await page.goto("/progress");
-  await page.getByRole("link", { name: "Open Shape of You Coach" }).click();
+  const [coachPage] = await Promise.all([
+    page.waitForEvent("popup"),
+    page.getByRole("link", { name: "Chat with your AI Coach" }).click()
+  ]);
 
-  await expect(page).toHaveURL(/\/progress\?coach=misconfigured$/u);
-  await expect(page.getByRole("alert")).toContainText("No fallback was used");
-  await expect(page.getByRole("link", { name: "Open Shape of You Coach" })).toHaveCount(1);
-  await expect(page.locator('a[href*="chatgpt.com"]')).toHaveCount(0);
+  await expect(page).toHaveURL(/\/progress$/u);
+  await expect(coachPage).toHaveURL(/\/progress\?coach=misconfigured$/u);
+  await expect(coachPage.getByRole("alert")).toContainText("No fallback was used");
+  await expect(coachPage.getByRole("link", { name: "Chat with your AI Coach" })).toHaveCount(1);
+  await expect(coachPage.locator('a[href*="chatgpt.com"]')).toHaveCount(0);
 });
 
 test("progress connects sparse observations without inventing missing-day markers", async ({ page }) => {
