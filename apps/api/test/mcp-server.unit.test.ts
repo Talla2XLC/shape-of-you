@@ -111,6 +111,15 @@ describe("MCP HTTP adapter", () => {
       "state missing evidence instead of inventing a plan"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "label the affected field unknown"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "never infer absence, zero, no plan, or another dependent fact"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "plain Markdown and never emit HTML entities or encoded whitespace"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Do not write until the user reports a completed action"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(

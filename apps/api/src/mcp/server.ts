@@ -135,6 +135,8 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
   "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
+  "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
+  "Format user-facing Daily Coach answers as plain Markdown and never emit HTML entities or encoded whitespace. " +
   "Do not write until the user reports a completed action, the atomic typed command is unambiguous, and the user confirms it. For a closed or stale day, require separately confirmed reopen, edit, and reclose steps with typed read-back after each mutation.";
 
 const toolAuthorityInstruction =

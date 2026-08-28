@@ -262,7 +262,11 @@ for the answer. The response separates typed planned artifacts, current Coach
 proposals, and owning-domain facts that are actually completed, then presents
 one clear next step plus bounded nutrition, training, and recovery proposals.
 Missing tools, MCP/OAuth authority, or typed read-back stop the workflow without
-another data source or chat-history fallback.
+another data source or chat-history fallback. A failed, unavailable,
+incomplete, or inconsistent required typed read leaves the affected field
+unknown; it never proves absence, zero, or `no plan`, and dependent proposals
+are omitted or explicitly qualified. User-facing Daily Coach responses use
+plain Markdown without HTML entities or encoded whitespace.
 
 A user-reported completed action is written only through an existing typed
 Person-scoped tool after native confirmation and is followed by an owning-domain
