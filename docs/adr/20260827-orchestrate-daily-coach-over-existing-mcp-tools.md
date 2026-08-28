@@ -30,8 +30,8 @@ authority и единственным interactive writer. Google Sheets Fitness 
 
 - `get_daily_projection` компонует module-owned факты за Person-local date и
   возвращает `open`, `closed`, `stale` или `superseded` lifecycle state;
-- `get_active_training_program` возвращает active immutable Training program
-  prescriptions;
+- `get_active_training_program` явно различает active immutable Training
+  program prescriptions и валидное отсутствие active program;
 - typed list tools читают current Meals, WorkoutSessions,
   RecoveryObservations, DailyContextNotes, Weight и Body facts;
 - typed write tools создают или корректируют факты только в owning context
@@ -98,7 +98,9 @@ API-owned MCP initialization instructions закрепляют следующи�
 8. при missing tool, MCP/OAuth failure или inconsistent read-back остановиться
    без fallback и без объявления успеха.
 
-Tool names, schemas, scopes, annotations и count 23 не меняются.
+Tool names, scopes, annotations и count 23 не меняются. Output
+`get_active_training_program` использует отдельно одобренный typed
+presence/absence envelope.
 
 ### Семантика состояния
 
@@ -205,5 +207,6 @@ server-side guarantees. MCP guidance не считается их заменой
 - [Coaching recommendation lifecycle](20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md)
 - [Progress overview authenticated default](20260818-make-progress-overview-the-authenticated-default.md)
 - [ChatGPT Pro MCP authority](20260827-enforce-chatgpt-pro-authority-in-mcp.md)
+- [Typed active-program absence](20260828-represent-active-training-program-absence-explicitly-in-mcp.md)
 - [Integrity and lifecycle](../wiki/data/integrity-and-lifecycle.md)
 - [Coaching and Decision Support](../wiki/domain/coaching-and-decision-support.md)

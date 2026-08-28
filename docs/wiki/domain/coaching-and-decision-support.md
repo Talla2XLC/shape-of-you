@@ -42,6 +42,11 @@ completed` contains only current owning-domain facts verified through typed
 reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
 chat message never proves execution.
 
+For Training, `get_active_training_program` explicitly distinguishes an active
+program from valid absence. Only its typed `absent` result proves that no
+`Planned` training artifact is available; a tool failure remains unknown and
+stops dependent coaching without chat-history or Sheets fallback.
+
 ## Evidence
 
 - Coaching schema/contracts/integration tests.
@@ -50,6 +55,7 @@ chat message never proves execution.
 
 - [Coaching ADR](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md).
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md).
+- [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 
 ## Open questions
 

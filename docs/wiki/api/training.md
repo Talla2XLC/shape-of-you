@@ -30,6 +30,11 @@ Programs:
 - `POST /v1/training/programs/:id/versions`;
 - `POST /v1/training/programs/:id/versions/:versionId/activate`.
 
+The HTTP `GET /active` endpoint returns `404` when no active program exists.
+The MCP `get_active_training_program` adapter preserves that domain distinction
+without changing HTTP semantics: it returns `status: active` with the program
+or `status: absent` with `program: null`. Other failures remain tool errors.
+
 New programs/versions are inactive. Activation uses `expectedLockVersion`; one
 Person cannot have two active programs.
 
@@ -69,3 +74,4 @@ pending acceptance.
 
 - [Training domain](../domain/training-and-performance.md)
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
+- [MCP active-program absence ADR](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md)

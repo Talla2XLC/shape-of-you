@@ -338,6 +338,10 @@ lifecycle.
 - TASK-0041 browser acceptance completed real WebAuthn and OAuth, authenticated
   landing revisit, API-session loss, reconnect, and protected path-and-query
   restoration on 2026-08-17.
+- TASK-0075 verified that a brand-new authenticated ChatGPT Work conversation
+  can select the existing Shape of You Staging plugin without install or OAuth
+  reconnect, call `get_daily_projection` first with an exact date and timezone,
+  and stop without writes or absence inference when a later typed read fails.
 
 ## Decisions
 

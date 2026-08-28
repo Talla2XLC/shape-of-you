@@ -6,8 +6,10 @@ import {
   SignJWT
 } from "jose";
 import { afterAll, describe, expect, it, vi } from "vitest";
+import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
 
 import { RequestPersonContext } from "../src/application/person-context.js";
+import { NotFoundError } from "../src/domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
@@ -109,6 +111,9 @@ describe("MCP HTTP adapter", () => {
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "state missing evidence instead of inventing a plan"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "only status absent proves that no active program exists"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "label the affected field unknown"
@@ -218,6 +223,34 @@ describe("MCP HTTP adapter", () => {
       }
     });
     expect(workoutSetSchema.required).toBeUndefined();
+    const activeTrainingProgramTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "get_active_training_program"
+    );
+    expect(activeTrainingProgramTool).toMatchObject({
+      outputSchema: {
+        $id: "ActiveTrainingProgramResult",
+        type: "object",
+        oneOf: [
+          {
+            required: ["status", "program"],
+            properties: {
+              status: { const: "active" },
+              program: expect.any(Object)
+            }
+          },
+          {
+            required: ["status", "program"],
+            properties: {
+              status: { const: "absent" },
+              program: { type: "null" }
+            }
+          }
+        ]
+      },
+      annotations: { readOnlyHint: true },
+      securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
+    });
+    expect(ToolSchema.safeParse(activeTrainingProgramTool).success).toBe(true);
   });
 
   it("returns the OAuth challenge from a protected tool call", async () => {
@@ -573,7 +606,10 @@ describe("MCP HTTP adapter", () => {
       .setIssuedAt()
       .setExpirationTime("10m")
       .sign(pair.privateKey);
-    const findActiveProgram = vi.fn().mockResolvedValue({ id: "active-program" });
+    const findActiveProgram = vi.fn()
+      .mockResolvedValueOnce({ id: "active-program" })
+      .mockRejectedValueOnce(new NotFoundError("Active TrainingProgram was not found"))
+      .mockRejectedValueOnce(new Error("Training repository unavailable"));
     const create = vi.fn().mockResolvedValue({
       created: true,
       note: { id: "00000000-0000-4000-8000-000000000201" }
@@ -651,12 +687,26 @@ describe("MCP HTTP adapter", () => {
 
     try {
       expect((await call(5, "get_active_training_program", {})).json().result)
-        .toMatchObject({ structuredContent: { id: "active-program" } });
-      expect((await call(6, "record_daily_context_note", note)).json().result)
+        .toMatchObject({
+          structuredContent: {
+            status: "active",
+            program: { id: "active-program" }
+          }
+        });
+      expect((await call(6, "get_active_training_program", {})).json().result)
+        .toMatchObject({
+          structuredContent: { status: "absent", program: null }
+        });
+      expect((await call(7, "get_active_training_program", {})).json().result)
+        .toMatchObject({
+          isError: true,
+          content: [{ text: "The Shape of You operation failed" }]
+        });
+      expect((await call(8, "record_daily_context_note", note)).json().result)
         .toMatchObject({
           structuredContent: { id: "00000000-0000-4000-8000-000000000201" }
         });
-      expect((await call(7, "correct_daily_context_note", {
+      expect((await call(9, "correct_daily_context_note", {
         id: "00000000-0000-4000-8000-000000000201",
         ...note,
         text: "Went to bed early.",
@@ -665,14 +715,14 @@ describe("MCP HTTP adapter", () => {
       })).json().result).toMatchObject({
         structuredContent: { id: "00000000-0000-4000-8000-000000000202" }
       });
-      expect((await call(8, "close_day", {
+      expect((await call(10, "close_day", {
         localDate: "2026-08-26",
         timezone: "Europe/Moscow",
         idempotencyKey: "chatgpt:close:2026-08-26"
       })).json().result).toMatchObject({
         structuredContent: { id: "00000000-0000-4000-8000-000000000203" }
       });
-      expect((await call(9, "reopen_day", {
+      expect((await call(11, "reopen_day", {
         localDate: "2026-08-26",
         reason: "Add a confirmed late fact",
         idempotencyKey: "chatgpt:reopen:2026-08-26:1"
@@ -680,7 +730,7 @@ describe("MCP HTTP adapter", () => {
         structuredContent: { id: "00000000-0000-4000-8000-000000000203" }
       });
 
-      expect(findActiveProgram).toHaveBeenCalledOnce();
+      expect(findActiveProgram).toHaveBeenCalledTimes(3);
       expect(create).toHaveBeenCalledWith(note);
       expect(correct).toHaveBeenCalledWith(
         "00000000-0000-4000-8000-000000000201",

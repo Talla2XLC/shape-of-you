@@ -73,6 +73,7 @@ import type { TrainingService } from "../training/training.service.js";
 import type { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
 import type { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
 import type { DayClosureService } from "../day-closures/day-closure.service.js";
+import { NotFoundError } from "../domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
@@ -135,6 +136,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
   "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
+  "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
   "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
   "Format user-facing Daily Coach answers as plain Markdown and never emit HTML entities or encoded whitespace. " +
   "Do not write until the user reports a completed action, the atomic typed command is unambiguous, and the user confirms it. For a closed or stale day, require separately confirmed reopen, edit, and reclose steps with typed read-back after each mutation.";
@@ -152,6 +154,31 @@ const correctWorkoutSessionToolInputSchema = connectorWorkoutSchema(
 );
 const validateCreateWorkoutSession = compile(CreateWorkoutSessionSchema);
 const validateCorrectWorkoutSession = compile(CorrectWorkoutSessionSchema);
+
+const ActiveTrainingProgramResultSchema = {
+  $id: "ActiveTrainingProgramResult",
+  type: "object",
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "program"],
+      properties: {
+        status: { const: "active" },
+        program: TrainingProgramSchema
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "program"],
+      properties: {
+        status: { const: "absent" },
+        program: { type: "null" }
+      }
+    }
+  ]
+} as const;
 
 /** Registers protected-resource metadata and the stateless Streamable HTTP endpoint. */
 export function registerMcpRoutes(options: McpRouteOptions): void {
@@ -327,12 +354,24 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_active_training_program",
-      "Read the authorized person's active training program and exact exercise version references.",
+      "Read the authorized person's active training program and exact exercise version references. A typed absent result proves that no active program exists; a tool error remains unknown.",
       emptyObjectSchema("GetActiveTrainingProgramInput"),
-      TrainingProgramSchema,
+      ActiveTrainingProgramResultSchema,
       false,
       MCP_READ_SCOPE,
-      () => services.training.findActiveProgram()
+      async () => {
+        try {
+          return {
+            status: "active",
+            program: await services.training.findActiveProgram()
+          };
+        } catch (error) {
+          if (error instanceof NotFoundError) {
+            return { status: "absent", program: null };
+          }
+          throw error;
+        }
+      }
     ),
     defineTool(
       "list_workout_sessions",
