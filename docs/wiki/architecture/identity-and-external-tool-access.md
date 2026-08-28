@@ -254,6 +254,16 @@ chat switching. Disconnecting the source stops protected reads; reconnect and
 OAuth consent resume them in the same conversation rather than creating a new
 one.
 
+That launcher is ChatGPT-specific, while the Daily Coach protocol is session-
+and provider-neutral for independently approved MCP clients. Every approved
+conversation reconstructs current state from `get_daily_projection` and the
+required typed reads; no conversation history, provider memory, or token is
+shared across clients. The current `chatgpt_work` launcher remains the only
+supported one-click surface. Another provider remains unsupported and fails
+closed until a separate capability probe verifies remote MCP, OAuth, scopes,
+native confirmation, and typed read-back, and its own OAuth client receives
+explicit approval. No client may fall back to chat history or Google Sheets.
+
 Daily Coach is an interaction protocol inside that same conversation, not a
 new chat runtime or persisted daily-plan boundary. MCP initialization guidance
 requires an exact Person-local date and IANA timezone, calls
@@ -348,6 +358,7 @@ lifecycle.
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 - [Training and raw Recovery import](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
+- [Portable Daily Coach protocol](../../adr/20260828-keep-daily-coach-protocol-portable-across-approved-mcp-clients.md)
 
 ## Open questions
 
