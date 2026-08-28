@@ -7,13 +7,16 @@ NETWORK="$RUN_ID"
 EDGE_CONTAINER="$RUN_ID-edge"
 API_CONTAINER="$RUN_ID-api"
 IDENTITY_CONTAINER="$RUN_ID-identity"
+API_ADDRESS_HOLDER="$RUN_ID-api-address-holder"
+IDENTITY_ADDRESS_HOLDER="$RUN_ID-identity-address-holder"
 EDGE_IMAGE="$RUN_ID:local"
 WORK_ROOT=$(mktemp -d "${TMPDIR:-/tmp}/shape-of-you-edge-e2e.XXXXXX")
 CERT_ROOT="$WORK_ROOT/cert"
 
 cleanup() {
   docker container rm --force \
-    "$EDGE_CONTAINER" "$API_CONTAINER" "$IDENTITY_CONTAINER" >/dev/null 2>&1 || true
+    "$EDGE_CONTAINER" "$API_CONTAINER" "$IDENTITY_CONTAINER" \
+    "$API_ADDRESS_HOLDER" "$IDENTITY_ADDRESS_HOLDER" >/dev/null 2>&1 || true
   docker network rm "$NETWORK" >/dev/null 2>&1 || true
   docker image rm "$EDGE_IMAGE" >/dev/null 2>&1 || true
   rm -rf "$WORK_ROOT"
@@ -35,14 +38,36 @@ docker build \
   "$REPOSITORY_ROOT" >/dev/null
 docker network create "$NETWORK" >/dev/null
 
-docker run --detach --name "$API_CONTAINER" --network "$NETWORK" \
-  --network-alias api node:24-alpine node -e \
-  'require("node:http").createServer((request,response)=>{response.setHeader("content-type","application/json");response.end(JSON.stringify({owner:"api",path:request.url}))}).listen(3000,"0.0.0.0")' \
-  >/dev/null
-docker run --detach --name "$IDENTITY_CONTAINER" --network "$NETWORK" \
-  --network-alias identity node:24-alpine node -e \
-  'require("node:http").createServer((request,response)=>{if(request.url.startsWith("/oauth/interaction/")){response.setHeader("Referrer-Policy","same-origin")}else if(request.url==="/oauth/provider-policy"){response.setHeader("Referrer-Policy","no-referrer")}response.setHeader("content-type","application/json");response.end(JSON.stringify({owner:"identity",path:request.url}))}).listen(3000,"0.0.0.0")' \
-  >/dev/null
+start_api() {
+  generation=$1
+  docker run --detach --name "$API_CONTAINER" --network "$NETWORK" \
+    --network-alias api --env "RESPONSE_GENERATION=$generation" \
+    node:24-alpine node -e \
+    'require("node:http").createServer((request,response)=>{response.setHeader("content-type","application/json");response.end(JSON.stringify({owner:"api",generation:process.env.RESPONSE_GENERATION,path:request.url}))}).listen(3000,"0.0.0.0")' \
+    >/dev/null
+}
+
+start_identity() {
+  generation=$1
+  docker run --detach --name "$IDENTITY_CONTAINER" --network "$NETWORK" \
+    --network-alias identity --env "RESPONSE_GENERATION=$generation" \
+    node:24-alpine node -e \
+    'require("node:http").createServer((request,response)=>{if(request.url.startsWith("/oauth/interaction/")){response.setHeader("Referrer-Policy","same-origin")}else if(request.url==="/oauth/provider-policy"){response.setHeader("Referrer-Policy","no-referrer")}response.setHeader("content-type","application/json");response.end(JSON.stringify({owner:"identity",generation:process.env.RESPONSE_GENERATION,path:request.url}))}).listen(3000,"0.0.0.0")' \
+    >/dev/null
+}
+
+start_address_holder() {
+  container=$1
+  docker run --detach --name "$container" --network "$NETWORK" \
+    node:24-alpine node -e 'setInterval(()=>{},60000)' >/dev/null
+}
+
+container_ip() {
+  docker inspect --format '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$1"
+}
+
+start_api initial
+start_identity initial
 
 docker run --detach --name "$EDGE_CONTAINER" --network "$NETWORK" \
   --publish 127.0.0.1::8443 \
@@ -93,6 +118,52 @@ wait_for_owner() {
 
 wait_for_owner staging.shape-of-you.ru /api/ready api
 wait_for_owner identity.staging.shape-of-you.ru /ready identity
+
+wait_for_generation() {
+  host=$1
+  path=$2
+  generation=$3
+  attempt=0
+  until edge_url "$host" "$path" 2>/dev/null | \
+    grep -F "\"generation\":\"$generation\"" >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -ge 30 ]; then
+      printf 'Replacement upstream generation %s did not become reachable.\n' \
+        "$generation" >&2
+      exit 1
+    fi
+    sleep 1
+  done
+}
+
+EDGE_INSTANCE_ID=$(docker inspect --format '{{.Id}}' "$EDGE_CONTAINER")
+
+INITIAL_API_IP=$(container_ip "$API_CONTAINER")
+docker container rm --force "$API_CONTAINER" >/dev/null
+start_address_holder "$API_ADDRESS_HOLDER"
+start_api replacement
+REPLACEMENT_API_IP=$(container_ip "$API_CONTAINER")
+if [ "$INITIAL_API_IP" = "$REPLACEMENT_API_IP" ]; then
+  printf '%s\n' 'Replacement API unexpectedly reused its previous address.' >&2
+  exit 1
+fi
+wait_for_generation staging.shape-of-you.ru /api/ready replacement
+
+INITIAL_IDENTITY_IP=$(container_ip "$IDENTITY_CONTAINER")
+docker container rm --force "$IDENTITY_CONTAINER" >/dev/null
+start_address_holder "$IDENTITY_ADDRESS_HOLDER"
+start_identity replacement
+REPLACEMENT_IDENTITY_IP=$(container_ip "$IDENTITY_CONTAINER")
+if [ "$INITIAL_IDENTITY_IP" = "$REPLACEMENT_IDENTITY_IP" ]; then
+  printf '%s\n' 'Replacement Identity unexpectedly reused its previous address.' >&2
+  exit 1
+fi
+wait_for_generation identity.staging.shape-of-you.ru /ready replacement
+
+if [ "$(docker inspect --format '{{.Id}}' "$EDGE_CONTAINER")" != "$EDGE_INSTANCE_ID" ]; then
+  printf '%s\n' 'Edge container changed during upstream replacement.' >&2
+  exit 1
+fi
 
 PRODUCT_HTML=$(edge_url staging.shape-of-you.ru /)
 IDENTITY_HTML=$(edge_url identity.staging.shape-of-you.ru /sign-in)

@@ -60,6 +60,13 @@ service. That exact HTTPS origin is also the staging WebAuthn RP origin.
 Unknown hosts fail closed at both boundaries. PROXY protocol preserves client
 addresses for logging, forwarding, and rate limiting.
 
+The long-lived Shape of You edge resolves the replaceable `api` and `identity`
+Docker network aliases at runtime through Docker's embedded DNS. Shared nginx
+upstream zones update container addresses without requiring an edge restart,
+so replacing a healthy single-replica service cannot leave edge pinned to the
+removed container. This removes the stale-address window but does not claim
+zero downtime while the replacement process itself is not ready.
+
 On `staging.shape-of-you.ru`, edge serves the static Nuxt client by default
 while `/api`, `/api/`, `/.well-known/oauth-protected-resource`, and edge probes
 retain their current owners. On `identity.staging.shape-of-you.ru`, edge serves
@@ -152,6 +159,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
+- [Runtime resolution for replaceable staging upstreams](../../adr/20260828-resolve-replaceable-staging-upstreams-at-runtime.md)
 
 ## Open questions
 

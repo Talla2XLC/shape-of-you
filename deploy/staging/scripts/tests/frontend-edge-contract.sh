@@ -48,8 +48,21 @@ assert_contains "$NGINX" 'try_files $uri/index.html $uri /200.html;'
 assert_contains "$NGINX" "script-src 'self' 'unsafe-inline'"
 assert_contains "$NGINX" 'add_header X-Frame-Options "DENY" always;'
 assert_contains "$NGINX" 'add_header Referrer-Policy "no-referrer" always;'
-assert_contains "$NGINX" 'proxy_pass http://identity:3000;'
-assert_contains "$NGINX" 'proxy_pass http://api:3000/;'
+assert_contains "$NGINX" 'upstream api_backend {'
+assert_contains "$NGINX" 'zone api_backend 64k;'
+assert_contains "$NGINX" 'server api:3000 resolve;'
+assert_contains "$NGINX" 'upstream identity_backend {'
+assert_contains "$NGINX" 'zone identity_backend 64k;'
+assert_contains "$NGINX" 'server identity:3000 resolve;'
+RESOLVER_COUNT=$(grep -c '^        resolver 127.0.0.11 valid=5s ipv6=off;$' "$NGINX")
+if [ "$RESOLVER_COUNT" -ne 2 ]; then
+  printf '%s\n' 'API and Identity upstreams must use Docker runtime DNS resolution.' >&2
+  exit 1
+fi
+assert_contains "$NGINX" 'proxy_pass http://identity_backend;'
+assert_contains "$NGINX" 'proxy_pass http://api_backend/;'
+assert_not_contains "$NGINX" 'proxy_pass http://identity:3000;'
+assert_not_contains "$NGINX" 'proxy_pass http://api:3000/'
 
 IDENTITY_SERVER=$(sed -n '/server_name identity\.staging\.shape-of-you\.ru;/,$p' "$NGINX")
 if printf '%s\n' "$IDENTITY_SERVER" | \

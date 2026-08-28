@@ -90,7 +90,7 @@ assert_contains "$DEPLOY" 'rollback_schema_compatible'
 assert_contains "$SMOKE" 'IDENTITY_SMOKE_ENABLED'
 assert_contains "$SMOKE" '"$IDENTITY_URL/live"'
 assert_contains "$SMOKE" '"$IDENTITY_URL/ready"'
-assert_contains "$NGINX" 'proxy_pass http://identity:3000;'
+assert_contains "$NGINX" 'proxy_pass http://identity_backend;'
 
 docker compose \
   --project-name shape-of-you-identity-contract-test \
