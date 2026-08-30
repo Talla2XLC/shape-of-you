@@ -36,6 +36,16 @@ Existing dedupe returns `200`, new fact `201`, and conflicting second correction
 `409`. Current list uses
 `(occurredAt DESC, id DESC)`. Totals include only current Meals.
 
+The MCP connector does not expose that complete internal snapshot as mandatory
+LLM bookkeeping. `record_meal` and `correct_meal` accept the reported item
+label plus only the amount or nutrient evidence that is actually available.
+The API-owned MCP adapter fills omitted nullable fields, defaults interactive
+provenance to `manual`, infers the amount-evidence kind only from non-null
+evidence, and then validates the unchanged strict Meal command before calling
+the Nutrition service. Contradictory evidence still fails closed. This keeps
+ordinary text/photo capture concise without weakening domain or persistence
+invariants.
+
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and
 is never converted to zero. Daily totals also return `incompleteMealCount`; an

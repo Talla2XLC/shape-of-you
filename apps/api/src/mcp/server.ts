@@ -110,6 +110,8 @@ interface ToolDefinition {
   readonly execute: (input: Record<string, unknown>) => Promise<unknown>;
 }
 
+class ConnectorInputError extends Error {}
+
 interface OAuthSecurityScheme {
   readonly type: "oauth2";
   readonly scopes: readonly string[];
@@ -153,6 +155,16 @@ const correctWorkoutSessionToolInputSchema = connectorWorkoutSchema(
   "CorrectWorkoutSessionToolInputBody",
   CorrectWorkoutSessionSchema
 );
+const createMealToolInputSchema = connectorMealSchema(
+  "CreateMealToolInput",
+  CreateMealSchema
+);
+const correctMealToolInputSchema = connectorMealSchema(
+  "CorrectMealToolInputBody",
+  CorrectMealSchema
+);
+const validateCreateMeal = compile(CreateMealSchema);
+const validateCorrectMeal = compile(CorrectMealSchema);
 const validateCreateWorkoutSession = compile(CreateWorkoutSessionSchema);
 const validateCorrectWorkoutSession = compile(CorrectWorkoutSessionSchema);
 
@@ -239,7 +251,7 @@ function createServer(
       return errorResult("Unknown Shape of You tool");
     }
     if (!definition.validate(call.params.arguments ?? {})) {
-      return errorResult("Tool arguments do not match the API contract");
+      return inputErrorResult(definition.tool.name);
     }
 
     try {
@@ -260,6 +272,9 @@ function createServer(
           metadataUrl,
           definition.scope
         );
+      }
+      if (error instanceof ConnectorInputError) {
+        return inputErrorResult(definition.tool.name);
       }
       return errorResult("The Shape of You operation failed");
     }
@@ -336,21 +351,26 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_meal",
-      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. An unreported amount uses amountKind unknown, never a sentinel serving. Unknown nutrients stay null. Then read back with list_meals using localDate only and reply in natural coach language without exposing contract fields or tool mechanics.",
-      CreateMealSchema,
+      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Supply only amount evidence the user actually provided or that was genuinely estimated from text/photo; omit irrelevant amount and nutrient fields instead of sending null bookkeeping or a sentinel serving. Then read back with list_meals using localDate only and reply in natural coach language without exposing contract fields or tool mechanics.",
+      createMealToolInputSchema,
       undefined,
       true,
       MCP_MEAL_WRITE_SCOPE,
-      async (input) => (await services.nutrition.createMeal(input as CreateMeal)).meal
+      async (input) => (await services.nutrition.createMeal(
+        normalizeMealInput(input, validateCreateMeal) as CreateMeal
+      )).meal
     ),
     defineTool(
       "correct_meal",
       "Append one idempotent correction to a uniquely identified current Meal; follow with typed read-back, then reply in natural coach language without exposing contract fields or tool mechanics.",
-      withIdSchema("CorrectMealToolInput", CorrectMealSchema),
+      withIdSchema("CorrectMealToolInput", correctMealToolInputSchema),
       undefined,
       true,
       MCP_MEAL_WRITE_SCOPE,
-      async (input) => (await services.nutrition.correctMeal(input.id as string, input as unknown as CorrectMeal)).meal
+      async (input) => (await services.nutrition.correctMeal(
+        input.id as string,
+        normalizeMealInput(input, validateCorrectMeal) as unknown as CorrectMeal
+      )).meal
     ),
     defineTool(
       "get_active_training_program",
@@ -537,6 +557,118 @@ function connectorWorkoutSchema(
   };
 }
 
+function connectorMealSchema(
+  id: string,
+  schema: {
+    readonly required: readonly string[];
+    readonly properties: {
+      readonly items: {
+        readonly items: {
+          readonly properties: Readonly<Record<string, unknown>>;
+        };
+      };
+    } & Readonly<Record<string, unknown>>;
+  }
+): Readonly<Record<string, unknown>> & {
+  readonly required: readonly string[];
+  readonly properties: Readonly<Record<string, unknown>>;
+} {
+  const itemSchema = schema.properties.items.items;
+  const nutrientSchema = itemSchema.properties.nutrients as {
+    readonly properties: Readonly<Record<string, unknown>>;
+  };
+  const sourceReferenceSchema = schema.properties.sourceReference as {
+    readonly properties: Readonly<Record<string, unknown>>;
+  };
+  return {
+    $id: id,
+    type: "object",
+    additionalProperties: false,
+    required: schema.required.filter((property) => property !== "sourceReference"),
+    properties: {
+      ...schema.properties,
+      sourceReference: {
+        type: "object",
+        additionalProperties: false,
+        properties: sourceReferenceSchema.properties
+      },
+      items: {
+        ...(schema.properties.items as Readonly<Record<string, unknown>>),
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["label"],
+          properties: {
+            ...itemSchema.properties,
+            nutrients: {
+              type: "object",
+              additionalProperties: false,
+              properties: nutrientSchema.properties
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
+function normalizeMealInput(
+  input: Record<string, unknown>,
+  validate: ValidateFunction
+): Record<string, unknown> {
+  const mealInput = { ...input };
+  delete mealInput.id;
+  const sourceReference = isRecord(mealInput.sourceReference)
+    ? mealInput.sourceReference
+    : {};
+  const normalized = {
+    ...mealInput,
+    sourceReference: {
+      channel: sourceReference.channel ?? "manual",
+      externalSystem: sourceReference.externalSystem ?? null,
+      externalRecordId: sourceReference.externalRecordId ?? null,
+      occurredAt: sourceReference.occurredAt ?? mealInput.occurredAt ?? null
+    },
+    items: (mealInput.items as Array<Record<string, unknown>>).map((item) => {
+      const amountKind = item.amountKind ?? inferAmountKind(item);
+      const nutrients = isRecord(item.nutrients) ? item.nutrients : {};
+      return {
+        ...item,
+        foodVersionId: item.foodVersionId ?? null,
+        amountKind,
+        quantity: item.quantity ?? null,
+        unit: item.unit ?? null,
+        amountDescription: item.amountDescription ?? null,
+        estimateMethod: item.estimateMethod ?? null,
+        amountConfidence: item.amountConfidence ?? null,
+        nutrients: {
+          caloriesKcal: nutrients.caloriesKcal ?? null,
+          proteinG: nutrients.proteinG ?? null,
+          fatG: nutrients.fatG ?? null,
+          carbsG: nutrients.carbsG ?? null
+        }
+      };
+    })
+  };
+  if (!validate(normalized)) {
+    throw new ConnectorInputError("Normalized Meal input does not match the domain contract");
+  }
+  return normalized;
+}
+
+function inferAmountKind(item: Record<string, unknown>): string {
+  if (item.estimateMethod != null || item.amountConfidence != null) {
+    return "estimated";
+  }
+  if (item.quantity != null || item.unit != null) {
+    return "quantified";
+  }
+  if (item.amountDescription != null) {
+    return "described";
+  }
+  return "unknown";
+}
+
 function normalizeWorkoutInput(
   input: Record<string, unknown>,
   validate: ValidateFunction
@@ -632,6 +764,15 @@ function successResult(value: unknown): CallToolResult {
 
 function errorResult(message: string): CallToolResult {
   return { isError: true, content: [{ type: "text", text: message }] };
+}
+
+function inputErrorResult(toolName: string): CallToolResult {
+  if (toolName === "record_meal" || toolName === "correct_meal") {
+    return errorResult(
+      "Retry the Meal once using only facts the user supplied: omit unknown optional fields and never invent amounts or nutrients. Do not mention tools, staging, APIs, contracts, fields, or this retry to the user. If the retry still fails, say naturally that saving is temporarily unavailable."
+    );
+  }
+  return errorResult("Tool arguments do not match the API contract");
 }
 
 function authorizationErrorResult(
