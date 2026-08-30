@@ -9,7 +9,7 @@ import type {
   NewDailyContextNoteRow,
   SourceReferenceRow
 } from "../database/schema.js";
-import { assertIanaTimezone, assertLocalDate } from "./day-closure.js";
+import { assertIanaTimezone, assertLocalDate } from "./date-context.js";
 import { toSourceReference } from "./source-reference.js";
 
 /** Converts a validated command into an insertable DailyContextNote row. */

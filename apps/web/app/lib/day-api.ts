@@ -5,14 +5,13 @@ const csrfCookieName = "__Host-shape_of_you_api_csrf";
 export interface DailyProjection {
   readonly localDate: string;
   readonly timezone: string;
-  readonly state: "open" | "closed" | "stale" | "superseded";
-  readonly closure: { readonly version: number; readonly status: string } | null;
+  readonly asOf: string;
   readonly snapshot: {
     readonly physical: {
       readonly weightMeasurements: readonly { readonly weightKg: number }[];
     };
     readonly nutrition: {
-      readonly totals: { readonly caloriesKcal: number; readonly mealCount: number };
+      readonly totals: { readonly caloriesKcal: number | null; readonly mealCount: number };
     };
     readonly training: {
       readonly workoutSessions: readonly { readonly id: string }[];
@@ -25,18 +24,6 @@ export interface DailyProjection {
       }[];
     };
   };
-  readonly isStale: boolean;
-}
-
-export interface DayClosureHistory {
-  readonly items: readonly {
-    readonly id: string;
-    readonly version: number;
-    readonly status: string;
-    readonly closedAt: string;
-    readonly reopenedAt: string | null;
-    readonly reopenReason: string | null;
-  }[];
 }
 
 export class DayApiError extends Error {
@@ -52,8 +39,5 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 
 /** Same-origin browser adapter for the published daily projection contract. */
 export const dayApi = {
-  projection(localDate: string, timezone: string) { return request<DailyProjection>(`/api/v1/day-projections?localDate=${encodeURIComponent(localDate)}&timezone=${encodeURIComponent(timezone)}`); },
-  history(localDate: string, timezone: string) { return request<DayClosureHistory>(`/api/v1/day-closures/history?localDate=${encodeURIComponent(localDate)}&timezone=${encodeURIComponent(timezone)}`); },
-  close(localDate: string, timezone: string) { return request("/api/v1/day-closures", { method: "POST", body: JSON.stringify({ localDate, timezone, idempotencyKey: crypto.randomUUID() }) }); },
-  reopen(localDate: string, reason: string) { return request(`/api/v1/day-closures/${encodeURIComponent(localDate)}/reopen`, { method: "POST", body: JSON.stringify({ reason, idempotencyKey: crypto.randomUUID() }) }); }
+  projection(localDate: string, timezone: string) { return request<DailyProjection>(`/api/v1/day-projections?localDate=${encodeURIComponent(localDate)}&timezone=${encodeURIComponent(timezone)}`); }
 };

@@ -59,16 +59,16 @@ async function main(): Promise<void> {
   try {
     const repository = new ChatAssistantConversationBindingRepository(database);
     if (selectedAction === "inspect") {
-      const result = await repository.resolveActive(selectedPersonId, "chatgpt_work");
+      const result = await repository.resolveActive(selectedPersonId, "chatgpt_chat");
       process.stdout.write(`Chat assistant binding ${result.status}.\n`);
       if (result.status !== "active") process.exitCode = 3;
       return;
     }
     const result = selectedAction === "disable"
-      ? await repository.disable(selectedPersonId, "chatgpt_work")
+      ? await repository.disable(selectedPersonId, "chatgpt_chat")
       : await repository.bind(
           selectedPersonId,
-          "chatgpt_work",
+          "chatgpt_chat",
           required(conversationId, "--conversation-id")
         );
     process.stdout.write(

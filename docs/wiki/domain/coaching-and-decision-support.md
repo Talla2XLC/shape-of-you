@@ -42,6 +42,14 @@ completed` contains only current owning-domain facts verified through typed
 reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
 chat message never proves execution.
 
+The exact-date starting point is the always-live `get_daily_projection` read.
+A direct relevant user report authorizes one routine low-risk idempotent write
+through the owning typed tool without a duplicate confirmation question. The
+Coach performs typed read-back before declaring success. Unknown optional
+values remain partial/null; later precise input appends a correction. A bounded
+`DailyContextNote` is used only when no more specific owning-domain fact can
+represent a relevant observation safely.
+
 For Training, `get_active_training_program` explicitly distinguishes an active
 program from valid absence. Only its typed `absent` result proves that no
 `Planned` training artifact is available; a tool failure remains unknown and
@@ -55,6 +63,7 @@ stops dependent coaching without chat-history or Sheets fallback.
 
 - [Coaching ADR](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md).
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md).
+- [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md).
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 
 ## Open questions

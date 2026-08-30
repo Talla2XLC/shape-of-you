@@ -10,7 +10,7 @@ import type {
 
 import { BodyMeasurementSessionService } from "../body-measurement-sessions/body-measurement-session.service.js";
 import { CoachingService } from "../coaching/coaching.service.js";
-import { assertIanaTimezone, assertLocalDate } from "../domain/day-closure.js";
+import { assertIanaTimezone, assertLocalDate } from "../domain/date-context.js";
 import { DomainValidationError } from "../domain/errors.js";
 import { deriveLocalDate } from "../domain/weight-measurement.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";

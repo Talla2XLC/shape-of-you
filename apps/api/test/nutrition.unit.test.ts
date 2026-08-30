@@ -14,10 +14,10 @@ import {
 } from "../src/domain/nutrition.js";
 
 const item = (
-  caloriesKcal: number,
-  proteinG: number,
-  fatG: number,
-  carbsG: number
+  caloriesKcal: number | null,
+  proteinG: number | null,
+  fatG: number | null,
+  carbsG: number | null
 ): MealItemInput => ({
   foodVersionId: null,
   label: "Snapshot",
@@ -38,6 +38,18 @@ describe("Nutrition domain", () => {
       proteinG: 15.333,
       fatG: 6.333,
       carbsG: 30.333
+    });
+  });
+
+  it("preserves unknown nutrient totals instead of inventing zero", () => {
+    expect(sumMealNutrition([
+      item(100, 10, 4, 20),
+      item(null, null, 2, 5)
+    ])).toEqual({
+      caloriesKcal: null,
+      proteinG: null,
+      fatG: 6,
+      carbsG: 25
     });
   });
 

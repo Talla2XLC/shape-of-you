@@ -102,12 +102,8 @@ import {
   IntakeItemParamsSchema,
   IntakeRequestIdParamsSchema,
   IntakeRequestSchema,
-  CloseDaySchema,
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
-  DayClosureHistorySchema,
-  DayClosureSchema,
-  ReopenDaySchema,
   ProgressOverviewQuerySchema,
   ProgressOverviewSchema
 } from "@shape-of-you/contracts";
@@ -1120,61 +1116,19 @@ function coachingPaths(): Record<string, object> {
   };
 }
 
-function dayClosurePaths(): Record<string, object> {
+function dailyProjectionPaths(): Record<string, object> {
   return {
     "/v1/day-projections": {
       get: {
-        tags: ["day-closures"],
-        summary: "Read a live or closed Person-local daily projection",
+        tags: ["daily-projections"],
+        summary: "Read current facts for a Person-local date",
         parameters: [
           schemaParameter("localDate", "query", true, DailyProjectionQuerySchema.properties.localDate),
           schemaParameter("timezone", "query", true, DailyProjectionQuerySchema.properties.timezone)
         ],
         responses: {
           "200": { description: "Daily projection", content: { "application/json": { schema: DailyProjectionSchema } } },
-          "400": { description: "Invalid date or timezone", content: { "application/json": { schema: ErrorResponseSchema } } },
-          "409": { description: "Closed day was recorded in a different timezone", content: { "application/json": { schema: ErrorResponseSchema } } }
-        }
-      }
-    },
-    "/v1/day-closures": {
-      post: {
-        tags: ["day-closures"],
-        summary: "Close an open day with an immutable snapshot",
-        requestBody: { required: true, content: { "application/json": { schema: CloseDaySchema } } },
-        responses: {
-          "200": { description: "Existing idempotent closure", content: { "application/json": { schema: DayClosureSchema } } },
-          "201": { description: "Closure created", content: { "application/json": { schema: DayClosureSchema } } },
-          "400": { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } },
-          "409": { description: "Already closed or source state changed", content: { "application/json": { schema: ErrorResponseSchema } } }
-        }
-      }
-    },
-    "/v1/day-closures/{localDate}/reopen": {
-      post: {
-        tags: ["day-closures"],
-        summary: "Reopen a day without mutating its prior closure",
-        parameters: [schemaParameter("localDate", "path", true, { type: "string", format: "date" })],
-        requestBody: { required: true, content: { "application/json": { schema: ReopenDaySchema } } },
-        responses: {
-          "200": { description: "Closure superseded", content: { "application/json": { schema: DayClosureSchema } } },
-          "400": { description: "Invalid request", content: { "application/json": { schema: ErrorResponseSchema } } },
-          "409": { description: "No active closure", content: { "application/json": { schema: ErrorResponseSchema } } }
-        }
-      }
-    },
-    "/v1/day-closures/history": {
-      get: {
-        tags: ["day-closures"],
-        summary: "List closure versions for a Person-local date",
-        parameters: [
-          schemaParameter("localDate", "query", true, DailyProjectionQuerySchema.properties.localDate),
-          schemaParameter("timezone", "query", true, DailyProjectionQuerySchema.properties.timezone)
-        ],
-        responses: {
-          "200": { description: "Append-only closure history", content: { "application/json": { schema: DayClosureHistorySchema } } },
-          "400": { description: "Invalid date or timezone", content: { "application/json": { schema: ErrorResponseSchema } } },
-          "409": { description: "Closure history was recorded in a different timezone", content: { "application/json": { schema: ErrorResponseSchema } } }
+          "400": { description: "Invalid date or timezone", content: { "application/json": { schema: ErrorResponseSchema } } }
         }
       }
     }
@@ -1563,7 +1517,7 @@ export function createOpenApiDocument(): object {
       ...recoveryPaths(),
       ...coachingPaths(),
       ...dailyContextNotePaths(),
-      ...dayClosurePaths(),
+      ...dailyProjectionPaths(),
       ...progressOverviewPaths(),
       ...intakePaths()
     }

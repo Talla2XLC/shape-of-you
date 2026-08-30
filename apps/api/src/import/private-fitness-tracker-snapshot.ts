@@ -312,9 +312,6 @@ function sheet(
   if (!required.every((header) => headers.includes(header))) {
     throw new Error(`${title} required headers are missing`);
   }
-  if (title === "Daily_Log" && !headers.includes("Weight") && !headers.includes("DayStatus")) {
-    throw new Error("Daily_Log required headers are missing");
-  }
   if (!Array.isArray(value.rows) || value.rows.length > 4_999) {
     throw new Error(`${title} rows are outside the allowed bound`);
   }

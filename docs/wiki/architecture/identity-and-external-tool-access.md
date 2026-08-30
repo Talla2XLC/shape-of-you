@@ -211,8 +211,7 @@ shared lifecycle boundary.
 
 The initial protocol scopes are `openid` and `offline_access`. Resource scopes
 are `person:read`, `weight:write`, `body-measurement:write`, `meal:write`,
-`workout:write`, `recovery:write`, `daily-context-note:write`, and
-`day-closure:write`.
+`workout:write`, `recovery:write`, and `daily-context-note:write`.
 
 ### ChatGPT and MCP
 
@@ -222,15 +221,20 @@ the API deployable. Its internal endpoint is `/mcp`; staging exposes it as
 protected-resource metadata, advertises per-tool security schemes, and returns
 standards-complete OAuth challenges.
 
-The deployed allowlist contains 23 tools covering reads, typed writes,
-append-only corrections, active Training references, daily projection and
-closure lifecycle for Weight, Body, Meal, WorkoutSession,
-RecoveryObservation, and DailyContextNote. Reads require `person:read`; each
-write uses its domain-specific scope. Workout sets support typed reps,
+The repository allowlist contains 20 tools covering reads, typed writes,
+append-only corrections, active Training references, and the always-live daily
+projection for Weight, Body, Meal, WorkoutSession, RecoveryObservation, and
+DailyContextNote. Reads require `person:read`; each write uses its
+domain-specific scope. Workout sets support typed reps,
 duration, and distance; Recovery supports typed sleep stages and raw
 Garmin-derived metrics. Tools delegate to existing application contracts, so
 validation, idempotency, provenance, correction policy, and audit remain
 domain responsibilities rather than MCP-specific logic.
+
+Staging still exposes the previously deployed 23-tool contract until the
+separately approved coordinated deployment and OAuth reconnect. The scope
+contraction invalidates the existing refresh grant under the Identity
+allowlist, so repository acceptance alone is not a live cutover.
 
 The MCP initialization response and every tool description publish the same
 PostgreSQL-authority, no-Google-Sheets-fallback, and fail-closed guidance.
@@ -240,26 +244,25 @@ writer or fallback dependency.
 
 Authenticated Web exposes one `Chat with your AI Coach` action on Progress.
 The link opens the server-owned launcher in a new top-level browsing context
-with opener isolation, preserving the current Shape of You page. The API
-resolves the current Person's single active `chatgpt_work` conversation binding
+with opener isolation, preserving the current Shape of You page. The accepted repository API
+resolves the current Person's single active `chatgpt_chat` conversation binding
 and constructs an allowlisted `https://chatgpt.com/c/{opaque-id}` redirect
 server-side. Missing, disabled, ambiguous, or malformed bindings fail closed on
 the Web origin without leaking the conversation identifier. The binding stores
 no OAuth token and does not own fitness data.
 
-The launcher targets one existing persistent ChatGPT Work conversation where
-the Shape of You Staging source survives reload and repeated opening. The
-daily path requires no plugin search, `Try in chat`, mention, project-chat, or
-chat switching. Disconnecting the source stops protected reads; reconnect and
-OAuth consent resume them in the same conversation rather than creating a new
-one.
+The repository contract targets one existing persistent regular ChatGPT
+conversation and does not own model selection. The operational binding remains
+unchanged until a separately approved rebind; choosing Instant is a ChatGPT UI
+setting, not a Shape of You URL or domain contract. Disconnecting the source
+stops protected reads; reconnect and OAuth consent are explicit cutover steps.
 
 That launcher is ChatGPT-specific, while the Daily Coach protocol is session-
 and provider-neutral for independently approved MCP clients. Every approved
 conversation reconstructs current state from `get_daily_projection` and the
 required typed reads; no conversation history, provider memory, or token is
-shared across clients. The current `chatgpt_work` launcher remains the only
-supported one-click surface. Another provider remains unsupported and fails
+shared across clients. The `chatgpt_chat` launcher remains the only supported
+one-click surface after operational rebind. Another provider remains unsupported and fails
 closed until a separate capability probe verifies remote MCP, OAuth, scopes,
 native confirmation, and typed read-back, and its own OAuth client receives
 explicit approval. No client may fall back to chat history or Google Sheets.
@@ -278,12 +281,14 @@ unknown; it never proves absence, zero, or `no plan`, and dependent proposals
 are omitted or explicitly qualified. User-facing Daily Coach responses use
 plain Markdown without HTML entities or encoded whitespace.
 
-A user-reported completed action is written only through an existing typed
-Person-scoped tool after native confirmation and is followed by an owning-domain
-typed read-back. A closed or stale day requires separately confirmed
-`reopen_day`, domain write, and `close_day` steps with read-back after each
-mutation. Accepted advice is not execution, and neither reopen nor reclose is
-automatic.
+A direct relevant user report authorizes one routine low-risk idempotent create
+or correction through an existing typed Person-scoped tool without a duplicate
+confirmation question. The Coach follows every successful mutation with an
+owning-domain typed read-back. Unknown optional values remain partial/null;
+later precise input appends a correction. Irreducible target/date/domain
+ambiguity and destructive, credential, administrative, or material goal and
+program changes remain confirmation-gated. ChatGPT native permission behavior
+changes only during the separately approved connector cutover.
 
 The single staging connector has completed the deployed 23-tool discovery and
 all 14 required synthetic writer/lifecycle canaries with read-back. TASK-0065

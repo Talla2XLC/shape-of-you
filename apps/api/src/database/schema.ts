@@ -34,7 +34,7 @@ export const personAccessGrantStatus = pgEnum(
   ["active", "revoked"]
 );
 export const chatAssistantSurface = pgEnum("chat_assistant_surface", [
-  "chatgpt_work"
+  "chatgpt_chat"
 ]);
 export const chatAssistantBindingStatus = pgEnum(
   "chat_assistant_binding_status",
@@ -220,24 +220,6 @@ export const coachingTrainingAdjustmentReason = pgEnum(
 export const coachingDecisionOutcome = pgEnum("coaching_decision_outcome", [
   "accepted",
   "rejected"
-]);
-export const dayClosureStatus = pgEnum("day_closure_status", [
-  "active",
-  "superseded"
-]);
-export const dayClosureOperation = pgEnum("day_closure_operation", [
-  "close",
-  "reopen"
-]);
-export const dayClosureReferenceKind = pgEnum("day_closure_reference_kind", [
-  "weight_measurement",
-  "body_measurement_session",
-  "meal",
-  "workout_session",
-  "daily_context_note",
-  "recovery_observation",
-  "recovery_assessment",
-  "coaching_recommendation"
 ]);
 export const intakeParsingStatus = pgEnum("intake_parsing_status", [
   "queued",
@@ -1794,33 +1776,6 @@ export const nutritionMealImportRecords = pgTable(
   ]
 );
 
-export const nutritionDayClosureImportRecords = pgTable(
-  "nutrition_day_closure_import_records",
-  {
-    ...nutritionImportBase(),
-    normalizedLocalDate: date("normalized_local_date", { mode: "string" }),
-    sourceStatus: varchar("source_status", { length: 64 }),
-    targetClosureId: uuid("target_closure_id")
-  },
-  (table) => [
-    foreignKey({
-      name: "nutrition_day_closure_import_batch_fk",
-      columns: [table.batchId, table.personId],
-      foreignColumns: [importBatches.id, importBatches.personId]
-    }),
-    foreignKey({
-      name: "nutrition_day_closure_import_target_fk",
-      columns: [table.targetClosureId, table.personId],
-      foreignColumns: [dayClosures.id, dayClosures.personId]
-    }),
-    unique("nutrition_day_closure_import_record_uq").on(
-      table.batchId,
-      table.sourceLocator,
-      table.findingCode
-    )
-  ]
-);
-
 export const trainingExerciseCatalogSources = pgTable(
   "training_exercise_catalog_sources",
   {
@@ -3212,111 +3167,6 @@ export const coachingRecommendationDecisions = pgTable(
   ]
 );
 
-/** Append-only Person-local coordination snapshot; it never owns domain facts. */
-export const dayClosures = pgTable(
-  "day_closures",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    personId: uuid("person_id").notNull().references(() => persons.id),
-    closedByPersonId: uuid("closed_by_person_id").notNull().references(() => persons.id),
-    source: sourceChannel("source").notNull(),
-    localDate: date("local_date", { mode: "string" }).notNull(),
-    timezone: varchar("timezone", { length: 64 }).notNull(),
-    version: integer("version").notNull(),
-    status: dayClosureStatus("status").default("active").notNull(),
-    policyVersion: varchar("policy_version", { length: 128 }).notNull(),
-    snapshot: jsonb("snapshot").$type<unknown>().notNull(),
-    stateFingerprint: varchar("state_fingerprint", { length: 128 }).notNull(),
-    supersedesId: uuid("supersedes_id"),
-    closedAt: timestamp("closed_at", { withTimezone: true, mode: "date" })
-      .defaultNow()
-      .notNull(),
-    reopenedAt: timestamp("reopened_at", { withTimezone: true, mode: "date" }),
-    reopenReason: varchar("reopen_reason", { length: 512 })
-  },
-  (table) => [
-    unique("day_closures_id_person_uq").on(table.id, table.personId),
-    foreignKey({
-      name: "day_closures_supersedes_fk",
-      columns: [table.supersedesId, table.personId],
-      foreignColumns: [table.id, table.personId]
-    }),
-    unique("day_closures_person_date_version_uq").on(
-      table.personId,
-      table.localDate,
-      table.version
-    ),
-    uniqueIndex("day_closures_active_date_uq")
-      .on(table.personId, table.localDate)
-      .where(sql`${table.status} = 'active'`),
-    check("day_closures_version_positive", sql`${table.version} > 0`),
-    check("day_closures_actor_is_owner", sql`${table.closedByPersonId} = ${table.personId}`),
-    check(
-      "day_closures_reopen_shape",
-      sql`(${table.status} = 'active' AND ${table.reopenedAt} IS NULL AND ${table.reopenReason} IS NULL)
-          OR (${table.status} = 'superseded' AND ${table.reopenedAt} IS NOT NULL AND ${table.reopenReason} IS NOT NULL)`
-    ),
-    check(
-      "day_closures_no_self_supersede",
-      sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
-    )
-  ]
-);
-
-/** Idempotency ledger for explicit close/reopen commands. */
-export const dayClosureOperations = pgTable(
-  "day_closure_operations",
-  {
-    id: uuid("id").defaultRandom().primaryKey(),
-    personId: uuid("person_id").notNull().references(() => persons.id),
-    actorPersonId: uuid("actor_person_id").notNull().references(() => persons.id),
-    source: sourceChannel("source").notNull(),
-    operation: dayClosureOperation("operation").notNull(),
-    localDate: date("local_date", { mode: "string" }).notNull(),
-    idempotencyKey: varchar("idempotency_key", { length: 256 }).notNull(),
-    requestFingerprint: varchar("request_fingerprint", { length: 128 }).notNull(),
-    closureId: uuid("closure_id").notNull(),
-    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
-      .defaultNow()
-      .notNull()
-  },
-  (table) => [
-    foreignKey({
-      name: "day_closure_ops_closure_person_fk",
-      columns: [table.closureId, table.personId],
-      foreignColumns: [dayClosures.id, dayClosures.personId]
-    }),
-    unique("day_closure_ops_person_op_key_uq").on(
-      table.personId,
-      table.operation,
-      table.idempotencyKey
-    ),
-    check("day_closure_ops_actor_is_owner", sql`${table.actorPersonId} = ${table.personId}`)
-  ]
-);
-
-/** Typed manifest of immutable facts and decisions included in a closure. */
-export const dayClosureReferences = pgTable(
-  "day_closure_references",
-  {
-    closureId: uuid("closure_id").notNull(),
-    kind: dayClosureReferenceKind("kind").notNull(),
-    referenceId: uuid("reference_id").notNull()
-  },
-  (table) => [
-    foreignKey({
-      name: "day_closure_refs_closure_fk",
-      columns: [table.closureId],
-      foreignColumns: [dayClosures.id]
-    }).onDelete("cascade"),
-    unique("day_closure_refs_closure_kind_id_uq").on(
-      table.closureId,
-      table.kind,
-      table.referenceId
-    )
-  ]
-);
-
 export const intakeRequests = pgTable(
   "intake_requests",
   {
@@ -3571,10 +3421,6 @@ export type SourceReferenceRow = typeof sourceReferences.$inferSelect;
 export type DailyContextNoteRow = typeof dailyContextNotes.$inferSelect;
 /** Insertable DailyContextNote row accepted by Drizzle mutations. */
 export type NewDailyContextNoteRow = typeof dailyContextNotes.$inferInsert;
-/** Persisted versioned Person-local closure coordination artifact. */
-export type DayClosureRow = typeof dayClosures.$inferSelect;
-/** Persisted idempotency record for a closure operation. */
-export type DayClosureOperationRow = typeof dayClosureOperations.$inferSelect;
 /** Insertable SourceReference row accepted by Drizzle mutations. */
 export type NewSourceReferenceRow = typeof sourceReferences.$inferInsert;
 /** Persisted WeightMeasurement row returned by Drizzle queries. */

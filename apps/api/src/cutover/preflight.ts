@@ -41,9 +41,6 @@ export const cutoverWriterTools: readonly CutoverWriterToolRequirement[] = [
   { name: "record_daily_context_note", scope: "daily-context-note:write", canaryRequired: true },
   { name: "correct_daily_context_note", scope: "daily-context-note:write", canaryRequired: true },
   { name: "get_daily_projection", scope: "person:read", canaryRequired: false },
-  { name: "list_day_closure_history", scope: "person:read", canaryRequired: false },
-  { name: "close_day", scope: "day-closure:write", canaryRequired: true },
-  { name: "reopen_day", scope: "day-closure:write", canaryRequired: true }
 ];
 
 /** Immutable local evidence captured immediately before the writer switch. */

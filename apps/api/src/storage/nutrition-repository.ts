@@ -201,6 +201,20 @@ function partialNutrientsFromRow(row: {
   };
 }
 
+function partialNutrientsToRow(nutrients: PartialNutrientValues): {
+  readonly caloriesKcal: string | null;
+  readonly proteinG: string | null;
+  readonly fatG: string | null;
+  readonly carbsG: string | null;
+} {
+  return {
+    caloriesKcal: nutrients.caloriesKcal === null ? null : nutrients.caloriesKcal.toFixed(3),
+    proteinG: nutrients.proteinG === null ? null : nutrients.proteinG.toFixed(3),
+    fatG: nutrients.fatG === null ? null : nutrients.fatG.toFixed(3),
+    carbsG: nutrients.carbsG === null ? null : nutrients.carbsG.toFixed(3)
+  };
+}
+
 function partialTotals(values: readonly PartialNutrientValues[]): PartialNutrientValues {
   const total = (key: keyof PartialNutrientValues): number | null =>
     values.some((value) => value[key] === null)
@@ -1044,7 +1058,7 @@ export class NutritionRepository implements NutritionStore {
         label: item.label,
         quantity: item.quantity.toFixed(3),
         unit: item.unit,
-        ...nutrientsToRow(item.nutrients)
+        ...partialNutrientsToRow(item.nutrients)
       }))
     );
     return meal;

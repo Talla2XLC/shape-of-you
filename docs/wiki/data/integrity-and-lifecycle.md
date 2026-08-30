@@ -22,36 +22,27 @@ Workflows use explicit states, idempotency keys, validation, read-back, and
 append-only audit entries. Implement these as small state machines in owning
 modules, not separate services.
 
-A Person-local day is open when no active `DayClosure` exists. Closing creates
-an immutable versioned summary and typed fact/decision references; reopening
-supersedes rather than mutates or deletes that version. A later close appends a
-new version. The closure cannot own Nutrition, Training, Physical State,
-Recovery, or Coaching facts, and changed late evidence makes a closed daily
-projection stale instead of silently rewriting its snapshot.
+A Person-local date has no open/closed lifecycle. `DailyProjection` is an
+always-live API read composition over current facts owned by Physical State,
+Nutrition, Training, Recovery, Coaching, and bounded daily context notes. It
+returns the requested `localDate`, IANA `timezone`, composition `asOf`, and a
+typed snapshot; it never freezes or owns source facts.
 
-The canonical authenticated `/days/:localDate` screen reads the composed projection and append-only
-closure history through the API. It asks for an explicit browser confirmation
-before close and requires a non-empty reopen reason; it does not calculate or
-mutate lifecycle state locally.
+The canonical authenticated `/days/:localDate` screen and the Today card on
+`/progress` read this current composition. They expose no close, reopen, stale,
+or superseded state. Missing metric facts remain absent rather than synthetic
+zeros, and legacy `/day` routes safely replace themselves with the canonical
+dated route.
 
-The authenticated `/progress` overview is separate from closure lifecycle. It
-lists only dates with current module-owned facts and never treats a closure-only
-date as progress evidence. Missing metric facts remain absent points rather
-than synthetic zeros. Legacy `/day` routes safely replace themselves with the
-canonical dated route.
+Routine create/correct lifecycles remain inside owning modules. A direct,
+relevant user report authorizes one low-risk idempotent typed write without a
+duplicate confirmation question. Every successful write is followed by typed
+read-back. Unknown optional values remain `null` or partial; a later precise
+statement appends a correction that supersedes the prior fact.
 
-The closure records its IANA timezone, Person actor, and source channel. A
-closed date is read only in its recorded timezone; a different timezone is a
-conflict. Its coordinating read ports select every current fact for that exact
-local date and do not depend on public-list pagination.
-
-During controlled migration, an authoritative `Daily_Log` value `Closed` may
-create the same versioned closure with source `google_sheets`, after all
-same-run Nutrition facts for that date are persisted. Closure means the user
-finished the day; it does not assert that every optional activity happened or
-that every legacy nutrient value is known. In particular, Training is optional
-and a day with no Workout may close normally. The immutable snapshot exposes
-partial Nutrition explicitly rather than substituting zero.
+Legacy `Daily_Log.DayStatus` is not imported into PostgreSQL and has no runtime
+meaning. Google Sheets remains a non-authoritative read-only historical source
+without write or fallback authority.
 
 ## Evidence
 
@@ -61,8 +52,8 @@ partial Nutrition explicitly rather than substituting zero.
 
 ## Decisions
 
-- Model lifecycle inside owning modules; `DayClosure` only coordinates an
-  explicit Person-local close/reopen boundary.
+- Keep fact lifecycle inside owning modules and daily state as an always-live
+  read composition; do not create a coordinating day aggregate.
 
 ## Open questions
 
@@ -74,5 +65,5 @@ partial Nutrition explicitly rather than substituting zero.
 - [Authority](source-of-truth-and-authority.md)
 - [Domain invariants](../domain/invariants.md)
 - [Open questions](../domain/open-modeling-questions.md)
-- [Versioned Person-local day closures](../../adr/20260811-model-versioned-person-local-day-closures.md)
+- [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)
 - [Progress overview API](../api/progress-overview.md)

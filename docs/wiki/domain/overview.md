@@ -47,7 +47,7 @@ automatic bounded contexts or services.
 
 ## Open questions
 
-- Shared day closure/correction rules and remaining policy boundaries.
+- Remaining correction, retention, and policy boundaries.
 
 ## Related material
 

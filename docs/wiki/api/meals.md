@@ -51,7 +51,7 @@ incomplete date instead of publishing a known-subset sum as the full value.
 
 ## Open questions
 
-- Nutrition targets, combined day projection, and post-DayClosure correction.
+- Nutrition targets and longer-term aggregation policy for partial Meals.
 
 ## Related material
 

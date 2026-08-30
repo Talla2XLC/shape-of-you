@@ -5,7 +5,7 @@ title: "Model versioned Person-local day closures without owning domain facts"
 status: accepted
 date: 2026-08-11
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260829-remove-day-closure-and-use-capture-first-coach"
 tags:
   - "daily-projection"
   - "day-lifecycle"

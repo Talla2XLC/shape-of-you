@@ -31,19 +31,11 @@ and RecommendationDecision. Daily projections reference but do not own them.
 - CoachingRecommendation has typed detail; policy/evidence are references;
   RecommendationDecision and execution remain separate facts.
 
-`DayClosure` is a narrow Person-owned coordination artifact for explicit local
-date/timezone closure. An open day has no active closure; a closed day holds an
-immutable typed summary snapshot and a typed reference manifest. Reopen
-supersedes the active version with a reason, and reclose appends a new version.
-It does not own or mutate the referenced facts.
-
 `Daily_Log` is primarily a legacy read model/migration projection, not evidence
-for a broad aggregate.
 
-The progress overview is also a read model rather than an aggregate. It
-projects sparse current facts across a bounded date range through owning-module
-read ports and does not give `DayClosure` or a new `DayRecord` ownership of
-history.
+`DailyProjection` and the progress overview are read models rather than
+aggregates. They project current facts through owning-module read ports and do
+not give a day, conversation, or new `DayRecord` ownership of history.
 
 ## Evidence
 
@@ -53,6 +45,7 @@ history.
 ## Decisions
 
 - Do not create one aggregate per sheet or a broad `DayRecord`.
+- Do not create a day-close aggregate; current daily state is composed live.
 - Keep shared reference catalogs separate from Person facts.
 
 ## Open questions
@@ -65,5 +58,5 @@ history.
 - [Extraction map](domain-extraction-map.md)
 - [Invariants](invariants.md)
 - [Open questions](open-modeling-questions.md)
-- [Versioned Person-local day closures](../../adr/20260811-model-versioned-person-local-day-closures.md)
+- [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)
 - [Progress overview API](../api/progress-overview.md)

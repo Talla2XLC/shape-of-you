@@ -20,40 +20,7 @@ const nutritionTotalsSummarySchema = {
   }
 } as const;
 
-export const DayClosureStatusSchema = {
-  type: "string",
-  enum: ["active", "superseded"]
-} as const;
-
-export type DayClosureStatus = FromSchema<typeof DayClosureStatusSchema>;
-
-export const DayReferenceKindSchema = {
-  type: "string",
-  enum: [
-    "weight_measurement",
-    "body_measurement_session",
-    "meal",
-    "workout_session",
-    "daily_context_note",
-    "recovery_observation",
-    "recovery_assessment",
-    "coaching_recommendation"
-  ]
-} as const;
-
-export type DayReferenceKind = FromSchema<typeof DayReferenceKindSchema>;
-
-/** A typed immutable-fact reference included in one daily closure. */
-export const DayClosureReferenceSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["kind", "id"],
-  properties: { kind: DayReferenceKindSchema, id: uuid }
-} as const;
-
-export type DayClosureReference = FromSchema<typeof DayClosureReferenceSchema>;
-
-/** Immutable, typed result of composing one Person-local daily view. */
+/** Typed current-fact composition for one Person-local date. */
 export const DaySnapshotSchema = {
   type: "object",
   additionalProperties: false,
@@ -218,62 +185,16 @@ export const DaySnapshotSchema = {
 
 export type DaySnapshot = FromSchema<typeof DaySnapshotSchema>;
 
-export const DayClosureSchema = {
-  $id: "DayClosure",
-  type: "object",
-  additionalProperties: false,
-  required: [
-    "id",
-    "personId",
-    "closedByPersonId",
-    "source",
-    "localDate",
-    "timezone",
-    "version",
-    "status",
-    "policyVersion",
-    "snapshot",
-    "references",
-    "closedAt",
-    "reopenedAt",
-    "reopenReason",
-    "supersedesId"
-  ],
-  properties: {
-    id: uuid,
-    personId: uuid,
-    closedByPersonId: uuid,
-    source: { type: "string", enum: ["manual", "google_sheets", "import", "device"] },
-    localDate,
-    timezone,
-    version: { type: "integer", minimum: 1 },
-    status: DayClosureStatusSchema,
-    policyVersion: { type: "string", minLength: 1, maxLength: 128 },
-    snapshot: DaySnapshotSchema,
-    references: { type: "array", items: DayClosureReferenceSchema, uniqueItems: true },
-    closedAt: dateTime,
-    reopenedAt: { anyOf: [dateTime, { type: "null" }] },
-    reopenReason: {
-      anyOf: [{ type: "string", minLength: 1, maxLength: 512 }, { type: "null" }]
-    },
-    supersedesId: { anyOf: [uuid, { type: "null" }] }
-  }
-} as const;
-
-export type DayClosure = FromSchema<typeof DayClosureSchema>;
-
 export const DailyProjectionSchema = {
   $id: "DailyProjection",
   type: "object",
   additionalProperties: false,
-  required: ["localDate", "timezone", "state", "closure", "snapshot", "isStale"],
+  required: ["localDate", "timezone", "asOf", "snapshot"],
   properties: {
     localDate,
     timezone,
-    state: { type: "string", enum: ["open", "closed", "stale", "superseded"] },
-    closure: { anyOf: [DayClosureSchema, { type: "null" }] },
-    snapshot: DaySnapshotSchema,
-    isStale: { type: "boolean" }
+    asOf: dateTime,
+    snapshot: DaySnapshotSchema
   }
 } as const;
 
@@ -288,40 +209,3 @@ export const DailyProjectionQuerySchema = {
 } as const;
 
 export type DailyProjectionQuery = FromSchema<typeof DailyProjectionQuerySchema>;
-
-export const CloseDaySchema = {
-  $id: "CloseDay",
-  type: "object",
-  additionalProperties: false,
-  required: ["localDate", "timezone", "idempotencyKey"],
-  properties: {
-    localDate,
-    timezone,
-    idempotencyKey: { type: "string", minLength: 1, maxLength: 256 }
-  }
-} as const;
-
-export type CloseDay = FromSchema<typeof CloseDaySchema>;
-
-export const ReopenDaySchema = {
-  $id: "ReopenDay",
-  type: "object",
-  additionalProperties: false,
-  required: ["reason", "idempotencyKey"],
-  properties: {
-    reason: { type: "string", minLength: 1, maxLength: 512 },
-    idempotencyKey: { type: "string", minLength: 1, maxLength: 256 }
-  }
-} as const;
-
-export type ReopenDay = FromSchema<typeof ReopenDaySchema>;
-
-export const DayClosureHistorySchema = {
-  $id: "DayClosureHistory",
-  type: "object",
-  additionalProperties: false,
-  required: ["items"],
-  properties: { items: { type: "array", items: DayClosureSchema } }
-} as const;
-
-export type DayClosureHistory = FromSchema<typeof DayClosureHistorySchema>;

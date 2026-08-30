@@ -79,9 +79,7 @@ async function mockOpenToday(target: Page | BrowserContext): Promise<void> {
     return fulfillJson(route, {
       localDate: requestUrl.searchParams.get("localDate"),
       timezone: requestUrl.searchParams.get("timezone"),
-      state: "open",
-      closure: null,
-      isStale: false,
+      asOf: "2026-08-18T12:00:00.000Z",
       snapshot: {
         physical: { weightMeasurements: [] },
         nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } },
@@ -190,17 +188,12 @@ test("day layout remains content-sized across phone, tablet, and desktop", async
     fulfillJson(route, {
       localDate: "2026-08-17",
       timezone: "Europe/Moscow",
-      state: "open",
-      closure: null,
-      isStale: false,
+      asOf: "2026-08-18T12:00:00.000Z",
       snapshot: {
         physical: { weightMeasurements: [{ weightKg: 77.7 }] },
         nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } }
       }
     })
-  );
-  await page.route("**/api/v1/day-closures/history?*", (route) =>
-    fulfillJson(route, { items: [] })
   );
 
   for (const viewport of [
@@ -251,9 +244,7 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
     return fulfillJson(route, {
       localDate: "2026-08-18",
       timezone: "UTC",
-      state: "open",
-      closure: null,
-      isStale: false,
+      asOf: "2026-08-18T12:00:00.000Z",
       snapshot: {
         physical: { weightMeasurements: [{ weightKg: 77.8 }] },
         nutrition: { totals: { mealCount: 2, caloriesKcal: 1_240 } },
@@ -278,7 +269,7 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   );
   await expect(page.getByLabel("Latest selected metric")).toContainText("77.8 kg");
   const todayCard = page.getByRole("region", { name: "Your day, right now." });
-  await expect(todayCard).toContainText("Open and live");
+  await expect(todayCard).toContainText("Current recorded facts");
   await expect(todayCard).toContainText("2 meals · 1240 kcal");
   await expect(todayCard).toContainText("1 workout");
   await expect(todayCard).toContainText("Readiness 72 · low risk");
@@ -397,7 +388,7 @@ test("progress connects sparse observations without inventing missing-day marker
   await expect(page.getByText("Missing days stay visible through spacing.")).toBeVisible();
 });
 
-test("progress today card exposes stale state without treating it as editable", async ({ page }) => {
+test("progress today card presents an always-current fact projection", async ({ page }) => {
   await mockApiSession(page, 204);
   await page.clock.setFixedTime(new Date("2026-08-18T12:00:00.000Z"));
   await page.route("**/api/v1/progress-overview?*", (route) => fulfillJson(route, {
@@ -405,8 +396,7 @@ test("progress today card exposes stale state without treating it as editable", 
     metrics: [], days: []
   }));
   await page.route("**/api/v1/day-projections?*", (route) => fulfillJson(route, {
-    localDate: "2026-08-18", timezone: "UTC", state: "stale", isStale: true,
-    closure: { version: 2, status: "active" },
+    localDate: "2026-08-18", timezone: "UTC", asOf: "2026-08-18T12:00:00.000Z",
     snapshot: {
       physical: { weightMeasurements: [] },
       nutrition: { totals: { mealCount: 1, caloriesKcal: 640 } },
@@ -418,8 +408,8 @@ test("progress today card exposes stale state without treating it as editable", 
   await page.goto("/progress");
 
   const todayCard = page.getByRole("region", { name: "Your day, right now." });
-  await expect(todayCard).toContainText("Closed snapshot needs review");
-  await expect(todayCard).toContainText("must be reviewed before editing");
+  await expect(todayCard).toContainText("Current recorded facts");
+  await expect(todayCard).toContainText("1 meals · 640 kcal");
   await expect(todayCard.getByRole("button")).toHaveCount(0);
 });
 
@@ -438,7 +428,7 @@ test("progress today card fails closed when the projection is unavailable", asyn
     "Today's authoritative state is temporarily unavailable. No fallback was used."
   );
   await expect(todayCard.getByRole("button", { name: "Try again" })).toBeVisible();
-  await expect(todayCard).not.toContainText("Open and live");
+  await expect(todayCard).not.toContainText("Current recorded facts");
   await expect(todayCard).not.toContainText("Nutrition recorded");
 });
 
@@ -453,7 +443,7 @@ test("progress today card automatically recovers from one transient projection f
     projectionReads += 1;
     if (projectionReads === 1) return fulfillJson(route, {}, 503);
     return fulfillJson(route, {
-      localDate: "2026-08-18", timezone: "UTC", state: "open", closure: null, isStale: false,
+      localDate: "2026-08-18", timezone: "UTC", asOf: "2026-08-18T12:00:00.000Z",
       snapshot: {
         physical: { weightMeasurements: [] },
         nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } },
@@ -466,7 +456,7 @@ test("progress today card automatically recovers from one transient projection f
   await page.goto("/progress");
 
   const todayCard = page.getByRole("region", { name: "Your day, right now." });
-  await expect(todayCard).toContainText("Open and live");
+  await expect(todayCard).toContainText("Current recorded facts");
   expect(projectionReads).toBe(2);
   await expect(todayCard.getByRole("button", { name: "Try again" })).toHaveCount(0);
 });
@@ -482,7 +472,7 @@ test("progress today card recovers through the explicit retry action", async ({ 
     projectionReads += 1;
     if (projectionReads < 3) return fulfillJson(route, {}, 503);
     return fulfillJson(route, {
-      localDate: "2026-08-18", timezone: "UTC", state: "open", closure: null, isStale: false,
+      localDate: "2026-08-18", timezone: "UTC", asOf: "2026-08-18T12:00:00.000Z",
       snapshot: {
         physical: { weightMeasurements: [] },
         nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } },
@@ -496,23 +486,21 @@ test("progress today card recovers through the explicit retry action", async ({ 
 
   const todayCard = page.getByRole("region", { name: "Your day, right now." });
   await todayCard.getByRole("button", { name: "Try again" }).click();
-  await expect(todayCard).toContainText("Open and live");
+  await expect(todayCard).toContainText("Current recorded facts");
   expect(projectionReads).toBe(3);
 });
 
 test("legacy day query safely replaces itself with the canonical dated route", async ({ page }) => {
   await mockApiSession(page, 204);
-  await page.route("**/api/v1/day-projections?*", (route) => fulfillJson(route, { localDate: "2026-08-17", timezone: "Europe/Moscow", state: "open", closure: null, isStale: false, snapshot: { physical: { weightMeasurements: [] }, nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } } } }));
-  await page.route("**/api/v1/day-closures/history?*", (route) => fulfillJson(route, { items: [] }));
+  await page.route("**/api/v1/day-projections?*", (route) => fulfillJson(route, { localDate: "2026-08-17", timezone: "Europe/Moscow", asOf: "2026-08-17T12:00:00.000Z", snapshot: { physical: { weightMeasurements: [] }, nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } } } }));
   await page.goto("/day?date=2026-08-17&timezone=Europe%2FMoscow&returnTo=https%3A%2F%2Fevil.test#private");
   await expect(page).toHaveURL(/\/days\/2026-08-17\?timezone=Europe(?:%2F|\/)Moscow$/);
 });
 
-test("superseded day projection exposes no mutation controls", async ({ page }) => {
+test("dated projection exposes current facts without lifecycle controls", async ({ page }) => {
   await mockApiSession(page, 204);
   await page.route("**/api/v1/day-projections?*", (route) => fulfillJson(route, {
-    localDate: "2026-08-17", timezone: "Europe/Moscow", state: "superseded",
-    closure: null, isStale: false,
+    localDate: "2026-08-17", timezone: "Europe/Moscow", asOf: "2026-08-17T12:00:00.000Z",
     snapshot: {
       physical: { weightMeasurements: [] },
       nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } },
@@ -520,11 +508,9 @@ test("superseded day projection exposes no mutation controls", async ({ page }) 
       recovery: { assessments: [] }
     }
   }));
-  await page.route("**/api/v1/day-closures/history?*", (route) => fulfillJson(route, { items: [] }));
-
   await page.goto("/days/2026-08-17?timezone=Europe%2FMoscow");
 
-  await expect(page.getByRole("alert")).toContainText("This day version is not active");
+  await expect(page.getByText("Current recorded facts as of")).toBeVisible();
   await expect(page.getByRole("button", { name: "Close day" })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Reopen day" })).toHaveCount(0);
 });
@@ -535,9 +521,8 @@ test("dated page reloads exact-day facts when the route date changes", async ({ 
   await page.route("**/api/v1/day-projections?*", (route) => {
     const date = new URL(route.request().url()).searchParams.get("localDate")!;
     requestedDates.push(date);
-    return fulfillJson(route, { localDate: date, timezone: "Europe/Moscow", state: "open", closure: null, isStale: false, snapshot: { physical: { weightMeasurements: [{ weightKg: date === "2026-08-18" ? 78 : 79 }] }, nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } } } });
+    return fulfillJson(route, { localDate: date, timezone: "Europe/Moscow", asOf: `${date}T12:00:00.000Z`, snapshot: { physical: { weightMeasurements: [{ weightKg: date === "2026-08-18" ? 78 : 79 }] }, nutrition: { totals: { mealCount: 0, caloriesKcal: 0 } } } });
   });
-  await page.route("**/api/v1/day-closures/history?*", (route) => fulfillJson(route, { items: [] }));
   await page.goto("/days/2026-08-17?timezone=Europe%2FMoscow");
   await page.getByLabel("Date").fill("2026-08-18");
   await page.getByLabel("Date").dispatchEvent("change");

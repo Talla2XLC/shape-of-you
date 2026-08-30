@@ -11,7 +11,7 @@ tags: []
 ## Summary
 
 The project knowledge baseline was created on 2026-07-28. Core DEV-023 backend
-verticals, asynchronous Intake foundations, an explicit shared day lifecycle,
+verticals, asynchronous Intake foundations, always-live daily composition,
 and the controlled DEV-024 migration/import path are implemented. The staging
 ChatGPT operations now use one MCP-only writer and staging PostgreSQL is
 operational authority. Google Sheets is an unchanged, non-authoritative frozen
@@ -19,6 +19,29 @@ legacy workbook retained as an indefinite read-only reference. Production
 parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
+
+### 2026-08-29 — Capture-first Coach without DayClosure
+
+- Removed the `DayClosure` aggregate, tables, enums, legacy import candidate,
+  HTTP lifecycle, Web controls, OAuth scope, and `close_day`, `reopen_day`, and
+  `list_day_closure_history` MCP tools from the accepted repository contract.
+- Kept `get_daily_projection` as an always-live composition over current
+  owning-domain facts with exact local date, timezone, and `asOf`.
+- Changed routine Coach capture so a direct relevant user report authorizes one
+  idempotent low-risk create/correction without a duplicate question, followed
+  by typed read-back. Unknown Meal nutrients remain partial/null and later
+  input appends a superseding correction.
+- Renamed the repository conversation surface to `chatgpt_chat` without adding
+  a chat UI, provider memory, service, database, or OAuth client. Regular Chat
+  rebinding and Instant selection remain operational cutover steps.
+- Added a dependency-safe migration and verified clean install, every committed
+  migration prefix, identifier length, cappuccino create/read-back/correction,
+  20-tool discovery, Web behavior, and independent Quality/Architecture
+  acceptance.
+- Did not deploy, execute staging/production migration, reconnect OAuth, change
+  connector permissions, rebind the live conversation, commit, or push. Until
+  that separately approved cutover, staging continues to expose the previous
+  23-tool contract and existing conversation binding.
 
 ### 2026-08-27 — Persistent one-action ChatGPT MCP coaching UX
 

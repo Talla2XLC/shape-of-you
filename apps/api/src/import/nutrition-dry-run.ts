@@ -20,8 +20,7 @@ export type NutritionImportRecordKind =
   | "ingredient"
   | "food"
   | "composition"
-  | "meal"
-  | "day_closure";
+  | "meal";
 
 /** Comparable current Nutrition record returned by the target reader. */
 export interface NutritionImportTarget {
@@ -113,21 +112,13 @@ export interface NutritionMealCandidate extends CandidateBase {
   readonly confidence: number | null;
 }
 
-/** Source-authoritative closed-day decision imported after same-run facts. */
-export interface NutritionDayClosureCandidate extends CandidateBase {
-  readonly kind: "day_closure";
-  readonly localDate: string;
-  readonly sourceStatus: "Closed";
-}
-
 /** Valid normalized Nutrition candidates accepted by dry-run and apply. */
 export type NutritionImportCandidate =
   | NutritionBrandCandidate
   | NutritionIngredientCandidate
   | NutritionFoodCandidate
   | NutritionCompositionCandidate
-  | NutritionMealCandidate
-  | NutritionDayClosureCandidate;
+  | NutritionMealCandidate;
 
 type NutritionImportEvidence =
   | {
@@ -227,8 +218,7 @@ export class NutritionDryRunAdapter implements DryRunImportAdapter<
       ingredient: snapshot.ingredients.sheetId,
       food: snapshot.foods.sheetId,
       composition: snapshot.foodIngredients.sheetId,
-      meal: snapshot.meals.sheetId,
-      day_closure: snapshot.dailyLog.sheetId
+      meal: snapshot.meals.sheetId
     };
     const invalidIdentityKeys = new Set(normalized.invalid.flatMap(({ record }) =>
       record.sourceSheetId === null || record.sourceRecordId === null
@@ -388,11 +378,6 @@ export function nutritionMealSemanticChecksum(input: {
   return digest({ kind: "meal", ...input });
 }
 
-/** Stable semantic checksum for a source-authoritative closed local day. */
-export function nutritionDayClosureSemanticChecksum(localDate: string): string {
-  return digest({ kind: "day_closure", localDate, sourceStatus: "Closed" });
-}
-
 function candidateSemanticChecksum(
   candidate: NutritionImportCandidate
 ): string | null {
@@ -401,9 +386,6 @@ function candidateSemanticChecksum(
   }
   if (candidate.kind === "meal") {
     return nutritionMealSemanticChecksum(candidate);
-  }
-  if (candidate.kind === "day_closure") {
-    return nutritionDayClosureSemanticChecksum(candidate.localDate);
   }
   return null;
 }
@@ -428,29 +410,7 @@ function normalizeSnapshot(snapshot: FitnessTrackerNutritionSnapshot): {
   normalizeSheet(snapshot.foods, (row, columns) => normalizeFood(row, columns, snapshot), candidates, invalid);
   normalizeSheet(snapshot.foodIngredients, (row, columns) => normalizeComposition(row, columns, snapshot), candidates, invalid);
   normalizeSheet(snapshot.meals, (row, columns) => normalizeMeal(row, columns, snapshot), candidates, invalid);
-  normalizeClosedDays(snapshot.dailyLog, candidates, invalid);
   return { candidates, invalid };
-}
-
-function normalizeClosedDays(
-  sheet: BoundedSheetSnapshot,
-  candidates: NutritionImportCandidate[],
-  invalid: InvalidRow[]
-): void {
-  const columns = Object.fromEntries(sheet.headers.map((header, index) => [header, index]));
-  for (const row of sheet.rows) {
-    const status = optionalText(row, columns, "DayStatus", 64);
-    if (status !== "Closed") continue;
-    const localDate = dateValue(value(row, columns, "Date"));
-    if (!localDate) {
-      invalid.push(invalidRow("day_closure", row, sheet.sheetId, null, "invalid_closed_day_row"));
-      continue;
-    }
-    candidates.push(candidateBase("day_closure", row, sheet.sheetId, localDate, {
-      localDate,
-      sourceStatus: "Closed" as const
-    }));
-  }
 }
 
 function normalizeSheet(

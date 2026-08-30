@@ -14,7 +14,6 @@ import type { RecoveryStore } from "../storage/recovery-repository.js";
 import type { CoachingStore } from "../storage/coaching-repository.js";
 import type { IntakeStore } from "../storage/intake-repository.js";
 import type { IntakeParser } from "../domain/intake.js";
-import type { DayClosureStore } from "../storage/day-closure-repository.js";
 import type { DailyContextNoteStore } from "../storage/daily-context-note-repository.js";
 import { BodyMeasurementSessionModule } from "../body-measurement-sessions/body-measurement-session.module.js";
 import { PhysicalGoalModule } from "../physical-goals/physical-goal.module.js";
@@ -24,7 +23,7 @@ import { TrainingModule } from "../training/training.module.js";
 import { RecoveryModule } from "../recovery/recovery.module.js";
 import { CoachingModule } from "../coaching/coaching.module.js";
 import { IntakeModule } from "../intake/intake.module.js";
-import { DayClosureModule } from "../day-closures/day-closure.module.js";
+import { DailyProjectionModule } from "../daily-projections/daily-projection.module.js";
 import { DailyContextNoteModule } from "../daily-context-notes/daily-context-note.module.js";
 import { ProgressOverviewModule } from "../progress-overview/progress-overview.module.js";
 import { ChatAssistantModule } from "../chat-assistant/chat-assistant.module.js";
@@ -41,7 +40,6 @@ import {
   INTAKE_STORE,
   READINESS_PROBE,
   WEIGHT_MEASUREMENT_STORE,
-  DAY_CLOSURE_STORE,
   DAILY_CONTEXT_NOTE_STORE,
   CHAT_ASSISTANT_CONVERSATION_BINDING_STORE
 } from "./tokens.js";
@@ -68,8 +66,6 @@ export interface AppModuleOptions {
   readonly intakeStore: IntakeStore;
   /** Optional provider adapter; null leaves queued work durable but unclaimed. */
   readonly intakeParser: IntakeParser | null;
-  /** Persistence boundary for versioned Person-local daily closures. */
-  readonly dayClosureStore: DayClosureStore;
   /** Persistence boundary for append-only Person-local context notes. */
   readonly dailyContextNoteStore: DailyContextNoteStore;
   /** Persistence boundary for Person-owned assistant conversation bindings. */
@@ -130,10 +126,6 @@ class RuntimeDependenciesModule {
           useValue: options.intakeParser
         },
         {
-          provide: DAY_CLOSURE_STORE,
-          useValue: options.dayClosureStore
-        },
-        {
           provide: DAILY_CONTEXT_NOTE_STORE,
           useValue: options.dailyContextNoteStore
         },
@@ -163,7 +155,6 @@ class RuntimeDependenciesModule {
         COACHING_STORE,
         INTAKE_STORE,
         INTAKE_PARSER,
-        DAY_CLOSURE_STORE,
         DAILY_CONTEXT_NOTE_STORE,
         CHAT_ASSISTANT_CONVERSATION_BINDING_STORE,
         WEIGHT_MEASUREMENT_STORE,
@@ -198,7 +189,7 @@ export class AppModule {
         CoachingModule,
         IntakeModule,
         DailyContextNoteModule,
-        DayClosureModule,
+        DailyProjectionModule,
         ProgressOverviewModule,
         ChatAssistantModule
       ]

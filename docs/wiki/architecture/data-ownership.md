@@ -70,8 +70,8 @@ events, or owned published read models with explicit freshness contracts.
 The progress overview is an API application read model, not a new owner. It
 coordinates bounded reads exported by the existing Physical State, Nutrition,
 Training, Recovery, and Coaching modules and derives no durable `DayRecord`.
-`DayClosure` remains an exact-date lifecycle artifact and is not historical
-progress authority.
+The exact-date `DailyProjection` follows the same rule: it composes current
+facts and owns no lifecycle or historical authority.
 
 ## Evidence
 
@@ -98,3 +98,4 @@ progress authority.
 - [Shared-reference ADR](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Progress overview API](../api/progress-overview.md)
+- [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

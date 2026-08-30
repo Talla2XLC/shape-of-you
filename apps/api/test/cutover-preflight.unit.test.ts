@@ -80,9 +80,9 @@ describe("cutover preflight", () => {
       .map((tool) => ({ tool: tool.name, success: true, readBack: true }));
     expect(() => verifyCutoverWriterEvidence({ tools, canaries })).not.toThrow();
     expect(() => verifyCutoverWriterEvidence({
-      tools,
-      canaries: canaries.filter((item) => item.tool !== "close_day")
-    })).toThrow("close_day");
+      tools: tools.filter((item) => item.name !== "record_meal"),
+      canaries
+    })).toThrow("record_meal");
   });
 
   it("builds a deterministic zero-write post-checkpoint replay plan", () => {

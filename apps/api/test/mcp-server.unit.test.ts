@@ -13,7 +13,6 @@ import { NotFoundError } from "../src/domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-  MCP_DAY_CLOSURE_WRITE_SCOPE,
   MCP_MEAL_WRITE_SCOPE,
   MCP_READ_SCOPE,
   MCP_RECOVERY_WRITE_SCOPE,
@@ -56,12 +55,7 @@ const unavailableServices = {
     correctObservation: unreachable
   },
   dailyContextNotes: { list: unreachable, create: unreachable, correct: unreachable },
-  dayClosures: {
-    projection: unreachable,
-    close: unreachable,
-    reopen: unreachable,
-    history: unreachable
-  }
+  dailyProjection: { projection: unreachable }
 };
 
 registerMcpRoutes({
@@ -125,10 +119,10 @@ describe("MCP HTTP adapter", () => {
       "plain Markdown and never emit HTML entities or encoded whitespace"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Do not write until the user reports a completed action"
+      "direct relevant user report authorizes one routine low-risk"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "separately confirmed reopen, edit, and reclose"
+      "Always read back successful writes"
     );
   });
 
@@ -160,7 +154,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(23);
+    expect(body.result.tools).toHaveLength(20);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -197,17 +191,11 @@ describe("MCP HTTP adapter", () => {
       list_daily_context_notes: MCP_READ_SCOPE,
       record_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       correct_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-      get_daily_projection: MCP_READ_SCOPE,
-      list_day_closure_history: MCP_READ_SCOPE,
-      close_day: MCP_DAY_CLOSURE_WRITE_SCOPE,
-      reopen_day: MCP_DAY_CLOSURE_WRITE_SCOPE
+      get_daily_projection: MCP_READ_SCOPE
     });
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
-    )?.description).toContain("call reopen_day");
-    expect(body.result.tools.find((tool: { name: string }) =>
-      tool.name === "record_daily_context_note"
-    )?.description).toContain("separately confirm close_day");
+    )?.description).toContain("follow with typed read-back");
     const workoutSetSchema = body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_workout_session"
     )?.inputSchema.properties.exercises.items.properties.sets.items;
@@ -596,7 +584,7 @@ describe("MCP HTTP adapter", () => {
       scope: [
         MCP_READ_SCOPE,
         MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-        MCP_DAY_CLOSURE_WRITE_SCOPE
+        MCP_MEAL_WRITE_SCOPE
       ].join(" ")
     })
       .setProtectedHeader({ alg: "ES256", kid: "writer-v1" })
@@ -618,14 +606,32 @@ describe("MCP HTTP adapter", () => {
       created: true,
       note: { id: "00000000-0000-4000-8000-000000000202" }
     });
-    const close = vi.fn().mockResolvedValue({
-      created: true,
-      closure: { id: "00000000-0000-4000-8000-000000000203" }
-    });
-    const reopen = vi.fn().mockResolvedValue({
-      created: true,
-      closure: { id: "00000000-0000-4000-8000-000000000203" }
-    });
+    const originalMeal = {
+      id: "00000000-0000-4000-8000-000000000203",
+      description: "Капучино",
+      items: [{
+        label: "Капучино",
+        quantity: 1,
+        unit: "serving",
+        nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
+      }]
+    };
+    const correctedMeal = {
+      ...originalMeal,
+      id: "00000000-0000-4000-8000-000000000204",
+      supersedesId: originalMeal.id,
+      items: [{
+        ...originalMeal.items[0],
+        quantity: 300,
+        unit: "ml",
+        nutrients: { caloriesKcal: 120, proteinG: null, fatG: null, carbsG: null }
+      }]
+    };
+    const createMeal = vi.fn().mockResolvedValue({ created: true, meal: originalMeal });
+    const correctMeal = vi.fn().mockResolvedValue({ created: true, meal: correctedMeal });
+    const listMeals = vi.fn()
+      .mockResolvedValueOnce({ items: [originalMeal], nextCursor: null })
+      .mockResolvedValueOnce({ items: [correctedMeal], nextCursor: null });
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -653,7 +659,7 @@ describe("MCP HTTP adapter", () => {
           create,
           correct
         },
-        dayClosures: { ...unavailableServices.dayClosures, close, reopen }
+        nutrition: { listMeals, createMeal, correctMeal }
       }
     });
 
@@ -683,6 +689,29 @@ describe("MCP HTTP adapter", () => {
         occurredAt: null
       },
       dedupeKey: "chatgpt:daily-note:2026-08-26"
+    };
+    const cappuccino = {
+      occurredAt: "2026-08-29T07:30:00.000Z",
+      timezone: "Europe/Moscow",
+      kind: "snack",
+      description: "Капучино",
+      note: null,
+      photoMediaId: null,
+      items: [{
+        foodVersionId: null,
+        label: "Капучино",
+        quantity: 1,
+        unit: "serving",
+        nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
+      }],
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-08-29T07:30:00.000Z"
+      },
+      dedupeKey: "chatgpt:meal:cappuccino:2026-08-29:0730",
+      confidence: null
     };
 
     try {
@@ -715,35 +744,37 @@ describe("MCP HTTP adapter", () => {
       })).json().result).toMatchObject({
         structuredContent: { id: "00000000-0000-4000-8000-000000000202" }
       });
-      expect((await call(10, "close_day", {
-        localDate: "2026-08-26",
-        timezone: "Europe/Moscow",
-        idempotencyKey: "chatgpt:close:2026-08-26"
-      })).json().result).toMatchObject({
-        structuredContent: { id: "00000000-0000-4000-8000-000000000203" }
-      });
-      expect((await call(11, "reopen_day", {
-        localDate: "2026-08-26",
-        reason: "Add a confirmed late fact",
-        idempotencyKey: "chatgpt:reopen:2026-08-26:1"
-      })).json().result).toMatchObject({
-        structuredContent: { id: "00000000-0000-4000-8000-000000000203" }
-      });
-
+      expect((await call(10, "record_meal", cappuccino)).json().result)
+        .toMatchObject({ structuredContent: originalMeal });
+      expect((await call(11, "list_meals", { localDate: "2026-08-29" })).json().result)
+        .toMatchObject({ structuredContent: { items: [originalMeal] } });
+      const correction = {
+        ...cappuccino,
+        id: originalMeal.id,
+        items: [{
+          ...cappuccino.items[0],
+          quantity: 300,
+          unit: "ml",
+          nutrients: { caloriesKcal: 120, proteinG: null, fatG: null, carbsG: null }
+        }],
+        dedupeKey: "chatgpt:meal:cappuccino:2026-08-29:0730:correction:1",
+        reason: "Пользователь уточнил объём и калорийность"
+      };
+      expect((await call(12, "correct_meal", correction)).json().result)
+        .toMatchObject({ structuredContent: correctedMeal });
+      expect((await call(13, "list_meals", { localDate: "2026-08-29" })).json().result)
+        .toMatchObject({ structuredContent: { items: [correctedMeal] } });
       expect(findActiveProgram).toHaveBeenCalledTimes(3);
       expect(create).toHaveBeenCalledWith(note);
       expect(correct).toHaveBeenCalledWith(
         "00000000-0000-4000-8000-000000000201",
         expect.objectContaining({ reason: "Clarified wording" })
       );
-      expect(close).toHaveBeenCalledWith({
-        localDate: "2026-08-26",
-        timezone: "Europe/Moscow",
-        idempotencyKey: "chatgpt:close:2026-08-26"
-      });
-      expect(reopen).toHaveBeenCalledWith(
-        "2026-08-26",
-        expect.objectContaining({ reason: "Add a confirmed late fact" })
+      expect(createMeal).toHaveBeenCalledWith(cappuccino);
+      expect(listMeals).toHaveBeenCalledTimes(2);
+      expect(correctMeal).toHaveBeenCalledWith(
+        originalMeal.id,
+        expect.objectContaining({ reason: "Пользователь уточнил объём и калорийность" })
       );
     } finally {
       await authorizedFastify.close();

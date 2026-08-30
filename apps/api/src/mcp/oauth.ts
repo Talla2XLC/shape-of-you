@@ -14,7 +14,6 @@ export const MCP_MEAL_WRITE_SCOPE = "meal:write";
 export const MCP_WORKOUT_WRITE_SCOPE = "workout:write";
 export const MCP_RECOVERY_WRITE_SCOPE = "recovery:write";
 export const MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE = "daily-context-note:write";
-export const MCP_DAY_CLOSURE_WRITE_SCOPE = "day-closure:write";
 
 export type McpOAuthErrorCode = "invalid_token" | "insufficient_scope";
 

@@ -27,7 +27,6 @@ import type { TrainingStore } from "../src/storage/training-repository.js";
 import type { RecoveryStore } from "../src/storage/recovery-repository.js";
 import type { CoachingStore } from "../src/storage/coaching-repository.js";
 import type { IntakeStore } from "../src/storage/intake-repository.js";
-import type { DayClosureStore } from "../src/storage/day-closure-repository.js";
 import type { DailyContextNoteStore } from "../src/storage/daily-context-note-repository.js";
 import type {
   CreateWeightMeasurementResult,
@@ -270,13 +269,6 @@ const intakeStore: IntakeStore = {
   failJob: unreachable
 };
 
-const dayClosureStore: DayClosureStore = {
-  findActive: unreachable,
-  history: unreachable,
-  close: unreachable,
-  reopen: unreachable
-};
-
 const dailyContextNoteStore: DailyContextNoteStore = {
   create: unreachable,
   correct: unreachable,
@@ -292,7 +284,6 @@ const physicalStateStores = {
   recoveryStore,
   coachingStore,
   intakeStore,
-  dayClosureStore,
   dailyContextNoteStore
 };
 

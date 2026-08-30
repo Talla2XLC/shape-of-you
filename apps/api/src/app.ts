@@ -54,10 +54,6 @@ import {
   type IntakeStore
 } from "./storage/intake-repository.js";
 import {
-  DayClosureRepository,
-  type DayClosureStore
-} from "./storage/day-closure-repository.js";
-import {
   DailyContextNoteRepository,
   type DailyContextNoteStore
 } from "./storage/daily-context-note-repository.js";
@@ -68,7 +64,7 @@ import { NutritionService } from "./nutrition/nutrition.service.js";
 import { TrainingService } from "./training/training.service.js";
 import { RecoveryService } from "./recovery/recovery.service.js";
 import { DailyContextNoteService } from "./daily-context-notes/daily-context-note.service.js";
-import { DayClosureService } from "./day-closures/day-closure.service.js";
+import { DailyProjectionService } from "./daily-projections/daily-projection.service.js";
 import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
 import { McpAuthorizer } from "./mcp/oauth.js";
 import { registerMcpRoutes } from "./mcp/server.js";
@@ -102,8 +98,6 @@ export interface BuildAppOptions {
   readonly coachingStore?: CoachingStore;
   /** Optional Intake persistence used for isolated application tests. */
   readonly intakeStore?: IntakeStore;
-  /** Optional daily-closure persistence used for isolated application tests. */
-  readonly dayClosureStore?: DayClosureStore;
   /** Optional DailyContextNote persistence used for isolated application tests. */
   readonly dailyContextNoteStore?: DailyContextNoteStore;
   /** Optional assistant binding persistence used for isolated tests. */
@@ -174,9 +168,6 @@ export async function buildApp(
   const intakeStore =
     options.intakeStore ??
     (database ? new IntakeRepository(database) : undefined);
-  const dayClosureStore =
-    options.dayClosureStore ??
-    (database ? new DayClosureRepository(database) : undefined);
   const dailyContextNoteStore =
     options.dailyContextNoteStore ??
     (database ? new DailyContextNoteRepository(database) : undefined);
@@ -197,7 +188,6 @@ export async function buildApp(
     !recoveryStore ||
     !coachingStore ||
     !intakeStore ||
-    !dayClosureStore ||
     !dailyContextNoteStore
   ) {
     throw new Error("All application persistence stores are required");
@@ -257,7 +247,6 @@ export async function buildApp(
       recoveryStore,
       coachingStore,
       intakeStore,
-      dayClosureStore,
       dailyContextNoteStore,
       chatAssistantConversationBindingStore,
       intakeParser: options.intakeParser ?? null,
@@ -295,7 +284,7 @@ export async function buildApp(
         training: app.get(TrainingService),
         recovery: app.get(RecoveryService),
         dailyContextNotes: app.get(DailyContextNoteService),
-        dayClosures: app.get(DayClosureService)
+        dailyProjection: app.get(DailyProjectionService)
       }
     });
   }

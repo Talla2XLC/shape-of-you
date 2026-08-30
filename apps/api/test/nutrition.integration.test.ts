@@ -372,6 +372,119 @@ describe("Nutrition PostgreSQL vertical", () => {
     ]);
   });
 
+  it("captures an unknown cappuccino and supersedes it after a later correction", async () => {
+    const fastify = getFastifyInstance(app);
+    const originalPayload = {
+      occurredAt: "2026-08-29T07:30:00.000Z",
+      timezone: "Europe/Moscow",
+      kind: "snack",
+      description: "Капучино",
+      note: null,
+      photoMediaId: null,
+      items: [{
+        foodVersionId: null,
+        label: "Капучино",
+        quantity: 1,
+        unit: "serving",
+        nutrients: {
+          caloriesKcal: null,
+          proteinG: null,
+          fatG: null,
+          carbsG: null
+        }
+      }],
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-08-29T07:30:00.000Z"
+      },
+      dedupeKey: "chatgpt:meal:cappuccino:2026-08-29:0730",
+      confidence: null
+    } as const;
+
+    const created = await fastify.inject({
+      method: "POST",
+      url: "/v1/nutrition/meals",
+      payload: originalPayload
+    });
+    expect(created.statusCode, created.body).toBe(201);
+
+    const firstReadBack = await fastify.inject({
+      method: "GET",
+      url: "/v1/nutrition/meals?localDate=2026-08-29"
+    });
+    expect(firstReadBack.statusCode, firstReadBack.body).toBe(200);
+    expect(firstReadBack.json().items).toEqual([
+      expect.objectContaining({
+        id: created.json().id,
+        description: "Капучино",
+        items: [expect.objectContaining({
+          quantity: 1,
+          unit: "serving",
+          nutrients: {
+            caloriesKcal: null,
+            proteinG: null,
+            fatG: null,
+            carbsG: null
+          }
+        })]
+      })
+    ]);
+
+    const corrected = await fastify.inject({
+      method: "POST",
+      url: `/v1/nutrition/meals/${created.json().id as string}/corrections`,
+      payload: {
+        ...originalPayload,
+        items: [{
+          ...originalPayload.items[0],
+          quantity: 300,
+          unit: "ml",
+          nutrients: {
+            caloriesKcal: 120,
+            proteinG: null,
+            fatG: null,
+            carbsG: null
+          }
+        }],
+        dedupeKey: "chatgpt:meal:cappuccino:2026-08-29:0730:correction:1",
+        reason: "Пользователь уточнил объём и калорийность"
+      }
+    });
+    expect(corrected.statusCode, corrected.body).toBe(201);
+    expect(corrected.json().supersedesId).toBe(created.json().id);
+
+    const correctedReadBack = await fastify.inject({
+      method: "GET",
+      url: "/v1/nutrition/meals?localDate=2026-08-29"
+    });
+    expect(correctedReadBack.json().items).toEqual([
+      expect.objectContaining({
+        id: corrected.json().id,
+        supersedesId: created.json().id,
+        items: [expect.objectContaining({
+          quantity: 300,
+          unit: "ml",
+          nutrients: {
+            caloriesKcal: 120,
+            proteinG: null,
+            fatG: null,
+            carbsG: null
+          }
+        })]
+      })
+    ]);
+    const history = await fastify.inject({
+      method: "GET",
+      url: `/v1/nutrition/meals/${created.json().id as string}/history`
+    });
+    expect(history.json().items.map((meal: { id: string }) => meal.id)).toEqual([
+      created.json().id,
+      corrected.json().id
+    ]);
+  });
+
   it("stages external records idempotently without name-based merging", async () => {
     const firstSource = await database.pool.query<{ id: string }>(
       `insert into nutrition_catalog_sources (key, name)

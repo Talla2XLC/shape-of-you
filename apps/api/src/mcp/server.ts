@@ -4,7 +4,6 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
   BodyMeasurementSessionListSchema,
-  CloseDaySchema,
   CorrectBodyMeasurementSessionSchema,
   CorrectDailyContextNoteSchema,
   CorrectMealSchema,
@@ -20,7 +19,6 @@ import {
   DailyContextNoteListSchema,
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
-  DayClosureHistorySchema,
   ListDailyContextNotesQuerySchema,
   ListBodyMeasurementSessionsQuerySchema,
   ListMealsQuerySchema,
@@ -29,11 +27,9 @@ import {
   ListWorkoutSessionsQuerySchema,
   MealListSchema,
   RecoveryObservationListSchema,
-  ReopenDaySchema,
   TrainingProgramSchema,
   WeightMeasurementListSchema,
   WorkoutSessionListSchema,
-  type CloseDay,
   type CorrectBodyMeasurementSession,
   type CorrectDailyContextNote,
   type CorrectMeal,
@@ -53,7 +49,6 @@ import {
   type ListRecoveryObservationsQuery,
   type ListWeightMeasurementsQuery,
   type ListWorkoutSessionsQuery,
-  type ReopenDay
 } from "@shape-of-you/contracts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -72,12 +67,11 @@ import type { RecoveryService } from "../recovery/recovery.service.js";
 import type { TrainingService } from "../training/training.service.js";
 import type { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
 import type { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
-import type { DayClosureService } from "../day-closures/day-closure.service.js";
+import type { DailyProjectionService } from "../daily-projections/daily-projection.service.js";
 import { NotFoundError } from "../domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-  MCP_DAY_CLOSURE_WRITE_SCOPE,
   MCP_MEAL_WRITE_SCOPE,
   MCP_READ_SCOPE,
   MCP_RECOVERY_WRITE_SCOPE,
@@ -95,7 +89,7 @@ interface McpServices {
   readonly training: Pick<TrainingService, "listWorkoutSessions" | "createWorkoutSession" | "correctWorkoutSession" | "findActiveProgram">;
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
-  readonly dayClosures: Pick<DayClosureService, "projection" | "close" | "reopen" | "history">;
+  readonly dailyProjection: Pick<DailyProjectionService, "projection">;
 }
 
 /** Dependencies required by the API-owned stateless MCP transport adapter. */
@@ -125,21 +119,18 @@ type OAuthProtectedTool = Tool & {
   readonly securitySchemes: readonly OAuthSecurityScheme[];
 };
 
-const closedDayWriteInstruction =
-  "First call get_daily_projection for the target local date. If it is closed or stale, stop and obtain explicit confirmation for reopen, edit, and reclose: call reopen_day, read back the open projection, perform a separately confirmed write and typed read-back, then separately confirm close_day and read back projection and history.";
-
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
-  "Use only the authorized Person-scoped typed tools. Confirm writes, read back successful writes, and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
+  "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
   "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
   "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
-  "Format user-facing Daily Coach answers as plain Markdown and never emit HTML entities or encoded whitespace. " +
-  "Do not write until the user reports a completed action, the atomic typed command is unambiguous, and the user confirms it. For a closed or stale day, require separately confirmed reopen, edit, and reclose steps with typed read-back after each mutation.";
+  "Preserve unknown optional values as null or partial instead of inventing precision. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. Ask only for irreducible ambiguity between materially different targets, dates, or domain meanings. " +
+  "Format user-facing Daily Coach answers as plain Markdown and never emit HTML entities or encoded whitespace. Destructive, credential, administrative, and material goal or program changes still require explicit confirmation.";
 
 const toolAuthorityInstruction =
   "PostgreSQL authority; no Google Sheets fallback. Fail closed if this tool or its authorization is unavailable.";
@@ -194,8 +185,7 @@ export function registerMcpRoutes(options: McpRouteOptions): void {
       MCP_MEAL_WRITE_SCOPE,
       MCP_WORKOUT_WRITE_SCOPE,
       MCP_RECOVERY_WRITE_SCOPE,
-      MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-      MCP_DAY_CLOSURE_WRITE_SCOPE
+      MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE
     ],
     bearer_methods_supported: ["header"]
   }));
@@ -280,7 +270,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_weight_measurement",
-      `Record one idempotent weight measurement after user confirmation. ${closedDayWriteInstruction}`,
+      "Record one idempotent weight measurement from a direct user report; follow with typed read-back.",
       CreateWeightMeasurementSchema,
       undefined,
       true,
@@ -289,7 +279,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_weight_measurement",
-      `Append one idempotent correction to a current weight measurement after user confirmation. ${closedDayWriteInstruction}`,
+      "Append one idempotent correction to a uniquely identified current weight measurement; follow with typed read-back.",
       withIdSchema("CorrectWeightMeasurementToolInput", CorrectWeightMeasurementSchema),
       undefined,
       true,
@@ -308,7 +298,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_body_measurements",
-      `Record one idempotent body measurement session after user confirmation. ${closedDayWriteInstruction}`,
+      "Record one idempotent body measurement session from a direct user report; follow with typed read-back.",
       CreateBodyMeasurementSessionSchema,
       undefined,
       true,
@@ -318,7 +308,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_body_measurements",
-      `Append one idempotent correction to a current body measurement session after user confirmation. ${closedDayWriteInstruction}`,
+      "Append one idempotent correction to a uniquely identified body measurement session; follow with typed read-back.",
       withIdSchema("CorrectBodyMeasurementsToolInput", CorrectBodyMeasurementSessionSchema),
       undefined,
       true,
@@ -336,7 +326,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_meal",
-      `Record one idempotent meal after user confirmation. ${closedDayWriteInstruction}`,
+      "Record one idempotent Meal from a direct user report. Unknown nutrients stay null; follow with typed read-back.",
       CreateMealSchema,
       undefined,
       true,
@@ -345,7 +335,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_meal",
-      `Append one idempotent correction to a current meal after user confirmation. ${closedDayWriteInstruction}`,
+      "Append one idempotent correction to a uniquely identified current Meal; follow with typed read-back.",
       withIdSchema("CorrectMealToolInput", CorrectMealSchema),
       undefined,
       true,
@@ -384,7 +374,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_workout_session",
-      `Record one idempotent workout session after user confirmation. ${closedDayWriteInstruction}`,
+      "Record one idempotent workout session from a direct user report; follow with typed read-back.",
       createWorkoutSessionToolInputSchema,
       undefined,
       true,
@@ -397,7 +387,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_workout_session",
-      `Append one idempotent correction to a current workout session after user confirmation. ${closedDayWriteInstruction}`,
+      "Append one idempotent correction to a uniquely identified workout session; follow with typed read-back.",
       withIdSchema(
         "CorrectWorkoutSessionToolInput",
         correctWorkoutSessionToolInputSchema
@@ -421,7 +411,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_recovery_observation",
-      `Record one idempotent typed recovery observation after user confirmation. ${closedDayWriteInstruction}`,
+      "Record one idempotent typed recovery observation from a direct user report; follow with typed read-back.",
       CreateRecoveryObservationSchema,
       undefined,
       true,
@@ -431,7 +421,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_recovery_observation",
-      `Append one idempotent correction to a current recovery observation after user confirmation. ${closedDayWriteInstruction}`,
+      "Append one idempotent correction to a uniquely identified recovery observation; follow with typed read-back.",
       withIdSchema("CorrectRecoveryObservationToolInput", CorrectRecoveryObservationSchema),
       undefined,
       true,
@@ -449,7 +439,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_daily_context_note",
-      `Record one idempotent standalone daily context note after user confirmation. ${closedDayWriteInstruction}`,
+      "Record one idempotent relevant context note when no more specific typed fact can represent the report safely; follow with typed read-back.",
       CreateDailyContextNoteSchema,
       undefined,
       true,
@@ -458,7 +448,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_daily_context_note",
-      `Append one idempotent correction to a current daily context note after user confirmation. ${closedDayWriteInstruction}`,
+      "Append one idempotent correction to a uniquely identified context note; follow with typed read-back.",
       withIdSchema("CorrectDailyContextNoteToolInput", CorrectDailyContextNoteSchema),
       undefined,
       true,
@@ -467,39 +457,12 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_daily_projection",
-      "Read one live or closed Person-local daily projection.",
+      "Read the current owning-domain facts for one Person-local date.",
       DailyProjectionQuerySchema,
       DailyProjectionSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.dayClosures.projection(input as DailyProjectionQuery)
-    ),
-    defineTool(
-      "list_day_closure_history",
-      "Read append-only closure history for one Person-local date.",
-      DailyProjectionQuerySchema,
-      DayClosureHistorySchema,
-      false,
-      MCP_READ_SCOPE,
-      (input) => services.dayClosures.history(input as DailyProjectionQuery)
-    ),
-    defineTool(
-      "close_day",
-      "Close one Person-local date with an immutable typed snapshot after explicit user confirmation.",
-      CloseDaySchema,
-      undefined,
-      true,
-      MCP_DAY_CLOSURE_WRITE_SCOPE,
-      async (input) => (await services.dayClosures.close(input as CloseDay)).closure
-    ),
-    defineTool(
-      "reopen_day",
-      "Reopen one closed Person-local date with a mandatory reason after explicit user confirmation.",
-      withLocalDateSchema("ReopenDayToolInput", ReopenDaySchema),
-      undefined,
-      true,
-      MCP_DAY_CLOSURE_WRITE_SCOPE,
-      async (input) => (await services.dayClosures.reopen(input.localDate as string, input as unknown as ReopenDay)).closure
+      (input) => services.dailyProjection.projection(input as DailyProjectionQuery)
     )
   ];
 }
@@ -602,22 +565,6 @@ function withIdSchema(
     required: ["id", ...schema.required],
     properties: {
       id: { type: "string", format: "uuid" },
-      ...schema.properties
-    }
-  };
-}
-
-function withLocalDateSchema(
-  id: string,
-  schema: { readonly required: readonly string[]; readonly properties: Readonly<Record<string, unknown>> }
-): Readonly<Record<string, unknown>> {
-  return {
-    $id: id,
-    type: "object",
-    additionalProperties: false,
-    required: ["localDate", ...schema.required],
-    properties: {
-      localDate: { type: "string", format: "date" },
       ...schema.properties
     }
   };

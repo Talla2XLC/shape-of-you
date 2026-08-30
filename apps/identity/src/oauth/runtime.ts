@@ -21,7 +21,6 @@ export const initialOAuthProtocolScopes = ["openid", "offline_access"] as const;
 export const initialOAuthResourceScopes = [
   "body-measurement:write",
   "daily-context-note:write",
-  "day-closure:write",
   "meal:write",
   "person:read",
   "recovery:write",

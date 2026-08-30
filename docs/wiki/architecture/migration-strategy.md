@@ -108,10 +108,9 @@ comparisons; this orchestration is not a second migrator and does not weaken
 the existing one-domain commands.
 
 Nutrition target reads compare exact relational projections for imported
-Brands, Meals, and accepted Sheets day closures when legacy capture rendering
-changed a row checksum without changing the stored fact. This compatibility
-does not apply to unsupported entity kinds or day closures without accepted
-Sheets provenance. Numeric-sheet provenance drift is detected by stable source
+Brands and Meals when legacy capture rendering changed a row checksum without
+changing the stored fact. Day status is not a Nutrition candidate or target.
+Numeric-sheet provenance drift is detected by stable source
 ID across workbook-scoped catalog sources; the importer neither creates a
 duplicate nor repairs provenance automatically. TASK-0062 restored the exact
 authoritative identities after a prior remediation inverted them: current
@@ -142,10 +141,9 @@ blocks the row until a media migration capability exists.
 Nutrition Meals preserve source date-only semantics with `local_date`, a null
 `occurredAt`, and one immutable `serving` snapshot item containing the row's
 known source nutrient values. Existing and interactive Meals remain `instant`.
-Neither catalog gaps nor Meal time/media are inferred. `Daily_Log.DayStatus =
-Closed` is imported after same-run Meals as an idempotent `google_sheets`
-`DayClosure`. Its snapshot records Nutrition completeness. Training is optional:
-absence of a Workout never blocks closure.
+Neither catalog gaps nor Meal time/media are inferred. `Daily_Log.DayStatus`
+is retained only as legacy workbook evidence and is not imported into the
+operational domain.
 
 Controlled one-time runs execute from the operator workstation. Codex reads
 only approved bounded ranges, capped by current sheet grid metadata, from the
@@ -163,15 +161,14 @@ automation is needed. Controlled real-data apply has completed for every
 non-empty supported domain. Unattended recurring reconciliation and live
 service-identity use remain separately approved operations.
 
-The verified live writer contract has six active operations: Weight, Meal,
-Workout result, raw Garmin/Recovery observations, standalone daily context
-note, and explicit day closure. Body is currently unused but remains a
-supported writer capability. Repository MCP already has list/record tools for
-the five existing fact modules, including Recovery, but complete cutover parity
-also requires append-only corrections, day projection/close/reopen/history,
-active Training reference lookup, and a typed `DailyContextNote` fact.
+The accepted repository writer contract covers Weight, Meal, Workout result,
+raw Garmin/Recovery observations, standalone daily context note, and Body. It
+exposes append-only corrections, active Training reference lookup, and an
+always-live daily projection through 20 typed MCP tools. The previously
+deployed staging contract remains at 23 tools, including closure lifecycle,
+until a separately approved deployment and OAuth reconnect.
 
-TASK-0057 keeps separate typed domain tools and does not expand the Weight-only
+TASK-0057 kept separate typed domain tools and did not expand the Weight-only
 Intake parser into a generic event queue or persist a `CutoverSession`. The API
 now exposes the complete 23-tool writer/reference/lifecycle surface, including
 append-only corrections, `DailyContextNote`, active Training lookup, and day
@@ -182,6 +179,13 @@ Person-isolated rollback plan without writing Sheets. The complete surface is
 deployed and the single staging connector has passed all 14 required
 writer/lifecycle canaries. TASK-0065 completed the exclusive writer switch;
 TASK-0067 completed the separately approved authority transfer.
+
+TASK-0079 removes the DayClosure persistence, import, HTTP, Web, OAuth, and MCP
+surface from the repository. `get_daily_projection` remains an always-live
+composition; direct relevant routine reports use idempotent domain writes and
+typed read-back, and partial Meal nutrients remain null rather than fabricated.
+Deploying this contraction requires a coordinated migration, OAuth reconnect,
+connector permission review, and regular ChatGPT conversation rebind.
 
 Cutover pauses the Sheets writer, captures and re-verifies the source
 checkpoint, runs final import/reconciliation, switches ChatGPT to MCP-only
@@ -214,8 +218,8 @@ appears before operator approval.
 
 Never invent missing data. Ambiguous mapping remains an open question.
 Self-healing begins in dry-run, records before/after, uses an allowlist,
-verifies read-back/integrity, rolls back unverified results, and never
-automatically changes closed days or ambiguous facts.
+verifies read-back/integrity, rolls back unverified results, and never guesses
+ambiguous facts.
 
 ## Evidence
 

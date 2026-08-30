@@ -62,31 +62,31 @@ describe("Chat assistant PostgreSQL launcher", () => {
     await database.pool.query(
       `insert into chat_assistant_conversation_bindings
          (person_id, surface, external_conversation_id, status)
-       values ($1, 'chatgpt_work', 'constraint-conversation-0001', 'active')`,
+       values ($1, 'chatgpt_chat', 'constraint-conversation-0001', 'active')`,
       [constrainedPersonId]
     );
     await expect(database.pool.query(
       `insert into chat_assistant_conversation_bindings
          (person_id, surface, external_conversation_id, status)
-       values ($1, 'chatgpt_work', 'constraint-conversation-0002', 'active')`,
+       values ($1, 'chatgpt_chat', 'constraint-conversation-0002', 'active')`,
       [constrainedPersonId]
     )).rejects.toMatchObject({ constraint: "chat_assistant_binding_active_uq" });
     await expect(database.pool.query(
       `insert into chat_assistant_conversation_bindings
          (person_id, surface, external_conversation_id, status)
-       values ($1, 'chatgpt_work', 'constraint-conversation-0002', 'disabled')`,
+       values ($1, 'chatgpt_chat', 'constraint-conversation-0002', 'disabled')`,
       [constrainedPersonId]
     )).resolves.toMatchObject({ rowCount: 1 });
     await expect(database.pool.query(
       `insert into chat_assistant_conversation_bindings
          (person_id, surface, external_conversation_id, status)
-       values ($1, 'chatgpt_work', 'https://evil.test/private', 'disabled')`,
+       values ($1, 'chatgpt_chat', 'https://evil.test/private', 'disabled')`,
       [constrainedPersonId]
     )).rejects.toMatchObject({ constraint: "chat_assistant_binding_external_id_shape" });
     await expect(database.pool.query(
       `insert into chat_assistant_conversation_bindings
          (person_id, surface, external_conversation_id, status)
-       values ('00000000-0000-4000-8000-000000000099', 'chatgpt_work',
+       values ('00000000-0000-4000-8000-000000000099', 'chatgpt_chat',
                'constraint-conversation-0003', 'disabled')`
     )).rejects.toMatchObject({ code: "23503" });
     await expect(database.pool.query(
@@ -120,11 +120,11 @@ describe("Chat assistant PostgreSQL launcher", () => {
       "insert into persons (id, kind, status) values ($1, 'real', 'active')",
       [otherPersonId]
     );
-    await repository.bind(otherPersonId, "chatgpt_work", "another-conversation-1234");
-    await expect(repository.resolveActive(personId, "chatgpt_work")).resolves.toEqual({ status: "missing" });
+    await repository.bind(otherPersonId, "chatgpt_chat", "another-conversation-1234");
+    await expect(repository.resolveActive(personId, "chatgpt_chat")).resolves.toEqual({ status: "missing" });
 
-    await expect(repository.bind(personId, "chatgpt_work", conversationId)).resolves.toMatchObject({ status: "bound" });
-    await expect(repository.bind(personId, "chatgpt_work", conversationId)).resolves.toMatchObject({ status: "existing" });
+    await expect(repository.bind(personId, "chatgpt_chat", conversationId)).resolves.toMatchObject({ status: "bound" });
+    await expect(repository.bind(personId, "chatgpt_chat", conversationId)).resolves.toMatchObject({ status: "existing" });
     const response = await getFastifyInstance(app).inject({
       method: "GET",
       url: "/v1/chat-assistant/launch",
@@ -137,8 +137,8 @@ describe("Chat assistant PostgreSQL launcher", () => {
   });
 
   it("preserves lifecycle evidence and returns a same-origin disabled stop", async () => {
-    await expect(repository.disable(personId, "chatgpt_work")).resolves.toMatchObject({ status: "disabled" });
-    await expect(repository.resolveActive(personId, "chatgpt_work")).resolves.toEqual({ status: "disabled" });
+    await expect(repository.disable(personId, "chatgpt_chat")).resolves.toMatchObject({ status: "disabled" });
+    await expect(repository.resolveActive(personId, "chatgpt_chat")).resolves.toEqual({ status: "disabled" });
     const response = await getFastifyInstance(app).inject({
       method: "GET",
       url: "/v1/chat-assistant/launch",

@@ -1,7 +1,7 @@
 import type {
   FoodCompositionInput,
   MealItemInput,
-  NutrientValues,
+  PartialNutrientValues,
   UpsertFoodOverlay
 } from "@shape-of-you/contracts";
 
@@ -19,18 +19,17 @@ function round(value: number): number {
  */
 export function sumMealNutrition(
   items: readonly MealItemInput[]
-): NutrientValues {
-  return items.reduce<NutrientValues>(
-    (total, item) => ({
-      caloriesKcal: round(
-        total.caloriesKcal + item.nutrients.caloriesKcal
-      ),
-      proteinG: round(total.proteinG + item.nutrients.proteinG),
-      fatG: round(total.fatG + item.nutrients.fatG),
-      carbsG: round(total.carbsG + item.nutrients.carbsG)
-    }),
-    { caloriesKcal: 0, proteinG: 0, fatG: 0, carbsG: 0 }
-  );
+): PartialNutrientValues {
+  const sum = (key: keyof PartialNutrientValues): number | null =>
+    items.some((item) => item.nutrients[key] === null)
+      ? null
+      : round(items.reduce((total, item) => total + item.nutrients[key]!, 0));
+  return {
+    caloriesKcal: sum("caloriesKcal"),
+    proteinG: sum("proteinG"),
+    fatG: sum("fatG"),
+    carbsG: sum("carbsG")
+  };
 }
 
 /**

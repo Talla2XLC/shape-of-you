@@ -250,7 +250,6 @@ export class FitnessTrackerSheetsReader
     requireHeaders(foodIngredients, nutritionHeaders.Food_Ingredients);
     requireHeaders(meals, nutritionHeaders.Meals);
     requireHeader(dailyLog, "Date");
-    requireHeader(dailyLog, "DayStatus");
     const fields = {
       spreadsheetId: FITNESS_TRACKER_SPREADSHEET_ID,
       locale: "ru_RU" as const,

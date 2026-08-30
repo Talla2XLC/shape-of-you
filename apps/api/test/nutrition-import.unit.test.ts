@@ -7,25 +7,24 @@ import {
 import {
   NutritionDryRunAdapter,
   nutritionBrandSemanticChecksum,
-  nutritionDayClosureSemanticChecksum,
   nutritionMealSemanticChecksum,
   type NutritionImportTarget
 } from "../src/import/nutrition-dry-run.js";
 
 describe("unified Fitness Tracker Nutrition dry-run", () => {
-  it("reconciles Nutrition facts and closed-day lifecycle as one domain", () => {
+  it("reconciles Nutrition facts without importing presentation lifecycle", () => {
     const adapter = new NutritionDryRunAdapter();
     const source = snapshot();
     const created = adapter.classify(source, []);
 
     expect(created.safeReport.counts).toEqual({
-      created: 6,
+      created: 5,
       unchanged: 0,
       conflict: 0,
       invalid: 0
     });
     expect(created.privateDetail.candidates.map(({ kind }) => kind).sort()).toEqual([
-      "brand", "composition", "day_closure", "food", "ingredient", "meal"
+      "brand", "composition", "food", "ingredient", "meal"
     ]);
     const target: NutritionImportTarget[] = created.privateDetail.candidates.map(
       (candidate, index) => ({
@@ -38,7 +37,7 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     const unchanged = adapter.classify(source, target);
     expect(unchanged.safeReport.counts).toEqual({
       created: 0,
-      unchanged: 6,
+      unchanged: 5,
       conflict: 0,
       invalid: 0
     });
@@ -114,7 +113,7 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
 
     const result = new NutritionDryRunAdapter().classify(partial, []);
 
-    expect(result.safeReport.counts.created).toBe(6);
+    expect(result.safeReport.counts.created).toBe(5);
     expect(result.privateDetail.candidates.find(({ kind }) => kind === "meal")).toMatchObject({
       nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
     });
@@ -191,7 +190,7 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
     expect(codes).not.toContain("target_only");
   });
 
-  it("accepts relationally equal Brands, Meals, and closed days despite raw changes", () => {
+  it("accepts relationally equal Brands and Meals despite raw changes", () => {
     const source = snapshot();
     const initial = new NutritionDryRunAdapter().classify(source, []);
     const projected = initial.privateDetail.candidates.map((candidate, index) => {
@@ -199,9 +198,7 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
         ? nutritionBrandSemanticChecksum(candidate)
         : candidate.kind === "meal"
           ? nutritionMealSemanticChecksum(candidate)
-          : candidate.kind === "day_closure"
-            ? nutritionDayClosureSemanticChecksum(candidate.localDate)
-            : null;
+          : null;
       return {
         id: `target-${index}`,
         kind: candidate.kind,
@@ -218,7 +215,6 @@ describe("unified Fitness Tracker Nutrition dry-run", () => {
 
     expect(outcomes.get("brand")).toBe("unchanged");
     expect(outcomes.get("meal")).toBe("unchanged");
-    expect(outcomes.get("day_closure")).toBe("unchanged");
     expect(outcomes.get("ingredient")).toBe("conflict");
     expect(outcomes.get("food")).toBe("conflict");
     expect(outcomes.get("composition")).toBe("conflict");

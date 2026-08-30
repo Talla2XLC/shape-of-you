@@ -18,14 +18,15 @@ without an explicit rule is implementation evidence, not an invariant.
 
 ## Content
 
-- Ambiguous input is never stored as confirmed fact.
+- Irreducibly ambiguous input is not guessed into a materially different fact.
 - Retries do not create duplicate facts.
 - Corrections preserve provenance and supersession history.
-- Person-local day closure does not own referenced facts.
+- Current daily state is a read composition and does not own source facts.
 - Execution is not inferred from plans or permissions.
 - Recommendations remain separate from accepted/executed actions.
 - Coaching links sufficient evidence and never claims correlation as causation.
-- Writing to a closed day requires an explicit correction path.
+- A direct relevant report authorizes one routine low-risk typed write; unknown
+  optional values remain partial/null and successful writes require read-back.
 
 Numeric thresholds, readiness scores, and progression parameters are candidates
 for versioned policies rather than eternal invariants.
@@ -42,8 +43,8 @@ for versioned policies rather than eternal invariants.
 
 ## Open questions
 
-- Expert-validated health invariants, closed-day override semantics, scoring
-  ownership, and duplicate policy for device retries/same-day measurements.
+- Expert-validated health invariants, scoring ownership, and duplicate policy
+  for device retries/same-day measurements.
 
 ## Related material
 

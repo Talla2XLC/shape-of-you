@@ -25,7 +25,7 @@ describe("chat assistant launcher domain", () => {
     expect(
       chatAssistantConversationUrl({
         externalConversationId: conversationId,
-        surface: "chatgpt_work"
+        surface: "chatgpt_chat"
       })
     ).toBe(`https://chatgpt.com/c/${conversationId}`);
   });
@@ -63,7 +63,7 @@ describe("chat assistant launcher domain", () => {
         binding: {
           id: "00000000-0000-4000-8000-000000000099",
           personId,
-          surface: "chatgpt_work",
+          surface: "chatgpt_chat",
           externalConversationId: "https://evil.test/private",
           status: "active",
           createdAt: new Date(0),

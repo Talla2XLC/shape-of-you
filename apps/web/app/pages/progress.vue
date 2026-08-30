@@ -71,10 +71,6 @@ async function loadToday(allowAutomaticRetry = true): Promise<void> {
       try {
         const result = await dayApi.projection(today, timezone);
         if (requestId !== todayRequestId) return;
-        if (result.state === "superseded") {
-          todayError.value = "Today's authoritative state is unavailable.";
-          return;
-        }
         todayProjection.value = result;
         return;
       } catch (caught) {
@@ -182,13 +178,13 @@ onMounted(() => { void load(); void loadToday(); });
       </div>
       <template v-else-if="todayProjection">
         <p class="today-lifecycle">
-          <strong>{{ todayProjection.state === "open" ? "Open and live" : todayProjection.state === "stale" ? "Closed snapshot needs review" : `Closed · version ${todayProjection.closure?.version ?? "unknown"}` }}</strong>
-          <span v-if="todayProjection.isStale">New or corrected evidence must be reviewed before editing.</span>
+          <strong>Current recorded facts</strong>
+          <span>Updated {{ new Date(todayProjection.asOf).toLocaleTimeString() }}</span>
         </p>
         <dl class="today-facts">
           <div>
             <dt>Nutrition recorded</dt>
-            <dd>{{ todayProjection.snapshot.nutrition.totals.mealCount }} meals · {{ todayProjection.snapshot.nutrition.totals.caloriesKcal }} kcal</dd>
+            <dd>{{ todayProjection.snapshot.nutrition.totals.mealCount }} meals · {{ todayProjection.snapshot.nutrition.totals.caloriesKcal ?? "unknown" }} kcal</dd>
           </div>
           <div>
             <dt>Training completed</dt>

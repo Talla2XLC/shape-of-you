@@ -5,7 +5,7 @@ title: "Оркестрировать Daily Coach поверх существую
 status: accepted
 date: 2026-08-27
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260829-remove-day-closure-and-use-capture-first-coach"
 tags:
   - "chatgpt"
   - "coaching"

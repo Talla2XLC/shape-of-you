@@ -45,7 +45,7 @@ New deployables or Kafka require a confirmed driver and ADR.
 The authenticated default `/progress` uses one in-process API read-model
 coordinator over bounded module-owned range reads. It returns sparse current
 facts for at most 366 local dates without a materialized aggregate, new data
-owner, cross-service SQL, or expansion of the per-day `DayClosure` boundary.
+owner, cross-service SQL, or a per-day lifecycle boundary.
 
 Staging PostgreSQL is operational authority for fitness data through the typed
 API/MCP domain contracts. Google Sheets is a non-authoritative frozen legacy

@@ -539,7 +539,7 @@ export const MealItemInputSchema = {
       multipleOf: 0.001
     },
     unit: NutritionUnitSchema,
-    nutrients: NutrientValuesSchema
+    nutrients: PartialNutrientValuesSchema
   }
 } as const;
 

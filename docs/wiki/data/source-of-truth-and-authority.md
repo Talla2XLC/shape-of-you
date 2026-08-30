@@ -116,18 +116,17 @@ legacy catalog/Meals checkpoint and is not current authority. Meal snapshots nev
 recalculate from later catalog versions; daily totals remain derived.
 
 Writer authority changes as one exclusive switch, not a dual-write period.
-Before that switch, deployed MCP must cover every fact type used by the ChatGPT
-writer. The verified writer operations are Weight, Meal, Workout result, raw
-Garmin/Recovery observations, standalone daily context note, and explicit day
-closure; Body remains supported even though the current source is empty.
-TASK-0057 implements the complete repository-side MCP target: typed
-append-only corrections, lifecycle tools, active Training reference lookup,
-and a narrow relational `DailyContextNote`. The complete 23-tool surface is
-deployed through the single staging connector, and all 14 required synthetic
-writer/lifecycle canaries have passed with read-back. TASK-0065 completed the
-exclusive switch: MCP is now the only active writer, Google Sheets writes are
-prohibited. TASK-0067 made staging PostgreSQL operational authority and demoted
-Google Sheets to a non-authoritative frozen legacy reference.
+MCP is the only active interactive writer and Google Sheets writes are
+prohibited. The accepted repository contract exposes 20 typed tools for
+Weight, Body, Meal, WorkoutSession, RecoveryObservation, DailyContextNote,
+active Training reference lookup, corrections, and always-live daily
+projection. A direct relevant routine report authorizes one idempotent typed
+write followed by read-back; unknown optional values remain partial/null.
+Staging remains on the previously deployed 23-tool closure contract until a
+separately approved migration, OAuth reconnect, connector permission review,
+and conversation rebind. This transition does not restore Sheets authority or
+permit dual-write. TASK-0067 made staging PostgreSQL operational authority and
+demoted Google Sheets to a non-authoritative frozen legacy reference.
 
 The Sheets writer was paused before a local executable preflight recorded and
 re-verified the final source checkpoint. ChatGPT was then switched to MCP-only

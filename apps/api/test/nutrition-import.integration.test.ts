@@ -61,8 +61,6 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       compositions: string;
       meals: string;
       meal_items: string;
-      closures: string;
-      closure_source: string;
       audits: string;
       temporal_precision: string;
       occurred_at: Date | null;
@@ -80,14 +78,11 @@ describe("unified Fitness Tracker Nutrition apply", () => {
          (select count(*) from meals where person_id = $1)::text meals,
          (select count(*) from meal_items i join meals m on m.id = i.meal_id
            where m.person_id = $1)::text meal_items,
-         (select count(*) from day_closures where person_id = $1 and status = 'active')::text closures,
-         (select source::text from day_closures where person_id = $1 and status = 'active' limit 1) closure_source,
          ((select count(*) from nutrition_brand_import_records where person_id = $1) +
           (select count(*) from nutrition_ingredient_import_records where person_id = $1) +
           (select count(*) from nutrition_food_import_records where person_id = $1) +
           (select count(*) from nutrition_composition_import_records where person_id = $1) +
-          (select count(*) from nutrition_meal_import_records where person_id = $1) +
-          (select count(*) from nutrition_day_closure_import_records where person_id = $1))::text audits,
+          (select count(*) from nutrition_meal_import_records where person_id = $1))::text audits,
          m.temporal_precision, m.occurred_at,
          (select reference_quantity::text from nutrition_food_versions v
            join nutrition_foods f on f.current_version_id = v.id
@@ -105,23 +100,13 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       FITNESS_TRACKER_SPREADSHEET_ID,
       sheetIds
     ).readTarget(personId);
-    await pool.query(
-      "update nutrition_day_closure_import_records set outcome = 'conflict' where person_id = $1",
-      [personId]
-    );
-    const targetAfterConflictAudit = await new PostgresNutritionTargetReader(
-      pool,
-      FITNESS_TRACKER_SPREADSHEET_ID,
-      sheetIds
-    ).readTarget(personId);
-
     expect(first).toEqual(expect.objectContaining({
       status: "completed",
-      counts: { created: 6, unchanged: 0, conflict: 0, invalid: 0 }
+      counts: { created: 5, unchanged: 0, conflict: 0, invalid: 0 }
     }));
     expect(second).toEqual(expect.objectContaining({
       status: "completed",
-      counts: { created: 0, unchanged: 6, conflict: 0, invalid: 0 }
+      counts: { created: 0, unchanged: 5, conflict: 0, invalid: 0 }
     }));
     expect(state.rows[0]).toEqual({
       brands: "1",
@@ -130,20 +115,16 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       compositions: "1",
       meals: "1",
       meal_items: "1",
-      closures: "1",
-      closure_source: "google_sheets",
-      audits: "12",
+      audits: "10",
       temporal_precision: "local_date",
       occurred_at: null,
       food_reference_quantity: "1.000",
       food_reference_unit: "serving",
       source_default_portion: "250"
     });
-    expect(target).toHaveLength(6);
+    expect(target).toHaveLength(5);
     expect(target.find(({ kind }) => kind === "brand")?.semanticChecksum).toBeTruthy();
     expect(target.find(({ kind }) => kind === "meal")?.semanticChecksum).toBeTruthy();
-    expect(targetAfterConflictAudit.find(({ kind }) => kind === "day_closure"))
-      .toEqual(expect.objectContaining({ checksum: null, semanticChecksum: null }));
   });
 
   it("preserves photo evidence without blocking independent facts", async () => {
@@ -234,12 +215,6 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       "select calories_kcal, protein_g, fat_g, carbs_g from meal_items i join meals m on m.id = i.meal_id where m.person_id = $1",
       [personId]
     );
-    const closure = await pool.query<{ completeness: string; incomplete_meals: string }>(
-      `select snapshot #>> '{nutrition,totals,nutritionCompleteness}' completeness,
-              snapshot #>> '{nutrition,totals,incompleteMealCount}' incomplete_meals
-         from day_closures where person_id = $1 and status = 'active'`,
-      [personId]
-    );
     const evidence = await pool.query<{
       ingredient_unit: string | null;
       food_portion: string | null;
@@ -263,7 +238,6 @@ describe("unified Fitness Tracker Nutrition apply", () => {
       fat_g: null,
       carbs_g: null
     });
-    expect(closure.rows[0]).toEqual({ completeness: "partial", incomplete_meals: "1" });
     expect(evidence.rows[0]).toEqual({
       ingredient_unit: "шт",
       food_portion: "250 г",

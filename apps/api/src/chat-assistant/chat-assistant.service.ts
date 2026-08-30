@@ -10,7 +10,7 @@ import {
 import { chatAssistantConversationUrl } from "../domain/chat-assistant-conversation-binding.js";
 import type { ChatAssistantConversationBindingStore } from "../storage/chat-assistant-conversation-binding-repository.js";
 
-/** Result of resolving the current Person's durable Work conversation. */
+/** Result of resolving the current Person's durable ChatGPT conversation. */
 export type ChatAssistantLaunchResolution =
   | { readonly status: "ready"; readonly url: string }
   | { readonly status: "unavailable"; readonly reason: ChatAssistantLaunchFailureReason };
@@ -28,7 +28,7 @@ export class ChatAssistantService {
   public async launch(): Promise<ChatAssistantLaunchResolution> {
     const resolution = await this.store.resolveActive(
       this.personContext.getPersonId(),
-      "chatgpt_work"
+      "chatgpt_chat"
     );
     if (resolution.status === "missing") {
       return { status: "unavailable", reason: "not_configured" };

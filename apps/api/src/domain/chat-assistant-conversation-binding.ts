@@ -1,5 +1,5 @@
 /** Supported external assistant surface. */
-export type ChatAssistantSurface = "chatgpt_work";
+export type ChatAssistantSurface = "chatgpt_chat";
 
 /** Lifecycle state of a Person-owned external conversation binding. */
 export type ChatAssistantBindingStatus = "active" | "disabled";
@@ -33,7 +33,7 @@ export function chatAssistantConversationUrl(
     "externalConversationId" | "surface"
   >
 ): string {
-  if (binding.surface !== "chatgpt_work") {
+  if (binding.surface !== "chatgpt_chat") {
     throw new Error("Unsupported chat assistant surface");
   }
   assertExternalConversationId(binding.externalConversationId);
