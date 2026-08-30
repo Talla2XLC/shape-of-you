@@ -519,28 +519,130 @@ export const MealTemporalPrecisionSchema = {
   enum: ["instant", "local_date"]
 } as const;
 
+export const MealItemAmountKindSchema = {
+  type: "string",
+  enum: ["unknown", "described", "quantified", "estimated"]
+} as const;
+
+export const MealItemEstimateMethodSchema = {
+  anyOf: [
+    { type: "string", enum: ["text", "photo"] },
+    { type: "null" }
+  ]
+} as const;
+
+const nullableMealItemQuantitySchema = {
+  anyOf: [
+    {
+      type: "number",
+      exclusiveMinimum: 0,
+      maximum: 100000,
+      multipleOf: 0.001
+    },
+    { type: "null" }
+  ]
+} as const;
+
+const nullableNutritionUnitSchema = {
+  anyOf: [NutritionUnitSchema, { type: "null" }]
+} as const;
+
+const nullableAmountDescriptionSchema = {
+  anyOf: [
+    { type: "string", minLength: 1, maxLength: 256 },
+    { type: "null" }
+  ]
+} as const;
+
+const MealItemInputSchemaQuantitySchema = {
+  type: "number",
+  exclusiveMinimum: 0,
+  maximum: 100000,
+  multipleOf: 0.001
+} as const;
+
+const MealItemAmountEvidenceSchema = {
+  allOf: [
+    {
+      if: { properties: { amountKind: { const: "unknown" } } },
+      then: {
+        properties: {
+          quantity: { const: null },
+          unit: { const: null },
+          amountDescription: { const: null },
+          estimateMethod: { const: null },
+          amountConfidence: { const: null }
+        }
+      }
+    },
+    {
+      if: { properties: { amountKind: { const: "described" } } },
+      then: {
+        properties: {
+          quantity: { const: null },
+          unit: { const: null },
+          amountDescription: { type: "string", minLength: 1, maxLength: 256 },
+          estimateMethod: { const: null },
+          amountConfidence: { const: null }
+        }
+      }
+    },
+    {
+      if: { properties: { amountKind: { const: "quantified" } } },
+      then: {
+        properties: {
+          quantity: MealItemInputSchemaQuantitySchema,
+          unit: NutritionUnitSchema,
+          estimateMethod: { const: null },
+          amountConfidence: { const: null }
+        }
+      }
+    },
+    {
+      if: { properties: { amountKind: { const: "estimated" } } },
+      then: {
+        properties: {
+          quantity: MealItemInputSchemaQuantitySchema,
+          unit: NutritionUnitSchema,
+          estimateMethod: { type: "string", enum: ["text", "photo"] },
+          amountConfidence: {
+            type: "number",
+            minimum: 0,
+            maximum: 1,
+            multipleOf: 0.001
+          }
+        }
+      }
+    }
+  ]
+} as const;
+
 export const MealItemInputSchema = {
   type: "object",
   additionalProperties: false,
   required: [
     "foodVersionId",
     "label",
+    "amountKind",
     "quantity",
     "unit",
+    "amountDescription",
+    "estimateMethod",
+    "amountConfidence",
     "nutrients"
   ],
   properties: {
     foodVersionId: nullableUuidSchema,
     label: { type: "string", minLength: 1, maxLength: 256 },
-    quantity: {
-      type: "number",
-      exclusiveMinimum: 0,
-      maximum: 100000,
-      multipleOf: 0.001
-    },
-    unit: NutritionUnitSchema,
+    amountKind: MealItemAmountKindSchema,
+    quantity: nullableMealItemQuantitySchema,
+    unit: nullableNutritionUnitSchema,
+    amountDescription: nullableAmountDescriptionSchema,
+    estimateMethod: MealItemEstimateMethodSchema,
+    amountConfidence: nullableConfidenceSchema,
     nutrients: PartialNutrientValuesSchema
-  }
+  },
+  ...MealItemAmountEvidenceSchema
 } as const;
 
 export type MealItemInput = FromSchema<typeof MealItemInputSchema>;
@@ -548,15 +650,31 @@ export type MealItemInput = FromSchema<typeof MealItemInputSchema>;
 export const MealItemSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["position", "foodVersionId", "label", "quantity", "unit", "nutrients"],
+  required: [
+    "position",
+    "foodVersionId",
+    "label",
+    "amountKind",
+    "quantity",
+    "unit",
+    "amountDescription",
+    "estimateMethod",
+    "amountConfidence",
+    "nutrients"
+  ],
   properties: {
     position: { type: "integer", minimum: 1 },
     foodVersionId: nullableUuidSchema,
     label: { type: "string", minLength: 1, maxLength: 256 },
+    amountKind: MealItemAmountKindSchema,
     quantity: MealItemInputSchema.properties.quantity,
-    unit: NutritionUnitSchema,
+    unit: nullableNutritionUnitSchema,
+    amountDescription: nullableAmountDescriptionSchema,
+    estimateMethod: MealItemEstimateMethodSchema,
+    amountConfidence: nullableConfidenceSchema,
     nutrients: PartialNutrientValuesSchema
-  }
+  },
+  ...MealItemAmountEvidenceSchema
 } as const;
 
 export type MealItem = FromSchema<typeof MealItemSchema>;

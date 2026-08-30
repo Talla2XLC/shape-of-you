@@ -119,6 +119,12 @@ type OAuthProtectedTool = Tool & {
   readonly securitySchemes: readonly OAuthSecurityScheme[];
 };
 
+/** Natural routine replies used to demonstrate the Coach voice to MCP clients. */
+export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
+  "Записал чечевичный суп, говядину в перечном соусе, салат и вишнёвый сок; пенне не учитывал.",
+  "Исправил обед. Если захочешь точнее оценить порции, позже пришли фото или просто опиши их размер."
+] as const;
+
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
@@ -130,8 +136,11 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
   "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
-  "Preserve unknown optional values as null or partial instead of inventing precision. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. Ask only for irreducible ambiguity between materially different targets, dates, or domain meanings. " +
-  "Format user-facing Daily Coach answers as plain Markdown and never emit HTML entities or encoded whitespace. Destructive, credential, administrative, and material goal or program changes still require explicit confirmation.";
+  "Preserve unknown optional values as null or partial inside typed data instead of inventing precision. For Meal items, use amountKind unknown when no amount was reported, described for the user's own non-numeric wording, quantified only for an explicit number and unit, and estimated only after a real text or photo estimate with method and confidence; never invent 1 serving or another sentinel amount. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. Ask only for irreducible ambiguity between materially different targets, dates, or domain meanings. " +
+  "Keep the machine protocol invisible in user-facing language. Match the user's language and conversational tone. After a routine create or correction, answer like a real coach in one or two natural sentences: say what was recorded or corrected and, when useful, offer an optional later photo or everyday-language amount description. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
+  MCP_ROUTINE_COACH_RESPONSE_EXAMPLES.map((example) => `\"${example}\"`).join(" ") +
+  " " +
+  "Format user-facing answers as plain Markdown and never emit HTML entities or encoded whitespace. Destructive, credential, administrative, and material goal or program changes still require explicit confirmation.";
 
 const toolAuthorityInstruction =
   "PostgreSQL authority; no Google Sheets fallback. Fail closed if this tool or its authorization is unavailable.";
@@ -327,7 +336,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_meal",
-      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Unknown nutrients stay null; then read back with list_meals using localDate only.",
+      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. An unreported amount uses amountKind unknown, never a sentinel serving. Unknown nutrients stay null. Then read back with list_meals using localDate only and reply in natural coach language without exposing contract fields or tool mechanics.",
       CreateMealSchema,
       undefined,
       true,
@@ -336,7 +345,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_meal",
-      "Append one idempotent correction to a uniquely identified current Meal; follow with typed read-back.",
+      "Append one idempotent correction to a uniquely identified current Meal; follow with typed read-back, then reply in natural coach language without exposing contract fields or tool mechanics.",
       withIdSchema("CorrectMealToolInput", CorrectMealSchema),
       undefined,
       true,

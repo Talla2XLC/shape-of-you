@@ -221,8 +221,12 @@ describe("Nutrition PostgreSQL vertical", () => {
         {
           foodVersionId: originalFoodVersionId,
           label: "Творог 5%",
+          amountKind: "quantified",
           quantity: 200,
           unit: "g",
+          amountDescription: null,
+          estimateMethod: null,
+          amountConfidence: null,
           nutrients: {
             caloriesKcal: 240,
             proteinG: 36,
@@ -384,8 +388,12 @@ describe("Nutrition PostgreSQL vertical", () => {
       items: [{
         foodVersionId: null,
         label: "Капучино",
-        quantity: 1,
-        unit: "serving",
+        amountKind: "unknown",
+        quantity: null,
+        unit: null,
+        amountDescription: null,
+        estimateMethod: null,
+        amountConfidence: null,
         nutrients: {
           caloriesKcal: null,
           proteinG: null,
@@ -420,8 +428,9 @@ describe("Nutrition PostgreSQL vertical", () => {
         id: created.json().id,
         description: "Капучино",
         items: [expect.objectContaining({
-          quantity: 1,
-          unit: "serving",
+          amountKind: "unknown",
+          quantity: null,
+          unit: null,
           nutrients: {
             caloriesKcal: null,
             proteinG: null,
@@ -439,6 +448,7 @@ describe("Nutrition PostgreSQL vertical", () => {
         ...originalPayload,
         items: [{
           ...originalPayload.items[0],
+          amountKind: "quantified",
           quantity: 300,
           unit: "ml",
           nutrients: {
@@ -464,6 +474,7 @@ describe("Nutrition PostgreSQL vertical", () => {
         id: corrected.json().id,
         supersedesId: created.json().id,
         items: [expect.objectContaining({
+          amountKind: "quantified",
           quantity: 300,
           unit: "ml",
           nutrients: {
@@ -483,6 +494,110 @@ describe("Nutrition PostgreSQL vertical", () => {
       created.json().id,
       corrected.json().id
     ]);
+  });
+
+  it("keeps described and estimated Meal amounts distinct", async () => {
+    const fastify = getFastifyInstance(app);
+    const base = {
+      occurredAt: "2026-08-30T10:30:00.000Z",
+      timezone: "Europe/Moscow",
+      kind: "lunch",
+      description: "Обед",
+      note: null,
+      photoMediaId: null,
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-08-30T10:30:00.000Z"
+      },
+      confidence: null
+    } as const;
+    const unknownNutrients = {
+      caloriesKcal: null,
+      proteinG: null,
+      fatG: null,
+      carbsG: null
+    } as const;
+    const described = await fastify.inject({
+      method: "POST",
+      url: "/v1/nutrition/meals",
+      payload: {
+        ...base,
+        items: [{
+          foodVersionId: null,
+          label: "Чечевичный суп",
+          amountKind: "described",
+          quantity: null,
+          unit: null,
+          amountDescription: "большая тарелка",
+          estimateMethod: null,
+          amountConfidence: null,
+          nutrients: unknownNutrients
+        }],
+        dedupeKey: "chatgpt:meal:lentil-soup:2026-08-30:described"
+      }
+    });
+    expect(described.statusCode, described.body).toBe(201);
+    expect(described.json().items[0]).toMatchObject({
+      amountKind: "described",
+      quantity: null,
+      unit: null,
+      amountDescription: "большая тарелка",
+      estimateMethod: null,
+      amountConfidence: null
+    });
+
+    const estimated = await fastify.inject({
+      method: "POST",
+      url: "/v1/nutrition/meals",
+      payload: {
+        ...base,
+        occurredAt: "2026-08-30T10:31:00.000Z",
+        items: [{
+          foodVersionId: null,
+          label: "Говядина в перечном соусе",
+          amountKind: "estimated",
+          quantity: 220,
+          unit: "g",
+          amountDescription: "оценка по фото",
+          estimateMethod: "photo",
+          amountConfidence: 0.65,
+          nutrients: unknownNutrients
+        }],
+        dedupeKey: "chatgpt:meal:beef:2026-08-30:photo-estimate"
+      }
+    });
+    expect(estimated.statusCode, estimated.body).toBe(201);
+    expect(estimated.json().items[0]).toMatchObject({
+      amountKind: "estimated",
+      quantity: 220,
+      unit: "g",
+      estimateMethod: "photo",
+      amountConfidence: 0.65
+    });
+
+    const invalidEstimate = await fastify.inject({
+      method: "POST",
+      url: "/v1/nutrition/meals",
+      payload: {
+        ...base,
+        occurredAt: "2026-08-30T10:32:00.000Z",
+        items: [{
+          foodVersionId: null,
+          label: "Салат",
+          amountKind: "estimated",
+          quantity: 150,
+          unit: "g",
+          amountDescription: null,
+          estimateMethod: "photo",
+          amountConfidence: null,
+          nutrients: unknownNutrients
+        }],
+        dedupeKey: "chatgpt:meal:salad:2026-08-30:invalid-estimate"
+      }
+    });
+    expect(invalidEstimate.statusCode, invalidEstimate.body).toBe(400);
   });
 
   it("stages external records idempotently without name-based merging", async () => {

@@ -584,6 +584,92 @@ describe("API migration chain", () => {
     }
   }, 120_000);
 
+  it("backfills existing Meal item amounts without changing their values", async () => {
+    const databaseName = "shape_of_you_meal_amount_evidence_upgrade";
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    await adminPool.query(`create database ${databaseName}`);
+    await adminPool.end();
+    const url = databaseUrl(databaseName);
+    const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-meal-amount-prefix-"));
+    await mkdir(path.join(prefixFolder, "meta"));
+    try {
+      const amountMigrationIndex = journal.entries.findIndex(
+        ({ tag }) => tag === "20260830135757_complex_dragon_man"
+      );
+      expect(amountMigrationIndex).toBeGreaterThan(0);
+      const prefixEntries = journal.entries.slice(0, amountMigrationIndex);
+      for (const entry of prefixEntries) {
+        await cp(
+          new URL(`${entry.tag}.sql`, migrationsFolder),
+          path.join(prefixFolder, `${entry.tag}.sql`)
+        );
+      }
+      await writeFile(
+        path.join(prefixFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: prefixEntries })
+      );
+      const database = createDatabase(databaseConfig(url));
+      await migrate(database.db, { migrationsFolder: prefixFolder });
+      const personId = "00000000-0000-4000-8000-000000000081";
+      const sourceReferenceId = "00000000-0000-4000-8000-000000000082";
+      const mealId = "00000000-0000-4000-8000-000000000083";
+      await database.pool.query(
+        "insert into persons (id) values ($1)",
+        [personId]
+      );
+      await database.pool.query(
+        `insert into source_references
+           (id, person_id, channel, contains_sensitive_data)
+         values ($1, $2, 'manual', true)`,
+        [sourceReferenceId, personId]
+      );
+      await database.pool.query(
+        `insert into meals
+           (id, person_id, occurred_at, temporal_precision, local_date,
+            timezone, kind, source, source_reference_id, dedupe_key)
+         values ($1, $2, '2026-08-30T10:00:00Z', 'instant', '2026-08-30',
+           'Europe/Moscow', 'lunch', 'manual', $3, 'migration:meal-amount')`,
+        [mealId, personId, sourceReferenceId]
+      );
+      await database.pool.query(
+        `insert into meal_items
+           (meal_id, position, label, quantity, unit, calories_kcal,
+            protein_g, fat_g, carbs_g)
+         values ($1, 1, 'Legacy meal item', 250, 'g', 300, 20, 10, 30)`,
+        [mealId]
+      );
+      await database.pool.end();
+
+      await runMigrations(url);
+      const verification = new Pool({ connectionString: url });
+      const result = await verification.query<{
+        amount_kind: string;
+        quantity: string;
+        unit: string;
+        calories_kcal: string;
+      }>(
+        `select amount_kind, quantity::text, unit::text, calories_kcal::text
+           from meal_items where meal_id = $1`,
+        [mealId]
+      );
+      expect(result.rows[0]).toEqual({
+        amount_kind: "quantified",
+        quantity: "250.000",
+        unit: "g",
+        calories_kcal: "300.000"
+      });
+      await expect(
+        verification.query(
+          "update meal_items set amount_kind = 'unknown' where meal_id = $1",
+          [mealId]
+        )
+      ).rejects.toMatchObject({ code: "23514" });
+      await verification.end();
+    } finally {
+      await rm(prefixFolder, { force: true, recursive: true });
+    }
+  }, 120_000);
+
   it("preserves an existing Weight instant when adding temporal precision", async () => {
     const databaseName = "shape_of_you_weight_precision_upgrade";
     const adminPool = new Pool({ connectionString: container.getConnectionUri() });

@@ -80,11 +80,13 @@ TASK-0050 makes Nutrition reconciliation identity-scoped. An incomplete catalog
 record blocks only dependent catalog promotion; it does not suppress unrelated
 Meals or closed-day decisions. Historical Meals may preserve unknown nutrient
 components as `null` with explicit `complete|partial` read state. Interactive
-HTTP/MCP writes still require complete nutrients. Legacy kind labels map
-deterministically to `other`, while raw kind, Photo marker, and unresolved
-source `Food_ID` remain relational provenance instead of blockers. Progress
-series omit incomplete daily nutrient points rather than reporting partial sums
-as exact totals.
+HTTP/MCP writes now preserve the same null-not-zero semantics. Meal amount
+evidence distinguishes unknown, user-described, quantified, and text/photo
+estimated amounts; existing rows migrate as quantified without changing their
+stored quantity, unit, or nutrients. Legacy kind labels map deterministically
+to `other`, while raw kind, Photo marker, and unresolved source `Food_ID` remain
+relational provenance instead of blockers. Progress series omit incomplete
+daily nutrient points rather than reporting partial sums as exact totals.
 
 TASK-0052 extends the same command and lifecycle with `training` and `recovery`
 adapters. Training groups performed facts by the stable source `Session_ID`,

@@ -308,9 +308,9 @@ async function createMeal(
   const n = candidate.nutrients;
   await client.query(
     `insert into meal_items
-       (meal_id, position, food_version_id, label, quantity, unit,
+       (meal_id, position, food_version_id, label, amount_kind, quantity, unit,
         calories_kcal, protein_g, fat_g, carbs_g)
-     values ($1, 1, $2, $3, 1, 'serving', $4, $5, $6, $7)`,
+     values ($1, 1, $2, $3, 'quantified', 1, 'serving', $4, $5, $6, $7)`,
     [meal.rows[0]!.id, foodVersionId, candidate.label, n.caloriesKcal,
       n.proteinG, n.fatG, n.carbsG]
   );

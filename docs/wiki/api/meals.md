@@ -27,16 +27,23 @@ query-only daily nutrition totals.
 - `GET /v1/nutrition/daily-totals?localDate=YYYY-MM-DD` — projection.
 
 Commands contain complete item snapshots. Optional accessible `foodVersionId`
-never replaces the snapshot. Existing dedupe returns `200`, new fact `201`, and
-conflicting second correction `409`. Current list uses
+never replaces the snapshot. Each item carries explicit amount evidence:
+`unknown` when the user gave no amount, `described` for the user's unnormalized
+everyday wording, `quantified` for an explicit quantity/unit pair, or
+`estimated` for a real text/photo estimate with method and confidence.
+`unknown` and `described` never receive a fabricated `1 serving` sentinel.
+Existing dedupe returns `200`, new fact `201`, and conflicting second correction
+`409`. Current list uses
 `(occurredAt DESC, id DESC)`. Totals include only current Meals.
 
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and
 is never converted to zero. Daily totals also return `incompleteMealCount`; an
 exact component total is null when any current item lacks that component.
-Public create/correction inputs remain complete-only. Progress metrics omit an
-incomplete date instead of publishing a known-subset sum as the full value.
+Interactive create/correction inputs may preserve unknown nutrients as `null`;
+they never convert missing evidence to zero. Progress metrics omit an incomplete
+date instead of publishing a known-subset sum as the full value. Later amount or
+nutrition detail creates an append-only full-snapshot correction.
 
 ## Evidence
 
@@ -46,8 +53,9 @@ incomplete date instead of publishing a known-subset sum as the full value.
 
 - Responses/totals reproduce stored item snapshots; catalog revisions do not
   change Meal; totals are not a mutable table.
-- Partial historical evidence is read-compatible without weakening operational
-  write validation.
+- Amount and nutrient evidence remain machine-readable without turning
+  completeness into a user workflow or blocking direct fact capture.
+- [Unquantified Meal amount and natural Coach language](../../adr/20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md).
 
 ## Open questions
 

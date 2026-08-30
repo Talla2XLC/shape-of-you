@@ -24,6 +24,7 @@ import {
 } from "../src/mcp/oauth.js";
 import {
   MCP_OPERATIONAL_INSTRUCTIONS,
+  MCP_ROUTINE_COACH_RESPONSE_EXAMPLES,
   registerMcpRoutes
 } from "../src/mcp/server.js";
 
@@ -130,6 +131,38 @@ describe("MCP HTTP adapter", () => {
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "list_meals with localDate only"
     );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "never invent 1 serving or another sentinel amount"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "answer like a real coach in one or two natural sentences"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Never expose tool names, arguments, identifiers, property or enum names"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Match the user's language and conversational tone"
+    );
+    const forbiddenRoutineReplyTerms = [
+      "amountKind",
+      "list_meals",
+      "null",
+      "partial",
+      "read-back",
+      "typed"
+    ];
+    for (const example of MCP_ROUTINE_COACH_RESPONSE_EXAMPLES) {
+      const sentenceCount = example.split(/[.!?]+/u).filter(Boolean).length;
+      expect(sentenceCount).toBeGreaterThanOrEqual(1);
+      expect(sentenceCount).toBeLessThanOrEqual(2);
+      for (const forbidden of forbiddenRoutineReplyTerms) {
+        expect(example.toLowerCase()).not.toContain(forbidden.toLowerCase());
+      }
+      expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(example);
+    }
     expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
       "Confirm writes"
     );
@@ -205,6 +238,27 @@ describe("MCP HTTP adapter", () => {
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
     )?.description).toContain("follow with typed read-back");
+    const recordMealTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "record_meal"
+    );
+    expect(recordMealTool?.description).toContain(
+      "reply in natural coach language"
+    );
+    expect(recordMealTool?.inputSchema.properties.items.items).toMatchObject({
+      required: expect.arrayContaining([
+        "amountKind",
+        "quantity",
+        "unit",
+        "amountDescription",
+        "estimateMethod",
+        "amountConfidence"
+      ]),
+      properties: {
+        amountKind: {
+          enum: ["unknown", "described", "quantified", "estimated"]
+        }
+      }
+    });
     const workoutSetSchema = body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_workout_session"
     )?.inputSchema.properties.exercises.items.properties.sets.items;
@@ -620,8 +674,12 @@ describe("MCP HTTP adapter", () => {
       description: "Капучино",
       items: [{
         label: "Капучино",
-        quantity: 1,
-        unit: "serving",
+        amountKind: "unknown",
+        quantity: null,
+        unit: null,
+        amountDescription: null,
+        estimateMethod: null,
+        amountConfidence: null,
         nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
       }]
     };
@@ -631,6 +689,7 @@ describe("MCP HTTP adapter", () => {
       supersedesId: originalMeal.id,
       items: [{
         ...originalMeal.items[0],
+        amountKind: "quantified",
         quantity: 300,
         unit: "ml",
         nutrients: { caloriesKcal: 120, proteinG: null, fatG: null, carbsG: null }
@@ -709,8 +768,12 @@ describe("MCP HTTP adapter", () => {
       items: [{
         foodVersionId: null,
         label: "Капучино",
-        quantity: 1,
-        unit: "serving",
+        amountKind: "unknown",
+        quantity: null,
+        unit: null,
+        amountDescription: null,
+        estimateMethod: null,
+        amountConfidence: null,
         nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
       }],
       sourceReference: {
@@ -762,6 +825,7 @@ describe("MCP HTTP adapter", () => {
         id: originalMeal.id,
         items: [{
           ...cappuccino.items[0],
+          amountKind: "quantified",
           quantity: 300,
           unit: "ml",
           nutrients: { caloriesKcal: 120, proteinG: null, fatG: null, carbsG: null }

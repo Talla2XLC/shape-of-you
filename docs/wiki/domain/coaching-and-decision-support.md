@@ -50,6 +50,15 @@ values remain partial/null; later precise input appends a correction. A bounded
 `DailyContextNote` is used only when no more specific owning-domain fact can
 represent a relevant observation safely.
 
+Routine capture stays conversational. The Coach matches the user's language
+and tone, confirms the recorded or corrected facts in one or two natural
+sentences, and keeps tool names, arguments, identifiers, contract fields,
+completeness states, and transport details out of the reply. Daily-plan headings
+are reserved for an actual daily-plan answer. When a reported Meal has no known
+amount, the Meal is recorded immediately without a sentinel quantity; if extra
+precision would materially help, the Coach may optionally invite a later photo
+or an everyday-language size description without making it a success condition.
+
 For Training, `get_active_training_program` explicitly distinguishes an active
 program from valid absence. Only its typed `absent` result proves that no
 `Planned` training artifact is available; a tool failure remains unknown and
@@ -64,6 +73,7 @@ stops dependent coaching without chat-history or Sheets fallback.
 - [Coaching ADR](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md).
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md).
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md).
+- [Unquantified Meal amount and natural Coach language](../../adr/20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md).
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 
 ## Open questions

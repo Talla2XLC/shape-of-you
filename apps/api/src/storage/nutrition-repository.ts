@@ -333,8 +333,13 @@ function serializeMeal(
     position: item.position,
     foodVersionId: item.foodVersionId,
     label: item.label,
-    quantity: Number(item.quantity),
+    amountKind: item.amountKind,
+    quantity: item.quantity === null ? null : Number(item.quantity),
     unit: item.unit,
+    amountDescription: item.amountDescription,
+    estimateMethod: item.estimateMethod,
+    amountConfidence:
+      item.amountConfidence === null ? null : Number(item.amountConfidence),
     nutrients: partialNutrientsFromRow(item)
   }));
   const totals = partialTotals(publicItems.map(({ nutrients }) => nutrients));
@@ -1056,8 +1061,15 @@ export class NutritionRepository implements NutritionStore {
         position: index + 1,
         foodVersionId: item.foodVersionId,
         label: item.label,
-        quantity: item.quantity.toFixed(3),
+        amountKind: item.amountKind,
+        quantity: item.quantity === null ? null : item.quantity.toFixed(3),
         unit: item.unit,
+        amountDescription: item.amountDescription,
+        estimateMethod: item.estimateMethod,
+        amountConfidence:
+          item.amountConfidence === null
+            ? null
+            : item.amountConfidence.toFixed(3),
         ...partialNutrientsToRow(item.nutrients)
       }))
     );

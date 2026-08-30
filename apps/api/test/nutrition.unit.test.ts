@@ -1,9 +1,12 @@
+import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
 import { describe, expect, it } from "vitest";
 
-import type {
-  FoodCompositionInput,
-  MealItemInput,
-  UpsertFoodOverlay
+import {
+  MealItemInputSchema,
+  type FoodCompositionInput,
+  type MealItemInput,
+  type UpsertFoodOverlay
 } from "@shape-of-you/contracts";
 
 import {
@@ -21,12 +24,108 @@ const item = (
 ): MealItemInput => ({
   foodVersionId: null,
   label: "Snapshot",
+  amountKind: "quantified",
   quantity: 1,
   unit: "serving",
+  amountDescription: null,
+  estimateMethod: null,
+  amountConfidence: null,
   nutrients: { caloriesKcal, proteinG, fatG, carbsG }
 });
 
+const ajv = new Ajv({ allErrors: true, multipleOfPrecision: 6, strict: false });
+const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
+installFormats(ajv);
+const validateMealItem = ajv.compile(MealItemInputSchema);
+
+const amountItem = (overrides: Record<string, unknown>) => ({
+  foodVersionId: null,
+  label: "Чечевичный суп",
+  amountKind: "unknown",
+  quantity: null,
+  unit: null,
+  amountDescription: null,
+  estimateMethod: null,
+  amountConfidence: null,
+  nutrients: {
+    caloriesKcal: null,
+    proteinG: null,
+    fatG: null,
+    carbsG: null
+  },
+  ...overrides
+});
+
 describe("Nutrition domain", () => {
+  it("validates every Meal amount evidence shape", () => {
+    const valid = [
+      amountItem({}),
+      amountItem({
+        amountKind: "described",
+        amountDescription: "большая тарелка"
+      }),
+      amountItem({
+        amountKind: "quantified",
+        quantity: 250,
+        unit: "g"
+      }),
+      amountItem({
+        amountKind: "estimated",
+        quantity: 250,
+        unit: "g",
+        amountDescription: "примерно полтарелки",
+        estimateMethod: "text",
+        amountConfidence: 0.6
+      }),
+      amountItem({
+        amountKind: "estimated",
+        quantity: 220,
+        unit: "g",
+        estimateMethod: "photo",
+        amountConfidence: 0.65
+      })
+    ];
+    const invalid = [
+      amountItem({ quantity: 1, unit: "serving" }),
+      amountItem({ amountKind: "described" }),
+      amountItem({
+        amountKind: "described",
+        amountDescription: "большая тарелка",
+        quantity: 250,
+        unit: "g"
+      }),
+      amountItem({ amountKind: "quantified", quantity: 250 }),
+      amountItem({
+        amountKind: "quantified",
+        quantity: 250,
+        unit: "g",
+        estimateMethod: "text"
+      }),
+      amountItem({
+        amountKind: "estimated",
+        quantity: 250,
+        unit: "g",
+        amountConfidence: 0.6
+      }),
+      amountItem({
+        amountKind: "estimated",
+        quantity: 250,
+        unit: "g",
+        estimateMethod: "photo"
+      })
+    ];
+
+    for (const candidate of valid) {
+      expect(
+        validateMealItem(candidate),
+        JSON.stringify(validateMealItem.errors)
+      ).toBe(true);
+    }
+    for (const candidate of invalid) {
+      expect(validateMealItem(candidate)).toBe(false);
+    }
+  });
+
   it("sums immutable Meal snapshots with contract precision", () => {
     expect(
       sumMealNutrition([

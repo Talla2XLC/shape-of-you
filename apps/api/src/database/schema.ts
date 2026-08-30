@@ -146,6 +146,16 @@ export const mealTemporalPrecision = pgEnum("meal_temporal_precision", [
   "instant",
   "local_date"
 ]);
+export const mealItemAmountKind = pgEnum("meal_item_amount_kind", [
+  "unknown",
+  "described",
+  "quantified",
+  "estimated"
+]);
+export const mealItemEstimateMethod = pgEnum("meal_item_estimate_method", [
+  "text",
+  "photo"
+]);
 export const trainingLoadBasis = pgEnum("training_load_basis", [
   "external_weight",
   "body_weight",
@@ -1551,8 +1561,15 @@ export const mealItems = pgTable(
     position: smallint("position").notNull(),
     foodVersionId: uuid("food_version_id"),
     label: varchar("label", { length: 256 }).notNull(),
-    quantity: numeric("quantity", { precision: 12, scale: 3 }).notNull(),
-    unit: nutritionUnit("unit").notNull(),
+    amountKind: mealItemAmountKind("amount_kind").notNull(),
+    quantity: numeric("quantity", { precision: 12, scale: 3 }),
+    unit: nutritionUnit("unit"),
+    amountDescription: varchar("amount_description", { length: 256 }),
+    estimateMethod: mealItemEstimateMethod("estimate_method"),
+    amountConfidence: numeric("amount_confidence", {
+      precision: 4,
+      scale: 3
+    }),
     caloriesKcal: numeric("calories_kcal", {
       precision: 12,
       scale: 3
@@ -1579,11 +1596,43 @@ export const mealItems = pgTable(
     check(
       "meal_items_positive_values",
       sql`${table.position} > 0
-          AND ${table.quantity} > 0
+          AND (${table.quantity} IS NULL OR ${table.quantity} > 0)
           AND ${table.caloriesKcal} >= 0
           AND ${table.proteinG} >= 0
           AND ${table.fatG} >= 0
           AND ${table.carbsG} >= 0`
+    ),
+    check(
+      "meal_items_amount_evidence_shape",
+      sql`(
+            ${table.amountKind} = 'unknown'
+            AND ${table.quantity} IS NULL
+            AND ${table.unit} IS NULL
+            AND ${table.amountDescription} IS NULL
+            AND ${table.estimateMethod} IS NULL
+            AND ${table.amountConfidence} IS NULL
+          ) OR (
+            ${table.amountKind} = 'described'
+            AND ${table.quantity} IS NULL
+            AND ${table.unit} IS NULL
+            AND ${table.amountDescription} IS NOT NULL
+            AND ${table.estimateMethod} IS NULL
+            AND ${table.amountConfidence} IS NULL
+          ) OR (
+            ${table.amountKind} = 'quantified'
+            AND ${table.quantity} IS NOT NULL
+            AND ${table.unit} IS NOT NULL
+            AND ${table.estimateMethod} IS NULL
+            AND ${table.amountConfidence} IS NULL
+          ) OR (
+            ${table.amountKind} = 'estimated'
+            AND ${table.quantity} IS NOT NULL
+            AND ${table.unit} IS NOT NULL
+            AND ${table.estimateMethod} IS NOT NULL
+            AND ${table.amountConfidence} IS NOT NULL
+            AND ${table.amountConfidence} >= 0
+            AND ${table.amountConfidence} <= 1
+          )`
     )
   ]
 );
