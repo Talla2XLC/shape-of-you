@@ -20,6 +20,25 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-08-30 — Transactional predefined OAuth scope retirement
+
+- Made predefined-client scope contraction revoke only authorization state
+  carrying retired scopes before deleting referentially protected allowlist
+  rows. Affected grants, session authorizations, refresh families/tokens,
+  interactions, and codes are retired atomically; browser sessions, security
+  events, and unrelated grants are preserved.
+- Added forced-failure rollback, idempotency, concurrent reconciliation,
+  affected/unaffected grant, callback, refresh-token, and audit regression
+  coverage without adding schema or another operational boundary.
+- Marked the contracting release incompatible with automatic rollback to the
+  previous Identity image.
+- Clarified capture-first MCP guidance so a routine Meal create has no pre-read
+  or duplicate confirmation, then reads back through `list_meals` with its
+  accepted `localDate` argument only instead of failing on a redundant
+  timezone.
+- Kept staging unchanged. Deployment, OAuth reconnect, live Meal verification,
+  Git staging, commit, and push remain separate operator gates.
+
 ### 2026-08-29 — Capture-first Coach without DayClosure
 
 - Removed the `DayClosure` aggregate, tables, enums, legacy import candidate,

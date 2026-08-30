@@ -107,6 +107,13 @@ When an exact callback is retired, reconciliation invalidates only
 authorization codes and interaction state bound to that URI before removing
 the allowlist row. It never rebinds a credential to a different callback and
 preserves grants, sessions, refresh credentials, and security events.
+When a predefined policy retires a scope, the same transaction invalidates
+flows and codes carrying that scope, revokes affected grants, session
+authorizations, refresh families, and refresh tokens, removes the retired
+grant-scope references, and only then contracts the client allowlist. Browser
+sessions, security events, and unrelated grants remain intact. A scope-
+contracting release is not automatically rollback-compatible with the previous
+Identity image and requires a new external OAuth consent after cutover.
 
 Local development and staging supply private ES256 keys through a versioned
 runtime secret key ring. PostgreSQL stores only public SPKI material, lifecycle
@@ -289,6 +296,10 @@ later precise input appends a correction. Irreducible target/date/domain
 ambiguity and destructive, credential, administrative, or material goal and
 program changes remain confirmation-gated. ChatGPT native permission behavior
 changes only during the separately approved connector cutover.
+Routine creates do not require a pre-read. Meal read-back calls `list_meals`
+with the exact `localDate` input only; the tool does not accept a redundant
+timezone or write-command fields. This keeps the strict typed contract while
+preventing an unrelated pre-read argument error from becoming a write gate.
 
 The single staging connector has completed the deployed 23-tool discovery and
 all 14 required synthetic writer/lifecycle canaries with read-back. TASK-0065

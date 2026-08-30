@@ -124,6 +124,15 @@ describe("MCP HTTP adapter", () => {
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Always read back successful writes"
     );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "A routine create does not require a pre-read"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "list_meals with localDate only"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
+      "Confirm writes"
+    );
   });
 
   it("publishes OAuth protected-resource metadata", async () => {

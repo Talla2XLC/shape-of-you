@@ -124,6 +124,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
   "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
+  "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
   "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
@@ -317,7 +318,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "list_meals",
-      "Read the authorized person's current meals.",
+      "Read the authorized person's current meals. For one-day Meal read-back pass localDate only; timezone is not an accepted argument.",
       ListMealsQuerySchema,
       MealListSchema,
       false,
@@ -326,7 +327,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_meal",
-      "Record one idempotent Meal from a direct user report. Unknown nutrients stay null; follow with typed read-back.",
+      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Unknown nutrients stay null; then read back with list_meals using localDate only.",
       CreateMealSchema,
       undefined,
       true,

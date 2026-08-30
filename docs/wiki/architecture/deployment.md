@@ -127,6 +127,11 @@ deployment logs. API schema, Identity schema, and predefined-client
 compatibility are declared independently; automatic rollback of an Identity
 release requires all applicable declarations to be true. Edge/ACME owns TLS
 certificates; Identity owns OAuth signing keys and OAuth client policy.
+Predefined scope contraction is an explicit breaking client-policy transition:
+reconciliation transactionally revokes authorization state carrying retired
+scopes before deleting allowlist rows, and the release declares client
+compatibility false so the controller cannot automatically restore an older
+Identity image against the contracted policy.
 
 The root-owned runtime handoff also requires the Identity TOTP key ring, OAuth
 active signing-key identifier, OAuth signing-key ring, and provider cookie key

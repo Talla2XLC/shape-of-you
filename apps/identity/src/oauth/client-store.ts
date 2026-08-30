@@ -90,7 +90,8 @@ export class OAuthClientStore {
    * Creates or updates one predefined public client as a single transaction.
    *
    * Redirect URI and scope rows are reconciled exactly; omitted values are
-   * removed. Existing grants are not mutated.
+   * removed. Grants carrying retired scopes are revoked before their scope
+   * rows are removed.
    */
   public async provisionPublicClient(input: OAuthPublicClientInput): Promise<void> {
     await this.reconcilePublicClient(input);
@@ -101,9 +102,10 @@ export class OAuthClientStore {
    *
    * Calls for the same client ID are serialized inside PostgreSQL. An exact repeat
    * performs no writes, preserving the client's existing `updated_at` value.
-   * Existing grants, sessions, refresh credentials, and security events are
-   * never mutated. Retiring a redirect invalidates only callback-bound
-   * authorization codes and interaction state that cannot be safely rebound.
+   * Retiring a redirect invalidates only callback-bound authorization codes
+   * and interaction state that cannot be safely rebound. Retiring a scope
+   * revokes only grants and grant-bound credentials carrying that scope;
+   * browser sessions and security events are preserved.
    */
   public async reconcilePublicClient(
     input: OAuthPublicClientInput
@@ -148,7 +150,13 @@ export class OAuthClientStore {
           (redirectUri) => !input.redirectUris.includes(redirectUri)
         ) ?? []
       );
-      await reconcileScopes(client, input);
+      await reconcileScopes(
+        client,
+        input,
+        current?.allowedScopes.filter(
+          (scope) => !input.allowedScopes.includes(scope)
+        ) ?? []
+      );
       await client.query("commit");
       return current ? "updated" : "created";
     } catch (error) {
@@ -303,8 +311,12 @@ async function reconcileRedirectUris(
 
 async function reconcileScopes(
   client: PoolClient,
-  input: OAuthPublicClientInput
+  input: OAuthPublicClientInput,
+  retiredScopes: readonly string[]
 ): Promise<void> {
+  if (retiredScopes.length > 0) {
+    await retireScopeBoundAuthorization(client, input.clientId, retiredScopes);
+  }
   await client.query(
     "delete from oauth_client_allowed_scopes where client_id = $1 and not (scope = any($2::text[]))",
     [input.clientId, input.allowedScopes]
@@ -317,4 +329,134 @@ async function reconcileScopes(
       [input.clientId, scope]
     );
   }
+}
+
+/**
+ * Revokes authorization state carrying scopes removed from one client policy.
+ *
+ * The caller owns the surrounding client reconciliation transaction. Grant
+ * and refresh-family rows are locked in stable order before revocation so the
+ * operation follows the provider adapter's family-before-token invariant.
+ */
+async function retireScopeBoundAuthorization(
+  client: PoolClient,
+  clientId: string,
+  retiredScopes: readonly string[]
+): Promise<void> {
+  const affectedGrants = await client.query<{ id: string }>(
+    `select grants.id
+       from oauth_grants grants
+      where grants.client_id = $1
+        and (
+          exists (
+            select 1
+              from oauth_grant_oidc_scopes scopes
+             where scopes.grant_id = grants.id
+               and scopes.client_id = $1
+               and scopes.scope = any($2::text[])
+          )
+          or exists (
+            select 1
+              from oauth_grant_resource_scopes scopes
+             where scopes.grant_id = grants.id
+               and scopes.client_id = $1
+               and scopes.scope = any($2::text[])
+          )
+        )
+      order by grants.id
+      for update`,
+    [clientId, retiredScopes]
+  );
+  const grantIds = affectedGrants.rows.map((row) => row.id);
+
+  const affectedInteractions = await client.query<{ id: string }>(
+    `select interactions.id
+       from oauth_interactions interactions
+      where interactions.client_id = $1
+        and exists (
+          select 1
+            from oauth_interaction_requested_scopes scopes
+           where scopes.interaction_id = interactions.id
+             and scopes.client_id = interactions.client_id
+             and scopes.scope = any($2::text[])
+        )
+      order by interactions.id
+      for update`,
+    [clientId, retiredScopes]
+  );
+  const interactionIds = affectedInteractions.rows.map((row) => row.id);
+
+  await client.query(
+    `delete from oauth_authorization_codes
+      where client_id = $1
+        and (
+          issued_scopes && $2::text[]
+          or grant_id = any($3::uuid[])
+        )`,
+    [clientId, retiredScopes, grantIds]
+  );
+
+  if (interactionIds.length > 0) {
+    await client.query(
+      "delete from oauth_interaction_requested_resources where interaction_id = any($1::uuid[])",
+      [interactionIds]
+    );
+    await client.query(
+      "delete from oauth_interaction_requested_scopes where interaction_id = any($1::uuid[])",
+      [interactionIds]
+    );
+    await client.query(
+      "delete from oauth_interactions where id = any($1::uuid[])",
+      [interactionIds]
+    );
+  }
+
+  if (grantIds.length > 0) {
+    const lockedFamilies = await client.query<{ id: string }>(
+      `select id
+         from oauth_refresh_token_families
+        where grant_id = any($1::uuid[])
+        order by id
+        for update`,
+      [grantIds]
+    );
+    const familyIds = lockedFamilies.rows.map((row) => row.id);
+    if (familyIds.length > 0) {
+      await client.query(
+        `update oauth_refresh_token_families
+            set revoked_at = coalesce(revoked_at, now())
+          where id = any($1::uuid[])`,
+        [familyIds]
+      );
+      await client.query(
+        `update oauth_refresh_tokens
+            set revoked_at = coalesce(revoked_at, now())
+          where family_id = any($1::uuid[])`,
+        [familyIds]
+      );
+    }
+    await client.query(
+      `update oauth_session_authorizations
+          set revoked_at = coalesce(revoked_at, now())
+        where grant_id = any($1::uuid[])`,
+      [grantIds]
+    );
+    await client.query(
+      `update oauth_grants
+          set revoked_at = coalesce(revoked_at, now())
+        where id = any($1::uuid[])`,
+      [grantIds]
+    );
+  }
+
+  await client.query(
+    `delete from oauth_grant_oidc_scopes
+      where client_id = $1 and scope = any($2::text[])`,
+    [clientId, retiredScopes]
+  );
+  await client.query(
+    `delete from oauth_grant_resource_scopes
+      where client_id = $1 and scope = any($2::text[])`,
+    [clientId, retiredScopes]
+  );
 }

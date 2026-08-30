@@ -563,7 +563,9 @@ describe("Identity migration chain", () => {
     const store = new OAuthClientStore(pool);
     const clientId = "predefined-reconcile-test";
     const accountId = randomUUID();
+    const unaffectedAccountId = randomUUID();
     const grantId = randomUUID();
+    const unaffectedGrantId = randomUUID();
     const sessionId = randomUUID();
     const interactionId = randomUUID();
     const authorizationCodeId = randomUUID();
@@ -593,14 +595,42 @@ describe("Identity migration chain", () => {
         [accountId, randomUUID(), randomBytes(32), "Reconcile grant owner"]
       );
       await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, $4)`,
+        [
+          unaffectedAccountId,
+          randomUUID(),
+          randomBytes(32),
+          "Unaffected reconcile grant owner"
+        ]
+      );
+      await pool.query(
         `insert into oauth_grants (id, account_id, client_id)
          values ($1, $2, $3)`,
         [grantId, accountId, clientId]
       );
       await pool.query(
+        `insert into oauth_grants (id, account_id, client_id)
+         values ($1, $2, $3)`,
+        [unaffectedGrantId, unaffectedAccountId, clientId]
+      );
+      await pool.query(
         `insert into oauth_grant_oidc_scopes (grant_id, client_id, scope)
          values ($1, $2, 'openid')`,
         [grantId, clientId]
+      );
+      await pool.query(
+        `insert into oauth_grant_resource_scopes
+           (grant_id, client_id, resource, scope)
+         values ($1, $2, 'https://api.example.test/mcp', 'openid')`,
+        [grantId, clientId]
+      );
+      await pool.query(
+        `insert into oauth_grant_resource_scopes
+           (grant_id, client_id, resource, scope)
+         values ($1, $2, 'https://api.example.test/mcp', 'person:read')`,
+        [unaffectedGrantId, clientId]
       );
       await pool.query(
         `insert into oauth_sessions
@@ -610,6 +640,12 @@ describe("Identity migration chain", () => {
                  'urn:shape-of-you:acr:passkey', array['recovery_code'], now(),
                  now() + interval '1 day')`,
         [sessionId, accountId, randomBytes(32), randomBytes(32), randomUUID()]
+      );
+      await pool.query(
+        `insert into oauth_session_authorizations
+           (session_id, account_id, client_id, grant_id)
+         values ($1, $2, $3, $4)`,
+        [sessionId, accountId, clientId, grantId]
       );
       await pool.query(
         `insert into oauth_interactions
@@ -764,6 +800,39 @@ describe("Identity migration chain", () => {
       });
 
       const rollbackCodeId = randomUUID();
+      const rollbackInteractionId = randomUUID();
+      await pool.query(
+        `insert into oauth_interactions
+           (id, credential_hash, client_id, account_id, session_id, grant_id,
+            prompt, status, provider_cid, provider_return_to, redirect_uri,
+            code_challenge, code_challenge_method, created_at, expires_at)
+         values ($1, $2, $3, $4, $5, $6, 'consent', 'pending', $7, $8, $9,
+                 $10, 'S256', now(), now() + interval '10 minutes')`,
+        [
+          rollbackInteractionId,
+          randomBytes(32),
+          clientId,
+          accountId,
+          sessionId,
+          grantId,
+          "Q".repeat(43),
+          "https://identity.example.test/interaction/return",
+          desired.redirectUris[0],
+          "D".repeat(43)
+        ]
+      );
+      await pool.query(
+        `insert into oauth_interaction_requested_scopes
+           (interaction_id, client_id, scope)
+         values ($1, $2, 'openid')`,
+        [rollbackInteractionId, clientId]
+      );
+      await pool.query(
+        `insert into oauth_interaction_requested_resources
+           (interaction_id, resource)
+         values ($1, 'https://api.example.test/mcp')`,
+        [rollbackInteractionId]
+      );
       await pool.query(
         `insert into oauth_authorization_codes
            (id, code_hash, account_id, client_id, session_id, grant_id,
@@ -800,14 +869,37 @@ describe("Identity migration chain", () => {
                 (select count(*)::text from oauth_sessions) as sessions,
                 (select count(*)::text from identity_security_events) as history`
       );
-      await expect(
-        store.reconcilePublicClient({
-          ...desired,
-          displayName: "Unsafe partial drift",
-          redirectUris: ["https://chatgpt.com/connector/oauth/unsafe-removal"],
-          allowedScopes: ["offline_access", "person:read"]
-        })
-      ).rejects.toThrow();
+      await pool.query(
+        `create function reject_scope_retirement_for_test() returns trigger
+           language plpgsql as $$
+           begin
+             if old.client_id = 'predefined-reconcile-test' and old.scope = 'openid' then
+               raise exception 'scope retirement rollback test';
+             end if;
+             return old;
+           end
+         $$;
+         create trigger reject_scope_retirement_for_test
+           before delete on oauth_client_allowed_scopes
+           for each row execute function reject_scope_retirement_for_test()`
+      );
+      const contracted = {
+        ...desired,
+        displayName: "Contracted client",
+        redirectUris: ["https://chatgpt.com/connector/oauth/contracted-callback"],
+        allowedScopes: ["offline_access", "person:read"]
+      } as const;
+      try {
+        await expect(store.reconcilePublicClient(contracted)).rejects.toThrow(
+          "scope retirement rollback test"
+        );
+      } finally {
+        await pool.query(
+          `drop trigger if exists reject_scope_retirement_for_test
+             on oauth_client_allowed_scopes;
+           drop function if exists reject_scope_retirement_for_test()`
+        );
+      }
       const afterRejectedRemoval = await pool.query<{
         display_name: string;
         updated_at: Date;
@@ -842,6 +934,122 @@ describe("Identity migration chain", () => {
           [rollbackCodeId]
         )
       ).resolves.toMatchObject({ rows: [{ id: rollbackCodeId }] });
+      await expect(
+        pool.query<{
+          family_revoked: boolean;
+          grant_revoked: boolean;
+          interaction_id: string;
+          session_authorization_revoked: boolean;
+          session_revoked: boolean;
+          token_revoked: boolean;
+        }>(
+          `select g.revoked_at is not null as grant_revoked,
+                  s.revoked_at is not null as session_revoked,
+                  sa.revoked_at is not null as session_authorization_revoked,
+                  f.revoked_at is not null as family_revoked,
+                  t.revoked_at is not null as token_revoked,
+                  i.id as interaction_id
+             from oauth_grants g
+             join oauth_sessions s on s.id = $2
+             join oauth_session_authorizations sa on sa.grant_id = g.id
+             join oauth_refresh_token_families f on f.id = $3
+             join oauth_refresh_tokens t on t.id = $4
+             join oauth_interactions i on i.id = $5
+            where g.id = $1`,
+          [grantId, sessionId, refreshFamilyId, refreshTokenId, rollbackInteractionId]
+        )
+      ).resolves.toMatchObject({
+        rows: [{
+          family_revoked: false,
+          grant_revoked: false,
+          interaction_id: rollbackInteractionId,
+          session_authorization_revoked: false,
+          session_revoked: false,
+          token_revoked: false
+        }]
+      });
+
+      await expect(store.reconcilePublicClient(contracted)).resolves.toBe("updated");
+      const contractedUpdatedAt = await pool.query<{ updated_at: Date }>(
+        "select updated_at from oauth_clients where id = $1",
+        [clientId]
+      );
+      await expect(Promise.all([
+        store.reconcilePublicClient(contracted),
+        store.reconcilePublicClient(contracted)
+      ])).resolves.toEqual(["unchanged", "unchanged"]);
+      await expect(
+        pool.query<{ updated_at: Date }>(
+          "select updated_at from oauth_clients where id = $1",
+          [clientId]
+        )
+      ).resolves.toMatchObject({ rows: contractedUpdatedAt.rows });
+      await expect(store.findProviderClient(clientId)).resolves.toMatchObject({
+        redirect_uris: contracted.redirectUris,
+        scope: "offline_access person:read"
+      });
+      await expect(
+        pool.query<{
+          family_revoked: boolean;
+          grant_revoked: boolean;
+          session_authorization_revoked: boolean;
+          session_revoked: boolean;
+          token_revoked: boolean;
+        }>(
+          `select g.revoked_at is not null as grant_revoked,
+                  s.revoked_at is not null as session_revoked,
+                  sa.revoked_at is not null as session_authorization_revoked,
+                  f.revoked_at is not null as family_revoked,
+                  t.revoked_at is not null as token_revoked
+             from oauth_grants g
+             join oauth_sessions s on s.id = $2
+             join oauth_session_authorizations sa on sa.grant_id = g.id
+             join oauth_refresh_token_families f on f.id = $3
+             join oauth_refresh_tokens t on t.id = $4
+            where g.id = $1`,
+          [grantId, sessionId, refreshFamilyId, refreshTokenId]
+        )
+      ).resolves.toMatchObject({
+        rows: [{
+          family_revoked: true,
+          grant_revoked: true,
+          session_authorization_revoked: true,
+          session_revoked: false,
+          token_revoked: true
+        }]
+      });
+      await expect(
+        pool.query<{ count: string }>(
+          `select (
+             (select count(*) from oauth_grant_oidc_scopes
+               where grant_id = $1 and scope = 'openid') +
+             (select count(*) from oauth_grant_resource_scopes
+               where grant_id = $1 and scope = 'openid') +
+             (select count(*) from oauth_authorization_codes where id = $2) +
+             (select count(*) from oauth_interactions where id = $3) +
+             (select count(*) from oauth_client_allowed_scopes
+               where client_id = $4 and scope = 'openid')
+           )::text as count`,
+          [grantId, rollbackCodeId, rollbackInteractionId, clientId]
+        )
+      ).resolves.toMatchObject({ rows: [{ count: "0" }] });
+      await expect(
+        pool.query<{ grant_active: boolean; scope: string }>(
+          `select g.revoked_at is null as grant_active, scopes.scope
+             from oauth_grants g
+             join oauth_grant_resource_scopes scopes on scopes.grant_id = g.id
+            where g.id = $1`,
+          [unaffectedGrantId]
+        )
+      ).resolves.toMatchObject({
+        rows: [{ grant_active: true, scope: "person:read" }]
+      });
+      await expect(
+        pool.query<{ id: string }>(
+          "select id from identity_security_events where id = $1",
+          [securityEventId]
+        )
+      ).resolves.toMatchObject({ rows: [{ id: securityEventId }] });
 
       const concurrentClientId = "predefined-concurrent-create-test";
       const concurrentDesired = { ...desired, clientId: concurrentClientId };
