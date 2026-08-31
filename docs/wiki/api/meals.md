@@ -50,6 +50,15 @@ copy of the domain snapshot. It directs a natural acknowledgement and one
 evidence-grounded observation or next step when supported, without exposing
 internal completeness or transport vocabulary.
 
+For a sufficiently legible meal photo or useful text description, the MCP
+contract directs the client to make and save a best-effort estimate immediately:
+each identifiable item carries estimated quantity/unit, `text|photo` method,
+bounded confidence, and calories/protein/fat/carbohydrates for that estimated
+portion. Missing measured grams alone does not make the amount unknown. Unknown
+values remain appropriate when material foods or scale genuinely cannot be
+estimated. User-facing replies describe stored estimates as approximate, and a
+later clarification uses the existing append-only full-snapshot correction.
+
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and
 is never converted to zero. Daily totals also return `incompleteMealCount`; an
@@ -62,6 +71,7 @@ nutrition detail creates an append-only full-snapshot correction.
 ## Evidence
 
 - Nutrition contracts/controller/integration tests.
+- TASK-0086 accepted MCP photo-estimation and read-back fixture.
 
 ## Decisions
 

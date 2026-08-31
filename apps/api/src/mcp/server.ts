@@ -125,7 +125,7 @@ type OAuthProtectedTool = Tool & {
 /** Natural routine replies used to demonstrate the Coach voice to MCP clients. */
 export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
   "Записал чечевичный суп, говядину в перечном соусе, салат и вишнёвый сок; пенне не учитывал.",
-  "Исправил обед. Если захочешь точнее оценить порции, позже пришли фото или просто опиши их размер.",
+  "По фото оценил ужин примерно в 670 ккал: около 44 г белка, 29 г жиров и 59 г углеводов. Мясо даёт хороший белок, а большую часть углеводов здесь набирает пюре.",
   "Записал ужин: лосось, кукурузу, овощи, ягоды и бокал вина. Хороший набор белка и овощей; после вина сегодня лучше перейти на воду и оставить вечер спокойным.",
   "Записал сон 7 ч 54 мин, оценку 86, HRV 48 мс, ночной пульс 59, дыхание 13,8, SpO₂ 95% и температуру без отклонения. Восстановление выглядит неплохо; сегодня можно держать обычный темп и свериться с самочувствием перед тренировкой."
 ] as const;
@@ -134,13 +134,14 @@ const mealWriteResultContent =
   "The reported meal has been saved. Continue the required workflow silently before replying. " +
   "In the final reply, use the user's language and sound like a real coach in one or two natural sentences: " +
   "acknowledge what was eaten, then add one useful evidence-grounded observation or next step when the facts support it. " +
-  "Do not invent calories, nutrients, or portions, and never discuss internal mechanics.";
+  "When saved portions or nutrients are estimates, use them and clearly speak approximately rather than claiming measured precision. " +
+  "Do not say calories are unavailable merely because exact grams were not measured, and never discuss internal mechanics.";
 
 const mealReadResultContent =
   "Use these meal facts silently. If this completes a routine meal capture or correction, reply in the user's language " +
   "and sound like a real coach in one or two natural sentences: acknowledge what was eaten, then add one useful " +
-  "evidence-grounded observation or next step when the facts support it. Do not invent calories, nutrients, or portions, " +
-  "and never discuss internal mechanics.";
+  "evidence-grounded observation or next step when the facts support it. Use stored estimates as approximate values rather " +
+  "than hiding them because exact grams were not measured, and never discuss internal mechanics.";
 
 const recoveryWriteResultContent =
   "The reported recovery fact has been saved. Continue capturing every other independent fact from the same report " +
@@ -167,8 +168,8 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
   "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
-  "Preserve unknown optional values as null or partial inside typed data instead of inventing precision. For Meal items, use amountKind unknown when no amount was reported, described for the user's own non-numeric wording, quantified only for an explicit number and unit, and estimated only after a real text or photo estimate with method and confidence; never invent 1 serving or another sentinel amount. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. Ask only for irreducible ambiguity between materially different targets, dates, or domain meanings. " +
-  "After a routine Meal create or correction, say naturally what was recorded or corrected and add one useful evidence-grounded observation or next step when supported. An optional later photo or everyday-language amount description may be useful, but do not turn it into a prerequisite or a repeated question. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
+  "Preserve genuinely unknown optional values as null or partial inside typed data instead of inventing measured precision. For Meal items, use amountKind unknown only when available evidence is genuinely insufficient for a reasonable estimate, described for the user's own non-numeric wording, quantified for an explicit number and unit, and estimated for a best-effort text or photo estimate with method and confidence; never invent 1 serving or another sentinel amount. A sufficiently legible meal photo or useful text description authorizes and requires an immediate best-effort estimate of each identifiable item's quantity plus calories, protein, fat, and carbohydrates. Exact grams are not a prerequisite: use bounded confidence, save the approximate nutrition now, and let later user detail correct it. Ask only when material foods or scale are genuinely ambiguous. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. " +
+  "After a routine Meal create or correction, say naturally what was recorded or corrected, state approximate calories or macros when estimated values were saved, and add one useful evidence-grounded observation or next step when supported. Do not ask for duplicate confirmation before a reasonable estimate. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
   MCP_ROUTINE_COACH_RESPONSE_EXAMPLES.map((example) => `\"${example}\"`).join(" ") +
   " " +
   "Format user-facing answers as plain Markdown and never emit HTML entities or encoded whitespace. Destructive, credential, administrative, and material goal or program changes still require explicit confirmation.";
@@ -391,7 +392,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_meal",
-      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Supply only amount evidence the user actually provided or that was genuinely estimated from text/photo; omit irrelevant amount and nutrient fields instead of sending null bookkeeping or a sentinel serving. Then read back with list_meals using localDate only and reply in natural coach language without exposing contract fields or tool mechanics.",
+      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. For a sufficiently legible photo or useful text description, make and save a best-effort estimate now for each identifiable item's quantity, calories, protein, fat, and carbohydrates using method and bounded confidence; exact grams are not required. Use unknown only for genuinely unidentifiable food or scale, never merely because the user did not weigh it, and never invent a sentinel serving. Then read back with list_meals using localDate only and reply in natural coach language with approximate nutrition and useful guidance without exposing contract fields or tool mechanics.",
       createMealToolInputSchema,
       undefined,
       true,
@@ -651,10 +652,48 @@ function connectorMealSchema(
           required: ["label"],
           properties: {
             ...itemSchema.properties,
+            amountKind: {
+              ...(itemSchema.properties.amountKind as Readonly<Record<string, unknown>>),
+              description: "Use estimated when a legible photo or useful text supports a reasonable portion estimate; missing exact scale alone is not a reason to use unknown."
+            },
+            quantity: {
+              ...(itemSchema.properties.quantity as Readonly<Record<string, unknown>>),
+              description: "Explicit or best-effort estimated amount. For legible meal photos, estimate a realistic quantity instead of requiring measured grams."
+            },
+            unit: {
+              ...(itemSchema.properties.unit as Readonly<Record<string, unknown>>),
+              description: "Unit for the explicit or estimated quantity."
+            },
+            estimateMethod: {
+              ...(itemSchema.properties.estimateMethod as Readonly<Record<string, unknown>>),
+              description: "Set to photo or text whenever quantity and nutrition are estimated from that evidence."
+            },
+            amountConfidence: {
+              ...(itemSchema.properties.amountConfidence as Readonly<Record<string, unknown>>),
+              description: "Bounded 0..1 confidence for the best-effort item estimate; uncertainty should lower confidence, not automatically erase useful estimates."
+            },
             nutrients: {
               type: "object",
               additionalProperties: false,
-              properties: nutrientSchema.properties
+              description: "For each identifiable item in a sufficiently legible photo or useful text report, provide best-effort calories, protein, fat, and carbohydrates for the estimated portion. Omit values only when they genuinely cannot be estimated.",
+              properties: {
+                caloriesKcal: {
+                  ...(nutrientSchema.properties.caloriesKcal as Readonly<Record<string, unknown>>),
+                  description: "Best-effort calories for this item's reported or estimated portion."
+                },
+                proteinG: {
+                  ...(nutrientSchema.properties.proteinG as Readonly<Record<string, unknown>>),
+                  description: "Best-effort protein grams for this item's reported or estimated portion."
+                },
+                fatG: {
+                  ...(nutrientSchema.properties.fatG as Readonly<Record<string, unknown>>),
+                  description: "Best-effort fat grams for this item's reported or estimated portion."
+                },
+                carbsG: {
+                  ...(nutrientSchema.properties.carbsG as Readonly<Record<string, unknown>>),
+                  description: "Best-effort carbohydrate grams for this item's reported or estimated portion."
+                }
+              }
             }
           }
         }
@@ -922,7 +961,7 @@ function errorResult(message: string): CallToolResult {
 function inputErrorResult(toolName: string): CallToolResult {
   if (toolName === "record_meal" || toolName === "correct_meal") {
     return errorResult(
-      "Retry the Meal once using only facts the user supplied: omit unknown optional fields and never invent amounts or nutrients. Do not mention tools, staging, APIs, contracts, fields, or this retry to the user. If the retry still fails, say naturally that saving is temporarily unavailable."
+      "Retry the Meal once while preserving valid best-effort text/photo estimates with method and confidence. For sufficiently legible evidence, include estimated quantity plus calories, protein, fat, and carbohydrates; exact measured grams are not required. Remove only contradictory or genuinely unknowable optional fields and never use a sentinel serving. Do not mention tools, staging, APIs, contracts, fields, or this retry to the user. If the retry still fails, say naturally that saving is temporarily unavailable."
     );
   }
   if (toolName === "record_recovery_observation" || toolName === "correct_recovery_observation") {

@@ -140,6 +140,15 @@ describe("MCP HTTP adapter", () => {
       "never invent 1 serving or another sentinel amount"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "authorizes and requires an immediate best-effort estimate"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Exact grams are not a prerequisite"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "calories, protein, fat, and carbohydrates"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "answer like a real coach in one or two natural sentences"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
@@ -180,6 +189,9 @@ describe("MCP HTTP adapter", () => {
     }
     expect(MCP_ROUTINE_COACH_RESPONSE_EXAMPLES).toContain(
       "Записал ужин: лосось, кукурузу, овощи, ягоды и бокал вина. Хороший набор белка и овощей; после вина сегодня лучше перейти на воду и оставить вечер спокойным."
+    );
+    expect(MCP_ROUTINE_COACH_RESPONSE_EXAMPLES).toContain(
+      "По фото оценил ужин примерно в 670 ккал: около 44 г белка, 29 г жиров и 59 г углеводов. Мясо даёт хороший белок, а большую часть углеводов здесь набирает пюре."
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
       "Confirm writes"
@@ -262,6 +274,9 @@ describe("MCP HTTP adapter", () => {
     expect(recordMealTool?.description).toContain(
       "reply in natural coach language"
     );
+    expect(recordMealTool?.description).toContain(
+      "make and save a best-effort estimate now"
+    );
     expect(recordMealTool?.inputSchema.properties.items.items).toMatchObject({
       required: ["label"],
       properties: {
@@ -277,6 +292,10 @@ describe("MCP HTTP adapter", () => {
     });
     expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients.required)
       .toBeUndefined();
+    expect(recordMealTool?.inputSchema.properties.items.items.properties.amountKind.description)
+      .toContain("missing exact scale alone is not a reason to use unknown");
+    expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients.description)
+      .toContain("provide best-effort calories, protein, fat, and carbohydrates");
     expect(recordMealTool?.inputSchema.required).not.toContain("sourceReference");
     expect(recordMealTool?.inputSchema.properties.sourceReference.required).toBeUndefined();
     const recordRecoveryTool = body.result.tools.find((tool: { name: string }) =>
@@ -755,11 +774,39 @@ describe("MCP HTTP adapter", () => {
         nutrients: { caloriesKcal: 455, proteinG: null, fatG: null, carbsG: null }
       }]
     };
-    const createMeal = vi.fn().mockResolvedValue({ created: true, meal: originalMeal });
+    const photoMeal = {
+      id: "00000000-0000-4000-8000-000000000205",
+      description: "Ужин по фото",
+      items: [
+        { label: "Картофельное пюре", quantity: 220, unit: "g", caloriesKcal: 240, proteinG: 4, fatG: 8, carbsG: 38, confidence: 0.7 },
+        { label: "Мясо", quantity: 170, unit: "g", caloriesKcal: 330, proteinG: 34, fatG: 20, carbsG: 3, confidence: 0.55 },
+        { label: "Зелёный горошек", quantity: 90, unit: "g", caloriesKcal: 72, proteinG: 4.5, fatG: 0.4, carbsG: 12.5, confidence: 0.75 },
+        { label: "Огурцы", quantity: 80, unit: "g", caloriesKcal: 12, proteinG: 0.5, fatG: 0.1, carbsG: 2.4, confidence: 0.75 },
+        { label: "Помидоры", quantity: 80, unit: "g", caloriesKcal: 14, proteinG: 0.7, fatG: 0.2, carbsG: 3, confidence: 0.75 }
+      ].map((item) => ({
+        label: item.label,
+        amountKind: "estimated",
+        quantity: item.quantity,
+        unit: item.unit,
+        amountDescription: "оценка по фото",
+        estimateMethod: "photo",
+        amountConfidence: item.confidence,
+        nutrients: {
+          caloriesKcal: item.caloriesKcal,
+          proteinG: item.proteinG,
+          fatG: item.fatG,
+          carbsG: item.carbsG
+        }
+      }))
+    };
+    const createMeal = vi.fn()
+      .mockResolvedValueOnce({ created: true, meal: originalMeal })
+      .mockResolvedValueOnce({ created: true, meal: photoMeal });
     const correctMeal = vi.fn().mockResolvedValue({ created: true, meal: correctedMeal });
     const listMeals = vi.fn()
       .mockResolvedValueOnce({ items: [originalMeal], nextCursor: null })
-      .mockResolvedValueOnce({ items: [correctedMeal], nextCursor: null });
+      .mockResolvedValueOnce({ items: [correctedMeal], nextCursor: null })
+      .mockResolvedValueOnce({ items: [photoMeal], nextCursor: null });
     const recoveryObservations: RecoveryObservation[] = [];
     const createObservation = vi.fn(async (input: CreateRecoveryObservation) => {
       const observation = {
@@ -913,6 +960,35 @@ describe("MCP HTTP adapter", () => {
         }))
       ]
     };
+    const photoDinner = {
+      occurredAt: "2026-08-31T16:47:00.000Z",
+      timezone: "Europe/Moscow",
+      kind: "dinner",
+      description: "Картофельное пюре, мясо, зелёный горошек, огурцы и помидоры",
+      items: photoMeal.items.map((item) => ({
+        label: item.label,
+        quantity: item.quantity,
+        unit: item.unit,
+        amountDescription: item.amountDescription,
+        estimateMethod: item.estimateMethod,
+        amountConfidence: item.amountConfidence,
+        nutrients: item.nutrients
+      })),
+      dedupeKey: "chatgpt:meal:dinner:2026-08-31:1947:photo"
+    };
+    const normalizedPhotoDinner = {
+      ...photoDinner,
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-08-31T16:47:00.000Z"
+      },
+      items: photoMeal.items.map((item) => ({
+        foodVersionId: null,
+        ...item
+      }))
+    };
 
     try {
       expect((await call(5, "get_active_training_program", {})).json().result)
@@ -1017,6 +1093,34 @@ describe("MCP HTTP adapter", () => {
         .toMatchObject({ structuredContent: { items: [correctedMeal] } });
       expect(correctedMealReadResult.content[0].text)
         .toContain("one useful evidence-grounded observation or next step");
+      const photoMealResult = (await call(140, "record_meal", photoDinner)).json().result;
+      expect(photoMealResult).toMatchObject({ structuredContent: photoMeal });
+      expect(photoMealResult.content[0].text).toContain(
+        "Do not say calories are unavailable merely because exact grams were not measured"
+      );
+      expect(createMeal).toHaveBeenNthCalledWith(2, normalizedPhotoDinner);
+      for (const item of normalizedPhotoDinner.items) {
+        expect(item).toMatchObject({
+          amountKind: "estimated",
+          estimateMethod: "photo",
+          amountConfidence: expect.any(Number),
+          nutrients: {
+            caloriesKcal: expect.any(Number),
+            proteinG: expect.any(Number),
+            fatG: expect.any(Number),
+            carbsG: expect.any(Number)
+          }
+        });
+      }
+      const photoMealReadResult = (await call(141, "list_meals", {
+        localDate: "2026-08-31"
+      })).json().result;
+      expect(photoMealReadResult).toMatchObject({
+        structuredContent: { items: [photoMeal] }
+      });
+      expect(photoMealReadResult.content[0].text).toContain(
+        "Use stored estimates as approximate values"
+      );
       const invalidSleepScoreResult = (await call(15, "record_recovery_observation", {
         kind: "metric",
         localDate: "2026-08-31",
@@ -1146,8 +1250,9 @@ describe("MCP HTTP adapter", () => {
         "00000000-0000-4000-8000-000000000201",
         expect.objectContaining({ reason: "Clarified wording" })
       );
-      expect(createMeal).toHaveBeenCalledWith(normalizedDinner);
-      expect(listMeals).toHaveBeenCalledTimes(2);
+      expect(createMeal).toHaveBeenCalledTimes(2);
+      expect(createMeal).toHaveBeenNthCalledWith(1, normalizedDinner);
+      expect(listMeals).toHaveBeenCalledTimes(3);
       expect(correctMeal).toHaveBeenCalledWith(
         originalMeal.id,
         expect.objectContaining({

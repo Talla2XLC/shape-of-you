@@ -58,10 +58,12 @@ completeness states, and transport details out of the reply. Daily-plan headings
 are reserved for an actual daily-plan answer. The MCP adapter retains typed
 `structuredContent` for orchestration but uses a tool-specific Meal presentation
 instead of duplicating the raw domain DTO into model-facing text. When a reported
-Meal has no known amount, the Meal is recorded immediately without a sentinel
-quantity; if extra precision would materially help, the Coach may optionally
-invite a later photo or an everyday-language size description without making it
-a success condition.
+Meal includes a sufficiently legible photo or useful size description, the Coach
+immediately makes a best-effort portion and calorie/macronutrient estimate with
+bounded confidence; measured grams are not a prerequisite. It reports the
+result as approximate and keeps later ordinary-language corrections available.
+Unknown amount or nutrients remain valid only when material foods or scale
+cannot be estimated reasonably, and they never receive a sentinel quantity.
 
 For Training, `get_active_training_program` explicitly distinguishes an active
 program from valid absence. Only its typed `absent` result proves that no
@@ -71,6 +73,7 @@ stops dependent coaching without chat-history or Sheets fallback.
 ## Evidence
 
 - Coaching schema/contracts/integration tests.
+- TASK-0086 accepted MCP photo-estimation and read-back fixture.
 
 ## Decisions
 
