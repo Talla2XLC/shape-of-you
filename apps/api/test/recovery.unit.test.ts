@@ -66,6 +66,18 @@ describe("Recovery domain", () => {
     })).toThrow("kind must match");
   });
 
+  it("keeps a wearable sleep score separate from subjective sleep quality", () => {
+    expect(validateRecoveryObservation({
+      ...manualMetric,
+      dedupeKey: "manual:sleep-score:2026-10-25",
+      detail: { type: "metric", metric: "sleep_score", value: 86, unit: "score" }
+    })).toMatchObject({ localDate: "2026-10-25", temporalPrecision: "instant" });
+    expect(() => validateRecoveryObservation({
+      ...manualMetric,
+      detail: { type: "metric", metric: "sleep_score", value: 86, unit: "bpm" }
+    })).toThrow("unit is incompatible");
+  });
+
   it("lets hard stops dominate readiness and caps confidence for poor evidence", () => {
     const result = evaluateRecovery(policy, [{
       id: "subjective-1",

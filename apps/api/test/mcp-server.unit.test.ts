@@ -7,6 +7,11 @@ import {
 } from "jose";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+import type {
+  CreateRecoveryObservation,
+  ListRecoveryObservationsQuery,
+  RecoveryObservation
+} from "@shape-of-you/contracts";
 
 import { RequestPersonContext } from "../src/application/person-context.js";
 import { NotFoundError } from "../src/domain/errors.js";
@@ -274,6 +279,33 @@ describe("MCP HTTP adapter", () => {
       .toBeUndefined();
     expect(recordMealTool?.inputSchema.required).not.toContain("sourceReference");
     expect(recordMealTool?.inputSchema.properties.sourceReference.required).toBeUndefined();
+    const recordRecoveryTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "record_recovery_observation"
+    );
+    expect(recordRecoveryTool?.inputSchema.required).toEqual([
+      "kind",
+      "timezone",
+      "dedupeKey",
+      "detail"
+    ]);
+    const recoveryDetailSchemas = recordRecoveryTool?.inputSchema.properties.detail.oneOf;
+    const sleepDetailSchema = recoveryDetailSchemas.find((detail: {
+      properties: { type: { const: string } };
+    }) => detail.properties.type.const === "sleep");
+    expect(sleepDetailSchema.required).toEqual(["type", "totalSleepMinutes"]);
+    const metricDetailSchema = recoveryDetailSchemas.find((detail: {
+      properties: { type: { const: string } };
+    }) => detail.properties.type.const === "metric");
+    expect(metricDetailSchema.properties.metric.enum).toContain("sleep_score");
+    expect(metricDetailSchema.allOf).toContainEqual(expect.objectContaining({
+      if: { properties: { metric: { enum: ["body_battery", "sleep_score"] } } },
+      then: {
+        properties: {
+          value: { minimum: 0, maximum: 100 },
+          unit: { const: "score" }
+        }
+      }
+    }));
     const workoutSetSchema = body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_workout_session"
     )?.inputSchema.properties.exercises.items.properties.sets.items;
@@ -662,7 +694,8 @@ describe("MCP HTTP adapter", () => {
       scope: [
         MCP_READ_SCOPE,
         MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-        MCP_MEAL_WRITE_SCOPE
+        MCP_MEAL_WRITE_SCOPE,
+        MCP_RECOVERY_WRITE_SCOPE
       ].join(" ")
     })
       .setProtectedHeader({ alg: "ES256", kid: "writer-v1" })
@@ -727,6 +760,27 @@ describe("MCP HTTP adapter", () => {
     const listMeals = vi.fn()
       .mockResolvedValueOnce({ items: [originalMeal], nextCursor: null })
       .mockResolvedValueOnce({ items: [correctedMeal], nextCursor: null });
+    const recoveryObservations: RecoveryObservation[] = [];
+    const createObservation = vi.fn(async (input: CreateRecoveryObservation) => {
+      const observation = {
+        id: `00000000-0000-4000-8000-${String(300 + recoveryObservations.length).padStart(12, "0")}`,
+        personId: "00000000-0000-4000-8000-000000000001",
+        localDate: input.localDate ?? "2026-08-31",
+        temporalPrecision: input.temporalPrecision ?? "local_date",
+        supersedesId: null,
+        correctionReason: null,
+        createdAt: "2026-08-31T09:00:00.000Z",
+        ...input
+      } as RecoveryObservation;
+      recoveryObservations.push(observation);
+      return { created: true, observation };
+    });
+    const listObservations = vi.fn(async (query: ListRecoveryObservationsQuery) => ({
+      items: recoveryObservations.filter((observation) =>
+        query.localDate === undefined || observation.localDate === query.localDate
+      ),
+      nextCursor: null
+    }));
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -754,7 +808,12 @@ describe("MCP HTTP adapter", () => {
           create,
           correct
         },
-        nutrition: { listMeals, createMeal, correctMeal }
+        nutrition: { listMeals, createMeal, correctMeal },
+        recovery: {
+          ...unavailableServices.recovery,
+          listObservations,
+          createObservation
+        }
       }
     });
 
@@ -958,6 +1017,99 @@ describe("MCP HTTP adapter", () => {
         .toMatchObject({ structuredContent: { items: [correctedMeal] } });
       expect(correctedMealReadResult.content[0].text)
         .toContain("one useful evidence-grounded observation or next step");
+      const invalidSleepScoreResult = (await call(15, "record_recovery_observation", {
+        kind: "metric",
+        localDate: "2026-08-31",
+        timezone: "Europe/Moscow",
+        dedupeKey: "chatgpt:recovery:sleep-score:2026-08-31:invalid",
+        detail: { type: "metric", metric: "sleep_score", value: 101, unit: "score" }
+      })).json().result;
+      expect(invalidSleepScoreResult).toMatchObject({
+        isError: true,
+        content: [{ text: expect.stringContaining("Continue saving the other independent facts") }]
+      });
+      expect(createObservation).not.toHaveBeenCalled();
+      const recoveryFacts = [
+        {
+          kind: "sleep",
+          dedupeKey: "chatgpt:recovery:sleep:2026-08-31",
+          detail: { type: "sleep", totalSleepMinutes: 474 }
+        },
+        {
+          kind: "metric",
+          dedupeKey: "chatgpt:recovery:sleep-score:2026-08-31",
+          detail: { type: "metric", metric: "sleep_score", value: 86, unit: "score" }
+        },
+        {
+          kind: "metric",
+          dedupeKey: "chatgpt:recovery:hrv:2026-08-31",
+          detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" }
+        },
+        {
+          kind: "metric",
+          dedupeKey: "chatgpt:recovery:night-heart-rate:2026-08-31",
+          detail: { type: "metric", metric: "night_heart_rate", value: 59, unit: "bpm" }
+        },
+        {
+          kind: "metric",
+          dedupeKey: "chatgpt:recovery:respiration-rate:2026-08-31",
+          detail: { type: "metric", metric: "respiration_rate", value: 13.8, unit: "breaths_per_minute" }
+        },
+        {
+          kind: "metric",
+          dedupeKey: "chatgpt:recovery:oxygen-saturation:2026-08-31",
+          detail: { type: "metric", metric: "oxygen_saturation", value: 95, unit: "percent" }
+        },
+        {
+          kind: "metric",
+          dedupeKey: "chatgpt:recovery:temperature-deviation:2026-08-31",
+          detail: { type: "metric", metric: "temperature_deviation", value: 0, unit: "celsius" }
+        }
+      ];
+      for (const [index, fact] of recoveryFacts.entries()) {
+        const result = (await call(16 + index, "record_recovery_observation", {
+          ...fact,
+          localDate: "2026-08-31",
+          timezone: "Europe/Moscow"
+        })).json().result;
+        expect(result.isError, JSON.stringify({ index, fact, result })).not.toBe(true);
+        expect(result.content[0].text).toContain("sound like a real coach");
+        expect(result.content[0].text.toLowerCase()).not.toContain("api");
+      }
+      const recoveryReadResult = (await call(23, "list_recovery_observations", {
+        localDate: "2026-08-31"
+      })).json().result;
+      expect(recoveryReadResult.structuredContent.items).toHaveLength(7);
+      expect(recoveryReadResult.content[0].text)
+        .toContain("one evidence-grounded observation or next step");
+      expect(recoveryReadResult.content[0].text.toLowerCase()).not.toContain("schema");
+      expect(createObservation).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        observedFrom: null,
+        observedUntil: null,
+        temporalPrecision: "local_date",
+        localDate: "2026-08-31",
+        quality: "reliable",
+        connectionId: null,
+        consentId: null,
+        sourceReference: {
+          channel: "manual",
+          externalSystem: null,
+          externalRecordId: null,
+          occurredAt: null
+        },
+        detail: {
+          type: "sleep",
+          totalSleepMinutes: 474,
+          deepSleepMinutes: null,
+          remSleepMinutes: null,
+          lightSleepMinutes: null,
+          sleepQuality: null
+        }
+      }));
+      expect(createObservation).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        detail: { type: "metric", metric: "sleep_score", value: 86, unit: "score" }
+      }));
+      expect(listObservations).toHaveBeenCalledWith({ localDate: "2026-08-31" });
       expect(findActiveProgram).toHaveBeenCalledTimes(3);
       expect(create).toHaveBeenCalledWith(note);
       expect(correct).toHaveBeenCalledWith(

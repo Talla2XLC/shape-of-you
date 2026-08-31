@@ -68,6 +68,37 @@ describe("Recovery PostgreSQL vertical", () => {
     ]);
   });
 
+  it("persists a wearable sleep score as an independent local-date fact", async () => {
+    const created = await repository.createObservation(personA, {
+      kind: "metric",
+      observedFrom: null,
+      observedUntil: null,
+      temporalPrecision: "local_date",
+      localDate: "2026-08-31",
+      timezone: "Europe/Moscow",
+      quality: "reliable",
+      connectionId: null,
+      consentId: null,
+      dedupeKey: "manual:sleep-score:2026-08-31",
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: null
+      },
+      detail: { type: "metric", metric: "sleep_score", value: 86, unit: "score" }
+    });
+    const listed = await repository.listObservations(personA, {
+      localDate: "2026-08-31"
+    });
+
+    expect(created.observation).toMatchObject({
+      localDate: "2026-08-31",
+      detail: { type: "metric", metric: "sleep_score", value: 86, unit: "score" }
+    });
+    expect(listed.items).toContainEqual(created.observation);
+  });
+
   it("reuses shared device knowledge while isolating Person-owned connections", async () => {
     const first = await repository.registerDeviceModel({
       providerKey: "synthetic-provider",

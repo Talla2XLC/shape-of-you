@@ -126,7 +126,8 @@ type OAuthProtectedTool = Tool & {
 export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
   "Записал чечевичный суп, говядину в перечном соусе, салат и вишнёвый сок; пенне не учитывал.",
   "Исправил обед. Если захочешь точнее оценить порции, позже пришли фото или просто опиши их размер.",
-  "Записал ужин: лосось, кукурузу, овощи, ягоды и бокал вина. Хороший набор белка и овощей; после вина сегодня лучше перейти на воду и оставить вечер спокойным."
+  "Записал ужин: лосось, кукурузу, овощи, ягоды и бокал вина. Хороший набор белка и овощей; после вина сегодня лучше перейти на воду и оставить вечер спокойным.",
+  "Записал сон 7 ч 54 мин, оценку 86, HRV 48 мс, ночной пульс 59, дыхание 13,8, SpO₂ 95% и температуру без отклонения. Восстановление выглядит неплохо; сегодня можно держать обычный темп и свериться с самочувствием перед тренировкой."
 ] as const;
 
 const mealWriteResultContent =
@@ -141,6 +142,17 @@ const mealReadResultContent =
   "evidence-grounded observation or next step when the facts support it. Do not invent calories, nutrients, or portions, " +
   "and never discuss internal mechanics.";
 
+const recoveryWriteResultContent =
+  "The reported recovery fact has been saved. Continue capturing every other independent fact from the same report " +
+  "before replying, even if one separate fact could not be saved. Then complete the required day-level check silently. " +
+  "In the final reply, use the user's language and sound like a real coach: briefly acknowledge the useful recovery picture " +
+  "and add one evidence-grounded observation or next step. Do not invent values or discuss internal mechanics.";
+
+const recoveryReadResultContent =
+  "Use these recovery facts silently. If this completes a routine recovery capture, reply in the user's language and sound " +
+  "like a real coach: summarize the useful recovery picture and add one evidence-grounded observation or next step. " +
+  "Do not list internal states, missing bookkeeping, or implementation mechanics.";
+
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
@@ -149,6 +161,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
   "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
   "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
+  "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
   "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
@@ -179,8 +192,18 @@ const correctMealToolInputSchema = connectorMealSchema(
   "CorrectMealToolInputBody",
   CorrectMealSchema
 );
+const createRecoveryObservationToolInputSchema = connectorRecoverySchema(
+  "CreateRecoveryObservationToolInput",
+  CreateRecoveryObservationSchema
+);
+const correctRecoveryObservationToolInputSchema = connectorRecoverySchema(
+  "CorrectRecoveryObservationToolInputBody",
+  CorrectRecoveryObservationSchema
+);
 const validateCreateMeal = compile(CreateMealSchema);
 const validateCorrectMeal = compile(CorrectMealSchema);
+const validateCreateRecoveryObservation = compile(CreateRecoveryObservationSchema);
+const validateCorrectRecoveryObservation = compile(CorrectRecoveryObservationSchema);
 const validateCreateWorkoutSession = compile(CreateWorkoutSessionSchema);
 const validateCorrectWorkoutSession = compile(CorrectWorkoutSessionSchema);
 
@@ -451,31 +474,40 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "list_recovery_observations",
-      "Read the authorized person's current raw recovery observations.",
+      "Read the authorized person's current raw recovery observations. For one-day set read-back pass localDate only.",
       ListRecoveryObservationsQuerySchema,
       RecoveryObservationListSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.recovery.listObservations(input as ListRecoveryObservationsQuery)
+      (input) => services.recovery.listObservations(input as ListRecoveryObservationsQuery),
+      () => recoveryReadResultContent
     ),
     defineTool(
       "record_recovery_observation",
-      "Record one idempotent typed recovery observation from a direct user report; follow with typed read-back.",
-      CreateRecoveryObservationSchema,
+      "Immediately record one independent recovery fact from a direct text or screenshot report. Use sleep_score for a wearable 0..100 score, keep subjective sleepQuality at 1..5 only, continue other independent facts after an isolated failure, then read back the date-level set.",
+      createRecoveryObservationToolInputSchema,
       undefined,
       true,
       MCP_RECOVERY_WRITE_SCOPE,
       async (input) =>
-        (await services.recovery.createObservation(input as unknown as CreateRecoveryObservation)).observation
+        (await services.recovery.createObservation(normalizeRecoveryInput(
+          input,
+          validateCreateRecoveryObservation
+        ) as unknown as CreateRecoveryObservation)).observation,
+      () => recoveryWriteResultContent
     ),
     defineTool(
       "correct_recovery_observation",
-      "Append one idempotent correction to a uniquely identified recovery observation; follow with typed read-back.",
-      withIdSchema("CorrectRecoveryObservationToolInput", CorrectRecoveryObservationSchema),
+      "Append one idempotent correction to a uniquely identified recovery observation, then read back the date-level set without exposing internal mechanics.",
+      withIdSchema("CorrectRecoveryObservationToolInput", correctRecoveryObservationToolInputSchema),
       undefined,
       true,
       MCP_RECOVERY_WRITE_SCOPE,
-      async (input) => (await services.recovery.correctObservation(input.id as string, input as unknown as CorrectRecoveryObservation)).observation
+      async (input) => (await services.recovery.correctObservation(
+        input.id as string,
+        normalizeRecoveryInput(input, validateCorrectRecoveryObservation) as unknown as CorrectRecoveryObservation
+      )).observation,
+      () => recoveryWriteResultContent
     ),
     defineTool(
       "list_daily_context_notes",
@@ -631,6 +663,62 @@ function connectorMealSchema(
   };
 }
 
+function connectorRecoverySchema(
+  id: string,
+  schema: {
+    readonly required: readonly string[];
+    readonly properties: Readonly<Record<string, unknown>>;
+  }
+): Readonly<Record<string, unknown>> & {
+  readonly required: readonly string[];
+  readonly properties: Readonly<Record<string, unknown>>;
+} {
+  const sourceReferenceSchema = schema.properties.sourceReference as {
+    readonly properties: Readonly<Record<string, unknown>>;
+  };
+  const detailSchema = schema.properties.detail as {
+    readonly oneOf: readonly {
+      readonly required?: readonly string[];
+      readonly properties: Readonly<Record<string, unknown>>;
+    }[];
+  };
+  const connectorDetailSchema = {
+    ...detailSchema,
+    oneOf: detailSchema.oneOf.map((detail) => {
+      const type = detail.properties.type as { readonly const?: string } | undefined;
+      return type?.const === "sleep"
+        ? {
+            ...detail,
+            required: detail.required?.filter((property) => property !== "sleepQuality")
+          }
+        : detail;
+    })
+  };
+  const normalizedByAdapter = new Set([
+    "observedFrom",
+    "observedUntil",
+    "quality",
+    "connectionId",
+    "consentId",
+    "sourceReference"
+  ]);
+  return {
+    $id: id,
+    type: "object",
+    additionalProperties: false,
+    required: schema.required.filter((property) => !normalizedByAdapter.has(property)),
+    properties: {
+      ...schema.properties,
+      detail: connectorDetailSchema,
+      sourceReference: {
+        type: "object",
+        additionalProperties: false,
+        properties: sourceReferenceSchema.properties
+      }
+    }
+  };
+}
+
 function normalizeMealInput(
   input: Record<string, unknown>,
   validate: ValidateFunction
@@ -671,6 +759,49 @@ function normalizeMealInput(
   };
   if (!validate(normalized)) {
     throw new ConnectorInputError("Normalized Meal input does not match the domain contract");
+  }
+  return normalized;
+}
+
+function normalizeRecoveryInput(
+  input: Record<string, unknown>,
+  validate: ValidateFunction
+): Record<string, unknown> {
+  const recoveryInput = { ...input };
+  delete recoveryInput.id;
+  const sourceReference = isRecord(recoveryInput.sourceReference)
+    ? recoveryInput.sourceReference
+    : {};
+  const detail = isRecord(recoveryInput.detail) ? recoveryInput.detail : {};
+  const temporalPrecision = recoveryInput.temporalPrecision ??
+    (typeof recoveryInput.localDate === "string" ? "local_date" : "instant");
+  const normalized = {
+    ...recoveryInput,
+    observedFrom: recoveryInput.observedFrom ?? null,
+    observedUntil: recoveryInput.observedUntil ?? null,
+    temporalPrecision,
+    localDate: recoveryInput.localDate ?? null,
+    quality: recoveryInput.quality ?? "reliable",
+    connectionId: recoveryInput.connectionId ?? null,
+    consentId: recoveryInput.consentId ?? null,
+    sourceReference: {
+      channel: sourceReference.channel ?? "manual",
+      externalSystem: sourceReference.externalSystem ?? null,
+      externalRecordId: sourceReference.externalRecordId ?? null,
+      occurredAt: sourceReference.occurredAt ?? recoveryInput.observedUntil ?? null
+    },
+    detail: detail.type === "sleep" ? {
+      ...detail,
+      deepSleepMinutes: detail.deepSleepMinutes ?? null,
+      remSleepMinutes: detail.remSleepMinutes ?? null,
+      lightSleepMinutes: detail.lightSleepMinutes ?? null,
+      sleepQuality: detail.sleepQuality ?? null
+    } : detail
+  };
+  if (!validate(normalized)) {
+    throw new ConnectorInputError(
+      "Normalized RecoveryObservation input does not match the domain contract"
+    );
   }
   return normalized;
 }
@@ -791,6 +922,15 @@ function inputErrorResult(toolName: string): CallToolResult {
   if (toolName === "record_meal" || toolName === "correct_meal") {
     return errorResult(
       "Retry the Meal once using only facts the user supplied: omit unknown optional fields and never invent amounts or nutrients. Do not mention tools, staging, APIs, contracts, fields, or this retry to the user. If the retry still fails, say naturally that saving is temporarily unavailable."
+    );
+  }
+  if (toolName === "record_recovery_observation" || toolName === "correct_recovery_observation") {
+    return errorResult(
+      "Retry this recovery fact once using the exact local date and timezone plus only the reported value. " +
+      "A wearable 0..100 sleep score is metric sleep_score with unit score, never sleepQuality. " +
+      "Continue saving the other independent facts from the same report. Do not mention tools, staging, APIs, " +
+      "contracts, fields, or this retry to the user. If this fact still cannot be saved, describe that one missing " +
+      "fact naturally without technical details and never claim it was recorded."
     );
   }
   return errorResult("Tool arguments do not match the API contract");

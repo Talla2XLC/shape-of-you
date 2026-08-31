@@ -234,9 +234,21 @@ projection for Weight, Body, Meal, WorkoutSession, RecoveryObservation, and
 DailyContextNote. Reads require `person:read`; each write uses its
 domain-specific scope. Workout sets support typed reps,
 duration, and distance; Recovery supports typed sleep stages and raw
-Garmin-derived metrics. Tools delegate to existing application contracts, so
-validation, idempotency, provenance, correction policy, and audit remain
-domain responsibilities rather than MCP-specific logic.
+Garmin-derived metrics, including a provider-neutral `sleep_score` distinct
+from subjective sleep quality. Meal and Recovery write tools publish concise
+connector-facing schemas and normalize safe manual provenance and nullable
+service bookkeeping before strict domain validation. A natural Recovery report
+is decomposed into independent observations and verified with a local-date set
+read, so an isolated invalid fact does not suppress the remaining valid facts.
+Tools delegate to existing application contracts, so validation, idempotency,
+provenance, correction policy, and audit remain domain responsibilities rather
+than MCP-specific logic.
+
+Routine Meal and Recovery results instruct the client to answer in the user's
+language as a coach: acknowledge the captured facts and add a short,
+evidence-grounded observation or next step. Tool names, schema fields, storage
+states, transport failures, and other implementation mechanics are not part of
+the routine user-facing response.
 
 Staging still exposes the previously deployed 23-tool contract until the
 separately approved coordinated deployment and OAuth reconnect. The scope

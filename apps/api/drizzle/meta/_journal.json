@@ -190,6 +190,13 @@
       "when": 1788098277264,
       "tag": "20260830135757_complex_dragon_man",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1788168682382,
+      "tag": "20260831093122_low_stature",
+      "breakpoints": true
     }
   ]
 }

@@ -109,7 +109,8 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
     minimum_oxygen_saturation: "percent",
     temperature_deviation: "celsius",
     respiration_rate: "breaths_per_minute",
-    body_battery: "score"
+    body_battery: "score",
+    sleep_score: "score"
   } as const;
   if (input.detail.type === "metric" && input.detail.unit !== expectedUnits[input.detail.metric]) {
     throw new DomainValidationError("Recovery metric unit is incompatible");

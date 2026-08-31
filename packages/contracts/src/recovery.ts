@@ -31,7 +31,8 @@ export const RecoveryMetricSchema = {
     "minimum_oxygen_saturation",
     "temperature_deviation",
     "respiration_rate",
-    "body_battery"
+    "body_battery",
+    "sleep_score"
   ]
 } as const;
 
@@ -60,7 +61,8 @@ export type RecoveryMetric =
   | "minimum_oxygen_saturation"
   | "temperature_deviation"
   | "respiration_rate"
-  | "body_battery";
+  | "body_battery"
+  | "sleep_score";
 export type RecoveryMetricUnit =
   | "ms"
   | "bpm"
@@ -324,7 +326,7 @@ export const MetricObservationDetailSchema = {
     { if: { properties: { metric: { enum: ["oxygen_saturation", "minimum_oxygen_saturation"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "percent" } } } },
     { if: { properties: { metric: { const: "temperature_deviation" } } }, then: { properties: { value: { minimum: -20, maximum: 20 }, unit: { const: "celsius" } } } },
     { if: { properties: { metric: { const: "respiration_rate" } } }, then: { properties: { value: { exclusiveMinimum: 0, maximum: 100 }, unit: { const: "breaths_per_minute" } } } },
-    { if: { properties: { metric: { const: "body_battery" } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } }
+    { if: { properties: { metric: { enum: ["body_battery", "sleep_score"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } }
   ]
 } as const;
 

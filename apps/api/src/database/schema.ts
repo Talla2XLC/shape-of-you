@@ -183,7 +183,8 @@ export const recoveryMetric = pgEnum("recovery_metric", [
   "minimum_oxygen_saturation",
   "temperature_deviation",
   "respiration_rate",
-  "body_battery"
+  "body_battery",
+  "sleep_score"
 ]);
 export const recoveryMetricUnit = pgEnum("recovery_metric_unit", [
   "ms",
@@ -2730,7 +2731,7 @@ export const recoveryMetricDetails = pgTable(
             OR (${table.metric} IN ('oxygen_saturation', 'minimum_oxygen_saturation') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'percent')
             OR (${table.metric} = 'temperature_deviation' AND ${table.value} >= -20 AND ${table.value} <= 20 AND ${table.unit} = 'celsius')
             OR (${table.metric} = 'respiration_rate' AND ${table.value} > 0 AND ${table.value} <= 100 AND ${table.unit} = 'breaths_per_minute')
-            OR (${table.metric} = 'body_battery' AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'score'))`
+            OR (${table.metric} IN ('body_battery', 'sleep_score') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'score'))`
     )
   ]
 );
