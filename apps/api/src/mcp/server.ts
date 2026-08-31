@@ -108,6 +108,7 @@ interface ToolDefinition {
   readonly scope: string;
   readonly write: boolean;
   readonly execute: (input: Record<string, unknown>) => Promise<unknown>;
+  readonly present?: (value: unknown) => string;
 }
 
 class ConnectorInputError extends Error {}
@@ -124,12 +125,27 @@ type OAuthProtectedTool = Tool & {
 /** Natural routine replies used to demonstrate the Coach voice to MCP clients. */
 export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
   "Записал чечевичный суп, говядину в перечном соусе, салат и вишнёвый сок; пенне не учитывал.",
-  "Исправил обед. Если захочешь точнее оценить порции, позже пришли фото или просто опиши их размер."
+  "Исправил обед. Если захочешь точнее оценить порции, позже пришли фото или просто опиши их размер.",
+  "Записал ужин: лосось, кукурузу, овощи, ягоды и бокал вина. Хороший набор белка и овощей; после вина сегодня лучше перейти на воду и оставить вечер спокойным."
 ] as const;
+
+const mealWriteResultContent =
+  "The reported meal has been saved. Continue the required workflow silently before replying. " +
+  "In the final reply, use the user's language and sound like a real coach in one or two natural sentences: " +
+  "acknowledge what was eaten, then add one useful evidence-grounded observation or next step when the facts support it. " +
+  "Do not invent calories, nutrients, or portions, and never discuss internal mechanics.";
+
+const mealReadResultContent =
+  "Use these meal facts silently. If this completes a routine meal capture or correction, reply in the user's language " +
+  "and sound like a real coach in one or two natural sentences: acknowledge what was eaten, then add one useful " +
+  "evidence-grounded observation or next step when the facts support it. Do not invent calories, nutrients, or portions, " +
+  "and never discuss internal mechanics.";
 
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
+  "Keep internal mechanics invisible in user-facing replies, including tool, schema, status, identifier, storage, API, and implementation details. " +
+  "Match the user's language. After a routine fact capture or correction, answer like a real coach in one or two natural sentences: acknowledge the fact and add one useful evidence-grounded observation or next step when supported; never invent precision. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
   "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
   "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
@@ -139,7 +155,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
   "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
   "Preserve unknown optional values as null or partial inside typed data instead of inventing precision. For Meal items, use amountKind unknown when no amount was reported, described for the user's own non-numeric wording, quantified only for an explicit number and unit, and estimated only after a real text or photo estimate with method and confidence; never invent 1 serving or another sentinel amount. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. Ask only for irreducible ambiguity between materially different targets, dates, or domain meanings. " +
-  "Keep the machine protocol invisible in user-facing language. Match the user's language and conversational tone. After a routine create or correction, answer like a real coach in one or two natural sentences: say what was recorded or corrected and, when useful, offer an optional later photo or everyday-language amount description. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
+  "After a routine Meal create or correction, say naturally what was recorded or corrected and add one useful evidence-grounded observation or next step when supported. An optional later photo or everyday-language amount description may be useful, but do not turn it into a prerequisite or a repeated question. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
   MCP_ROUTINE_COACH_RESPONSE_EXAMPLES.map((example) => `\"${example}\"`).join(" ") +
   " " +
   "Format user-facing answers as plain Markdown and never emit HTML entities or encoded whitespace. Destructive, credential, administrative, and material goal or program changes still require explicit confirmation.";
@@ -263,7 +279,7 @@ function createServer(
       const result = await options.personContext.run(authorized.personId, () =>
         definition.execute((call.params.arguments ?? {}) as Record<string, unknown>)
       );
-      return successResult(result);
+      return successResult(result, definition.present?.(result));
     } catch (error) {
       if (error instanceof McpAuthorizationError) {
         return authorizationErrorResult(
@@ -347,7 +363,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       MealListSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.nutrition.listMeals(input as ListMealsQuery)
+      (input) => services.nutrition.listMeals(input as ListMealsQuery),
+      () => mealReadResultContent
     ),
     defineTool(
       "record_meal",
@@ -358,7 +375,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       MCP_MEAL_WRITE_SCOPE,
       async (input) => (await services.nutrition.createMeal(
         normalizeMealInput(input, validateCreateMeal) as CreateMeal
-      )).meal
+      )).meal,
+      () => mealWriteResultContent
     ),
     defineTool(
       "correct_meal",
@@ -370,7 +388,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       async (input) => (await services.nutrition.correctMeal(
         input.id as string,
         normalizeMealInput(input, validateCorrectMeal) as unknown as CorrectMeal
-      )).meal
+      )).meal,
+      () => mealWriteResultContent
     ),
     defineTool(
       "get_active_training_program",
@@ -719,7 +738,8 @@ function defineTool(
   outputSchema: Readonly<Record<string, unknown>> | undefined,
   write: boolean,
   scope: string,
-  execute: (input: Record<string, unknown>) => Promise<unknown>
+  execute: (input: Record<string, unknown>) => Promise<unknown>,
+  present?: (value: unknown) => string
 ): ToolDefinition {
   return {
     tool: {
@@ -743,7 +763,8 @@ function defineTool(
     validate: compile(inputSchema),
     scope,
     write,
-    execute
+    execute,
+    ...(present ? { present } : {})
   };
 }
 
@@ -754,10 +775,10 @@ function compile(schema: Readonly<Record<string, unknown>>): ValidateFunction {
   return ajv.compile(schema);
 }
 
-function successResult(value: unknown): CallToolResult {
+function successResult(value: unknown, content?: string): CallToolResult {
   const structured = isRecord(value) ? value : { result: value };
   return {
-    content: [{ type: "text", text: JSON.stringify(value) }],
+    content: [{ type: "text", text: content ?? JSON.stringify(value) }],
     structuredContent: structured
   };
 }

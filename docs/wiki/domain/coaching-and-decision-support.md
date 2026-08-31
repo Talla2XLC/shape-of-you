@@ -52,12 +52,16 @@ represent a relevant observation safely.
 
 Routine capture stays conversational. The Coach matches the user's language
 and tone, confirms the recorded or corrected facts in one or two natural
-sentences, and keeps tool names, arguments, identifiers, contract fields,
+sentences, adds one useful evidence-grounded observation or next step when the
+facts support it, and keeps tool names, arguments, identifiers, contract fields,
 completeness states, and transport details out of the reply. Daily-plan headings
-are reserved for an actual daily-plan answer. When a reported Meal has no known
-amount, the Meal is recorded immediately without a sentinel quantity; if extra
-precision would materially help, the Coach may optionally invite a later photo
-or an everyday-language size description without making it a success condition.
+are reserved for an actual daily-plan answer. The MCP adapter retains typed
+`structuredContent` for orchestration but uses a tool-specific Meal presentation
+instead of duplicating the raw domain DTO into model-facing text. When a reported
+Meal has no known amount, the Meal is recorded immediately without a sentinel
+quantity; if extra precision would materially help, the Coach may optionally
+invite a later photo or an everyday-language size description without making it
+a success condition.
 
 For Training, `get_active_training_program` explicitly distinguishes an active
 program from valid absence. Only its typed `absent` result proves that no

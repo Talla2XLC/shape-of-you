@@ -44,7 +44,11 @@ provenance to `manual`, infers the amount-evidence kind only from non-null
 evidence, and then validates the unchanged strict Meal command before calling
 the Nutrition service. Contradictory evidence still fails closed. This keeps
 ordinary text/photo capture concise without weakening domain or persistence
-invariants.
+invariants. Successful Meal tools keep the same typed `structuredContent`, while
+their model-facing text is a concise presentation contract rather than a JSON
+copy of the domain snapshot. It directs a natural acknowledgement and one
+evidence-grounded observation or next step when supported, without exposing
+internal completeness or transport vocabulary.
 
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and

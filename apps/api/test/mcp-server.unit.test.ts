@@ -144,7 +144,17 @@ describe("MCP HTTP adapter", () => {
       "Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Match the user's language and conversational tone"
+      "Match the user's language"
+    );
+    const priorityInstructions = MCP_OPERATIONAL_INSTRUCTIONS.slice(0, 512);
+    expect(priorityInstructions).toContain(
+      "Keep internal mechanics invisible in user-facing replies"
+    );
+    expect(priorityInstructions).toContain(
+      "answer like a real coach in one or two natural sentences"
+    );
+    expect(priorityInstructions).toContain(
+      "one useful evidence-grounded observation or next step"
     );
     const forbiddenRoutineReplyTerms = [
       "amountKind",
@@ -163,6 +173,9 @@ describe("MCP HTTP adapter", () => {
       }
       expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(example);
     }
+    expect(MCP_ROUTINE_COACH_RESPONSE_EXAMPLES).toContain(
+      "Записал ужин: лосось, кукурузу, овощи, ягоды и бокал вина. Хороший набор белка и овощей; после вина сегодня лучше перейти на воду и оставить вечер спокойным."
+    );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
       "Confirm writes"
     );
@@ -886,10 +899,43 @@ describe("MCP HTTP adapter", () => {
         content: [{ text: expect.stringContaining("Do not mention tools, staging, APIs, contracts") }]
       });
       expect(createMeal).not.toHaveBeenCalled();
-      expect((await call(11, "record_meal", dinner)).json().result)
-        .toMatchObject({ structuredContent: originalMeal });
-      expect((await call(12, "list_meals", { localDate: "2026-08-30" })).json().result)
+      const recordMealResult = (await call(11, "record_meal", dinner)).json().result;
+      expect(recordMealResult).toMatchObject({ structuredContent: originalMeal });
+      expect(recordMealResult.content).toEqual([{
+        type: "text",
+        text: expect.stringContaining("sound like a real coach")
+      }]);
+      expect(recordMealResult.content[0].text.trim().startsWith("{")).toBe(false);
+      const firstMealReadResult = (await call(12, "list_meals", {
+        localDate: "2026-08-30"
+      })).json().result;
+      expect(firstMealReadResult)
         .toMatchObject({ structuredContent: { items: [originalMeal] } });
+      expect(firstMealReadResult.content).toEqual([{
+        type: "text",
+        text: expect.stringContaining("one useful evidence-grounded observation or next step")
+      }]);
+      const forbiddenMealPresentationTerms = [
+        "partial",
+        "null",
+        "list_meals",
+        "typed",
+        "read-back",
+        "staging",
+        "api",
+        "contract",
+        "tool",
+        "schema"
+      ];
+      for (const presentation of [
+        recordMealResult.content[0].text,
+        firstMealReadResult.content[0].text
+      ]) {
+        expect(presentation.trim().startsWith("{")).toBe(false);
+        for (const forbidden of forbiddenMealPresentationTerms) {
+          expect(presentation.toLowerCase()).not.toContain(forbidden);
+        }
+      }
       const correction = {
         ...dinner,
         id: originalMeal.id,
@@ -902,10 +948,16 @@ describe("MCP HTTP adapter", () => {
         dedupeKey: "chatgpt:meal:dinner:2026-08-30:1905:correction:1",
         reason: "Пользователь уточнил объём и калорийность"
       };
-      expect((await call(13, "correct_meal", correction)).json().result)
-        .toMatchObject({ structuredContent: correctedMeal });
-      expect((await call(14, "list_meals", { localDate: "2026-08-30" })).json().result)
+      const correctMealResult = (await call(13, "correct_meal", correction)).json().result;
+      expect(correctMealResult).toMatchObject({ structuredContent: correctedMeal });
+      expect(correctMealResult.content[0].text).toContain("sound like a real coach");
+      const correctedMealReadResult = (await call(14, "list_meals", {
+        localDate: "2026-08-30"
+      })).json().result;
+      expect(correctedMealReadResult)
         .toMatchObject({ structuredContent: { items: [correctedMeal] } });
+      expect(correctedMealReadResult.content[0].text)
+        .toContain("one useful evidence-grounded observation or next step");
       expect(findActiveProgram).toHaveBeenCalledTimes(3);
       expect(create).toHaveBeenCalledWith(note);
       expect(correct).toHaveBeenCalledWith(
