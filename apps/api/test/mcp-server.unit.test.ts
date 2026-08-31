@@ -1033,7 +1033,15 @@ describe("MCP HTTP adapter", () => {
         {
           kind: "sleep",
           dedupeKey: "chatgpt:recovery:sleep:2026-08-31",
-          detail: { type: "sleep", totalSleepMinutes: 474 }
+          detail: { type: "sleep", totalSleepMinutes: 474, sleepQuality: 4 },
+          connectionId: "00000000-0000-4000-8000-000000000301",
+          consentId: "00000000-0000-4000-8000-000000000302",
+          sourceReference: {
+            channel: "device",
+            externalSystem: "garmin-screenshot",
+            externalRecordId: "2026-08-31-sleep",
+            occurredAt: null
+          }
         },
         {
           kind: "metric",
@@ -1043,7 +1051,13 @@ describe("MCP HTTP adapter", () => {
         {
           kind: "metric",
           dedupeKey: "chatgpt:recovery:hrv:2026-08-31",
-          detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" }
+          detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" },
+          sourceReference: {
+            channel: "device",
+            externalSystem: "garmin-screenshot",
+            externalRecordId: "2026-08-31-hrv",
+            occurredAt: null
+          }
         },
         {
           kind: "metric",
@@ -1104,6 +1118,22 @@ describe("MCP HTTP adapter", () => {
           remSleepMinutes: null,
           lightSleepMinutes: null,
           sleepQuality: null
+        }
+      }));
+      expect(createObservation).toHaveBeenNthCalledWith(3, expect.objectContaining({
+        connectionId: null,
+        consentId: null,
+        sourceReference: {
+          channel: "manual",
+          externalSystem: null,
+          externalRecordId: null,
+          occurredAt: null
+        },
+        detail: {
+          type: "metric",
+          metric: "hrv_rmssd",
+          value: 48,
+          unit: "ms"
         }
       }));
       expect(createObservation).toHaveBeenNthCalledWith(2, expect.objectContaining({

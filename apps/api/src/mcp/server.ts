@@ -484,7 +484,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_recovery_observation",
-      "Immediately record one independent recovery fact from a direct text or screenshot report. Use sleep_score for a wearable 0..100 score, keep subjective sleepQuality at 1..5 only, continue other independent facts after an isolated failure, then read back the date-level set.",
+      "Immediately record one independent recovery fact from a direct text or screenshot report. The report is manual provenance even when the text or image displays Garmin or another wearable; never classify it as a direct device connection. Use sleep_score for a wearable 0..100 score, keep subjective sleepQuality at 1..5 only, continue other independent facts after an isolated failure, then read back the date-level set.",
       createRecoveryObservationToolInputSchema,
       undefined,
       true,
@@ -498,7 +498,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_recovery_observation",
-      "Append one idempotent correction to a uniquely identified recovery observation, then read back the date-level set without exposing internal mechanics.",
+      "Append one idempotent correction to a uniquely identified recovery observation. Text and screenshot reports are manual provenance even when they display wearable data; then read back the date-level set without exposing internal mechanics.",
       withIdSchema("CorrectRecoveryObservationToolInput", correctRecoveryObservationToolInputSchema),
       undefined,
       true,
@@ -769,9 +769,10 @@ function normalizeRecoveryInput(
 ): Record<string, unknown> {
   const recoveryInput = { ...input };
   delete recoveryInput.id;
-  const sourceReference = isRecord(recoveryInput.sourceReference)
+  const claimedSourceReference = isRecord(recoveryInput.sourceReference)
     ? recoveryInput.sourceReference
     : {};
+  const wasMisclassifiedAsDevice = claimedSourceReference.channel === "device";
   const detail = isRecord(recoveryInput.detail) ? recoveryInput.detail : {};
   const temporalPrecision = recoveryInput.temporalPrecision ??
     (typeof recoveryInput.localDate === "string" ? "local_date" : "instant");
@@ -782,20 +783,20 @@ function normalizeRecoveryInput(
     temporalPrecision,
     localDate: recoveryInput.localDate ?? null,
     quality: recoveryInput.quality ?? "reliable",
-    connectionId: recoveryInput.connectionId ?? null,
-    consentId: recoveryInput.consentId ?? null,
+    connectionId: null,
+    consentId: null,
     sourceReference: {
-      channel: sourceReference.channel ?? "manual",
-      externalSystem: sourceReference.externalSystem ?? null,
-      externalRecordId: sourceReference.externalRecordId ?? null,
-      occurredAt: sourceReference.occurredAt ?? recoveryInput.observedUntil ?? null
+      channel: "manual",
+      externalSystem: null,
+      externalRecordId: null,
+      occurredAt: recoveryInput.observedUntil ?? null
     },
     detail: detail.type === "sleep" ? {
       ...detail,
       deepSleepMinutes: detail.deepSleepMinutes ?? null,
       remSleepMinutes: detail.remSleepMinutes ?? null,
       lightSleepMinutes: detail.lightSleepMinutes ?? null,
-      sleepQuality: detail.sleepQuality ?? null
+      sleepQuality: wasMisclassifiedAsDevice ? null : detail.sleepQuality ?? null
     } : detail
   };
   if (!validate(normalized)) {
