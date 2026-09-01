@@ -113,6 +113,12 @@ describe("MCP HTTP adapter", () => {
       "state missing evidence instead of inventing a plan"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "a clear signal that the workout is finished, authorizes immediate recording"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Do not ask whether to record it"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "only status absent proves that no active program exists"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
@@ -340,6 +346,21 @@ describe("MCP HTTP adapter", () => {
       }
     });
     expect(workoutSetSchema.required).toBeUndefined();
+    const recordWorkoutTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "record_workout_session"
+    );
+    expect(recordWorkoutTool?.description).toContain(
+      "Immediately record one idempotent workout session"
+    );
+    expect(recordWorkoutTool?.description).toContain(
+      "never ask whether to save it"
+    );
+    expect(body.result.tools.find((tool: { name: string }) =>
+      tool.name === "correct_workout_session"
+    )?.description).toContain("Do not ask for duplicate confirmation");
+    expect(body.result.tools.find((tool: { name: string }) =>
+      tool.name === "list_workout_sessions"
+    )?.description).toContain("For one-day Workout read-back pass localDate");
     const activeTrainingProgramTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "get_active_training_program"
     );
@@ -486,6 +507,7 @@ describe("MCP HTTP adapter", () => {
       });
 
       expect(response.json().result).toMatchObject({
+        content: [{ text: expect.stringContaining("sound like a real coach") }],
         structuredContent: { id: "00000000-0000-4000-8000-000000000301" }
       });
       expect(createWorkoutSession).toHaveBeenCalledWith({
@@ -501,6 +523,30 @@ describe("MCP HTTP adapter", () => {
           }]
         }]
       });
+      const invalidSchemaResponse = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: 51,
+          method: "tools/call",
+          params: {
+            name: "record_workout_session",
+            arguments: { ...workout, workoutName: undefined }
+          }
+        }
+      });
+      expect(invalidSchemaResponse.json().result).toMatchObject({
+        isError: true,
+        content: [{
+          text: expect.stringContaining("do not ask the user whether to save known work again")
+        }]
+      });
+      expect(createWorkoutSession).toHaveBeenCalledOnce();
       const invalidResponse = await authorizedFastify.inject({
         method: "POST",
         url: "/mcp",
@@ -552,6 +598,7 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(correctionResponse.json().result).toMatchObject({
+        content: [{ text: expect.stringContaining("sound like a real coach") }],
         structuredContent: { id: "00000000-0000-4000-8000-000000000303" }
       });
       expect(correctWorkoutSession).toHaveBeenCalledWith(

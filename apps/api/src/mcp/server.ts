@@ -143,6 +143,16 @@ const mealReadResultContent =
   "evidence-grounded observation or next step when the facts support it. Use stored estimates as approximate values rather " +
   "than hiding them because exact grams were not measured, and never discuss internal mechanics.";
 
+const workoutWriteResultContent =
+  "The reported workout has been saved. Complete the required date-scoped read-back silently before replying. " +
+  "In the final reply, use the user's language and sound like a real coach in one or two natural sentences: acknowledge " +
+  "the completed work and add one useful evidence-grounded observation or next step. Never discuss internal mechanics.";
+
+const workoutReadResultContent =
+  "Use these workout facts silently. If this completes a routine workout capture or correction, reply in the user's " +
+  "language and sound like a real coach in one or two natural sentences: acknowledge the completed work and add one " +
+  "useful evidence-grounded observation or next step. Never discuss internal mechanics.";
+
 const recoveryWriteResultContent =
   "The reported recovery fact has been saved. Continue capturing every other independent fact from the same report " +
   "before replying, even if one separate fact could not be saved. Then complete the required day-level check silently. " +
@@ -162,6 +172,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
   "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
   "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
+  "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
   "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
@@ -438,16 +449,17 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "list_workout_sessions",
-      "Read the authorized person's current workout sessions.",
+      "Read the authorized person's current workout sessions. For one-day Workout read-back pass localDate.",
       ListWorkoutSessionsQuerySchema,
       WorkoutSessionListSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.training.listWorkoutSessions(input as ListWorkoutSessionsQuery)
+      (input) => services.training.listWorkoutSessions(input as ListWorkoutSessionsQuery),
+      () => workoutReadResultContent
     ),
     defineTool(
       "record_workout_session",
-      "Record one idempotent workout session from a direct user report; follow with typed read-back.",
+      "Immediately record one idempotent workout session when the user directly reports performed exercises or sets, or clearly says the workout is finished. Assemble the session from the current message and accumulated conversation context; never ask whether to save it and never require the user to restate known work. Use get_active_training_program when exact exercise version references are needed, preserve genuinely unknown optional set values, then read back with list_workout_sessions using localDate and reply in natural coach language without exposing tool mechanics.",
       createWorkoutSessionToolInputSchema,
       undefined,
       true,
@@ -456,11 +468,12 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
         (await services.training.createWorkoutSession(normalizeWorkoutInput(
           input,
           validateCreateWorkoutSession
-        ) as CreateWorkoutSession)).session
+        ) as CreateWorkoutSession)).session,
+      () => workoutWriteResultContent
     ),
     defineTool(
       "correct_workout_session",
-      "Append one idempotent correction to a uniquely identified workout session; follow with typed read-back.",
+      "Immediately append one idempotent correction to a uniquely identified workout session when the user supplies a routine clarification. Do not ask for duplicate confirmation; follow with list_workout_sessions date-scoped read-back and reply in natural coach language without exposing tool mechanics.",
       withIdSchema(
         "CorrectWorkoutSessionToolInput",
         correctWorkoutSessionToolInputSchema
@@ -471,7 +484,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       async (input) => (await services.training.correctWorkoutSession(
         input.id as string,
         normalizeWorkoutInput(input, validateCorrectWorkoutSession) as unknown as CorrectWorkoutSession
-      )).session
+      )).session,
+      () => workoutWriteResultContent
     ),
     defineTool(
       "list_recovery_observations",
@@ -971,6 +985,14 @@ function inputErrorResult(toolName: string): CallToolResult {
       "Continue saving the other independent facts from the same report. Do not mention tools, staging, APIs, " +
       "contracts, fields, or this retry to the user. If this fact still cannot be saved, describe that one missing " +
       "fact naturally without technical details and never claim it was recorded."
+    );
+  }
+  if (toolName === "record_workout_session" || toolName === "correct_workout_session") {
+    return errorResult(
+      "Retry this Workout once using the performed exercises and sets already present in the conversation plus exact " +
+      "exercise version references from the active TrainingProgram when needed. Preserve genuinely unknown optional set " +
+      "values and do not ask the user whether to save known work again. Do not mention tools, staging, APIs, contracts, " +
+      "fields, or this retry to the user. If the retry still fails, say naturally that saving is temporarily unavailable."
     );
   }
   return errorResult("Tool arguments do not match the API contract");
