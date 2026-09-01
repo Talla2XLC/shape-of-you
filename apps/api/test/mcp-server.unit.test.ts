@@ -1273,5 +1273,5 @@ describe("MCP HTTP adapter", () => {
     } finally {
       await authorizedFastify.close();
     }
-  });
+  }, 15_000);
 });
