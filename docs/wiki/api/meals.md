@@ -48,7 +48,8 @@ weakening domain or persistence invariants. Successful Meal tools keep the same
 typed `structuredContent`, while their model-facing text is a concise
 presentation contract rather than a JSON copy of the domain snapshot. It
 directs a natural acknowledgement and one evidence-grounded observation or next
-step when supported, without exposing internal completeness or transport
+step by default whenever safe useful guidance follows from the available
+evidence, without exposing internal completeness or transport
 vocabulary.
 
 The connector-facing schemas remain backward compatible under the existing

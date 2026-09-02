@@ -28,6 +28,7 @@ import {
   type McpAuthorizationBoundary
 } from "../src/mcp/oauth.js";
 import {
+  MCP_COACH_REPLY_POLICY,
   MCP_OPERATIONAL_INSTRUCTIONS,
   MCP_ROUTINE_COACH_RESPONSE_EXAMPLES,
   registerMcpRoutes
@@ -239,7 +240,13 @@ describe("MCP HTTP adapter", () => {
       "calories, protein, fat, and carbohydrates"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "answer like a real coach in one or two natural sentences"
+      "sound like a real coach"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "For a routine capture, correction, or short factual answer, reply in one to three natural sentences"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "For a full Daily Coach answer, use the requested brief structure without a sentence limit"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Never expose tool names, arguments, identifiers, property or enum names"
@@ -248,17 +255,32 @@ describe("MCP HTTP adapter", () => {
       "Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Match the user's language"
+      "Always use the user's language"
     );
     const priorityInstructions = MCP_OPERATIONAL_INSTRUCTIONS.slice(0, 512);
     expect(priorityInstructions).toContain(
       "Keep internal mechanics invisible in user-facing replies"
     );
     expect(priorityInstructions).toContain(
-      "answer like a real coach in one or two natural sentences"
+      "sound like a real coach"
     );
     expect(priorityInstructions).toContain(
-      "one useful evidence-grounded observation or next step"
+      "one useful evidence-grounded observation"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "one concrete recommendation or next step by default"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Never ask whether the user wants you to record, correct, estimate, analyze"
+    );
+    expect(MCP_COACH_REPLY_POLICY).toContain(
+      "This guidance is expected, not an optional offer"
+    );
+    expect(MCP_COACH_REPLY_POLICY).toContain(
+      "Omit it only when the user explicitly asks for raw facts only"
+    );
+    expect(MCP_COACH_REPLY_POLICY).toContain(
+      "perform the action instead"
     );
     const forbiddenRoutineReplyTerms = [
       "amountKind",
@@ -498,6 +520,7 @@ describe("MCP HTTP adapter", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().result).toMatchObject({
       isError: true,
+      content: [{ text: expect.stringContaining("Do not claim that an unverified read or failed change succeeded") }],
       _meta: {
         "mcp/www_authenticate": [
           'Bearer resource_metadata="https://api.example.test/api/.well-known/oauth-protected-resource", scope="person:read", error="invalid_token", error_description="A bearer access token is required"'
@@ -661,7 +684,7 @@ describe("MCP HTTP adapter", () => {
       });
       expect(invalidResponse.json().result).toMatchObject({
         isError: true,
-        content: [{ text: "The Shape of You operation failed" }]
+        content: [{ text: expect.stringContaining("The requested fact was not saved") }]
       });
       expect(createWorkoutSession).toHaveBeenCalledOnce();
       const correction = {
@@ -733,7 +756,7 @@ describe("MCP HTTP adapter", () => {
       });
       expect(invalidCorrectionResponse.json().result).toMatchObject({
         isError: true,
-        content: [{ text: "The Shape of You operation failed" }]
+        content: [{ text: expect.stringContaining("The requested fact was not saved") }]
       });
       expect(correctWorkoutSession).toHaveBeenCalledOnce();
     } finally {
@@ -834,13 +857,242 @@ describe("MCP HTTP adapter", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().result).toMatchObject({
+        content: [{ text: expect.stringContaining("one concrete recommendation or next step by default") }],
         structuredContent: { items: [], nextCursor: null }
       });
       expect(list).toHaveBeenCalledOnce();
+
+      const invalidInputResponse = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${refreshedToken}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: 41,
+          method: "tools/call",
+          params: { name: "list_weight_measurements", arguments: { limit: 0 } }
+        }
+      });
+      expect(invalidInputResponse.json().result).toMatchObject({
+        isError: true,
+        content: [{
+          text: expect.stringContaining("Retry once silently using the unambiguous facts already present")
+        }]
+      });
     } finally {
       await authorizedFastify.close();
     }
   });
+
+  it("delivers the current Coach policy with every successful tool result", async () => {
+    const authorizedFastify = Fastify();
+    const pair = await generateKeyPair("ES256");
+    const jwk = await exportJWK(pair.publicKey);
+    const token = await new SignJWT({
+      client_id: "chatgpt-runtime",
+      scope: [
+        MCP_READ_SCOPE,
+        MCP_WEIGHT_WRITE_SCOPE,
+        MCP_BODY_MEASUREMENT_WRITE_SCOPE,
+        MCP_MEAL_WRITE_SCOPE,
+        MCP_WORKOUT_WRITE_SCOPE,
+        MCP_RECOVERY_WRITE_SCOPE,
+        MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE
+      ].join(" ")
+    })
+      .setProtectedHeader({ alg: "ES256", kid: "coach-policy-v1" })
+      .setIssuer("https://identity.example.test")
+      .setSubject("identity-account-1")
+      .setAudience("https://api.example.test/api/mcp")
+      .setIssuedAt()
+      .setExpirationTime("10m")
+      .sign(pair.privateKey);
+    const result = (marker: string) => ({ marker });
+    const created = (key: string, marker: string) => ({
+      created: true,
+      [key]: result(marker)
+    });
+    registerMcpRoutes({
+      fastify: authorizedFastify,
+      issuer: "https://identity.example.test",
+      resource: "https://api.example.test/api/mcp",
+      authorizer: new McpAuthorizer(
+        "https://identity.example.test",
+        "https://unused.test/jwks",
+        "https://api.example.test/api/mcp",
+        {
+          resolveAuthorizedPersons: async () => [{
+            personId: "00000000-0000-4000-8000-000000000001",
+            roles: ["owner"]
+          }]
+        },
+        createLocalJWKSet({
+          keys: [{ ...jwk, kid: "coach-policy-v1", use: "sig" }]
+        })
+      ),
+      personContext: new RequestPersonContext(),
+      services: {
+        weights: {
+          list: async () => result("list_weight_measurements"),
+          create: async () => created("measurement", "record_weight_measurement"),
+          correct: async () => created("measurement", "correct_weight_measurement")
+        },
+        bodyMeasurements: {
+          list: async () => result("list_body_measurements"),
+          create: async () => created("session", "record_body_measurements"),
+          correct: async () => created("session", "correct_body_measurements")
+        },
+        nutrition: {
+          listMeals: async () => result("list_meals"),
+          createMeal: async () => created("meal", "record_meal"),
+          correctMeal: async () => created("meal", "correct_meal")
+        },
+        training: {
+          findActiveProgram: async () => result("get_active_training_program"),
+          listWorkoutSessions: async () => result("list_workout_sessions"),
+          createWorkoutSession: async () => created("session", "record_workout_session"),
+          correctWorkoutSession: async () => created("session", "correct_workout_session")
+        },
+        recovery: {
+          listObservations: async () => result("list_recovery_observations"),
+          createObservation: async () => created("observation", "record_recovery_observation"),
+          correctObservation: async () => created("observation", "correct_recovery_observation")
+        },
+        dailyContextNotes: {
+          list: async () => result("list_daily_context_notes"),
+          create: async () => created("note", "record_daily_context_note"),
+          correct: async () => created("note", "correct_daily_context_note")
+        },
+        dailyProjection: {
+          projection: async () => result("get_daily_projection")
+        }
+      } as unknown as Parameters<typeof registerMcpRoutes>[0]["services"]
+    });
+    const sourceReference = {
+      channel: "manual",
+      externalSystem: null,
+      externalRecordId: null,
+      occurredAt: null
+    };
+    const weight = {
+      measuredAt: "2026-09-02T06:00:00.000Z",
+      timezone: "Europe/Moscow",
+      weightKg: 78.7,
+      sourceReference,
+      dedupeKey: "coach-policy-weight"
+    };
+    const body = {
+      measuredAt: "2026-09-02T06:01:00.000Z",
+      timezone: "Europe/Moscow",
+      values: [{ metric: "waist", value: 82, unit: "cm" }],
+      sourceReference,
+      dedupeKey: "coach-policy-body"
+    };
+    const meal = {
+      occurredAt: "2026-09-02T07:00:00.000Z",
+      timezone: "Europe/Moscow",
+      kind: "breakfast",
+      items: [{
+        label: "Яйца",
+        amountKind: "quantified",
+        quantity: 2,
+        unit: "piece",
+        nutrients: { caloriesKcal: 156, proteinG: 12.6, fatG: 10.6, carbsG: 1.2 }
+      }],
+      sourceReference,
+      dedupeKey: "coach-policy-meal"
+    };
+    const workout = {
+      occurredAt: "2026-09-02T09:00:00.000Z",
+      timezone: "Europe/Moscow",
+      programVersionId: null,
+      workoutName: "Workout A",
+      feeling: null,
+      note: null,
+      exercises: [{
+        exerciseVersionId: "00000000-0000-4000-8000-000000000301",
+        loadBasis: "external_weight",
+        feeling: null,
+        note: null,
+        sets: [{ reps: 10 }]
+      }],
+      sourceReference,
+      dedupeKey: "coach-policy-workout",
+      confidence: 1
+    };
+    const recovery = {
+      kind: "metric",
+      localDate: "2026-09-02",
+      timezone: "Europe/Moscow",
+      dedupeKey: "coach-policy-recovery",
+      detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" }
+    };
+    const note = {
+      localDate: "2026-09-02",
+      timezone: "Europe/Moscow",
+      text: "Busy work day",
+      sourceReference,
+      dedupeKey: "coach-policy-note"
+    };
+    const id = "00000000-0000-4000-8000-000000000401";
+    const cases = [
+      ["list_weight_measurements", {}, "list_weight_measurements"],
+      ["record_weight_measurement", weight, "record_weight_measurement"],
+      ["correct_weight_measurement", { id, ...weight, dedupeKey: "coach-policy-weight-correction", reason: "Correction" }, "correct_weight_measurement"],
+      ["list_body_measurements", {}, "list_body_measurements"],
+      ["record_body_measurements", body, "record_body_measurements"],
+      ["correct_body_measurements", { id, ...body, dedupeKey: "coach-policy-body-correction", reason: "Correction" }, "correct_body_measurements"],
+      ["list_meals", { localDate: "2026-09-02" }, "list_meals"],
+      ["record_meal", meal, "record_meal"],
+      ["correct_meal", { id, ...meal, dedupeKey: "coach-policy-meal-correction", reason: "Correction" }, "correct_meal"],
+      ["get_active_training_program", {}, "get_active_training_program"],
+      ["list_workout_sessions", { localDate: "2026-09-02" }, "list_workout_sessions"],
+      ["record_workout_session", workout, "record_workout_session"],
+      ["correct_workout_session", { id, ...workout, dedupeKey: "coach-policy-workout-correction", correctionReason: "Correction" }, "correct_workout_session"],
+      ["list_recovery_observations", { localDate: "2026-09-02" }, "list_recovery_observations"],
+      ["record_recovery_observation", recovery, "record_recovery_observation"],
+      ["correct_recovery_observation", { id, ...recovery, dedupeKey: "coach-policy-recovery-correction", reason: "Correction" }, "correct_recovery_observation"],
+      ["list_daily_context_notes", { localDate: "2026-09-02" }, "list_daily_context_notes"],
+      ["record_daily_context_note", note, "record_daily_context_note"],
+      ["correct_daily_context_note", { id, ...note, dedupeKey: "coach-policy-note-correction", reason: "Correction" }, "correct_daily_context_note"],
+      ["get_daily_projection", { localDate: "2026-09-02", timezone: "Europe/Moscow" }, "get_daily_projection"]
+    ] as const;
+
+    try {
+      for (const [index, [name, args, marker]] of cases.entries()) {
+        const response = await authorizedFastify.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${token}`
+          },
+          payload: {
+            jsonrpc: "2.0",
+            id: 200 + index,
+            method: "tools/call",
+            params: { name, arguments: args }
+          }
+        });
+        const toolResult = response.json().result;
+        expect(toolResult.isError, name).not.toBe(true);
+        expect(toolResult.content[0].text, name).toContain(MCP_COACH_REPLY_POLICY);
+        if (name === "get_active_training_program") {
+          expect(toolResult.structuredContent, name).toMatchObject({
+            status: "active",
+            program: { marker }
+          });
+        } else {
+          expect(toolResult.structuredContent, name).toMatchObject({ marker });
+        }
+      }
+    } finally {
+      await authorizedFastify.close();
+    }
+  }, 15_000);
 
   it("dispatches the new typed writer lifecycle through the authorized MCP adapter", async () => {
     const authorizedFastify = Fastify();
@@ -873,6 +1125,13 @@ describe("MCP HTTP adapter", () => {
     const correct = vi.fn().mockResolvedValue({
       created: true,
       note: { id: "00000000-0000-4000-8000-000000000202" }
+    });
+    const listNotes = vi.fn().mockResolvedValue({ items: [] });
+    const projection = vi.fn().mockResolvedValue({
+      localDate: "2026-09-02",
+      timezone: "Europe/Moscow",
+      asOf: "2026-09-02T12:00:00.000Z",
+      snapshot: {}
     });
     const originalMeal = {
       id: "00000000-0000-4000-8000-000000000203",
@@ -994,9 +1253,11 @@ describe("MCP HTTP adapter", () => {
         training: { ...unavailableServices.training, findActiveProgram },
         dailyContextNotes: {
           ...unavailableServices.dailyContextNotes,
+          list: listNotes,
           create,
           correct
         },
+        dailyProjection: { projection },
         nutrition: { listMeals, createMeal, correctMeal },
         recovery: {
           ...unavailableServices.recovery,
@@ -1113,13 +1374,18 @@ describe("MCP HTTP adapter", () => {
     };
 
     try {
-      expect((await call(5, "get_active_training_program", {})).json().result)
-        .toMatchObject({
+      const activeProgramResult = (await call(
+        5,
+        "get_active_training_program",
+        {}
+      )).json().result;
+      expect(activeProgramResult).toMatchObject({
           structuredContent: {
             status: "active",
             program: { id: "active-program" }
           }
         });
+      expect(activeProgramResult.content[0].text).toContain(MCP_COACH_REPLY_POLICY);
       expect((await call(6, "get_active_training_program", {})).json().result)
         .toMatchObject({
           structuredContent: { status: "absent", program: null }
@@ -1127,12 +1393,17 @@ describe("MCP HTTP adapter", () => {
       expect((await call(7, "get_active_training_program", {})).json().result)
         .toMatchObject({
           isError: true,
-          content: [{ text: "The Shape of You operation failed" }]
+          content: [{ text: expect.stringContaining("The requested current facts could not be retrieved") }]
         });
-      expect((await call(8, "record_daily_context_note", note)).json().result)
-        .toMatchObject({
+      const noteWriteResult = (await call(
+        8,
+        "record_daily_context_note",
+        note
+      )).json().result;
+      expect(noteWriteResult).toMatchObject({
           structuredContent: { id: "00000000-0000-4000-8000-000000000201" }
         });
+      expect(noteWriteResult.content[0].text).toContain(MCP_COACH_REPLY_POLICY);
       expect((await call(9, "correct_daily_context_note", {
         id: "00000000-0000-4000-8000-000000000201",
         ...note,
@@ -1142,6 +1413,24 @@ describe("MCP HTTP adapter", () => {
       })).json().result).toMatchObject({
         structuredContent: { id: "00000000-0000-4000-8000-000000000202" }
       });
+      const noteReadResult = (await call(90, "list_daily_context_notes", {
+        localDate: "2026-08-26"
+      })).json().result;
+      expect(noteReadResult.content[0].text).toContain(MCP_COACH_REPLY_POLICY);
+      const dailyProjectionResult = (await call(91, "get_daily_projection", {
+        localDate: "2026-09-02",
+        timezone: "Europe/Moscow"
+      })).json().result;
+      expect(dailyProjectionResult).toMatchObject({
+        structuredContent: {
+          localDate: "2026-09-02",
+          timezone: "Europe/Moscow"
+        }
+      });
+      expect(dailyProjectionResult.content[0].text).toContain(
+        "one clear Next step plus bounded nutrition, training, and recovery guidance"
+      );
+      expect(dailyProjectionResult.content[0].text).toContain(MCP_COACH_REPLY_POLICY);
       expect((await call(10, "record_meal", {
         ...dinner,
         items: [{
@@ -1210,7 +1499,7 @@ describe("MCP HTTP adapter", () => {
         .toMatchObject({ structuredContent: { items: [originalMeal] } });
       expect(firstMealReadResult.content).toEqual([{
         type: "text",
-        text: expect.stringContaining("one useful evidence-grounded observation or next step")
+        text: expect.stringContaining("one concrete recommendation or next step by default")
       }]);
       const forbiddenMealPresentationTerms = [
         "partial",
@@ -1270,7 +1559,7 @@ describe("MCP HTTP adapter", () => {
       expect(correctedMealReadResult)
         .toMatchObject({ structuredContent: { items: [correctedMeal] } });
       expect(correctedMealReadResult.content[0].text)
-        .toContain("one useful evidence-grounded observation or next step");
+        .toContain("one concrete recommendation or next step by default");
       const photoMealResult = (await call(140, "record_meal", photoDinner)).json().result;
       expect(photoMealResult).toMatchObject({ structuredContent: photoMeal });
       expect(photoMealResult.content[0].text).toContain(
@@ -1397,7 +1686,7 @@ describe("MCP HTTP adapter", () => {
       })).json().result;
       expect(recoveryReadResult.structuredContent.items).toHaveLength(7);
       expect(recoveryReadResult.content[0].text)
-        .toContain("one evidence-grounded observation or next step");
+        .toContain("one concrete recommendation or next step by default");
       expect(recoveryReadResult.content[0].text.toLowerCase()).not.toContain("schema");
       expect(createObservation).toHaveBeenNthCalledWith(1, expect.objectContaining({
         observedFrom: null,
@@ -1448,6 +1737,11 @@ describe("MCP HTTP adapter", () => {
         "00000000-0000-4000-8000-000000000201",
         expect.objectContaining({ reason: "Clarified wording" })
       );
+      expect(listNotes).toHaveBeenCalledWith({ localDate: "2026-08-26" });
+      expect(projection).toHaveBeenCalledWith({
+        localDate: "2026-09-02",
+        timezone: "Europe/Moscow"
+      });
       expect(createMeal).toHaveBeenCalledTimes(3);
       expect(createMeal).toHaveBeenNthCalledWith(1, normalizedDinner);
       expect(listMeals).toHaveBeenCalledTimes(3);

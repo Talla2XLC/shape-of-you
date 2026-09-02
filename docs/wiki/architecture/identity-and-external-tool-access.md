@@ -254,11 +254,22 @@ new versioned tool name and an explicit transition period. Client metadata
 refresh remains a release verification step, not a prerequisite imposed on an
 already open user conversation.
 
-Routine Meal and Recovery results instruct the client to answer in the user's
-language as a coach: acknowledge the captured facts and add a short,
-evidence-grounded observation or next step. Tool names, schema fields, storage
-states, transport failures, and other implementation mechanics are not part of
-the routine user-facing response.
+Every relevant MCP result carries the current server-owned Coach reply policy
+in model-facing content. Successful results retain typed facts in
+`structuredContent`; validation, execution, and OAuth failures carry a separate
+fail-closed presentation that forbids success claims, advice based on unverified
+facts, and user-facing implementation details while preserving the OAuth
+challenge. This reaches already open conversations after their next actual tool
+call even when they retain older initialization metadata. The client answers in the user's language
+as a coach: it acknowledges captured facts, adds a useful evidence-grounded
+interpretation, and gives one concrete next step by default for meaningful
+nutrition, training, recovery, and daily-summary interactions. Guidance may be
+omitted only when no safe useful recommendation follows from available evidence
+or the user explicitly requests raw facts only. Tool names, schema fields,
+storage states, transport failures, and other implementation mechanics are not
+part of the routine user-facing response. The one-to-three-sentence shape applies
+to routine captures, corrections, and short factual reads; the structured Daily
+Coach brief has no conflicting sentence limit.
 
 Staging still exposes the previously deployed 23-tool contract until the
 separately approved coordinated deployment and OAuth reconnect. The scope
@@ -312,8 +323,9 @@ plain Markdown without HTML entities or encoded whitespace.
 
 A direct relevant user report authorizes one routine low-risk idempotent create
 or correction through an existing typed Person-scoped tool without a duplicate
-confirmation question. The Coach follows every successful mutation with an
-owning-domain typed read-back. Unknown optional values remain partial/null;
+confirmation question. The Coach performs the unambiguous operation instead of
+offering to record, correct, or estimate it later. The Coach follows every
+successful mutation with an owning-domain typed read-back. Unknown optional values remain partial/null;
 later precise input appends a correction. Irreducible target/date/domain
 ambiguity and destructive, credential, administrative, or material goal and
 program changes remain confirmation-gated. ChatGPT native permission behavior
@@ -347,9 +359,11 @@ unambiguous active Person grant. Writes require `owner` or `editor`; `viewer`
 cannot mutate. Authenticated MCP execution always uses request-scoped Person
 context and never falls back to the synthetic compatibility context.
 
-ChatGPT confirms mutations conversationally before invoking a write tool; this
-is a client interaction policy, not a replacement for API authorization. No
-raw prompt or full conversation is stored.
+ChatGPT does not request a second conversational confirmation for an
+unambiguous routine low-risk fact or correction. Irreducible ambiguity and
+destructive, credential, administrative, or material goal and program changes
+remain confirmation-gated. This interaction policy does not replace API
+authorization. No raw prompt or full conversation is stored.
 
 ### Operational separation
 

@@ -51,11 +51,19 @@ values remain partial/null; later precise input appends a correction. A bounded
 represent a relevant observation safely.
 
 Routine capture stays conversational. The Coach matches the user's language
-and tone, confirms the recorded or corrected facts in one or two natural
-sentences, adds one useful evidence-grounded observation or next step when the
-facts support it, and keeps tool names, arguments, identifiers, contract fields,
-completeness states, and transport details out of the reply. Daily-plan headings
-are reserved for an actual daily-plan answer. The MCP adapter retains typed
+and tone and confirms the recorded or corrected facts in one to three natural
+sentences. For a meaningful nutrition, training, recovery, or daily-summary
+interaction, one useful evidence-grounded interpretation and concrete next step
+are the default. They may be omitted only when no safe useful guidance follows
+from available evidence or the user explicitly asks for raw facts only. The
+Coach performs an unambiguous routine write or correction instead of asking
+whether the user wants it recorded, corrected, or estimated. It keeps tool names,
+arguments, identifiers, contract fields, completeness states, and transport
+details out of the reply. Validation, execution, and OAuth failures use a
+separate fail-closed presentation: the Coach does not claim success or advise
+from unverified facts and does not expose the internal reason. Daily-plan
+headings are reserved for an actual daily-plan answer and are not constrained
+to the routine one-to-three-sentence shape. The MCP adapter retains typed
 `structuredContent` for orchestration but uses a tool-specific Meal presentation
 instead of duplicating the raw domain DTO into model-facing text. When a reported
 Meal includes a sufficiently legible photo or useful size description, the Coach
@@ -84,6 +92,7 @@ stops dependent coaching without chat-history or Sheets fallback.
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md).
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md).
 - [Unquantified Meal amount and natural Coach language](../../adr/20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md).
+- [Per-result proactive Coach policy](../../adr/20260902-deliver-coach-reply-policy-in-every-relevant-mcp-result.md).
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 
 ## Open questions

@@ -130,48 +130,93 @@ export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
   "Записал сон 7 ч 54 мин, оценку 86, HRV 48 мс, ночной пульс 59, дыхание 13,8, SpO₂ 95% и температуру без отклонения. Восстановление выглядит неплохо; сегодня можно держать обычный темп и свериться с самочувствием перед тренировкой."
 ] as const;
 
-const mealWriteResultContent =
+/** Current Coach behavior delivered with every successful MCP result. */
+export const MCP_COACH_REPLY_POLICY =
+  "Always use the user's language and sound like a real coach. " +
+  "After every meaningful nutrition, training, recovery, body, or daily-summary interaction, include one useful evidence-grounded observation and one concrete recommendation or next step by default. " +
+  "This guidance is expected, not an optional offer. Omit it only when the user explicitly asks for raw facts only or the available facts support no safe useful guidance. " +
+  "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
+  "Keep all implementation mechanics invisible in the final reply. " +
+  "Keep planned facts, proposed guidance, and verified completed facts distinct, and never imply that a recommendation was completed.";
+
+const routineCoachReplyShape =
+  "For a routine capture, correction, or short factual answer, reply in one to three natural sentences.";
+
+const dailyCoachReplyShape =
+  "For a full Daily Coach answer, use the requested brief structure without a sentence limit.";
+
+const coachFailurePolicy =
+  "Do not claim that an unverified read or failed change succeeded. Keep implementation mechanics invisible, do not repeat an obvious permission question, and do not base guidance on unavailable or unverified facts.";
+
+function coachResultContent(
+  instruction: string,
+  replyShape = routineCoachReplyShape
+): string {
+  return `${instruction} ${MCP_COACH_REPLY_POLICY} ${replyShape}`;
+}
+
+function coachFailureResultContent(instruction: string): string {
+  return `${instruction} ${coachFailurePolicy}`;
+}
+
+const routineReadResultContent = coachResultContent(
+  "Use these current facts silently and answer the user's actual request."
+);
+
+const routineWriteResultContent = coachResultContent(
+  "The directly reported routine fact has been saved. Complete the required owning-domain read-back silently before claiming success."
+);
+
+const mealWriteResultContent = coachResultContent(
   "The reported meal has been saved. Continue the required workflow silently before replying. " +
-  "In the final reply, use the user's language and sound like a real coach in one or two natural sentences: " +
-  "acknowledge what was eaten, then add one useful evidence-grounded observation or next step when the facts support it. " +
+  "In the final reply, acknowledge what was eaten, interpret the approximate nutrition, and give one concrete useful next step. " +
   "When saved portions or nutrients are estimates, use them and clearly speak approximately rather than claiming measured precision. " +
-  "Do not say calories are unavailable merely because exact grams were not measured, and never discuss internal mechanics.";
+  "Do not say calories are unavailable merely because exact grams were not measured."
+);
 
-const mealReadResultContent =
-  "Use these meal facts silently. If this completes a routine meal capture or correction, reply in the user's language " +
-  "and sound like a real coach in one or two natural sentences: acknowledge what was eaten, then add one useful " +
-  "evidence-grounded observation or next step when the facts support it. Use stored estimates as approximate values rather " +
-  "than hiding them because exact grams were not measured, and never discuss internal mechanics.";
+const mealReadResultContent = coachResultContent(
+  "Use these meal facts silently. Acknowledge what was eaten, interpret the nutrition, and give one concrete useful next step. " +
+  "Use stored estimates as approximate values rather than hiding them because exact grams were not measured."
+);
 
-const workoutWriteResultContent =
+const workoutWriteResultContent = coachResultContent(
   "The reported workout has been saved. Complete the required date-scoped read-back silently before replying. " +
-  "In the final reply, use the user's language and sound like a real coach in one or two natural sentences: acknowledge " +
-  "the completed work and add one useful evidence-grounded observation or next step. Never discuss internal mechanics.";
+  "Acknowledge the completed work, interpret it against available training and recovery evidence, and give one concrete useful next step."
+);
 
-const workoutReadResultContent =
-  "Use these workout facts silently. If this completes a routine workout capture or correction, reply in the user's " +
-  "language and sound like a real coach in one or two natural sentences: acknowledge the completed work and add one " +
-  "useful evidence-grounded observation or next step. Never discuss internal mechanics.";
+const workoutReadResultContent = coachResultContent(
+  "Use these workout facts silently. Acknowledge the completed work, interpret it against available training and recovery evidence, and give one concrete useful next step."
+);
 
-const recoveryWriteResultContent =
+const recoveryWriteResultContent = coachResultContent(
   "The reported recovery fact has been saved. Continue capturing every other independent fact from the same report " +
   "before replying, even if one separate fact could not be saved. Then complete the required day-level check silently. " +
-  "In the final reply, use the user's language and sound like a real coach: briefly acknowledge the useful recovery picture " +
-  "and add one evidence-grounded observation or next step. Do not invent values or discuss internal mechanics.";
+  "Briefly acknowledge the useful recovery picture, interpret it, and give one concrete useful next step without inventing values."
+);
 
-const recoveryReadResultContent =
-  "Use these recovery facts silently. If this completes a routine recovery capture, reply in the user's language and sound " +
-  "like a real coach: summarize the useful recovery picture and add one evidence-grounded observation or next step. " +
-  "Do not list internal states, missing bookkeeping, or implementation mechanics.";
+const recoveryReadResultContent = coachResultContent(
+  "Use these recovery facts silently. Summarize and interpret the useful recovery picture, then give one concrete useful next step without inventing values."
+);
+
+const activeTrainingProgramResultContent = coachResultContent(
+  "Use only an active result as a planned training artifact. An absent result means no active program; an error does not."
+);
+
+const dailyProjectionResultContent = coachResultContent(
+  "Use this exact-date projection as the current daily starting point. For a full Daily Coach answer, separate Planned, Proposed now, and Actually completed, then give one clear Next step plus bounded nutrition, training, and recovery guidance grounded in available evidence.",
+  dailyCoachReplyShape
+);
 
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
   "Keep internal mechanics invisible in user-facing replies, including tool, schema, status, identifier, storage, API, and implementation details. " +
-  "Match the user's language. After a routine fact capture or correction, answer like a real coach in one or two natural sentences: acknowledge the fact and add one useful evidence-grounded observation or next step when supported; never invent precision. " +
+  MCP_COACH_REPLY_POLICY + " " + routineCoachReplyShape + " " + dailyCoachReplyShape + " " +
+  "After a routine fact capture or correction, acknowledge the fact and never invent precision. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
   "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
   "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
+  "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
@@ -180,13 +225,13 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
   "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
   "Preserve genuinely unknown optional values as null or partial inside typed data instead of inventing measured precision. For Meal items, use amountKind unknown only when available evidence is genuinely insufficient for a reasonable estimate, described for the user's own non-numeric wording, quantified for an explicit number and unit, and estimated for a best-effort text or photo estimate with method and confidence; never invent 1 serving or another sentinel amount. A sufficiently legible meal photo or useful text description authorizes and requires an immediate best-effort estimate of each identifiable item's quantity plus calories, protein, fat, and carbohydrates. Exact grams are not a prerequisite: use bounded confidence, save the approximate nutrition now, and let later user detail correct it. Ask only when material foods or scale are genuinely ambiguous. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. " +
-  "After a routine Meal create or correction, say naturally what was recorded or corrected, state approximate calories or macros when estimated values were saved, and add one useful evidence-grounded observation or next step when supported. Do not ask for duplicate confirmation before a reasonable estimate. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
+  "After a routine Meal create or correction, say naturally what was recorded or corrected, state approximate calories or macros when estimated values were saved, and give one concrete useful evidence-grounded next step by default. Do not ask for duplicate confirmation before a reasonable estimate. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
   MCP_ROUTINE_COACH_RESPONSE_EXAMPLES.map((example) => `\"${example}\"`).join(" ") +
   " " +
   "Format user-facing answers as plain Markdown and never emit HTML entities or encoded whitespace. Destructive, credential, administrative, and material goal or program changes still require explicit confirmation.";
 
 const toolAuthorityInstruction =
-  "PostgreSQL authority; no Google Sheets fallback. Fail closed if this tool or its authorization is unavailable.";
+  "PostgreSQL authority; no Google Sheets fallback. Fail closed if this tool or its authorization is unavailable. Do not ask an obvious permission question before an unambiguous routine low-risk action, and give proactive evidence-grounded coaching by default.";
 
 const createWorkoutSessionToolInputSchema = connectorWorkoutSchema(
   "CreateWorkoutSessionToolInput",
@@ -299,7 +344,9 @@ function createServer(
   server.setRequestHandler(CallToolRequestSchema, async (call) => {
     const definition = tools.find(({ tool }) => tool.name === call.params.name);
     if (!definition) {
-      return errorResult("Unknown Shape of You tool");
+      return errorResult(coachFailureResultContent(
+        "The requested action is unavailable. Say this naturally without naming internal components."
+      ));
     }
     if (!definition.validate(call.params.arguments ?? {})) {
       return inputErrorResult(definition.tool.name);
@@ -327,7 +374,11 @@ function createServer(
       if (error instanceof ConnectorInputError) {
         return inputErrorResult(definition.tool.name);
       }
-      return errorResult("The Shape of You operation failed");
+      return errorResult(coachFailureResultContent(
+        definition.write
+          ? "The requested fact was not saved. Say this briefly and naturally without blaming the user."
+          : "The requested current facts could not be retrieved. Say this briefly and naturally without blaming the user."
+      ));
     }
   });
   return server;
@@ -445,7 +496,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
           }
           throw error;
         }
-      }
+      },
+      () => activeTrainingProgramResultContent
     ),
     defineTool(
       "list_workout_sessions",
@@ -558,7 +610,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       DailyProjectionSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.dailyProjection.projection(input as DailyProjectionQuery)
+      (input) => services.dailyProjection.projection(input as DailyProjectionQuery),
+      () => dailyProjectionResultContent
     )
   ];
 }
@@ -967,7 +1020,7 @@ function defineTool(
     scope,
     write,
     execute,
-    ...(present ? { present } : {})
+    present: present ?? (() => write ? routineWriteResultContent : routineReadResultContent)
   };
 }
 
@@ -992,28 +1045,30 @@ function errorResult(message: string): CallToolResult {
 
 function inputErrorResult(toolName: string): CallToolResult {
   if (toolName === "record_meal" || toolName === "correct_meal") {
-    return errorResult(
+    return errorResult(coachFailureResultContent(
       "Retry the Meal once silently from the photo and text already present in the conversation. Every identifiable item must have non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates; estimate realistic portions with text/photo method and bounded confidence because exact measured grams are not required. Do not ask the user for values that can be reasonably estimated, do not save an incomplete Meal, and do not mention internal completeness, tools, staging, APIs, contracts, fields, or this retry. If material food or scale is genuinely unidentifiable, ask one natural clarification instead of claiming it was saved."
-    );
+    ));
   }
   if (toolName === "record_recovery_observation" || toolName === "correct_recovery_observation") {
-    return errorResult(
+    return errorResult(coachFailureResultContent(
       "Retry this recovery fact once using the exact local date and timezone plus only the reported value. " +
       "A wearable 0..100 sleep score is metric sleep_score with unit score, never sleepQuality. " +
       "Continue saving the other independent facts from the same report. Do not mention tools, staging, APIs, " +
       "contracts, fields, or this retry to the user. If this fact still cannot be saved, describe that one missing " +
       "fact naturally without technical details and never claim it was recorded."
-    );
+    ));
   }
   if (toolName === "record_workout_session" || toolName === "correct_workout_session") {
-    return errorResult(
+    return errorResult(coachFailureResultContent(
       "Retry this Workout once using the performed exercises and sets already present in the conversation plus exact " +
       "exercise version references from the active TrainingProgram when needed. Preserve genuinely unknown optional set " +
       "values and do not ask the user whether to save known work again. Do not mention tools, staging, APIs, contracts, " +
       "fields, or this retry to the user. If the retry still fails, say naturally that saving is temporarily unavailable."
-    );
+    ));
   }
-  return errorResult("Tool arguments do not match the API contract");
+  return errorResult(coachFailureResultContent(
+    "Retry once silently using the unambiguous facts already present. If essential meaning is genuinely ambiguous, ask one natural clarification; otherwise say briefly that this item could not be completed."
+  ));
 }
 
 function authorizationErrorResult(
@@ -1025,7 +1080,9 @@ function authorizationErrorResult(
   const description = message.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
   const challenge = `Bearer resource_metadata="${metadataUrl}", scope="${scope}", error="${oauthError}", error_description="${description}"`;
   return {
-    ...errorResult(message),
+    ...errorResult(coachFailureResultContent(
+      "Current access is unavailable. Use the client's native access flow when offered; otherwise say naturally that current data cannot be reached yet."
+    )),
     _meta: { "mcp/www_authenticate": [challenge] }
   };
 }
