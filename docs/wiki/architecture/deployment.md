@@ -48,6 +48,13 @@ from that commit. The controller owns the evolving release-field allowlist,
 validation, runtime environments, registry login, and deployment. Adding an
 ordinary deployment parameter therefore requires no bootstrap reinstall.
 
+The bootstrap creates an empty local Git repository without network access,
+then performs the fixed-origin control fetch with Git HTTP/1.1 and three
+bounded attempts. This narrow transport setting works around the verified
+HTTP/2 failure of Git smart-HTTP POST requests from the staging VM; it does not
+change HTTP/2 support at the application ingress, Web, API, Identity, or MCP
+boundaries. Exact `CONTROL_SHA` verification remains mandatory after fetch.
+
 ### Runtime and data
 
 The root-owned `/opt/shared-vm-ingress` Compose project is the only owner of

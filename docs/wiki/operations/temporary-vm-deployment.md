@@ -140,12 +140,26 @@ runtime env, uses temporary `DOCKER_CONFIG`, and runs `deploy.sh`. CI sends no
 Compose, scripts, paths, or arbitrary shell. Successful release updates
 `current` and `previous`.
 
+For the control-tree fetch only, the bootstrap initializes the local Git
+repository before network access and runs the fixed-origin fetch over Git
+HTTP/1.1 with at most three attempts. The staging VM was verified to complete
+the same public-repository operation over HTTP/1.1 while Git smart HTTP over
+HTTP/2 failed during the POST exchange. Application ingress and API traffic
+continue to support HTTP/2; this setting is not a system-wide Git or HTTP
+configuration change. Exact `CONTROL_SHA` verification still runs after the
+fetch.
+
 Only a change to the bootstrap trust boundary or systemd/sudoers assets needs
 operator installation from a verified checkout:
 
 ```sh
 sudo sh deploy/staging/system/install-root-owned-assets.sh
 ```
+
+When a release changes only the stable bootstrap executable, an operator may
+instead install just the reviewed file with owner `root:root` and mode `0755`.
+That one-time installation must precede the deployment retry; otherwise the VM
+continues to execute the previously installed bootstrap.
 
 GitHub Actions never runs this installer. Ordinary controller, Compose,
 migration, smoke, and runtime-field changes arrive automatically with the

@@ -16,6 +16,8 @@ LOCK_FILE=/run/shape-of-you-staging.lock
 REQUEST_FILE=
 MAX_REQUEST_BYTES=65536
 MAX_REQUEST_LINES=128
+NETWORK_ATTEMPTS=3
+NETWORK_RETRY_DELAY_SECONDS=2
 
 cleanup() {
   if [ -n "$REQUEST_FILE" ]; then
@@ -28,6 +30,17 @@ trap cleanup EXIT HUP INT TERM
 fail() {
   printf '%s\n' "$1" >&2
   exit 2
+}
+
+retry_network() {
+  attempt=1
+  while ! "$@"; do
+    [ "$attempt" -lt "$NETWORK_ATTEMPTS" ] || return 1
+    printf 'Network operation failed; retrying (%s/%s).\n' \
+      "$attempt" "$NETWORK_ATTEMPTS" >&2
+    sleep "$NETWORK_RETRY_DELAY_SECONDS"
+    attempt=$((attempt + 1))
+  done
 }
 
 command -v flock >/dev/null 2>&1 || fail 'flock is required.'
@@ -73,6 +86,8 @@ done < "$REQUEST_FILE"
 
 [ "$control_sha_seen" = true ] || fail 'CONTROL_SHA is required.'
 printf '%s\n' "$control_sha" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid CONTROL_SHA.'
+GIT_TERMINAL_PROMPT=0
+export GIT_TERMINAL_PROMPT
 
 if [ -d "$CONTROL_ROOT/.git" ]; then
   git -C "$CONTROL_ROOT" remote set-url origin "$CONTROL_REPOSITORY"
@@ -80,10 +95,12 @@ else
   test -d "$CONTROL_ROOT" || install -d -o root -g root -m 0755 "$CONTROL_ROOT"
   test -z "$(find "$CONTROL_ROOT" -mindepth 1 -maxdepth 1 -print -quit)" || \
     fail 'Control checkout path is unexpectedly non-empty.'
-  git clone --no-checkout "$CONTROL_REPOSITORY" "$CONTROL_ROOT"
+  git init "$CONTROL_ROOT"
+  git -C "$CONTROL_ROOT" remote add origin "$CONTROL_REPOSITORY"
 fi
 
-git -C "$CONTROL_ROOT" fetch --depth=1 origin "$CONTROL_BRANCH"
+retry_network git -C "$CONTROL_ROOT" -c http.version=HTTP/1.1 \
+  fetch --depth=1 origin "$CONTROL_BRANCH"
 control_head=$(git -C "$CONTROL_ROOT" rev-parse FETCH_HEAD)
 [ "$control_sha" = "$control_head" ] || fail 'CONTROL_SHA does not match current origin/main.'
 git -C "$CONTROL_ROOT" checkout --detach --force "$control_sha"
