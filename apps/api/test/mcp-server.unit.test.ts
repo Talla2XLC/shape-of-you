@@ -33,6 +33,90 @@ import {
   registerMcpRoutes
 } from "../src/mcp/server.js";
 
+const legacyMealToolCompatibilityContracts = {
+  record_meal: {
+    required: ["occurredAt", "timezone", "kind", "items", "dedupeKey"],
+    properties: [
+      "occurredAt", "timezone", "kind", "description", "note", "photoMediaId",
+      "items", "sourceReference", "dedupeKey", "confidence"
+    ]
+  },
+  correct_meal: {
+    required: ["id", "occurredAt", "timezone", "kind", "items", "dedupeKey", "reason"],
+    properties: [
+      "id", "occurredAt", "timezone", "kind", "description", "note", "photoMediaId",
+      "items", "sourceReference", "dedupeKey", "confidence", "reason"
+    ]
+  }
+} as const;
+
+const legacyMealItemCompatibilityContract = {
+  required: ["label"],
+  properties: [
+    "foodVersionId",
+    "label",
+    "amountKind",
+    "quantity",
+    "unit",
+    "amountDescription",
+    "estimateMethod",
+    "amountConfidence",
+    "nutrients"
+  ],
+  enums: {
+    kind: ["breakfast", "lunch", "dinner", "snack", "other"],
+    amountKind: ["unknown", "described", "quantified", "estimated"],
+    unit: ["g", "ml", "serving", "piece"]
+  },
+  nutrientProperties: ["caloriesKcal", "proteinG", "fatG", "carbsG"]
+} as const;
+
+interface CompatibilitySchema {
+  required?: string[];
+  properties?: Record<string, CompatibilitySchema>;
+  enum?: string[];
+  anyOf?: CompatibilitySchema[];
+  items?: CompatibilitySchema;
+}
+
+function expectLegacyMealToolCompatibility(
+  toolName: keyof typeof legacyMealToolCompatibilityContracts,
+  schema: CompatibilitySchema
+): void {
+  const toolContract = legacyMealToolCompatibilityContracts[toolName];
+  for (const requiredProperty of schema.required ?? []) {
+    expect(toolContract.required).toContain(requiredProperty);
+  }
+  for (const property of toolContract.properties) {
+    expect(schema.properties).toHaveProperty(property);
+  }
+  expect(schema.properties?.kind?.enum).toEqual(expect.arrayContaining(
+    [...legacyMealItemCompatibilityContract.enums.kind]
+  ));
+
+  const itemSchema = schema.properties?.items?.items;
+  expect(itemSchema).toBeDefined();
+  for (const requiredProperty of itemSchema?.required ?? []) {
+    expect(legacyMealItemCompatibilityContract.required).toContain(requiredProperty);
+  }
+  for (const property of legacyMealItemCompatibilityContract.properties) {
+    expect(itemSchema?.properties).toHaveProperty(property);
+  }
+  expect(itemSchema?.properties?.amountKind?.enum).toEqual(expect.arrayContaining(
+    [...legacyMealItemCompatibilityContract.enums.amountKind]
+  ));
+  const unitEnum = itemSchema?.properties?.unit?.anyOf
+    ?.find((candidate) => candidate.enum)?.enum;
+  expect(unitEnum).toEqual(expect.arrayContaining(
+    [...legacyMealItemCompatibilityContract.enums.unit]
+  ));
+  const nutrientSchema = itemSchema?.properties?.nutrients;
+  expect(nutrientSchema?.required).toBeUndefined();
+  for (const property of legacyMealItemCompatibilityContract.nutrientProperties) {
+    expect(nutrientSchema?.properties).toHaveProperty(property);
+  }
+}
+
 const fastify = Fastify();
 const unreachable = async (): Promise<never> => {
   throw new Error("Domain service must not be called without authorization");
@@ -284,27 +368,31 @@ describe("MCP HTTP adapter", () => {
       "Every accepted Coach Meal item must include"
     );
     expect(recordMealTool?.inputSchema.properties.items.items).toMatchObject({
-      required: ["label", "amountKind", "nutrients"],
+      required: ["label"],
       properties: {
         amountKind: {
-          enum: ["described", "quantified", "estimated"]
+          enum: ["unknown", "described", "quantified", "estimated"]
         },
         nutrients: {
           type: "object",
           additionalProperties: false,
-          required: ["caloriesKcal", "proteinG", "fatG", "carbsG"],
           properties: expect.any(Object)
         }
       }
     });
     expect(recordMealTool?.inputSchema.properties.items.items.properties.amountKind.description)
-      .toContain("Coach Meal writes cannot use unknown");
+      .toContain("Omitted values are inferred");
     expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients.description)
-      .toContain("Required complete best-effort nutrition");
+      .toContain("server rejects an incomplete Meal before any write");
     for (const nutrient of ["caloriesKcal", "proteinG", "fatG", "carbsG"]) {
       expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients
-        .properties[nutrient].type).toBe("number");
+        .properties[nutrient].type).toEqual(["number", "null"]);
     }
+    const correctMealTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "correct_meal"
+    );
+    expectLegacyMealToolCompatibility("record_meal", recordMealTool?.inputSchema);
+    expectLegacyMealToolCompatibility("correct_meal", correctMealTool?.inputSchema);
     expect(recordMealTool?.inputSchema.required).not.toContain("sourceReference");
     expect(recordMealTool?.inputSchema.properties.sourceReference.required).toBeUndefined();
     const recordRecoveryTool = body.result.tools.find((tool: { name: string }) =>
@@ -854,7 +942,8 @@ describe("MCP HTTP adapter", () => {
     };
     const createMeal = vi.fn()
       .mockResolvedValueOnce({ created: true, meal: originalMeal })
-      .mockResolvedValueOnce({ created: true, meal: photoMeal });
+      .mockResolvedValueOnce({ created: true, meal: photoMeal })
+      .mockResolvedValueOnce({ created: true, meal: originalMeal });
     const correctMeal = vi.fn().mockResolvedValue({ created: true, meal: correctedMeal });
     const listMeals = vi.fn()
       .mockResolvedValueOnce({ items: [originalMeal], nextCursor: null })
@@ -993,6 +1082,33 @@ describe("MCP HTTP adapter", () => {
       items: photoMeal.items.map((item) => ({
         foodVersionId: null,
         ...item
+      }))
+    };
+    const legacyDinner = {
+      ...dinner,
+      items: originalMeal.items.map((item) => ({
+        label: item.label,
+        quantity: item.quantity,
+        unit: item.unit,
+        nutrients: item.nutrients
+      })),
+      dedupeKey: "chatgpt:meal:dinner:2026-08-30:1905:legacy-client"
+    };
+    const normalizedLegacyDinner = {
+      ...legacyDinner,
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-08-30T16:05:00.000Z"
+      },
+      items: legacyDinner.items.map((item) => ({
+        foodVersionId: null,
+        ...item,
+        amountKind: "quantified",
+        amountDescription: null,
+        estimateMethod: null,
+        amountConfidence: null
       }))
     };
 
@@ -1183,6 +1299,26 @@ describe("MCP HTTP adapter", () => {
       expect(photoMealReadResult.content[0].text).toContain(
         "Use stored estimates as approximate values"
       );
+      const legacyMealResult = (await call(142, "record_meal", legacyDinner)).json().result;
+      expect(legacyMealResult).toMatchObject({ structuredContent: originalMeal });
+      expect(createMeal).toHaveBeenNthCalledWith(3, normalizedLegacyDinner);
+      const legacyCorrection = {
+        ...legacyDinner,
+        id: originalMeal.id,
+        dedupeKey: "chatgpt:meal:dinner:2026-08-30:1905:legacy-client:correction:1",
+        reason: "Legacy client correction"
+      };
+      const legacyCorrectionResult = (await call(
+        143,
+        "correct_meal",
+        legacyCorrection
+      )).json().result;
+      expect(legacyCorrectionResult).toMatchObject({ structuredContent: correctedMeal });
+      expect(correctMeal).toHaveBeenNthCalledWith(2, originalMeal.id, {
+        ...normalizedLegacyDinner,
+        dedupeKey: legacyCorrection.dedupeKey,
+        reason: legacyCorrection.reason
+      });
       const invalidSleepScoreResult = (await call(15, "record_recovery_observation", {
         kind: "metric",
         localDate: "2026-08-31",
@@ -1312,7 +1448,7 @@ describe("MCP HTTP adapter", () => {
         "00000000-0000-4000-8000-000000000201",
         expect.objectContaining({ reason: "Clarified wording" })
       );
-      expect(createMeal).toHaveBeenCalledTimes(2);
+      expect(createMeal).toHaveBeenCalledTimes(3);
       expect(createMeal).toHaveBeenNthCalledWith(1, normalizedDinner);
       expect(listMeals).toHaveBeenCalledTimes(3);
       expect(correctMeal).toHaveBeenCalledWith(

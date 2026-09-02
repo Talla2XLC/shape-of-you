@@ -663,13 +663,12 @@ function connectorMealSchema(
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["label", "amountKind", "nutrients"],
+          required: ["label"],
           properties: {
             ...itemSchema.properties,
             amountKind: {
-              type: "string",
-              enum: ["described", "quantified", "estimated"],
-              description: "Coach Meal writes cannot use unknown. Use estimated for a reasonable photo/text estimate, described only for the user's own non-numeric amount wording, or quantified for an explicit number and unit."
+              ...(itemSchema.properties.amountKind as Readonly<Record<string, unknown>>),
+              description: "Optional compatibility hint. Use estimated for a reasonable photo/text estimate, described only for the user's own non-numeric amount wording, or quantified for an explicit number and unit. Omitted values are inferred from the supplied evidence; unknown cannot produce an accepted Coach Meal write."
             },
             quantity: {
               ...(itemSchema.properties.quantity as Readonly<Record<string, unknown>>),
@@ -690,27 +689,22 @@ function connectorMealSchema(
             nutrients: {
               type: "object",
               additionalProperties: false,
-              required: ["caloriesKcal", "proteinG", "fatG", "carbsG"],
-              description: "Required complete best-effort nutrition for this accepted Coach Meal item. If the evidence is too ambiguous to estimate all four values, clarify instead of writing an incomplete Meal.",
+              description: "Provide complete best-effort calories, protein, fat, and carbohydrates for every accepted Coach Meal item. Historical clients may omit or send unknown values, but the server rejects an incomplete Meal before any write.",
               properties: {
                 caloriesKcal: {
                   ...(nutrientSchema.properties.caloriesKcal as Readonly<Record<string, unknown>>),
-                  type: "number",
                   description: "Best-effort calories for this item's reported or estimated portion."
                 },
                 proteinG: {
                   ...(nutrientSchema.properties.proteinG as Readonly<Record<string, unknown>>),
-                  type: "number",
                   description: "Best-effort protein grams for this item's reported or estimated portion."
                 },
                 fatG: {
                   ...(nutrientSchema.properties.fatG as Readonly<Record<string, unknown>>),
-                  type: "number",
                   description: "Best-effort fat grams for this item's reported or estimated portion."
                 },
                 carbsG: {
                   ...(nutrientSchema.properties.carbsG as Readonly<Record<string, unknown>>),
-                  type: "number",
                   description: "Best-effort carbohydrate grams for this item's reported or estimated portion."
                 }
               }

@@ -244,6 +244,16 @@ Tools delegate to existing application contracts, so validation, idempotency,
 provenance, correction policy, and audit remain domain responsibilities rather
 than MCP-specific logic.
 
+An existing MCP tool name is also a compatibility identity. Its published
+input schema evolves additively: new fields are optional, old fields remain,
+required sets do not grow, and enum values do not narrow. The API adapter may
+accept a historical connector payload and normalize it into the current strict
+domain command, but validation still completes before any writer service runs.
+Frozen schema checks protect this boundary. A truly incompatible change uses a
+new versioned tool name and an explicit transition period. Client metadata
+refresh remains a release verification step, not a prerequisite imposed on an
+already open user conversation.
+
 Routine Meal and Recovery results instruct the client to answer in the user's
 language as a coach: acknowledge the captured facts and add a short,
 evidence-grounded observation or next step. Tool names, schema fields, storage
@@ -390,6 +400,7 @@ lifecycle.
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 - [Training and raw Recovery import](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
+- [Backward-compatible MCP tool schemas](../../adr/20260902-evolve-mcp-tool-schemas-backward-compatibly.md)
 - [Portable Daily Coach protocol](../../adr/20260828-keep-daily-coach-protocol-portable-across-approved-mcp-clients.md)
 
 ## Open questions

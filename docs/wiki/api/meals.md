@@ -51,6 +51,15 @@ directs a natural acknowledgement and one evidence-grounded observation or next
 step when supported, without exposing internal completeness or transport
 vocabulary.
 
+The connector-facing schemas remain backward compatible under the existing
+tool names. Evidence fields stay advertised for current clients but are
+optional at the transport boundary, so a conversation holding an older schema
+can still send a complete Meal with label, quantity/unit, and nutrients. The
+adapter infers omitted evidence fields before the same completeness and domain
+guards run. Frozen compatibility tests reject new required fields, removal of
+previously published fields, and narrowing of published enums; a genuinely
+incompatible contract requires a new versioned tool name.
+
 For a sufficiently legible meal photo or useful text description, the MCP
 contract directs the client to make and save a best-effort estimate immediately:
 each identifiable item carries estimated quantity/unit, `text|photo` method,
@@ -85,6 +94,7 @@ detail creates an append-only full-snapshot correction.
 - Amount and nutrient evidence remain machine-readable without turning
   completeness into a user workflow or blocking direct fact capture.
 - [Unquantified Meal amount and natural Coach language](../../adr/20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md).
+- [Backward-compatible MCP tool schemas](../../adr/20260902-evolve-mcp-tool-schemas-backward-compatibly.md).
 
 ## Open questions
 
