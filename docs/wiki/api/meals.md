@@ -36,37 +36,42 @@ Existing dedupe returns `200`, new fact `201`, and conflicting second correction
 `409`. Current list uses
 `(occurredAt DESC, id DESC)`. Totals include only current Meals.
 
-The MCP connector does not expose that complete internal snapshot as mandatory
-LLM bookkeeping. `record_meal` and `correct_meal` accept the reported item
-label plus only the amount or nutrient evidence that is actually available.
-The API-owned MCP adapter fills omitted nullable fields, defaults interactive
-provenance to `manual`, infers the amount-evidence kind only from non-null
-evidence, and then validates the unchanged strict Meal command before calling
-the Nutrition service. Contradictory evidence still fails closed. This keeps
-ordinary text/photo capture concise without weakening domain or persistence
-invariants. Successful Meal tools keep the same typed `structuredContent`, while
-their model-facing text is a concise presentation contract rather than a JSON
-copy of the domain snapshot. It directs a natural acknowledgement and one
-evidence-grounded observation or next step when supported, without exposing
-internal completeness or transport vocabulary.
+The MCP connector exposes a smaller command than the complete internal snapshot,
+but `record_meal` and `correct_meal` require every accepted Coach item to carry
+non-unknown amount evidence plus numeric calories, protein, fat, and
+carbohydrates. The API-owned MCP adapter fills unrelated omitted nullable
+fields, defaults interactive provenance to `manual`, and then validates both
+the Coach completeness guard and the unchanged strict Meal command before
+calling the Nutrition service. Incomplete or contradictory evidence fails
+before dispatch. This keeps ordinary text/photo capture concise without
+weakening domain or persistence invariants. Successful Meal tools keep the same
+typed `structuredContent`, while their model-facing text is a concise
+presentation contract rather than a JSON copy of the domain snapshot. It
+directs a natural acknowledgement and one evidence-grounded observation or next
+step when supported, without exposing internal completeness or transport
+vocabulary.
 
 For a sufficiently legible meal photo or useful text description, the MCP
 contract directs the client to make and save a best-effort estimate immediately:
 each identifiable item carries estimated quantity/unit, `text|photo` method,
 bounded confidence, and calories/protein/fat/carbohydrates for that estimated
 portion. Missing measured grams alone does not make the amount unknown. Unknown
-values remain appropriate when material foods or scale genuinely cannot be
-estimated. User-facing replies describe stored estimates as approximate, and a
-later clarification uses the existing append-only full-snapshot correction.
+values remain representable by the domain and historical import contracts, but
+when material foods or scale genuinely cannot be estimated the Coach asks one
+natural clarification instead of saving an incomplete interactive Meal.
+User-facing replies describe stored estimates as approximate, and a later
+clarification uses the existing append-only full-snapshot correction.
 
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and
 is never converted to zero. Daily totals also return `incompleteMealCount`; an
 exact component total is null when any current item lacks that component.
-Interactive create/correction inputs may preserve unknown nutrients as `null`;
-they never convert missing evidence to zero. Progress metrics omit an incomplete
-date instead of publishing a known-subset sum as the full value. Later amount or
-nutrition detail creates an append-only full-snapshot correction.
+REST create/correction inputs may preserve unknown nutrients as `null`; they
+never convert missing evidence to zero. Coach MCP creates and corrections use a
+stricter adapter contract and do not dispatch an accepted item until all four
+nutrient estimates are numeric. Progress metrics omit an incomplete date instead
+of publishing a known-subset sum as the full value. Later amount or nutrition
+detail creates an append-only full-snapshot correction.
 
 ## Evidence
 

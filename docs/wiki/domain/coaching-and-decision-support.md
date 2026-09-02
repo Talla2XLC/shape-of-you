@@ -62,8 +62,11 @@ Meal includes a sufficiently legible photo or useful size description, the Coach
 immediately makes a best-effort portion and calorie/macronutrient estimate with
 bounded confidence; measured grams are not a prerequisite. It reports the
 result as approximate and keeps later ordinary-language corrections available.
-Unknown amount or nutrients remain valid only when material foods or scale
-cannot be estimated reasonably, and they never receive a sentinel quantity.
+The underlying Meal domain and legacy import retain unknown amount or nutrient
+evidence, but Coach MCP writes do not accept `amountKind = unknown` or null
+calories/macronutrients. If material foods or scale cannot be estimated
+reasonably, the Coach asks one natural clarification instead of claiming an
+incomplete Meal was recorded. No path invents a sentinel quantity.
 
 For Training, `get_active_training_program` explicitly distinguishes an active
 program from valid absence. Only its typed `absent` result proves that no

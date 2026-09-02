@@ -281,27 +281,30 @@ describe("MCP HTTP adapter", () => {
       "reply in natural coach language"
     );
     expect(recordMealTool?.description).toContain(
-      "make and save a best-effort estimate now"
+      "Every accepted Coach Meal item must include"
     );
     expect(recordMealTool?.inputSchema.properties.items.items).toMatchObject({
-      required: ["label"],
+      required: ["label", "amountKind", "nutrients"],
       properties: {
         amountKind: {
-          enum: ["unknown", "described", "quantified", "estimated"]
+          enum: ["described", "quantified", "estimated"]
         },
         nutrients: {
           type: "object",
           additionalProperties: false,
+          required: ["caloriesKcal", "proteinG", "fatG", "carbsG"],
           properties: expect.any(Object)
         }
       }
     });
-    expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients.required)
-      .toBeUndefined();
     expect(recordMealTool?.inputSchema.properties.items.items.properties.amountKind.description)
-      .toContain("missing exact scale alone is not a reason to use unknown");
+      .toContain("Coach Meal writes cannot use unknown");
     expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients.description)
-      .toContain("provide best-effort calories, protein, fat, and carbohydrates");
+      .toContain("Required complete best-effort nutrition");
+    for (const nutrient of ["caloriesKcal", "proteinG", "fatG", "carbsG"]) {
+      expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients
+        .properties[nutrient].type).toBe("number");
+    }
     expect(recordMealTool?.inputSchema.required).not.toContain("sourceReference");
     expect(recordMealTool?.inputSchema.properties.sourceReference.required).toBeUndefined();
     const recordRecoveryTool = body.result.tools.find((tool: { name: string }) =>
@@ -789,13 +792,13 @@ describe("MCP HTTP adapter", () => {
       items: [
         {
           label: "Стейк лосося",
-          amountKind: "unknown",
-          quantity: null,
-          unit: null,
-          amountDescription: null,
-          estimateMethod: null,
-          amountConfidence: null,
-          nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
+          amountKind: "estimated",
+          quantity: 220,
+          unit: "g",
+          amountDescription: "оценка по фото",
+          estimateMethod: "photo",
+          amountConfidence: 0.75,
+          nutrients: { caloriesKcal: 455, proteinG: 48, fatG: 28, carbsG: 0 }
         },
         {
           label: "Красное вино",
@@ -805,7 +808,7 @@ describe("MCP HTTP adapter", () => {
           amountDescription: null,
           estimateMethod: null,
           amountConfidence: null,
-          nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
+          nutrients: { caloriesKcal: 125, proteinG: 0, fatG: 0, carbsG: 4 }
         }
       ]
     };
@@ -816,9 +819,12 @@ describe("MCP HTTP adapter", () => {
       items: [{
         ...originalMeal.items[0],
         amountKind: "quantified",
-        quantity: 220,
+        quantity: 200,
         unit: "g",
-        nutrients: { caloriesKcal: 455, proteinG: null, fatG: null, carbsG: null }
+        amountDescription: null,
+        estimateMethod: null,
+        amountConfidence: null,
+        nutrients: { caloriesKcal: 414, proteinG: 44, fatG: 25.5, carbsG: 0 }
       }]
     };
     const photoMeal = {
@@ -942,14 +948,8 @@ describe("MCP HTTP adapter", () => {
       occurredAt: "2026-08-30T16:05:00.000Z",
       timezone: "Europe/Moscow",
       kind: "dinner",
-      description: "Стейк лосося, початок кукурузы, овощи, ягоды и вино",
-      items: [
-        { label: "Стейк лосося" },
-        { label: "Варёная кукуруза", amountDescription: "1 початок" },
-        { label: "Красное вино", quantity: 150, unit: "ml" },
-        { label: "Овощи" },
-        { label: "Ягоды" }
-      ],
+      description: "Стейк лосося и 150 мл красного вина",
+      items: originalMeal.items,
       dedupeKey: "chatgpt:meal:dinner:2026-08-30:1905"
     };
     const normalizedDinner = {
@@ -960,52 +960,10 @@ describe("MCP HTTP adapter", () => {
         externalRecordId: null,
         occurredAt: "2026-08-30T16:05:00.000Z"
       },
-      items: [
-        {
-          foodVersionId: null,
-          label: "Стейк лосося",
-          amountKind: "unknown",
-          quantity: null,
-          unit: null,
-          amountDescription: null,
-          estimateMethod: null,
-          amountConfidence: null,
-          nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
-        },
-        {
-          foodVersionId: null,
-          label: "Варёная кукуруза",
-          amountKind: "described",
-          quantity: null,
-          unit: null,
-          amountDescription: "1 початок",
-          estimateMethod: null,
-          amountConfidence: null,
-          nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
-        },
-        {
-          foodVersionId: null,
-          label: "Красное вино",
-          amountKind: "quantified",
-          quantity: 150,
-          unit: "ml",
-          amountDescription: null,
-          estimateMethod: null,
-          amountConfidence: null,
-          nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
-        },
-        ...["Овощи", "Ягоды"].map((label) => ({
-          foodVersionId: null,
-          label,
-          amountKind: "unknown",
-          quantity: null,
-          unit: null,
-          amountDescription: null,
-          estimateMethod: null,
-          amountConfidence: null,
-          nutrients: { caloriesKcal: null, proteinG: null, fatG: null, carbsG: null }
-        }))
-      ]
+      items: originalMeal.items.map((item) => ({
+        foodVersionId: null,
+        ...item
+      }))
     };
     const photoDinner = {
       occurredAt: "2026-08-31T16:47:00.000Z",
@@ -1014,6 +972,7 @@ describe("MCP HTTP adapter", () => {
       description: "Картофельное пюре, мясо, зелёный горошек, огурцы и помидоры",
       items: photoMeal.items.map((item) => ({
         label: item.label,
+        amountKind: item.amountKind,
         quantity: item.quantity,
         unit: item.unit,
         amountDescription: item.amountDescription,
@@ -1078,8 +1037,48 @@ describe("MCP HTTP adapter", () => {
         dedupeKey: "chatgpt:meal:dinner:2026-08-30:invalid"
       })).json().result).toMatchObject({
         isError: true,
-        content: [{ text: expect.stringContaining("Do not mention tools, staging, APIs, contracts") }]
+        content: [{ text: expect.stringContaining("do not save an incomplete Meal") }]
       });
+      expect(createMeal).not.toHaveBeenCalled();
+      const incompleteTeriyakiLunchResult = (await call(101, "record_meal", {
+        occurredAt: "2026-09-02T09:35:00.000Z",
+        timezone: "Europe/Moscow",
+        kind: "lunch",
+        description: "Курица терияки с рисом, свежие огурцы и помидоры",
+        items: [
+          {
+            label: "Курица терияки с рисом",
+            amountKind: "estimated",
+            quantity: 350,
+            unit: "g",
+            amountDescription: "оценка по фото",
+            estimateMethod: "photo",
+            amountConfidence: 0.7
+          },
+          {
+            label: "Свежие огурцы и помидоры",
+            amountKind: "estimated",
+            quantity: 160,
+            unit: "g",
+            amountDescription: "оценка по фото",
+            estimateMethod: "photo",
+            amountConfidence: 0.75
+          }
+        ],
+        dedupeKey: "chatgpt:meal:lunch:2026-09-02:1235:photo"
+      })).json().result;
+      expect(incompleteTeriyakiLunchResult).toMatchObject({
+        isError: true,
+        content: [{ text: expect.stringContaining("photo and text already present") }]
+      });
+      expect(incompleteTeriyakiLunchResult.content[0].text).toContain(
+        "numeric best-effort calories, protein, fat, and carbohydrates"
+      );
+      expect(incompleteTeriyakiLunchResult.content[0].text).toContain(
+        "Do not ask the user for values that can be reasonably estimated"
+      );
+      expect(incompleteTeriyakiLunchResult.content[0].text.toLowerCase())
+        .not.toContain("partial");
       expect(createMeal).not.toHaveBeenCalled();
       const recordMealResult = (await call(11, "record_meal", dinner)).json().result;
       expect(recordMealResult).toMatchObject({ structuredContent: originalMeal });
@@ -1123,13 +1122,29 @@ describe("MCP HTTP adapter", () => {
         id: originalMeal.id,
         items: [{
           label: "Стейк лосося",
-          quantity: 220,
+          amountKind: "quantified",
+          quantity: 200,
           unit: "g",
-          nutrients: { caloriesKcal: 455 }
+          nutrients: { caloriesKcal: 414, proteinG: 44, fatG: 25.5, carbsG: 0 }
         }],
         dedupeKey: "chatgpt:meal:dinner:2026-08-30:1905:correction:1",
         reason: "Пользователь уточнил объём и калорийность"
       };
+      const incompleteCorrectionResult = (await call(102, "correct_meal", {
+        ...correction,
+        items: [{
+          label: "Стейк лосося",
+          amountKind: "quantified",
+          quantity: 200,
+          unit: "g",
+          nutrients: { caloriesKcal: 414, proteinG: null, fatG: null, carbsG: null }
+        }],
+        dedupeKey: "chatgpt:meal:dinner:2026-08-30:1905:correction:invalid"
+      })).json().result;
+      expect(incompleteCorrectionResult).toMatchObject({ isError: true });
+      expect(incompleteCorrectionResult.content[0].text.toLowerCase())
+        .not.toContain("partial");
+      expect(correctMeal).not.toHaveBeenCalled();
       const correctMealResult = (await call(13, "correct_meal", correction)).json().result;
       expect(correctMealResult).toMatchObject({ structuredContent: correctedMeal });
       expect(correctMealResult.content[0].text).toContain("sound like a real coach");
@@ -1308,12 +1323,12 @@ describe("MCP HTTP adapter", () => {
             foodVersionId: null,
             label: "Стейк лосося",
             amountKind: "quantified",
-            quantity: 220,
+            quantity: 200,
             unit: "g",
             amountDescription: null,
             estimateMethod: null,
             amountConfidence: null,
-            nutrients: { caloriesKcal: 455, proteinG: null, fatG: null, carbsG: null }
+            nutrients: { caloriesKcal: 414, proteinG: 44, fatG: 25.5, carbsG: 0 }
           }]
         })
       );

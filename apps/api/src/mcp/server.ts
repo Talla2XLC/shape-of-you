@@ -403,7 +403,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_meal",
-      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. For a sufficiently legible photo or useful text description, make and save a best-effort estimate now for each identifiable item's quantity, calories, protein, fat, and carbohydrates using method and bounded confidence; exact grams are not required. Use unknown only for genuinely unidentifiable food or scale, never merely because the user did not weigh it, and never invent a sentinel serving. Then read back with list_meals using localDate only and reply in natural coach language with approximate nutrition and useful guidance without exposing contract fields or tool mechanics.",
+      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Every accepted Coach Meal item must include non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates. For a sufficiently legible photo or useful text description, estimate realistic quantities using method and bounded confidence; exact grams are not required. If material food or scale is genuinely unidentifiable, clarify instead of saving an incomplete Meal, and never invent a sentinel serving. Then read back with list_meals using localDate only and reply in natural coach language with approximate nutrition and useful guidance without exposing contract fields or tool mechanics.",
       createMealToolInputSchema,
       undefined,
       true,
@@ -415,7 +415,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_meal",
-      "Append one idempotent correction to a uniquely identified current Meal; follow with typed read-back, then reply in natural coach language without exposing contract fields or tool mechanics.",
+      "Immediately append one idempotent full-replacement correction to a uniquely identified current Meal without duplicate confirmation. Preserve or improve every item and provide non-unknown amount evidence plus numeric best-effort calories, protein, fat, and carbohydrates; do not replace a useful estimate with an incomplete Meal. Follow with date-scoped read-back, then reply in natural coach language without exposing contract fields or tool mechanics.",
       withIdSchema("CorrectMealToolInput", correctMealToolInputSchema),
       undefined,
       true,
@@ -663,12 +663,13 @@ function connectorMealSchema(
         items: {
           type: "object",
           additionalProperties: false,
-          required: ["label"],
+          required: ["label", "amountKind", "nutrients"],
           properties: {
             ...itemSchema.properties,
             amountKind: {
-              ...(itemSchema.properties.amountKind as Readonly<Record<string, unknown>>),
-              description: "Use estimated when a legible photo or useful text supports a reasonable portion estimate; missing exact scale alone is not a reason to use unknown."
+              type: "string",
+              enum: ["described", "quantified", "estimated"],
+              description: "Coach Meal writes cannot use unknown. Use estimated for a reasonable photo/text estimate, described only for the user's own non-numeric amount wording, or quantified for an explicit number and unit."
             },
             quantity: {
               ...(itemSchema.properties.quantity as Readonly<Record<string, unknown>>),
@@ -689,22 +690,27 @@ function connectorMealSchema(
             nutrients: {
               type: "object",
               additionalProperties: false,
-              description: "For each identifiable item in a sufficiently legible photo or useful text report, provide best-effort calories, protein, fat, and carbohydrates for the estimated portion. Omit values only when they genuinely cannot be estimated.",
+              required: ["caloriesKcal", "proteinG", "fatG", "carbsG"],
+              description: "Required complete best-effort nutrition for this accepted Coach Meal item. If the evidence is too ambiguous to estimate all four values, clarify instead of writing an incomplete Meal.",
               properties: {
                 caloriesKcal: {
                   ...(nutrientSchema.properties.caloriesKcal as Readonly<Record<string, unknown>>),
+                  type: "number",
                   description: "Best-effort calories for this item's reported or estimated portion."
                 },
                 proteinG: {
                   ...(nutrientSchema.properties.proteinG as Readonly<Record<string, unknown>>),
+                  type: "number",
                   description: "Best-effort protein grams for this item's reported or estimated portion."
                 },
                 fatG: {
                   ...(nutrientSchema.properties.fatG as Readonly<Record<string, unknown>>),
+                  type: "number",
                   description: "Best-effort fat grams for this item's reported or estimated portion."
                 },
                 carbsG: {
                   ...(nutrientSchema.properties.carbsG as Readonly<Record<string, unknown>>),
+                  type: "number",
                   description: "Best-effort carbohydrate grams for this item's reported or estimated portion."
                 }
               }
@@ -810,10 +816,28 @@ function normalizeMealInput(
       };
     })
   };
+  assertCompleteCoachMeal(normalized);
   if (!validate(normalized)) {
     throw new ConnectorInputError("Normalized Meal input does not match the domain contract");
   }
   return normalized;
+}
+
+function assertCompleteCoachMeal(meal: Record<string, unknown>): void {
+  const items = meal.items as Array<Record<string, unknown>>;
+  for (const item of items) {
+    const nutrients = item.nutrients as Record<string, unknown>;
+    if (
+      item.amountKind === "unknown" ||
+      !["caloriesKcal", "proteinG", "fatG", "carbsG"].every(
+        (key) => typeof nutrients[key] === "number" && Number.isFinite(nutrients[key])
+      )
+    ) {
+      throw new ConnectorInputError(
+        "Coach Meal writes require amount evidence and complete estimated nutrition"
+      );
+    }
+  }
 }
 
 function normalizeRecoveryInput(
@@ -975,7 +999,7 @@ function errorResult(message: string): CallToolResult {
 function inputErrorResult(toolName: string): CallToolResult {
   if (toolName === "record_meal" || toolName === "correct_meal") {
     return errorResult(
-      "Retry the Meal once while preserving valid best-effort text/photo estimates with method and confidence. For sufficiently legible evidence, include estimated quantity plus calories, protein, fat, and carbohydrates; exact measured grams are not required. Remove only contradictory or genuinely unknowable optional fields and never use a sentinel serving. Do not mention tools, staging, APIs, contracts, fields, or this retry to the user. If the retry still fails, say naturally that saving is temporarily unavailable."
+      "Retry the Meal once silently from the photo and text already present in the conversation. Every identifiable item must have non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates; estimate realistic portions with text/photo method and bounded confidence because exact measured grams are not required. Do not ask the user for values that can be reasonably estimated, do not save an incomplete Meal, and do not mention internal completeness, tools, staging, APIs, contracts, fields, or this retry. If material food or scale is genuinely unidentifiable, ask one natural clarification instead of claiming it was saved."
     );
   }
   if (toolName === "record_recovery_observation" || toolName === "correct_recovery_observation") {
