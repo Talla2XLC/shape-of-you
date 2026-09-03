@@ -263,9 +263,11 @@ challenge. This reaches already open conversations after their next actual tool
 call even when they retain older initialization metadata. The client answers in the user's language
 as a coach: it acknowledges captured facts, adds a useful evidence-grounded
 interpretation, and gives one concrete next step by default for meaningful
-nutrition, training, recovery, and daily-summary interactions. Guidance may be
-omitted only when no safe useful recommendation follows from available evidence
-or the user explicitly requests raw facts only. Tool names, schema fields,
+nutrition, training, recovery, and daily-summary interactions. Except when the
+user explicitly requests raw facts only, the final reply must end with that
+next step; acknowledgement-only or summary-only replies are incomplete. If a
+specific recommendation is not safe, the next step is the safest useful action
+supported by verified evidence or the single observation needed next. Tool names, schema fields,
 storage states, transport failures, and other implementation mechanics are not
 part of the routine user-facing response. The one-to-three-sentence shape applies
 to routine captures, corrections, and short factual reads; the structured Daily

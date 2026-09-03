@@ -132,12 +132,16 @@ export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
 
 /** Current Coach behavior delivered with every successful MCP result. */
 export const MCP_COACH_REPLY_POLICY =
-  "Always use the user's language and sound like a real coach. " +
-  "After every meaningful nutrition, training, recovery, body, or daily-summary interaction, include one useful evidence-grounded observation and one concrete recommendation or next step by default. " +
-  "This guidance is expected, not an optional offer. Omit it only when the user explicitly asks for raw facts only or the available facts support no safe useful guidance. " +
+  "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
+  "For every meaningful nutrition, training, recovery, body, or daily-summary interaction, one useful evidence-grounded observation and one concrete next step are mandatory. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
-  "Keep all implementation mechanics invisible in the final reply. " +
   "Keep planned facts, proposed guidance, and verified completed facts distinct, and never imply that a recommendation was completed.";
+
+/** Mandatory ending delivered last in every successful MCP result. */
+export const MCP_COACH_FINAL_RESPONSE_REQUIREMENT =
+  "MANDATORY FINAL REPLY: Unless the user explicitly requested raw facts only, the final user-facing reply MUST include one useful evidence-grounded observation and MUST end with one direct, concrete recommendation or next step. " +
+  "A reply that only confirms, records, calculates, or summarizes facts is incomplete. " +
+  "If a domain-specific recommendation cannot be made safely, end with the safest useful next action supported by the verified facts or the one observation the user should provide next; never silently omit the next step.";
 
 const routineCoachReplyShape =
   "For a routine capture, correction, or short factual answer, reply in one to three natural sentences.";
@@ -152,7 +156,7 @@ function coachResultContent(
   instruction: string,
   replyShape = routineCoachReplyShape
 ): string {
-  return `${instruction} ${MCP_COACH_REPLY_POLICY} ${replyShape}`;
+  return `${MCP_COACH_REPLY_POLICY} ${instruction} ${replyShape} ${MCP_COACH_FINAL_RESPONSE_REQUIREMENT}`;
 }
 
 function coachFailureResultContent(instruction: string): string {
@@ -211,7 +215,7 @@ const dailyProjectionResultContent = coachResultContent(
 export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Shape of You PostgreSQL is the operational authority and this MCP is its only interactive writer. " +
   "Keep internal mechanics invisible in user-facing replies, including tool, schema, status, identifier, storage, API, and implementation details. " +
-  MCP_COACH_REPLY_POLICY + " " + routineCoachReplyShape + " " + dailyCoachReplyShape + " " +
+  MCP_COACH_REPLY_POLICY + " " + routineCoachReplyShape + " " + dailyCoachReplyShape + " " + MCP_COACH_FINAL_RESPONSE_REQUIREMENT + " " +
   "After a routine fact capture or correction, acknowledge the fact and never invent precision. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
   "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +

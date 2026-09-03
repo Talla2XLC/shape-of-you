@@ -48,8 +48,11 @@ weakening domain or persistence invariants. Successful Meal tools keep the same
 typed `structuredContent`, while their model-facing text is a concise
 presentation contract rather than a JSON copy of the domain snapshot. It
 directs a natural acknowledgement and one evidence-grounded observation or next
-step by default whenever safe useful guidance follows from the available
-evidence, without exposing internal completeness or transport
+step. Unless the user explicitly asks for raw facts only, acknowledgement or
+nutrition summary without that final next step is incomplete. When a specific
+nutrition recommendation is not safe, the Coach ends with the safest useful
+action supported by verified facts or requests the one observation needed next,
+without exposing internal completeness or transport
 vocabulary.
 
 The connector-facing schemas remain backward compatible under the existing

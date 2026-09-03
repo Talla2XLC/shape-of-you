@@ -46,9 +46,11 @@ evidence-grounded следующим шагом.
 3. Routine result требует ответа на языке пользователя в одной–трёх естественных
    фразах: факт, интерпретация и конкретный следующий шаг. Daily Coach brief не
    получает конфликтующий sentence limit.
-4. Рекомендация обязательна по умолчанию для meaningful nutrition, training,
-   recovery и daily-summary interactions. Она пропускается только без безопасной
-   evidence-grounded пользы или при явном raw-only запросе пользователя.
+4. Рекомендация обязательна для meaningful nutrition, training, recovery и
+   daily-summary interactions и завершает ответ. Она пропускается только при
+   явном raw-only запросе пользователя; если предметный совет небезопасен,
+   Coach даёт самый безопасный полезный следующий шаг по проверенным данным или
+   просит одно наблюдение, необходимое для следующей рекомендации.
 5. Все 20 existing tools доставляют актуальную policy в каждом successful
    result. Validation, execution и OAuth failures доставляют нетехническую
    fail-closed policy, поэтому новый deployment не требует переоткрытия chat

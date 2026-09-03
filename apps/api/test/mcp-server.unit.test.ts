@@ -28,6 +28,7 @@ import {
   type McpAuthorizationBoundary
 } from "../src/mcp/oauth.js";
 import {
+  MCP_COACH_FINAL_RESPONSE_REQUIREMENT,
   MCP_COACH_REPLY_POLICY,
   MCP_OPERATIONAL_INSTRUCTIONS,
   MCP_ROUTINE_COACH_RESPONSE_EXAMPLES,
@@ -268,16 +269,19 @@ describe("MCP HTTP adapter", () => {
       "one useful evidence-grounded observation"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "one concrete recommendation or next step by default"
+      MCP_COACH_FINAL_RESPONSE_REQUIREMENT
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Never ask whether the user wants you to record, correct, estimate, analyze"
     );
-    expect(MCP_COACH_REPLY_POLICY).toContain(
-      "This guidance is expected, not an optional offer"
+    expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).toContain(
+      "MUST end with one direct, concrete recommendation or next step"
     );
-    expect(MCP_COACH_REPLY_POLICY).toContain(
-      "Omit it only when the user explicitly asks for raw facts only"
+    expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).toContain(
+      "only confirms, records, calculates, or summarizes facts is incomplete"
+    );
+    expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).toContain(
+      "never silently omit the next step"
     );
     expect(MCP_COACH_REPLY_POLICY).toContain(
       "perform the action instead"
@@ -857,7 +861,7 @@ describe("MCP HTTP adapter", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().result).toMatchObject({
-        content: [{ text: expect.stringContaining("one concrete recommendation or next step by default") }],
+        content: [{ text: expect.stringContaining("MUST end with one direct, concrete recommendation or next step") }],
         structuredContent: { items: [], nextCursor: null }
       });
       expect(list).toHaveBeenCalledOnce();
@@ -1061,6 +1065,8 @@ describe("MCP HTTP adapter", () => {
       ["get_daily_projection", { localDate: "2026-09-02", timezone: "Europe/Moscow" }, "get_daily_projection"]
     ] as const;
 
+    const successfulContent = new Map<string, string>();
+
     try {
       for (const [index, [name, args, marker]] of cases.entries()) {
         const response = await authorizedFastify.inject({
@@ -1078,8 +1084,15 @@ describe("MCP HTTP adapter", () => {
           }
         });
         const toolResult = response.json().result;
+        successfulContent.set(name, toolResult.content[0].text);
         expect(toolResult.isError, name).not.toBe(true);
         expect(toolResult.content[0].text, name).toContain(MCP_COACH_REPLY_POLICY);
+        expect(toolResult.content[0].text, name).toContain(
+          MCP_COACH_FINAL_RESPONSE_REQUIREMENT
+        );
+        expect(toolResult.content[0].text, name).toMatch(
+          /MANDATORY FINAL REPLY:[\s\S]*never silently omit the next step\.$/u
+        );
         if (name === "get_active_training_program") {
           expect(toolResult.structuredContent, name).toMatchObject({
             status: "active",
@@ -1088,6 +1101,17 @@ describe("MCP HTTP adapter", () => {
         } else {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });
         }
+      }
+
+      for (const name of [
+        "record_weight_measurement",
+        "record_meal",
+        "record_recovery_observation",
+        "list_recovery_observations"
+      ]) {
+        expect(successfulContent.get(name), `morning flow: ${name}`).toMatch(
+          /MANDATORY FINAL REPLY:[\s\S]*MUST end with one direct, concrete recommendation or next step[\s\S]*never silently omit the next step\.$/u
+        );
       }
     } finally {
       await authorizedFastify.close();
@@ -1499,7 +1523,7 @@ describe("MCP HTTP adapter", () => {
         .toMatchObject({ structuredContent: { items: [originalMeal] } });
       expect(firstMealReadResult.content).toEqual([{
         type: "text",
-        text: expect.stringContaining("one concrete recommendation or next step by default")
+        text: expect.stringContaining("MUST end with one direct, concrete recommendation or next step")
       }]);
       const forbiddenMealPresentationTerms = [
         "partial",
@@ -1559,7 +1583,7 @@ describe("MCP HTTP adapter", () => {
       expect(correctedMealReadResult)
         .toMatchObject({ structuredContent: { items: [correctedMeal] } });
       expect(correctedMealReadResult.content[0].text)
-        .toContain("one concrete recommendation or next step by default");
+        .toContain("MUST end with one direct, concrete recommendation or next step");
       const photoMealResult = (await call(140, "record_meal", photoDinner)).json().result;
       expect(photoMealResult).toMatchObject({ structuredContent: photoMeal });
       expect(photoMealResult.content[0].text).toContain(
@@ -1686,7 +1710,7 @@ describe("MCP HTTP adapter", () => {
       })).json().result;
       expect(recoveryReadResult.structuredContent.items).toHaveLength(7);
       expect(recoveryReadResult.content[0].text)
-        .toContain("one concrete recommendation or next step by default");
+        .toContain("MUST end with one direct, concrete recommendation or next step");
       expect(recoveryReadResult.content[0].text.toLowerCase()).not.toContain("schema");
       expect(createObservation).toHaveBeenNthCalledWith(1, expect.objectContaining({
         observedFrom: null,
