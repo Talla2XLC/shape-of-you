@@ -10,7 +10,9 @@ import type {
   RecoveryAssessment,
   RecoveryAssessmentList,
   RecoveryConnection,
+  RecoveryConnectionList,
   RecoveryConsent,
+  RecoveryErasureRequest,
   RecoveryObservation,
   RecoveryObservationHistory,
   RecoveryObservationList,
@@ -36,6 +38,10 @@ export class RecoveryService {
 
   public createConnection(input: CreateRecoveryConnection): Promise<RecoveryConnection> {
     return this.store.createConnection(this.personContext.getPersonId(), input);
+  }
+
+  public listConnections(): Promise<RecoveryConnectionList> {
+    return this.store.listConnections(this.personContext.getPersonId());
   }
 
   public grantConsent(connectionId: string, input: GrantRecoveryConsent): Promise<RecoveryConsent> {
@@ -92,6 +98,15 @@ export class RecoveryService {
 
   public listAssessments(limit = 50): Promise<RecoveryAssessmentList> {
     return this.store.listAssessments(this.personContext.getPersonId(), limit);
+  }
+
+  public async findErasureRequest(id: string): Promise<RecoveryErasureRequest> {
+    const request = await this.store.findErasureRequest(
+      this.personContext.getPersonId(),
+      id
+    );
+    if (!request) throw new NotFoundError("Recovery erasure request was not found");
+    return request;
   }
 
   /** Reads all assessments for a single local date for a coordinating projection. */

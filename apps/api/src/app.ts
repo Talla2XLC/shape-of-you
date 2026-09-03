@@ -94,6 +94,8 @@ export interface BuildAppOptions {
   readonly trainingStore?: TrainingStore;
   /** Optional Recovery persistence used for isolated application tests. */
   readonly recoveryStore?: RecoveryStore;
+  /** Optional test override for the API-owned Recovery erasure poller. */
+  readonly recoveryErasureWorkerEnabled?: boolean;
   /** Optional Coaching persistence used for isolated application tests. */
   readonly coachingStore?: CoachingStore;
   /** Optional Intake persistence used for isolated application tests. */
@@ -230,7 +232,19 @@ export async function buildApp(
           resolveAuthorizedPersons:
             identitySubjectMappings.resolveAuthorizedPersons.bind(
               identitySubjectMappings
-            )
+            ),
+          requestRecoveryErasure: ({
+            personId,
+            connectionId,
+            idempotencyKey,
+            authorityId
+          }) => recoveryStore.requestErasure(
+            personId,
+            connectionId,
+            idempotencyKey,
+            "user_request",
+            authorityId
+          )
         })
       : null;
   const logger =
@@ -245,6 +259,8 @@ export async function buildApp(
       nutritionStore,
       trainingStore,
       recoveryStore,
+      recoveryErasureWorkerEnabled:
+        options.recoveryErasureWorkerEnabled ?? options.config.NODE_ENV !== "test",
       coachingStore,
       intakeStore,
       dailyContextNoteStore,

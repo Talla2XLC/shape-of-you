@@ -85,15 +85,20 @@ export class OAuthBrowserUi {
     if (promptName === "consent" && (!session || !csrfToken)) {
       throw new IdentityAuthenticationError(401, "authentication_required", "Authentication required");
     }
+    const requiresFreshPasskey =
+      promptName === "login" &&
+      typeof details.params.prompt === "string" &&
+      details.params.prompt.split(/\s+/u).includes("login") &&
+      (details.params.max_age === 0 || details.params.max_age === "0");
     const html = renderPage({
       clientName: typeof client.client_name === "string" ? client.client_name : clientId,
-      csrfToken,
+      csrfToken: requiresFreshPasskey ? null : csrfToken,
       interactionCredential,
       nonce,
       prompt: promptName,
       scopes,
       durableConnection,
-      session
+      session: requiresFreshPasskey ? null : session
     });
     response.writeHead(200, {
       "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${redirectOrigin}`,

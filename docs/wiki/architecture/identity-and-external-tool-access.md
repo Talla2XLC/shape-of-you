@@ -144,6 +144,14 @@ sessions and refresh families; recovery revokes existing sessions. The final
 usable authentication method cannot be removed without another active passkey
 or valid recovery path.
 
+The Recovery connection-erasure flow requires a separate fresh-passkey
+authority. Identity performs a new ceremony and returns a short-lived,
+single-use proof bound to the authenticated account, browser session, purpose,
+and exact Recovery connection. API verifies and consumes that proof through a
+versioned HTTP contract before quarantining the connection. The ordinary
+browser session and CSRF token remain necessary but are not sufficient for the
+irreversible action. Identity never reads or deletes Recovery data.
+
 The first passkey is provisioned through an operator-only CLI that creates an
 account and a hashed, single-use enrollment token valid for 15 minutes. It does
 not enable public self-registration or require manual SQL. Additional passkeys

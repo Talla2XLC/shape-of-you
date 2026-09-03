@@ -108,6 +108,65 @@ test("landing offers progress when the API session is active", async ({ page }) 
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveCount(0);
 });
 
+test("privacy requires explicit confirmation and starts fresh passkey erasure", async ({ context, page }) => {
+  await mockApiSession(page, 204);
+  const csrf = opaqueValue();
+  await context.addCookies([{
+    name: "__Host-shape_of_you_api_csrf",
+    value: csrf,
+    domain: "localhost",
+    path: "/",
+    secure: true,
+    httpOnly: false,
+    sameSite: "Lax"
+  }]);
+  const connectionId = randomUUID();
+  await page.route("**/api/v1/recovery/connections", (route) => fulfillJson(route, {
+    items: [{
+      id: connectionId,
+      status: "active",
+      device: {
+        label: "Garmin watch",
+        modelVersion: { providerName: "Garmin", name: "Watch" }
+      },
+      connectedAt: "2026-09-01T12:00:00.000Z",
+      erasureRequestedAt: null
+    }]
+  }));
+  await page.route("**/api/browser-auth/recovery-erasure/start", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+    expect(route.request().postDataJSON()).toEqual({ connectionId });
+    await fulfillJson(route, { authorizationUrl: "/fresh-passkey-erasure" });
+  });
+
+  await page.goto("/privacy");
+  await expect(page.getByRole("heading", { name: "Your wearable data." })).toBeVisible();
+  const erase = page.getByRole("button", { name: "Confirm with passkey and erase" });
+  await expect(erase).toBeDisabled();
+  await page.getByRole("checkbox").check();
+  await expect(erase).toBeEnabled();
+  await erase.click();
+  await expect(page).toHaveURL(/\/fresh-passkey-erasure$/u);
+});
+
+test("privacy reports an accepted erasure without exposing deleted data", async ({ page }) => {
+  await mockApiSession(page, 204);
+  const requestId = randomUUID();
+  await page.route("**/api/v1/recovery/connections", (route) => fulfillJson(route, { items: [] }));
+  await page.route(`**/api/v1/recovery/erasure-requests/${requestId}`, (route) => fulfillJson(route, {
+    id: requestId,
+    connectionId: randomUUID(),
+    reason: "user_request",
+    status: "completed",
+    requestedAt: "2026-09-03T12:00:00.000Z",
+    completedAt: "2026-09-03T12:00:01.000Z"
+  }));
+
+  await page.goto(`/privacy?erasureRequestId=${requestId}`);
+  await expect(page.getByRole("status")).toContainText("Erasure completed");
+  await expect(page.getByText("No wearable connections.")).toBeVisible();
+});
+
 test("landing passkey explanation is a reversible disclosure", async ({ page }) => {
   await mockApiSession(page, 401);
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -144,12 +203,15 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
   ).toBe(true);
   const brand = page.getByRole("link", { name: "Shape of You home" });
   const myDay = page.getByRole("banner").getByRole("link", { name: "Progress" });
+  const privacy = page.getByRole("banner").getByRole("link", { name: "Privacy" });
   const continueLink = page.getByRole("link", { name: "Continue with a passkey" });
   await expect(continueLink).toBeVisible();
   await page.keyboard.press("Tab");
   await expect(brand).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(myDay).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(privacy).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(continueLink).toBeFocused();
   await page.keyboard.press("Tab");

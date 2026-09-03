@@ -12,7 +12,9 @@ import {
   RecoveryAssessmentListSchema,
   RecoveryAssessmentSchema,
   RecoveryConnectionSchema,
+  RecoveryConnectionListSchema,
   RecoveryConsentSchema,
+  RecoveryErasureRequestSchema,
   RecoveryIdParamsSchema,
   RecoveryObservationHistorySchema,
   RecoveryObservationListSchema,
@@ -28,7 +30,9 @@ import {
   type RecoveryAssessment,
   type RecoveryAssessmentList,
   type RecoveryConnection,
+  type RecoveryConnectionList,
   type RecoveryConsent,
+  type RecoveryErasureRequest,
   type RecoveryIdParams,
   type RecoveryObservation,
   type RecoveryObservationHistory,
@@ -52,6 +56,20 @@ export class RecoveryConnectionController {
   ): Promise<RecoveryConnection> {
     void reply.code(201);
     return this.service.createConnection(input);
+  }
+
+  @Get("connections")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(RecoveryConnectionListSchema))
+  public listConnections(): Promise<RecoveryConnectionList> {
+    return this.service.listConnections();
+  }
+
+  @Get("erasure-requests/:id")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(RecoveryErasureRequestSchema))
+  public findErasureRequest(
+    @Param(new JsonSchemaPipe<RecoveryIdParams>(RecoveryIdParamsSchema, true)) params: RecoveryIdParams
+  ): Promise<RecoveryErasureRequest> {
+    return this.service.findErasureRequest(params.id);
   }
 
   @Post("connections/:id/consents")

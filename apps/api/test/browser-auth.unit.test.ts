@@ -13,7 +13,10 @@ const key = "test-browser-cookie-key-that-is-long-enough-for-validation";
 const resource = "https://staging.example.test/api/mcp";
 
 function auth(
-  resolveAuthorizedPersons: BrowserAuthOptions["resolveAuthorizedPersons"] = async () => []
+  resolveAuthorizedPersons: BrowserAuthOptions["resolveAuthorizedPersons"] = async () => [],
+  requestRecoveryErasure: BrowserAuthOptions["requestRecoveryErasure"] = async () => {
+    throw new Error("Unexpected Recovery erasure request");
+  }
 ): BrowserAuth {
   return new BrowserAuth({
     origin,
@@ -22,7 +25,8 @@ function auth(
     resource,
     clientId: "shape-of-you-web-test",
     cookieKeys: [key],
-    resolveAuthorizedPersons
+    resolveAuthorizedPersons,
+    requestRecoveryErasure
   });
 }
 
@@ -88,7 +92,10 @@ describe("API browser session boundary", () => {
       resource,
       clientId: "shape-of-you-web-test",
       cookieKeys: [key, oldKey],
-      resolveAuthorizedPersons: async () => []
+      resolveAuthorizedPersons: async () => [],
+      requestRecoveryErasure: async () => {
+        throw new Error("Unexpected Recovery erasure request");
+      }
     });
     await expect(
       rotating.requireRead(
@@ -169,6 +176,77 @@ describe("API browser session boundary", () => {
     expect(expired.statusCode).toBe(401);
     expect(expired.body).toBe("");
     expect(expired.headers["cache-control"]).toBe("no-store");
+    await fastify.close();
+  });
+
+  it("requires a fresh passkey OAuth ceremony before connection erasure", async () => {
+    const { privateKey, publicKey } = await generateKeyPair("ES256");
+    const publicJwk = await exportJWK(publicKey);
+    const idToken = await new SignJWT({
+      amr: ["passkey"],
+      auth_time: Math.floor(Date.now() / 1_000)
+    })
+      .setProtectedHeader({ alg: "ES256", kid: "erasure-test" })
+      .setIssuer("https://identity.example.test")
+      .setAudience("shape-of-you-web-test")
+      .setSubject("identity-subject")
+      .setIssuedAt()
+      .setExpirationTime("5m")
+      .sign(privateKey);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      if (url.pathname === "/oauth/token") return Response.json({ id_token: idToken });
+      if (url.pathname === "/oauth/jwks") {
+        return Response.json({
+          keys: [{ ...publicJwk, alg: "ES256", kid: "erasure-test", use: "sig" }]
+        });
+      }
+      return new Response(null, { status: 404 });
+    }));
+    const requestRecoveryErasure = vi.fn(async (input: {
+      readonly connectionId: string;
+    }) => ({
+      id: "00000000-0000-4000-8000-000000000099",
+      connectionId: input.connectionId,
+      reason: "user_request" as const,
+      status: "pending" as const,
+      requestedAt: new Date().toISOString(),
+      completedAt: null
+    }));
+    const fastify = Fastify();
+    auth(async () => [], requestRecoveryErasure).register(fastify);
+    const connectionId = "00000000-0000-4000-8000-000000000088";
+    const apiSession = await session();
+    const start = await fastify.inject({
+      method: "POST",
+      url: "/browser-auth/recovery-erasure/start",
+      headers: {
+        cookie: `__Host-shape_of_you_api_session=${apiSession}; __Host-shape_of_you_api_csrf=csrf-value`,
+        origin,
+        "x-csrf-token": "csrf-value"
+      },
+      payload: { connectionId }
+    });
+    expect(start.statusCode).toBe(200);
+    const authorize = new URL(start.json<{ authorizationUrl: string }>().authorizationUrl);
+    expect(authorize.searchParams.get("prompt")).toBe("login");
+    expect(authorize.searchParams.get("max_age")).toBe("0");
+
+    const callback = await fastify.inject({
+      method: "GET",
+      url: `/browser-auth/callback?code=fresh-code&state=${authorize.searchParams.get("state")}`,
+      headers: {
+        cookie: `${transactionCookie(start)}; __Host-shape_of_you_api_session=${apiSession}`
+      }
+    });
+    expect(callback.statusCode).toBe(302);
+    expect(callback.headers.location).toBe(
+      `${origin}/privacy?erasureRequestId=00000000-0000-4000-8000-000000000099`
+    );
+    expect(requestRecoveryErasure).toHaveBeenCalledWith(expect.objectContaining({
+      connectionId,
+      personId: "00000000-0000-4000-8000-000000000001"
+    }));
     await fastify.close();
   });
 

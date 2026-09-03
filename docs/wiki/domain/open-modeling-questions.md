@@ -18,10 +18,11 @@ migration design.
 
 ## Content
 
-High cost of change:
+High-cost design resolved and implemented but not yet operationally released:
 
-- wearable/health retention periods and authenticated erasure protocol before
-  production ingestion.
+- wearable connection retention uses explicit `indefinite` or exact
+  `retainUntil`; authenticated connection erasure uses a durable API-owned
+  lifecycle and independent restore-time manifest replay.
 
 Insufficient evidence:
 
@@ -40,10 +41,13 @@ supersession, body sessions/goals/weight reconciliation, layered Nutrition,
 shared-reference ownership, Training versions/sessions, typed Recovery and
 policy-pinned assessments, typed immutable Coaching lifecycle, and the
 always-live Person-local daily projection without a broad `JournalDay` or
-day-close aggregate.
+day-close aggregate. Recovery retention and authenticated connection erasure
+are also implemented; real provider data remains blocked until independent
+manifest storage, maximum backup lifetime, and the staging restore drill are
+accepted by the cluster owner.
 
-Still open: production Coaching policy parameters, exercise difficulty/
-replacement contracts, and authenticated erasure.
+Still open: production Coaching policy parameters and exercise difficulty/
+replacement contracts.
 
 ## Evidence
 
@@ -64,4 +68,5 @@ replacement contracts, and authenticated erasure.
 - [Candidate aggregates](candidate-aggregates.md)
 - [Extraction map](domain-extraction-map.md)
 - [Sheets inventory](../data/google-sheets-inventory.md)
+- [Recovery erasure ADR](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)
 - [ADR catalog](../../adr/)

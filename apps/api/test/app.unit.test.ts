@@ -227,6 +227,7 @@ const trainingStore: TrainingStore = {
 const recoveryStore: RecoveryStore = {
   registerDeviceModel: unreachable,
   createConnection: unreachable,
+  listConnections: unreachable,
   grantConsent: unreachable,
   revokeConsent: unreachable,
   createObservation: unreachable,
@@ -241,7 +242,14 @@ const recoveryStore: RecoveryStore = {
   findAssessment: unreachable,
   listAssessments: unreachable,
   listAssessmentsForLocalDate: unreachable,
-  listAssessmentsForLocalDateRange: unreachable
+  listAssessmentsForLocalDateRange: unreachable,
+  requestErasure: unreachable,
+  findErasureRequest: unreachable,
+  enqueueExpiredRetention: async () => 0,
+  claimErasure: async () => null,
+  completeErasure: unreachable,
+  failErasure: unreachable,
+  replayErasureMarker: unreachable
 };
 
 const coachingStore: CoachingStore = {
@@ -326,6 +334,7 @@ describe("API bootstrap", () => {
     expect(openapi.json().paths).toHaveProperty("/v1/nutrition/meals");
     expect(openapi.json().paths).toHaveProperty("/v1/recovery/observations");
     expect(openapi.json().paths).toHaveProperty("/v1/recovery/assessments");
+    expect(openapi.json().paths).toHaveProperty("/v1/recovery/erasure-requests/{id}");
     expect(openapi.json().paths).toHaveProperty(
       "/v1/coaching/recommendations/training-adjustments"
     );

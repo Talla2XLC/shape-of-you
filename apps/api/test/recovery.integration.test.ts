@@ -9,12 +9,17 @@ import type { AppConfig } from "@shape-of-you/config";
 import { buildApp, getFastifyInstance } from "../src/app.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
+import {
+  assertRecoveryErasureManifestComplete,
+  exportRecoveryErasureManifest
+} from "../src/recovery/recovery-erasure-manifest.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
 let repository: RecoveryRepository;
+let databaseUrl: string;
 
 const personA = "00000000-0000-4000-8000-000000000001";
 const personB = "00000000-0000-4000-8000-000000000002";
@@ -25,7 +30,7 @@ beforeAll(async () => {
     .withUsername("shape_of_you")
     .withPassword("shape_of_you")
     .start();
-  const databaseUrl = container.getConnectionUri();
+  databaseUrl = container.getConnectionUri();
   const config: AppConfig = {
     NODE_ENV: "test",
     HOST: "127.0.0.1",
@@ -220,6 +225,329 @@ describe("Recovery PostgreSQL vertical", () => {
     });
     const history = await repository.observationHistory(personA, corrected.observation.id);
     expect(history?.items.map((item) => item.id)).toEqual([manual.observation.id, corrected.observation.id]);
+  });
+
+  it("quarantines a connection immediately and erases only its owned graph", async () => {
+    const model = await repository.registerDeviceModel({
+      providerKey: "erasure-provider",
+      providerName: "Erasure provider",
+      modelKey: "erasure-watch",
+      version: 1,
+      name: "Erasure watch",
+      capabilities: ["metric"]
+    });
+    const connection = await repository.createConnection(personA, {
+      deviceModelVersionId: model.id,
+      label: "Disposable connection",
+      dedupeKey: "erasure:connection"
+    });
+    const consent = await repository.grantConsent(personA, connection.id, {
+      purpose: "Erasure integration test",
+      allowedKinds: ["metric"],
+      retentionMode: "until",
+      retainUntil: "2027-01-01T00:00:00.000Z"
+    });
+    const deviceInput = {
+      kind: "metric" as const,
+      observedFrom: "2026-11-01T06:00:00.000Z",
+      observedUntil: "2026-11-01T06:00:00.000Z",
+      timezone: "Europe/Moscow",
+      quality: "reliable" as const,
+      connectionId: connection.id,
+      consentId: consent.id,
+      dedupeKey: "erasure:device:one",
+      sourceReference: {
+        channel: "device" as const,
+        externalSystem: "erasure-provider",
+        externalRecordId: "device-one",
+        occurredAt: "2026-11-01T06:00:00.000Z"
+      },
+      detail: {
+        type: "metric" as const,
+        metric: "resting_heart_rate" as const,
+        value: 55,
+        unit: "bpm" as const
+      }
+    };
+    const deviceObservation = await repository.createObservation(personA, deviceInput);
+    const manualObservation = await repository.createObservation(personA, {
+      ...deviceInput,
+      connectionId: null,
+      consentId: null,
+      dedupeKey: "erasure:manual:one",
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-11-01T06:00:00.000Z"
+      }
+    });
+
+    const request = await repository.requestErasure(
+      personA,
+      connection.id,
+      "erasure:request:one",
+      "user_request",
+      "00000000-0000-4000-8000-000000000094"
+    );
+    const duplicate = await repository.requestErasure(
+      personA,
+      connection.id,
+      "erasure:request:one",
+      "user_request",
+      "00000000-0000-4000-8000-000000000094"
+    );
+
+    expect(duplicate.id).toBe(request.id);
+    expect((await repository.listConnections(personA)).items[0]).toMatchObject({
+      id: connection.id,
+      status: "disconnected"
+    });
+    expect((await repository.listConnections(personA)).items[0]?.erasureRequestedAt).not.toBeNull();
+    expect(await repository.findObservation(personA, deviceObservation.observation.id)).toBeNull();
+    expect(await repository.findObservation(personA, manualObservation.observation.id)).not.toBeNull();
+    await expect(repository.createObservation(personA, {
+      ...deviceInput,
+      dedupeKey: "erasure:device:after-request",
+      sourceReference: { ...deviceInput.sourceReference, externalRecordId: "after-request" }
+    })).rejects.toThrow("not permitted");
+
+    const job = await repository.claimErasure("integration-worker", 30_000);
+    expect(job).toMatchObject({ id: request.id, personId: personA, connectionId: connection.id });
+    await repository.completeErasure(job!);
+
+    expect(await repository.findErasureRequest(personA, request.id)).toMatchObject({
+      status: "completed"
+    });
+    expect((await repository.listConnections(personA)).items).not.toContainEqual(
+      expect.objectContaining({ id: connection.id })
+    );
+    expect(await repository.findObservation(personA, manualObservation.observation.id)).not.toBeNull();
+    const retainedModel = await repository.registerDeviceModel({
+      providerKey: "erasure-provider",
+      providerName: "Erasure provider",
+      modelKey: "erasure-watch",
+      version: 1,
+      name: "Erasure watch",
+      capabilities: ["metric"]
+    });
+    expect(retainedModel.id).toBe(model.id);
+    const erased = await database.pool.query<{ count: string }>(
+      "select count(*)::text as count from recovery_observations where connection_id = $1",
+      [connection.id]
+    );
+    expect(erased.rows[0]?.count).toBe("0");
+    const manifest = await exportRecoveryErasureManifest(
+      database.pool,
+      () => new Date("2026-11-02T00:00:00.000Z")
+    );
+    expect(manifest.markers).toContainEqual({
+      id: request.id,
+      personId: personA,
+      connectionId: connection.id,
+      reason: "user_request",
+      requestedAt: request.requestedAt
+    });
+  });
+
+  it("enqueues expired exact retention once and leaves indefinite consent active", async () => {
+    const model = await repository.registerDeviceModel({
+      providerKey: "retention-provider",
+      providerName: "Retention provider",
+      modelKey: "retention-watch",
+      version: 1,
+      name: "Retention watch",
+      capabilities: ["metric"]
+    });
+    const expired = await repository.createConnection(personA, {
+      deviceModelVersionId: model.id,
+      label: null,
+      dedupeKey: "retention:expired"
+    });
+    const indefinite = await repository.createConnection(personA, {
+      deviceModelVersionId: model.id,
+      label: null,
+      dedupeKey: "retention:indefinite"
+    });
+    await repository.grantConsent(personA, expired.id, {
+      purpose: "Expired retention test",
+      allowedKinds: ["metric"],
+      retentionMode: "until",
+      retainUntil: "2020-01-01T00:00:00.000Z"
+    });
+    await repository.grantConsent(personA, indefinite.id, {
+      purpose: "Indefinite retention test",
+      allowedKinds: ["metric"],
+      retentionMode: "indefinite",
+      retainUntil: null
+    });
+
+    expect(await repository.enqueueExpiredRetention(10)).toBe(1);
+    expect(await repository.enqueueExpiredRetention(10)).toBe(0);
+    expect((await repository.listConnections(personA)).items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: expired.id, status: "disconnected" }),
+        expect.objectContaining({ id: indefinite.id, status: "active", erasureRequestedAt: null })
+      ])
+    );
+    const claims = await Promise.all([
+      repository.claimErasure("retention-worker-a", 30_000),
+      repository.claimErasure("retention-worker-b", 30_000)
+    ]);
+    const claimed = claims.find((item) => item !== null)!;
+    expect(claims.filter((item) => item !== null)).toHaveLength(1);
+    expect(claimed.connectionId).toBe(expired.id);
+    await repository.failErasure(claimed, "TRANSIENT_TEST_FAILURE", 0);
+    const retried = await repository.claimErasure("retention-worker-c", 30_000);
+    expect(retried?.id).toBe(claimed.id);
+    await repository.completeErasure(retried!);
+    expect((await repository.listConnections(personA)).items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: indefinite.id, status: "active" })
+      ])
+    );
+  });
+
+  it("replays an independent marker idempotently without a request in the restored database", async () => {
+    const model = await repository.registerDeviceModel({
+      providerKey: "restore-provider",
+      providerName: "Restore provider",
+      modelKey: "restore-watch",
+      version: 1,
+      name: "Restore watch",
+      capabilities: ["metric"]
+    });
+    const connection = await repository.createConnection(personA, {
+      deviceModelVersionId: model.id,
+      label: null,
+      dedupeKey: "restore:connection"
+    });
+    const marker = {
+      id: "00000000-0000-4000-8000-000000009400",
+      personId: personA,
+      connectionId: connection.id,
+      reason: "user_request" as const,
+      requestedAt: "2026-11-03T00:00:00.000Z"
+    };
+
+    await repository.replayErasureMarker(marker);
+    await repository.replayErasureMarker(marker);
+
+    expect((await repository.listConnections(personA)).items).not.toContainEqual(
+      expect.objectContaining({ id: connection.id })
+    );
+    expect(await repository.findErasureRequest(personA, marker.id)).toBeNull();
+  });
+
+  it("replays a post-backup erasure into an isolated pre-erasure restore", async () => {
+    const model = await repository.registerDeviceModel({
+      providerKey: "restore-drill-provider",
+      providerName: "Restore drill provider",
+      modelKey: "restore-drill-watch",
+      version: 1,
+      name: "Restore drill watch",
+      capabilities: ["metric"]
+    });
+    const connection = await repository.createConnection(personA, {
+      deviceModelVersionId: model.id,
+      label: null,
+      dedupeKey: "restore-drill:connection"
+    });
+    const consent = await repository.grantConsent(personA, connection.id, {
+      purpose: "Restore drill",
+      allowedKinds: ["metric"],
+      retentionMode: "indefinite",
+      retainUntil: null
+    });
+    const device = await repository.createObservation(personA, {
+      kind: "metric",
+      observedFrom: "2026-11-04T06:00:00.000Z",
+      observedUntil: "2026-11-04T06:00:00.000Z",
+      timezone: "Europe/Moscow",
+      quality: "reliable",
+      connectionId: connection.id,
+      consentId: consent.id,
+      dedupeKey: "restore-drill:device",
+      sourceReference: {
+        channel: "device",
+        externalSystem: "restore-drill-provider",
+        externalRecordId: "restore-drill-device",
+        occurredAt: "2026-11-04T06:00:00.000Z"
+      },
+      detail: { type: "metric", metric: "resting_heart_rate", value: 56, unit: "bpm" }
+    });
+    const manual = await repository.createObservation(personA, {
+      kind: "metric",
+      observedFrom: "2026-11-04T07:00:00.000Z",
+      observedUntil: "2026-11-04T07:00:00.000Z",
+      timezone: "Europe/Moscow",
+      quality: "reliable",
+      connectionId: null,
+      consentId: null,
+      dedupeKey: "restore-drill:manual",
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-11-04T07:00:00.000Z"
+      },
+      detail: { type: "metric", metric: "resting_heart_rate", value: 57, unit: "bpm" }
+    });
+    const dump = await container.exec([
+      "pg_dump", "-U", "shape_of_you", "-Fc", "-f", "/tmp/pre-erasure.dump",
+      "shape_of_you_recovery_test"
+    ]);
+    expect(dump.exitCode, dump.output).toBe(0);
+
+    const request = await repository.requestErasure(
+      personA,
+      connection.id,
+      "restore-drill:request",
+      "user_request",
+      "00000000-0000-4000-8000-000000000096"
+    );
+    const job = await repository.claimErasure("restore-drill-worker", 30_000);
+    expect(job?.id).toBe(request.id);
+    await repository.completeErasure(job!);
+    const manifest = await exportRecoveryErasureManifest(database.pool);
+    assertRecoveryErasureManifestComplete(manifest, manifest.completeThrough);
+    expect(() => assertRecoveryErasureManifestComplete(
+      manifest,
+      new Date(new Date(manifest.completeThrough).getTime() + 1).toISOString()
+    )).toThrow("incomplete");
+
+    const createdRestore = await container.exec([
+      "createdb", "-U", "shape_of_you", "shape_of_you_recovery_restore_test"
+    ]);
+    expect(createdRestore.exitCode, createdRestore.output).toBe(0);
+    const restoredDump = await container.exec([
+      "pg_restore", "-U", "shape_of_you", "-d", "shape_of_you_recovery_restore_test",
+      "/tmp/pre-erasure.dump"
+    ]);
+    expect(restoredDump.exitCode, restoredDump.output).toBe(0);
+    const restoredUrl = new URL(databaseUrl);
+    restoredUrl.pathname = "/shape_of_you_recovery_restore_test";
+    const restoredDatabase = createDatabase({
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      PORT: 3_000,
+      DATABASE_URL: restoredUrl.toString(),
+      LOG_LEVEL: "silent",
+      PERSON_CONTEXT_MODE: "synthetic",
+      SYNTHETIC_PERSON_ID: personA,
+      SHUTDOWN_TIMEOUT_MS: 1_000
+    });
+    try {
+      const restoredRepository = new RecoveryRepository(restoredDatabase);
+      expect(await restoredRepository.findObservation(personA, device.observation.id)).not.toBeNull();
+      for (const marker of manifest.markers) {
+        await restoredRepository.replayErasureMarker(marker);
+      }
+      expect(await restoredRepository.findObservation(personA, device.observation.id)).toBeNull();
+      expect(await restoredRepository.findObservation(personA, manual.observation.id)).not.toBeNull();
+    } finally {
+      await restoredDatabase.pool.end();
+    }
   });
 
   it("creates immutable policy-pinned assessments with hard-stop evidence", async () => {

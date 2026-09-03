@@ -382,6 +382,29 @@ button.button {
   list-style: none;
 }
 
+.header-links {
+  display: flex;
+  gap: 1.25rem;
+}
+
+.privacy-warning {
+  border: 1px solid color-mix(in srgb, var(--danger, #ef6a6a) 55%, transparent);
+  border-radius: 1rem;
+  margin: 1.25rem 0;
+  padding: 1rem;
+}
+
+.privacy-confirmation {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.privacy-confirmation input {
+  margin-top: 0.25rem;
+}
+
 .security-item {
   border-top: 1px solid var(--line);
   padding-top: 18px;

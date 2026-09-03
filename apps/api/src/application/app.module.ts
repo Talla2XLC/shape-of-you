@@ -35,6 +35,7 @@ import {
   NUTRITION_STORE,
   TRAINING_STORE,
   RECOVERY_STORE,
+  RECOVERY_ERASURE_WORKER_ENABLED,
   COACHING_STORE,
   INTAKE_PARSER,
   INTAKE_STORE,
@@ -60,6 +61,8 @@ export interface AppModuleOptions {
   readonly trainingStore: TrainingStore;
   /** Persistence boundary used by the Recovery module. */
   readonly recoveryStore: RecoveryStore;
+  /** Whether the API process starts the durable Recovery erasure poller. */
+  readonly recoveryErasureWorkerEnabled: boolean;
   /** Persistence boundary used by the Coaching module. */
   readonly coachingStore: CoachingStore;
   /** Persistence boundary used by durable Intake orchestration. */
@@ -114,6 +117,10 @@ class RuntimeDependenciesModule {
           useValue: options.recoveryStore
         },
         {
+          provide: RECOVERY_ERASURE_WORKER_ENABLED,
+          useValue: options.recoveryErasureWorkerEnabled
+        },
+        {
           provide: COACHING_STORE,
           useValue: options.coachingStore
         },
@@ -152,6 +159,7 @@ class RuntimeDependenciesModule {
         NUTRITION_STORE,
         TRAINING_STORE,
         RECOVERY_STORE,
+        RECOVERY_ERASURE_WORKER_ENABLED,
         COACHING_STORE,
         INTAKE_STORE,
         INTAKE_PARSER,

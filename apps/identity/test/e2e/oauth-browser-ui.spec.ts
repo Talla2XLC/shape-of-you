@@ -50,7 +50,7 @@ function close(server: Server): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
-async function startBrowserFixture(): Promise<BrowserFixture> {
+async function startBrowserFixture(forceFreshPasskey = false): Promise<BrowserFixture> {
   const callbackReferers: string[] = [];
   const callbackServer = createServer((request, response) => {
     callbackReferers.push(request.headers.referer ?? "");
@@ -99,11 +99,12 @@ async function startBrowserFixture(): Promise<BrowserFixture> {
   const runtime = {
     interactionDetails: async () => ({
       uid: interactionCredential,
-      prompt: { name: "consent" },
+      prompt: { name: forceFreshPasskey ? "login" : "consent" },
       params: {
         client_id: "browser-client",
         redirect_uri: `${callbackOrigin}/client/callback`,
-        scope: "openid person:read"
+        scope: "openid person:read",
+        ...(forceFreshPasskey ? { prompt: "login", max_age: "0" } : {})
       }
     }),
     grantConsentScopes: async () => "00000000-0000-4000-8000-000000000004",
@@ -198,6 +199,19 @@ test("Deny posts the exact browser Origin and returns cross-origin access_denied
     expect(fixture.submissionCount()).toBe(1);
     expect(fixture.decision()).toBe("deny");
     expect(fixture.callbackReferers).toEqual([""]);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("prompt=login and max_age=0 ignores an existing session and requires a passkey", async ({
+  page
+}) => {
+  const fixture = await startBrowserFixture(true);
+  try {
+    await openConsent(page, fixture.origin);
+    await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /Continue as/u })).toHaveCount(0);
   } finally {
     await fixture.close();
   }

@@ -26,6 +26,9 @@ let policyVersionId: string;
 let recoveryAssessmentId: string;
 let programId: string;
 let programVersionId: string;
+let recovery: RecoveryRepository;
+let recoveryConnectionId: string;
+let manualRecoveryObservationId: string;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:17-alpine")
@@ -53,7 +56,7 @@ beforeAll(async () => {
     [personB]
   );
 
-  const recovery = new RecoveryRepository(database);
+  recovery = new RecoveryRepository(database);
   const recoveryPolicyId = await recovery.registerPolicyVersion({
     policyKey: "coaching-integration-recovery",
     policyName: "Восстановление для Coaching",
@@ -78,7 +81,7 @@ beforeAll(async () => {
     moderateRiskThreshold: 25,
     highRiskThreshold: 50
   });
-  await recovery.createObservation(personA, {
+  manualRecoveryObservationId = (await recovery.createObservation(personA, {
     kind: "subjective",
     observedFrom: "2026-07-31T11:00:00.000Z",
     observedUntil: "2026-07-31T11:00:00.000Z",
@@ -103,6 +106,43 @@ beforeAll(async () => {
       acuteIllness: false,
       injuryConcern: false
     }
+  })).observation.id;
+  const deviceModel = await recovery.registerDeviceModel({
+    providerKey: "coaching-erasure-provider",
+    providerName: "Coaching erasure provider",
+    modelKey: "coaching-erasure-watch",
+    version: 1,
+    name: "Coaching erasure watch",
+    capabilities: ["metric"]
+  });
+  const connection = await recovery.createConnection(personA, {
+    deviceModelVersionId: deviceModel.id,
+    label: null,
+    dedupeKey: "coaching:erasure:connection"
+  });
+  recoveryConnectionId = connection.id;
+  const consent = await recovery.grantConsent(personA, connection.id, {
+    purpose: "Coaching erasure coverage",
+    allowedKinds: ["metric"],
+    retentionMode: "indefinite",
+    retainUntil: null
+  });
+  await recovery.createObservation(personA, {
+    kind: "metric",
+    observedFrom: "2026-07-31T10:00:00.000Z",
+    observedUntil: "2026-07-31T10:00:00.000Z",
+    timezone: "Europe/Moscow",
+    quality: "reliable",
+    connectionId: connection.id,
+    consentId: consent.id,
+    dedupeKey: "coaching:erasure:metric",
+    sourceReference: {
+      channel: "device",
+      externalSystem: "coaching-erasure-provider",
+      externalRecordId: "metric-one",
+      occurredAt: "2026-07-31T10:00:00.000Z"
+    },
+    detail: { type: "metric", metric: "resting_heart_rate", value: 55, unit: "bpm" }
   });
   recoveryAssessmentId = (await recovery.createAssessment(personA, {
     policyVersionId: recoveryPolicyId,
@@ -315,5 +355,32 @@ describe("Coaching PostgreSQL vertical", () => {
       url: "/v1/coaching/recommendations?state=expired"
     });
     expect(filtered.json().items.map((item: { id: string }) => item.id)).toContain(created.json().id);
+  });
+
+  it("hides and deletes Coaching output derived from an erased connection", async () => {
+    const before = await coaching.list(personA, {});
+    expect(before.items.length).toBeGreaterThan(0);
+    const request = await recovery.requestErasure(
+      personA,
+      recoveryConnectionId,
+      "coaching:erasure:request",
+      "user_request",
+      "00000000-0000-4000-8000-000000000095"
+    );
+
+    expect((await coaching.list(personA, {})).items).toEqual([]);
+    expect(await recovery.findAssessment(personA, recoveryAssessmentId)).toBeNull();
+    const job = await recovery.claimErasure("coaching-erasure-worker", 30_000);
+    expect(job?.id).toBe(request.id);
+    await recovery.completeErasure(job!);
+
+    expect(await recovery.findObservation(personA, manualRecoveryObservationId)).not.toBeNull();
+    const derived = await database.pool.query<{ recommendations: string; assessments: string }>(
+      `select
+         (select count(*)::text from coaching_recommendations) as recommendations,
+         (select count(*)::text from recovery_assessments where id = $1) as assessments`,
+      [recoveryAssessmentId]
+    );
+    expect(derived.rows[0]).toEqual({ recommendations: "0", assessments: "0" });
   });
 });

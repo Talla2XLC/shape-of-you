@@ -11,9 +11,18 @@
       >S</span>
       <span>Shape of You</span>
     </NuxtLink>
-    <a
-      class="quiet-link"
-      href="/progress"
-    >Progress</a>
+    <nav
+      class="header-links"
+      aria-label="Primary"
+    >
+      <a
+        class="quiet-link"
+        href="/progress"
+      >Progress</a>
+      <a
+        class="quiet-link"
+        href="/privacy"
+      >Privacy</a>
+    </nav>
   </header>
 </template>

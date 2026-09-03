@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, isNull, lte, notExists, or, sql } from "drizzle-orm";
 
 import type {
   CoachingRecommendation,
@@ -23,7 +23,10 @@ import {
   coachingRecommendationTrainingSessionEvidence,
   coachingTrainingAdjustmentDetails,
   recoveryAssessments,
+  recoveryAssessmentObservationEvidence,
   recoveryAssessmentTrainingEvidence,
+  recoveryConnections,
+  recoveryObservations,
   trainingProgramPrescriptions,
   trainingPrograms,
   trainingProgramVersions,
@@ -188,13 +191,17 @@ export class CoachingRepository implements CoachingStore {
       });
       if (!policy) throw new NotFoundError("Effective Coaching policy version was not found");
 
-      const recovery = await transaction.query.recoveryAssessments.findFirst({
-        where: and(
+      const recoveryRows = await transaction
+        .select()
+        .from(recoveryAssessments)
+        .where(and(
           eq(recoveryAssessments.id, input.recoveryAssessmentId),
           eq(recoveryAssessments.personId, personId),
-          lte(recoveryAssessments.asOf, asOf)
-        )
-      });
+          lte(recoveryAssessments.asOf, asOf),
+          this.visibleRecoveryAssessment(transaction)
+        ))
+        .limit(1);
+      const recovery = recoveryRows[0];
       if (!recovery) throw new NotFoundError("Recovery assessment evidence was not found");
 
       const prescriptionRows = await transaction
@@ -356,12 +363,16 @@ export class CoachingRepository implements CoachingStore {
   ): Promise<CreatedCoachingDecision> {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, personId);
-      const recommendation = await transaction.query.coachingRecommendations.findFirst({
-        where: and(
+      const recommendationRows = await transaction
+        .select()
+        .from(coachingRecommendations)
+        .where(and(
           eq(coachingRecommendations.id, recommendationId),
-          eq(coachingRecommendations.personId, personId)
-        )
-      });
+          eq(coachingRecommendations.personId, personId),
+          this.visibleRecommendation(transaction)
+        ))
+        .limit(1);
+      const recommendation = recommendationRows[0];
       if (!recommendation) throw new NotFoundError("Coaching recommendation was not found");
       const existing = await transaction.query.coachingRecommendationDecisions.findFirst({
         where: eq(coachingRecommendationDecisions.recommendationId, recommendationId)
@@ -407,12 +418,16 @@ export class CoachingRepository implements CoachingStore {
   }
 
   public async find(personId: string, id: string): Promise<CoachingRecommendation | null> {
-    const row = await this.database.db.query.coachingRecommendations.findFirst({
-      where: and(eq(coachingRecommendations.id, id), eq(coachingRecommendations.personId, personId))
+    return this.database.db.transaction(async (transaction) => {
+      const rows = await transaction.select().from(coachingRecommendations).where(and(
+        eq(coachingRecommendations.id, id),
+        eq(coachingRecommendations.personId, personId),
+        this.visibleRecommendation(transaction)
+      )).limit(1);
+      return rows[0]
+        ? this.hydrate(transaction, rows[0], this.clock())
+        : null;
     });
-    return row
-      ? this.database.db.transaction((transaction) => this.hydrate(transaction, row, this.clock()))
-      : null;
   }
 
   public list(
@@ -423,7 +438,10 @@ export class CoachingRepository implements CoachingStore {
       const rows = await transaction
         .select()
         .from(coachingRecommendations)
-        .where(eq(coachingRecommendations.personId, personId))
+        .where(and(
+          eq(coachingRecommendations.personId, personId),
+          this.visibleRecommendation(transaction)
+        ))
         .orderBy(desc(coachingRecommendations.asOf), desc(coachingRecommendations.id));
       const now = this.clock();
       const hydrated = await Promise.all(rows.map((row) => this.hydrate(transaction, row, now)));
@@ -445,7 +463,10 @@ export class CoachingRepository implements CoachingStore {
       const rows = await transaction
         .select()
         .from(coachingRecommendations)
-        .where(eq(coachingRecommendations.personId, personId))
+        .where(and(
+          eq(coachingRecommendations.personId, personId),
+          this.visibleRecommendation(transaction)
+        ))
         .orderBy(desc(coachingRecommendations.asOf), desc(coachingRecommendations.id));
       const now = this.clock();
       const hydrated = await Promise.all(rows.map((row) => this.hydrate(transaction, row, now)));
@@ -468,6 +489,7 @@ export class CoachingRepository implements CoachingStore {
         .from(coachingRecommendations)
         .where(and(
           eq(coachingRecommendations.personId, personId),
+          this.visibleRecommendation(transaction),
           sql<boolean>`(${coachingRecommendations.asOf} at time zone ${timezone})::date >= ${from}::date`,
           sql<boolean>`(${coachingRecommendations.asOf} at time zone ${timezone})::date <= ${to}::date`
         ))
@@ -487,6 +509,68 @@ export class CoachingRepository implements CoachingStore {
       recommendation,
       decisions: recommendation.decision ? [recommendation.decision] : []
     };
+  }
+
+  private visibleRecoveryAssessment(transaction: DatabaseTransaction) {
+    return notExists(
+      transaction
+        .select({ id: recoveryAssessmentObservationEvidence.observationId })
+        .from(recoveryAssessmentObservationEvidence)
+        .innerJoin(
+          recoveryObservations,
+          and(
+            eq(recoveryObservations.id, recoveryAssessmentObservationEvidence.observationId),
+            eq(recoveryObservations.personId, recoveryAssessmentObservationEvidence.personId)
+          )
+        )
+        .innerJoin(
+          recoveryConnections,
+          and(
+            eq(recoveryConnections.id, recoveryObservations.connectionId),
+            eq(recoveryConnections.personId, recoveryObservations.personId)
+          )
+        )
+        .where(and(
+          eq(recoveryAssessmentObservationEvidence.assessmentId, recoveryAssessments.id),
+          sql`${recoveryConnections.erasureRequestedAt} IS NOT NULL`
+        ))
+    );
+  }
+
+  private visibleRecommendation(transaction: DatabaseTransaction) {
+    return notExists(
+      transaction
+        .select({ id: coachingRecommendationRecoveryEvidence.recoveryAssessmentId })
+        .from(coachingRecommendationRecoveryEvidence)
+        .innerJoin(
+          recoveryAssessmentObservationEvidence,
+          eq(
+            recoveryAssessmentObservationEvidence.assessmentId,
+            coachingRecommendationRecoveryEvidence.recoveryAssessmentId
+          )
+        )
+        .innerJoin(
+          recoveryObservations,
+          and(
+            eq(recoveryObservations.id, recoveryAssessmentObservationEvidence.observationId),
+            eq(recoveryObservations.personId, recoveryAssessmentObservationEvidence.personId)
+          )
+        )
+        .innerJoin(
+          recoveryConnections,
+          and(
+            eq(recoveryConnections.id, recoveryObservations.connectionId),
+            eq(recoveryConnections.personId, recoveryObservations.personId)
+          )
+        )
+        .where(and(
+          eq(
+            coachingRecommendationRecoveryEvidence.recommendationId,
+            coachingRecommendations.id
+          ),
+          sql`${recoveryConnections.erasureRequestedAt} IS NOT NULL`
+        ))
+    );
   }
 
   private toDetail(row: DetailRow): TrainingAdjustmentRecommendationDetail {

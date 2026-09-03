@@ -149,13 +149,14 @@ export interface RecoveryConnection {
   readonly dedupeKey: string;
   readonly connectedAt: string;
   readonly disconnectedAt: string | null;
+  readonly erasureRequestedAt: string | null;
 }
 
 export const RecoveryConnectionSchema = {
   $id: "RecoveryConnection",
   type: "object",
   additionalProperties: false,
-  required: ["id", "personId", "status", "device", "dedupeKey", "connectedAt", "disconnectedAt"],
+  required: ["id", "personId", "status", "device", "dedupeKey", "connectedAt", "disconnectedAt", "erasureRequestedAt"],
   properties: {
     id: uuid,
     personId: uuid,
@@ -172,7 +173,51 @@ export const RecoveryConnectionSchema = {
     },
     dedupeKey: { type: "string" },
     connectedAt: dateTime,
-    disconnectedAt: { anyOf: [dateTime, { type: "null" }] }
+    disconnectedAt: { anyOf: [dateTime, { type: "null" }] },
+    erasureRequestedAt: { anyOf: [dateTime, { type: "null" }] }
+  }
+} as const;
+
+/** Browser-visible connection inventory owned by one authorized Person. */
+export interface RecoveryConnectionList {
+  readonly items: readonly RecoveryConnection[];
+}
+
+export const RecoveryConnectionListSchema = {
+  $id: "RecoveryConnectionList",
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: {
+    items: { type: "array", items: RecoveryConnectionSchema }
+  }
+} as const;
+
+export type RecoveryErasureReason = "user_request" | "retention_expired";
+export type RecoveryErasureStatus = "pending" | "processing" | "completed";
+
+/** Minimal non-health receipt for one connection-scoped erasure lifecycle. */
+export interface RecoveryErasureRequest {
+  readonly id: string;
+  readonly connectionId: string;
+  readonly reason: RecoveryErasureReason;
+  readonly status: RecoveryErasureStatus;
+  readonly requestedAt: string;
+  readonly completedAt: string | null;
+}
+
+export const RecoveryErasureRequestSchema = {
+  $id: "RecoveryErasureRequest",
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "connectionId", "reason", "status", "requestedAt", "completedAt"],
+  properties: {
+    id: uuid,
+    connectionId: uuid,
+    reason: { type: "string", enum: ["user_request", "retention_expired"] },
+    status: { type: "string", enum: ["pending", "processing", "completed"] },
+    requestedAt: dateTime,
+    completedAt: { anyOf: [dateTime, { type: "null" }] }
   }
 } as const;
 

@@ -206,6 +206,15 @@ export const recoveryRetentionMode = pgEnum("recovery_retention_mode", [
   "indefinite",
   "until"
 ]);
+export const recoveryErasureReason = pgEnum("recovery_erasure_reason", [
+  "user_request",
+  "retention_expired"
+]);
+export const recoveryErasureStatus = pgEnum("recovery_erasure_status", [
+  "pending",
+  "processing",
+  "completed"
+]);
 export const recoveryRiskLevel = pgEnum("recovery_risk_level", [
   "low",
   "moderate",
@@ -2497,7 +2506,11 @@ export const recoveryConnections = pgTable(
     connectedAt: timestamp("connected_at", { withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull(),
-    disconnectedAt: timestamp("disconnected_at", { withTimezone: true, mode: "date" })
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true, mode: "date" }),
+    erasureRequestedAt: timestamp("erasure_requested_at", {
+      withTimezone: true,
+      mode: "date"
+    })
   },
   (table) => [
     foreignKey({
@@ -2517,7 +2530,7 @@ export const recoveryConnections = pgTable(
     ),
     check(
       "recovery_connections_status_shape",
-      sql`(${table.status} = 'active' AND ${table.disconnectedAt} IS NULL)
+      sql`(${table.status} = 'active' AND ${table.disconnectedAt} IS NULL AND ${table.erasureRequestedAt} IS NULL)
           OR (${table.status} = 'disconnected' AND ${table.disconnectedAt} IS NOT NULL)`
     )
   ]
@@ -2606,6 +2619,67 @@ export const recoveryConsentKinds = pgTable(
     unique("recovery_consent_kinds_consent_kind_uq").on(
       table.consentId,
       table.kind
+    )
+  ]
+);
+
+export const recoveryErasureRequests = pgTable(
+  "recovery_erasure_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    connectionId: uuid("connection_id").notNull(),
+    reason: recoveryErasureReason("reason").notNull(),
+    idempotencyKey: varchar("idempotency_key", { length: 256 }).notNull(),
+    authorityId: uuid("authority_id"),
+    status: recoveryErasureStatus("status").default("pending").notNull(),
+    attemptCount: integer("attempt_count").default(0).notNull(),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    leaseOwner: varchar("lease_owner", { length: 128 }),
+    leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
+    lastFailureCode: varchar("last_failure_code", { length: 64 }),
+    requestedAt: timestamp("requested_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull(),
+    quarantinedAt: timestamp("quarantined_at", { withTimezone: true, mode: "date" })
+      .notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" })
+  },
+  (table) => [
+    foreignKey({
+      name: "recovery_erasure_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }),
+    unique("recovery_erasure_person_connection_uq").on(
+      table.personId,
+      table.connectionId
+    ),
+    unique("recovery_erasure_idempotency_uq").on(
+      table.personId,
+      table.idempotencyKey
+    ),
+    uniqueIndex("recovery_erasure_authority_uq")
+      .on(table.authorityId)
+      .where(sql`${table.authorityId} IS NOT NULL`),
+    index("recovery_erasure_claim_idx").on(
+      table.status,
+      table.nextAttemptAt,
+      table.leaseUntil
+    ),
+    check("recovery_erasure_attempt_count", sql`${table.attemptCount} >= 0`),
+    check(
+      "recovery_erasure_authority_shape",
+      sql`(${table.reason} = 'user_request' AND ${table.authorityId} IS NOT NULL)
+          OR (${table.reason} = 'retention_expired' AND ${table.authorityId} IS NULL)`
+    ),
+    check(
+      "recovery_erasure_status_shape",
+      sql`(${table.status} = 'pending' AND ${table.completedAt} IS NULL)
+          OR (${table.status} = 'processing' AND ${table.leaseOwner} IS NOT NULL AND ${table.leaseUntil} IS NOT NULL AND ${table.completedAt} IS NULL)
+          OR (${table.status} = 'completed' AND ${table.leaseOwner} IS NULL AND ${table.leaseUntil} IS NULL AND ${table.completedAt} IS NOT NULL)`
     )
   ]
 );
@@ -3512,6 +3586,8 @@ export type PhysicalGoalCriterionRow =
 export type RecoveryObservationRow = typeof recoveryObservations.$inferSelect;
 /** Persisted immutable Recovery assessment. */
 export type RecoveryAssessmentRow = typeof recoveryAssessments.$inferSelect;
+/** Persisted durable Recovery connection-erasure request and receipt. */
+export type RecoveryErasureRequestRow = typeof recoveryErasureRequests.$inferSelect;
 /** Persisted shared or private Nutrition Brand identity. */
 export type NutritionBrandRow = typeof nutritionBrands.$inferSelect;
 /** Persisted immutable Nutrition Brand version. */

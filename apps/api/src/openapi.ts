@@ -82,8 +82,10 @@ import {
   ListRecoveryObservationsQuerySchema,
   RecoveryAssessmentListSchema,
   RecoveryAssessmentSchema,
+  RecoveryConnectionListSchema,
   RecoveryConnectionSchema,
   RecoveryConsentSchema,
+  RecoveryErasureRequestSchema,
   RecoveryIdParamsSchema,
   RecoveryObservationHistorySchema,
   RecoveryObservationListSchema,
@@ -944,11 +946,27 @@ function recoveryPaths(): Record<string, object> {
   });
   return {
     "/v1/recovery/connections": {
+      get: {
+        tags: ["recovery-consent"],
+        summary: "List Person-owned logical device connections",
+        responses: { "200": response(RecoveryConnectionListSchema, "Connections") }
+      },
       post: {
         tags: ["recovery-consent"],
         summary: "Create a Person-owned logical device connection",
         requestBody: request(CreateRecoveryConnectionSchema),
         responses: { "201": response(RecoveryConnectionSchema, "Connection created") }
+      }
+    },
+    "/v1/recovery/erasure-requests/{id}": {
+      get: {
+        tags: ["recovery-consent"],
+        summary: "Read a connection erasure lifecycle status",
+        parameters: [idParameter],
+        responses: {
+          "200": response(RecoveryErasureRequestSchema, "Erasure request found"),
+          "404": response(ErrorResponseSchema, "Erasure request not found")
+        }
       }
     },
     "/v1/recovery/connections/{id}/consents": {

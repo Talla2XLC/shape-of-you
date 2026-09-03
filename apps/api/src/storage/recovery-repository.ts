@@ -24,8 +24,11 @@ import type {
   RecoveryAssessment,
   RecoveryAssessmentList,
   RecoveryConnection,
+  RecoveryConnectionList,
   RecoveryConsent,
   RecoveryDeviceModelVersion,
+  RecoveryErasureReason,
+  RecoveryErasureRequest,
   RecoveryObservation,
   RecoveryObservationDetail,
   RecoveryObservationHistory,
@@ -49,6 +52,7 @@ import {
   recoveryDeviceModels,
   recoveryDeviceModelVersions,
   recoveryDevices,
+  recoveryErasureRequests,
   recoveryMetricDetails,
   recoveryObservations,
   recoveryProviders,
@@ -57,6 +61,7 @@ import {
   sourceReferences,
   workoutSessions,
   type RecoveryAssessmentRow,
+  type RecoveryErasureRequestRow,
   type RecoveryObservationRow,
   type SourceReferenceRow
 } from "../database/schema.js";
@@ -104,10 +109,26 @@ export interface CreatedRecoveryAssessment {
   readonly assessment: RecoveryAssessment;
 }
 
+/** Leased durable erasure work owned by one API worker attempt. */
+export interface RecoveryErasureJob extends RecoveryErasureRequest {
+  readonly leaseOwner: string;
+  readonly personId: string;
+}
+
+/** Minimal independently stored marker replayed after a database restore. */
+export interface RecoveryErasureMarker {
+  readonly id: string;
+  readonly personId: string;
+  readonly connectionId: string;
+  readonly reason: RecoveryErasureReason;
+  readonly requestedAt: string;
+}
+
 /** Persistence boundary for Recovery definitions, facts, consent and decisions. */
 export interface RecoveryStore {
   registerDeviceModel(input: RegisterRecoveryDeviceModel): Promise<RecoveryDeviceModelVersion>;
   createConnection(personId: string, input: CreateRecoveryConnection): Promise<RecoveryConnection>;
+  listConnections(personId: string): Promise<RecoveryConnectionList>;
   grantConsent(personId: string, connectionId: string, input: GrantRecoveryConsent): Promise<RecoveryConsent>;
   revokeConsent(personId: string, consentId: string, input: RevokeRecoveryConsent): Promise<RecoveryConsent>;
   createObservation(personId: string, input: CreateRecoveryObservation): Promise<CreatedRecoveryObservation>;
@@ -125,6 +146,19 @@ export interface RecoveryStore {
   /** Reads every assessment for one exact Person-local calendar date. */
   listAssessmentsForLocalDate(personId: string, localDate: string): Promise<readonly RecoveryAssessment[]>;
   listAssessmentsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly RecoveryAssessment[]>;
+  requestErasure(
+    personId: string,
+    connectionId: string,
+    idempotencyKey: string,
+    reason: RecoveryErasureReason,
+    authorityId: string | null
+  ): Promise<RecoveryErasureRequest>;
+  findErasureRequest(personId: string, id: string): Promise<RecoveryErasureRequest | null>;
+  enqueueExpiredRetention(limit: number): Promise<number>;
+  claimErasure(workerId: string, leaseMs: number): Promise<RecoveryErasureJob | null>;
+  completeErasure(job: RecoveryErasureJob): Promise<void>;
+  failErasure(job: RecoveryErasureJob, failureCode: string, retryDelayMs: number): Promise<void>;
+  replayErasureMarker(marker: RecoveryErasureMarker): Promise<void>;
 }
 
 async function lockPerson(transaction: DatabaseTransaction, personId: string): Promise<void> {
@@ -251,8 +285,24 @@ export class RecoveryRepository implements RecoveryStore {
       },
       dedupeKey: rows[0].connection.dedupeKey,
       connectedAt: rows[0].connection.connectedAt.toISOString(),
-      disconnectedAt: rows[0].connection.disconnectedAt?.toISOString() ?? null
+      disconnectedAt: rows[0].connection.disconnectedAt?.toISOString() ?? null,
+      erasureRequestedAt: rows[0].connection.erasureRequestedAt?.toISOString() ?? null
     };
+  }
+
+  public listConnections(personId: string): Promise<RecoveryConnectionList> {
+    return this.database.db.transaction(async (transaction) => {
+      const rows = await transaction
+        .select({ id: recoveryConnections.id })
+        .from(recoveryConnections)
+        .where(eq(recoveryConnections.personId, personId))
+        .orderBy(desc(recoveryConnections.connectedAt), desc(recoveryConnections.id));
+      return {
+        items: await Promise.all(
+          rows.map((row) => this.hydrateConnection(transaction, personId, row.id))
+        )
+      };
+    });
   }
 
   public grantConsent(personId: string, connectionId: string, input: GrantRecoveryConsent): Promise<RecoveryConsent> {
@@ -425,9 +475,12 @@ export class RecoveryRepository implements RecoveryStore {
   public correctObservation(personId: string, id: string, input: CorrectRecoveryObservation): Promise<CreatedRecoveryObservation> {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, personId);
-      const original = await transaction.query.recoveryObservations.findFirst({
-        where: and(eq(recoveryObservations.id, id), eq(recoveryObservations.personId, personId))
-      });
+      const originals = await transaction.select().from(recoveryObservations).where(and(
+        eq(recoveryObservations.id, id),
+        eq(recoveryObservations.personId, personId),
+        this.visibleObservation(transaction)
+      )).limit(1);
+      const original = originals[0];
       if (!original) throw new NotFoundError("Recovery observation was not found");
       const successor = await transaction.query.recoveryObservations.findFirst({
         where: eq(recoveryObservations.supersedesId, id)
@@ -443,10 +496,18 @@ export class RecoveryRepository implements RecoveryStore {
   }
 
   public async findObservation(personId: string, id: string): Promise<RecoveryObservation | null> {
-    const row = await this.database.db.query.recoveryObservations.findFirst({
-      where: and(eq(recoveryObservations.id, id), eq(recoveryObservations.personId, personId))
+    return this.database.db.transaction(async (transaction) => {
+      const rows = await transaction
+        .select()
+        .from(recoveryObservations)
+        .where(and(
+          eq(recoveryObservations.id, id),
+          eq(recoveryObservations.personId, personId),
+          this.visibleObservation(transaction)
+        ))
+        .limit(1);
+      return rows[0] ? this.hydrateObservation(transaction, rows[0]) : null;
     });
-    return row ? this.database.db.transaction((tx) => this.hydrateObservation(tx, row)) : null;
   }
 
   public listObservations(personId: string, query: ListRecoveryObservationsQuery): Promise<RecoveryObservationList> {
@@ -454,6 +515,7 @@ export class RecoveryRepository implements RecoveryStore {
       const successor = alias(recoveryObservations, "recovery_observation_successor");
       const filters = [
         eq(recoveryObservations.personId, personId),
+        this.visibleObservation(transaction),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       ];
       if (query.kind) filters.push(eq(recoveryObservations.kind, query.kind));
@@ -472,6 +534,7 @@ export class RecoveryRepository implements RecoveryStore {
       const rows = await transaction.select().from(recoveryObservations).where(and(
         eq(recoveryObservations.personId, personId),
         eq(recoveryObservations.localDate, localDate),
+        this.visibleObservation(transaction),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       )).orderBy(desc(recoveryObservations.observedUntil), desc(recoveryObservations.id));
       return Promise.all(rows.map((row) => this.hydrateObservation(transaction, row)));
@@ -486,6 +549,7 @@ export class RecoveryRepository implements RecoveryStore {
         eq(recoveryObservations.personId, personId),
         gte(recoveryObservations.localDate, from),
         lte(recoveryObservations.localDate, to),
+        this.visibleObservation(transaction),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       )).orderBy(desc(recoveryObservations.localDate), desc(recoveryObservations.observedUntil), desc(recoveryObservations.id));
       return Promise.all(rows.map((row) => this.hydrateObservation(transaction, row)));
@@ -495,7 +559,10 @@ export class RecoveryRepository implements RecoveryStore {
   public observationHistory(personId: string, id: string): Promise<RecoveryObservationHistory | null> {
     return this.database.db.transaction(async (transaction) => {
       const all = await transaction.select().from(recoveryObservations)
-        .where(eq(recoveryObservations.personId, personId)).orderBy(asc(recoveryObservations.createdAt));
+        .where(and(
+          eq(recoveryObservations.personId, personId),
+          this.visibleObservation(transaction)
+        )).orderBy(asc(recoveryObservations.createdAt));
       const byId = new Map(all.map((row) => [row.id, row]));
       let current = byId.get(id);
       if (!current) return null;
@@ -554,6 +621,22 @@ export class RecoveryRepository implements RecoveryStore {
     };
   }
 
+  private visibleObservation(transaction: DatabaseTransaction) {
+    return or(
+      isNull(recoveryObservations.connectionId),
+      notExists(
+        transaction
+          .select({ id: recoveryConnections.id })
+          .from(recoveryConnections)
+          .where(and(
+            eq(recoveryConnections.id, recoveryObservations.connectionId),
+            eq(recoveryConnections.personId, recoveryObservations.personId),
+            sql`${recoveryConnections.erasureRequestedAt} IS NOT NULL`
+          ))
+      )
+    );
+  }
+
   public registerPolicyVersion(input: RegisterRecoveryPolicyVersion): Promise<string> {
     return this.database.db.transaction(async (transaction) => {
       const insertedPolicy = await transaction.insert(recoveryAssessmentPolicies).values({ key: input.policyKey, name: input.policyName }).onConflictDoNothing().returning();
@@ -610,6 +693,7 @@ export class RecoveryRepository implements RecoveryStore {
         .leftJoin(recoveryConsents, eq(recoveryObservations.consentId, recoveryConsents.id))
         .where(and(
           eq(recoveryObservations.personId, personId),
+          this.visibleObservation(transaction),
           gte(recoveryObservations.observedUntil, windowStart),
           lte(recoveryObservations.observedUntil, asOf),
           notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id))),
@@ -709,13 +793,22 @@ export class RecoveryRepository implements RecoveryStore {
   }
 
   public async findAssessment(personId: string, id: string): Promise<RecoveryAssessment | null> {
-    const row = await this.database.db.query.recoveryAssessments.findFirst({ where: and(eq(recoveryAssessments.id, id), eq(recoveryAssessments.personId, personId)) });
-    return row ? this.database.db.transaction((tx) => this.hydrateAssessment(tx, row)) : null;
+    return this.database.db.transaction(async (transaction) => {
+      const rows = await transaction.select().from(recoveryAssessments).where(and(
+        eq(recoveryAssessments.id, id),
+        eq(recoveryAssessments.personId, personId),
+        this.visibleAssessment(transaction)
+      )).limit(1);
+      return rows[0] ? this.hydrateAssessment(transaction, rows[0]) : null;
+    });
   }
 
   public listAssessments(personId: string, limit: number): Promise<RecoveryAssessmentList> {
     return this.database.db.transaction(async (transaction) => {
-      const rows = await transaction.select().from(recoveryAssessments).where(eq(recoveryAssessments.personId, personId)).orderBy(desc(recoveryAssessments.asOf), desc(recoveryAssessments.id)).limit(limit);
+      const rows = await transaction.select().from(recoveryAssessments).where(and(
+        eq(recoveryAssessments.personId, personId),
+        this.visibleAssessment(transaction)
+      )).orderBy(desc(recoveryAssessments.asOf), desc(recoveryAssessments.id)).limit(limit);
       return { items: await Promise.all(rows.map((row) => this.hydrateAssessment(transaction, row))) };
     });
   }
@@ -725,7 +818,8 @@ export class RecoveryRepository implements RecoveryStore {
     return this.database.db.transaction(async (transaction) => {
       const rows = await transaction.select().from(recoveryAssessments).where(and(
         eq(recoveryAssessments.personId, personId),
-        eq(recoveryAssessments.localDate, localDate)
+        eq(recoveryAssessments.localDate, localDate),
+        this.visibleAssessment(transaction)
       )).orderBy(desc(recoveryAssessments.asOf), desc(recoveryAssessments.id));
       return Promise.all(rows.map((row) => this.hydrateAssessment(transaction, row)));
     });
@@ -737,7 +831,8 @@ export class RecoveryRepository implements RecoveryStore {
       const rows = await transaction.select().from(recoveryAssessments).where(and(
         eq(recoveryAssessments.personId, personId),
         gte(recoveryAssessments.localDate, from),
-        lte(recoveryAssessments.localDate, to)
+        lte(recoveryAssessments.localDate, to),
+        this.visibleAssessment(transaction)
       )).orderBy(desc(recoveryAssessments.localDate), desc(recoveryAssessments.asOf), desc(recoveryAssessments.id));
       return Promise.all(rows.map((row) => this.hydrateAssessment(transaction, row)));
     });
@@ -766,6 +861,408 @@ export class RecoveryRepository implements RecoveryStore {
       calculation: row.calculationSnapshot,
       dedupeKey: row.dedupeKey,
       createdAt: row.createdAt.toISOString()
+    };
+  }
+
+  private visibleAssessment(transaction: DatabaseTransaction) {
+    return notExists(
+      transaction
+        .select({ id: recoveryAssessmentObservationEvidence.observationId })
+        .from(recoveryAssessmentObservationEvidence)
+        .innerJoin(
+          recoveryObservations,
+          and(
+            eq(
+              recoveryObservations.id,
+              recoveryAssessmentObservationEvidence.observationId
+            ),
+            eq(
+              recoveryObservations.personId,
+              recoveryAssessmentObservationEvidence.personId
+            )
+          )
+        )
+        .innerJoin(
+          recoveryConnections,
+          and(
+            eq(recoveryConnections.id, recoveryObservations.connectionId),
+            eq(recoveryConnections.personId, recoveryObservations.personId)
+          )
+        )
+        .where(and(
+          eq(
+            recoveryAssessmentObservationEvidence.assessmentId,
+            recoveryAssessments.id
+          ),
+          sql`${recoveryConnections.erasureRequestedAt} IS NOT NULL`
+        ))
+    );
+  }
+
+  public requestErasure(
+    personId: string,
+    connectionId: string,
+    idempotencyKey: string,
+    reason: RecoveryErasureReason,
+    authorityId: string | null
+  ): Promise<RecoveryErasureRequest> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const existing = await transaction.query.recoveryErasureRequests.findFirst({
+        where: and(
+          eq(recoveryErasureRequests.personId, personId),
+          eq(recoveryErasureRequests.connectionId, connectionId)
+        )
+      });
+      if (existing) return this.toErasureRequest(existing);
+
+      const connection = await transaction.query.recoveryConnections.findFirst({
+        where: and(
+          eq(recoveryConnections.id, connectionId),
+          eq(recoveryConnections.personId, personId)
+        )
+      });
+      if (!connection) throw new NotFoundError("Recovery connection was not found");
+
+      const now = new Date();
+      const inserted = await transaction
+        .insert(recoveryErasureRequests)
+        .values({
+          personId,
+          connectionId,
+          reason,
+          idempotencyKey,
+          authorityId,
+          quarantinedAt: now,
+          requestedAt: now,
+          nextAttemptAt: now
+        })
+        .onConflictDoNothing()
+        .returning();
+      const request = inserted[0] ?? await transaction.query.recoveryErasureRequests.findFirst({
+        where: and(
+          eq(recoveryErasureRequests.personId, personId),
+          eq(recoveryErasureRequests.connectionId, connectionId)
+        )
+      });
+      if (!request) {
+        throw new ConflictError("Recovery erasure authority or idempotency key was already used");
+      }
+
+      await transaction
+        .update(recoveryConnections)
+        .set({
+          status: "disconnected",
+          disconnectedAt: connection.disconnectedAt ?? now,
+          erasureRequestedAt: now
+        })
+        .where(and(
+          eq(recoveryConnections.id, connectionId),
+          eq(recoveryConnections.personId, personId),
+          isNull(recoveryConnections.erasureRequestedAt)
+        ));
+      await transaction
+        .update(recoveryConsents)
+        .set({
+          status: "revoked",
+          revokedAt: now,
+          revocationReason: reason === "user_request"
+            ? "connection erasure requested"
+            : "retention expired"
+        })
+        .where(and(
+          eq(recoveryConsents.connectionId, connectionId),
+          eq(recoveryConsents.personId, personId),
+          eq(recoveryConsents.status, "active")
+        ));
+      return this.toErasureRequest(request);
+    });
+  }
+
+  public async findErasureRequest(
+    personId: string,
+    id: string
+  ): Promise<RecoveryErasureRequest | null> {
+    const row = await this.database.db.query.recoveryErasureRequests.findFirst({
+      where: and(
+        eq(recoveryErasureRequests.id, id),
+        eq(recoveryErasureRequests.personId, personId)
+      )
+    });
+    return row ? this.toErasureRequest(row) : null;
+  }
+
+  public async enqueueExpiredRetention(limit: number): Promise<number> {
+    const expired = await this.database.db
+      .select({
+        connectionId: recoveryConsents.connectionId,
+        personId: recoveryConsents.personId,
+        retainUntil: recoveryConsents.retainUntil
+      })
+      .from(recoveryConsents)
+      .innerJoin(
+        recoveryConnections,
+        and(
+          eq(recoveryConnections.id, recoveryConsents.connectionId),
+          eq(recoveryConnections.personId, recoveryConsents.personId)
+        )
+      )
+      .where(and(
+        eq(recoveryConsents.status, "active"),
+        eq(recoveryConsents.retentionMode, "until"),
+        lte(recoveryConsents.retainUntil, new Date()),
+        isNull(recoveryConnections.erasureRequestedAt)
+      ))
+      .orderBy(asc(recoveryConsents.retainUntil), asc(recoveryConsents.id))
+      .limit(limit);
+
+    let enqueued = 0;
+    const seen = new Set<string>();
+    for (const item of expired) {
+      if (!item.retainUntil || seen.has(item.connectionId)) continue;
+      seen.add(item.connectionId);
+      await this.requestErasure(
+        item.personId,
+        item.connectionId,
+        `retention:${item.connectionId}:${item.retainUntil.toISOString()}`,
+        "retention_expired",
+        null
+      );
+      enqueued += 1;
+    }
+    return enqueued;
+  }
+
+  public async claimErasure(
+    workerId: string,
+    leaseMs: number
+  ): Promise<RecoveryErasureJob | null> {
+    const now = new Date();
+    const leaseUntil = new Date(now.getTime() + leaseMs);
+    const result = await this.database.pool.query<RecoveryErasureRequestRow>(
+      `with candidate as (
+         select id
+           from recovery_erasure_requests
+          where status <> 'completed'
+            and next_attempt_at <= $1
+            and (status = 'pending' or lease_until < $1)
+          order by requested_at, id
+          for update skip locked
+          limit 1
+       )
+       update recovery_erasure_requests request
+          set status = 'processing', lease_owner = $2, lease_until = $3,
+              attempt_count = attempt_count + 1, last_failure_code = null
+         from candidate
+        where request.id = candidate.id
+      returning
+        request.id,
+        request.person_id as "personId",
+        request.connection_id as "connectionId",
+        request.reason,
+        request.idempotency_key as "idempotencyKey",
+        request.authority_id as "authorityId",
+        request.status,
+        request.attempt_count as "attemptCount",
+        request.next_attempt_at as "nextAttemptAt",
+        request.lease_owner as "leaseOwner",
+        request.lease_until as "leaseUntil",
+        request.last_failure_code as "lastFailureCode",
+        request.requested_at as "requestedAt",
+        request.quarantined_at as "quarantinedAt",
+        request.completed_at as "completedAt"`,
+      [now, workerId, leaseUntil]
+    );
+    const row = result.rows[0];
+    return row
+      ? { ...this.toErasureRequest(row), leaseOwner: workerId, personId: row.personId }
+      : null;
+  }
+
+  public completeErasure(job: RecoveryErasureJob): Promise<void> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, job.personId);
+      const owned = await transaction.query.recoveryErasureRequests.findFirst({
+        where: and(
+          eq(recoveryErasureRequests.id, job.id),
+          eq(recoveryErasureRequests.status, "processing"),
+          eq(recoveryErasureRequests.leaseOwner, job.leaseOwner)
+        )
+      });
+      if (!owned) throw new ConflictError("Recovery erasure lease is no longer owned");
+
+      await this.eraseConnectionGraph(transaction, owned.personId, owned.connectionId);
+
+      const completedAt = new Date();
+      const updated = await transaction
+        .update(recoveryErasureRequests)
+        .set({
+          status: "completed",
+          leaseOwner: null,
+          leaseUntil: null,
+          completedAt,
+          lastFailureCode: null
+        })
+        .where(and(
+          eq(recoveryErasureRequests.id, job.id),
+          eq(recoveryErasureRequests.status, "processing"),
+          eq(recoveryErasureRequests.leaseOwner, job.leaseOwner)
+        ))
+        .returning({ id: recoveryErasureRequests.id });
+      if (!updated[0]) throw new ConflictError("Recovery erasure completion lost its lease");
+    });
+  }
+
+  public async failErasure(
+    job: RecoveryErasureJob,
+    failureCode: string,
+    retryDelayMs: number
+  ): Promise<void> {
+    await this.database.db
+      .update(recoveryErasureRequests)
+      .set({
+        status: "pending",
+        leaseOwner: null,
+        leaseUntil: null,
+        lastFailureCode: failureCode,
+        nextAttemptAt: new Date(Date.now() + retryDelayMs)
+      })
+      .where(and(
+        eq(recoveryErasureRequests.id, job.id),
+        eq(recoveryErasureRequests.status, "processing"),
+        eq(recoveryErasureRequests.leaseOwner, job.leaseOwner)
+      ));
+  }
+
+  public replayErasureMarker(marker: RecoveryErasureMarker): Promise<void> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, marker.personId);
+      const existing = await transaction.query.recoveryErasureRequests.findFirst({
+        where: eq(recoveryErasureRequests.id, marker.id)
+      });
+      if (existing && (
+        existing.personId !== marker.personId ||
+        existing.connectionId !== marker.connectionId ||
+        existing.reason !== marker.reason ||
+        existing.requestedAt.toISOString() !== marker.requestedAt
+      )) {
+        throw new ConflictError("Recovery erasure marker conflicts with restored state");
+      }
+      await this.eraseConnectionGraph(transaction, marker.personId, marker.connectionId);
+      if (existing && existing.status !== "completed") {
+        await transaction
+          .update(recoveryErasureRequests)
+          .set({
+            status: "completed",
+            leaseOwner: null,
+            leaseUntil: null,
+            completedAt: new Date(),
+            lastFailureCode: null
+          })
+          .where(eq(recoveryErasureRequests.id, marker.id));
+      }
+    });
+  }
+
+  private async eraseConnectionGraph(
+    transaction: DatabaseTransaction,
+    personId: string,
+    connectionId: string
+  ): Promise<void> {
+    const sourceRows = await transaction
+      .select({ id: recoveryObservations.sourceReferenceId })
+      .from(recoveryObservations)
+      .where(and(
+        eq(recoveryObservations.personId, personId),
+        eq(recoveryObservations.connectionId, connectionId)
+      ));
+
+    await transaction.execute(sql`
+      delete from coaching_recommendation_decisions
+       where recommendation_id in (
+         select evidence.recommendation_id
+           from coaching_recommendation_recovery_evidence evidence
+           join recovery_assessment_observation_evidence assessment_evidence
+             on assessment_evidence.assessment_id = evidence.recovery_assessment_id
+          where assessment_evidence.person_id = ${personId}
+            and assessment_evidence.observation_id in (
+              select id from recovery_observations
+               where person_id = ${personId} and connection_id = ${connectionId}
+            )
+       )
+    `);
+    await transaction.execute(sql`
+      delete from coaching_recommendations
+       where id in (
+         select evidence.recommendation_id
+           from coaching_recommendation_recovery_evidence evidence
+           join recovery_assessment_observation_evidence assessment_evidence
+             on assessment_evidence.assessment_id = evidence.recovery_assessment_id
+          where assessment_evidence.person_id = ${personId}
+            and assessment_evidence.observation_id in (
+              select id from recovery_observations
+               where person_id = ${personId} and connection_id = ${connectionId}
+            )
+       )
+    `);
+    await transaction.execute(sql`
+      delete from recovery_assessments
+       where person_id = ${personId}
+         and id in (
+           select assessment_id from recovery_assessment_observation_evidence
+            where person_id = ${personId}
+              and observation_id in (
+                select id from recovery_observations
+                 where person_id = ${personId} and connection_id = ${connectionId}
+              )
+         )
+    `);
+    await transaction.execute(sql`
+      delete from recovery_import_records
+       where person_id = ${personId}
+         and target_observation_id in (
+           select id from recovery_observations
+            where person_id = ${personId} and connection_id = ${connectionId}
+         )
+    `);
+    await transaction.execute(sql`
+      update recovery_observations
+         set supersedes_id = null, correction_reason = null
+       where person_id = ${personId} and connection_id = ${connectionId}
+    `);
+    await transaction.delete(recoveryObservations).where(and(
+      eq(recoveryObservations.personId, personId),
+      eq(recoveryObservations.connectionId, connectionId)
+    ));
+    await transaction.delete(recoveryConnections).where(and(
+      eq(recoveryConnections.personId, personId),
+      eq(recoveryConnections.id, connectionId)
+    ));
+
+    for (const sourceId of new Set(sourceRows.map((row) => row.id))) {
+      await transaction.execute(sql`
+        delete from source_references source
+         where source.id = ${sourceId}
+           and not exists (select 1 from daily_context_notes where source_reference_id = source.id)
+           and not exists (select 1 from weight_measurements where source_reference_id = source.id)
+           and not exists (select 1 from body_measurement_sessions where source_reference_id = source.id)
+           and not exists (select 1 from physical_goal_versions where source_reference_id = source.id)
+           and not exists (select 1 from meals where source_reference_id = source.id)
+           and not exists (select 1 from workout_sessions where source_reference_id = source.id)
+           and not exists (select 1 from recovery_observations where source_reference_id = source.id)
+           and not exists (select 1 from intake_requests where source_reference_id = source.id)
+      `);
+    }
+  }
+
+  private toErasureRequest(row: RecoveryErasureRequestRow): RecoveryErasureRequest {
+    return {
+      id: row.id,
+      connectionId: row.connectionId,
+      reason: row.reason,
+      status: row.status,
+      requestedAt: row.requestedAt.toISOString(),
+      completedAt: row.completedAt?.toISOString() ?? null
     };
   }
 }

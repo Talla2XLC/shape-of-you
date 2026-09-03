@@ -29,7 +29,8 @@
     "fitness-tracker:cutover-preflight": "tsx src/commands/run-cutover-preflight.ts",
     "fitness-tracker:weight:dry-run": "tsx src/commands/import-fitness-tracker.ts --domain weight --mode dry-run",
     "identity-access:revoke": "tsx src/commands/change-identity-access.ts --action revoke",
-    "chat-assistant:binding": "tsx src/commands/manage-chat-assistant-binding.ts"
+    "chat-assistant:binding": "tsx src/commands/manage-chat-assistant-binding.ts",
+    "recovery-erasure:manifest": "tsx src/commands/manage-recovery-erasure-manifest.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
