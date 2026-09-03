@@ -197,6 +197,8 @@ jobs:
           } | ssh -p "$VM_PORT" "$target" \
             -o BatchMode=yes \
             -o IdentitiesOnly=yes \
+            -o ServerAliveInterval=30 \
+            -o ServerAliveCountMax=6 \
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "sudo -n /usr/local/sbin/shape-of-you-staging-deploy"

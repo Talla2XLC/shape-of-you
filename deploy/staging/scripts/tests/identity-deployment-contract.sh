@@ -67,6 +67,10 @@ assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_DIGEST=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=%s"
 assert_contains "$DEPLOY" 'identity-migrate'
+assert_contains "$DEPLOY" "run_migration 'API migration' migrate"
+assert_contains "$DEPLOY" "run_migration 'Identity migration' identity-migrate"
+assert_contains "$DEPLOY" 'timed out after 300 seconds'
+assert_contains "$DEPLOY" 'Migration container $container_name is no longer present.'
 assert_contains "$DEPLOY" 'identity-reconcile-oauth-clients'
 assert_contains "$DEPLOY" 'parseTotpKeyRing'
 assert_contains "$DEPLOY" 'api identity'

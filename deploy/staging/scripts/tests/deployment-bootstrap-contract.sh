@@ -7,6 +7,8 @@ CONTROLLER="$REPOSITORY_ROOT/deploy/staging/scripts/deployment-controller.sh"
 INSTALLER="$REPOSITORY_ROOT/deploy/staging/system/install-root-owned-assets.sh"
 SUDOERS="$REPOSITORY_ROOT/deploy/staging/system/shape-deploy.sudoers"
 COMPOSE="$REPOSITORY_ROOT/deploy/staging/compose.yaml"
+PREFLIGHT="$REPOSITORY_ROOT/deploy/staging/scripts/vm-preflight.sh"
+DEPLOY="$REPOSITORY_ROOT/deploy/staging/scripts/deploy.sh"
 DEPLOY_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/deploy-staging.yml"
 PUBLISH_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/publish-staging.yml"
 
@@ -130,6 +132,28 @@ assert_not_contains "$CONTROLLER" 'GOOGLE_SHEETS_SERVICE_ACCOUNT'
 assert_not_contains "$COMPOSE" 'fitness-tracker-import'
 assert_not_contains "$DEPLOY_WORKFLOW" 'run_fitness_tracker_weight_dry_run'
 assert_not_contains "$PUBLISH_WORKFLOW" 'run_fitness_tracker_weight_dry_run'
+assert_contains "$PUBLISH_WORKFLOW" 'paths-ignore:'
+assert_contains "$PUBLISH_WORKFLOW" "- '**/*.md'"
+assert_contains "$PUBLISH_WORKFLOW" "- 'docs/**'"
+assert_contains "$PUBLISH_WORKFLOW" "- 'plans/**'"
+assert_contains "$DEPLOY_WORKFLOW" 'ServerAliveInterval=30'
+assert_contains "$DEPLOY_WORKFLOW" 'ServerAliveCountMax=6'
+assert_contains "$PREFLIGHT" 'command -v timeout'
+assert_contains "$DEPLOY" 'run_migration()'
+assert_contains "$DEPLOY" 'timeout --signal=TERM --kill-after=30s 300s'
+assert_not_contains "$DEPLOY" 'timeout --foreground'
+assert_contains "$DEPLOY" 'migration_container="${COMPOSE_PROJECT}-${migration_service}-migration"'
+assert_contains "$DEPLOY" 'run --name "$migration_container" --rm'
+assert_contains "$DEPLOY" 'docker rm --force "$container_name"'
+assert_contains "$DEPLOY" 'docker container ls --all --quiet'
+assert_contains "$DEPLOY" '--filter "name=^/${container_name}$"'
+assert_contains "$DEPLOY" "run_migration 'API migration' migrate"
+assert_contains "$DEPLOY" "run_migration 'Identity migration' identity-migrate"
+assert_contains "$DEPLOY" 'timed out after 300 seconds'
+assert_contains "$DEPLOY" 'ended with SIGKILL or timeout escalation'
+assert_contains "$DEPLOY" 'compose ps --all "$migration_service"'
+assert_not_contains "$DEPLOY_WORKFLOW" 'MIGRATION_TIMEOUT'
+assert_not_contains "$PUBLISH_WORKFLOW" 'MIGRATION_TIMEOUT'
 
 assert_contains "$INSTALLER" 'shape-of-you-staging-deploy'
 assert_contains "$SUDOERS" '/usr/local/sbin/shape-of-you-staging-deploy ""'
@@ -155,5 +179,7 @@ assert_callback_rejected_without_echo "$multiline_callback"
 
 sh -n "$BOOTSTRAP"
 sh -n "$CONTROLLER"
+sh -n "$DEPLOY"
+sh -n "$PREFLIGHT"
 
 printf '%s\n' 'Deployment bootstrap contract test passed.'

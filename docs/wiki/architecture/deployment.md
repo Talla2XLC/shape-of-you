@@ -33,8 +33,11 @@ coordinate.
 
 ### Delivery
 
-Pushes to `main` run quality, publish SHA-linked GHCR images, and automatically
-deploy exact digests to Environment `staging`. API, Identity, edge, and Certbot
+Pushes to `main` that include any path outside Markdown, `docs/**`, and
+`plans/**` run quality, publish SHA-linked GHCR images, and automatically deploy
+exact digests to Environment `staging`. Documentation-only and plan-only pushes
+do not start the publication workflow; manual dispatch remains available. API,
+Identity, edge, and Certbot
 are independently built and attested, and all four coordinates belong to one
 atomic release. Input is a bounded `key=value` request to
 `/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no build context,
@@ -47,6 +50,8 @@ requires an exact head match, and invokes the fixed versioned controller path
 from that commit. The controller owns the evolving release-field allowlist,
 validation, runtime environments, registry login, and deployment. Adding an
 ordinary deployment parameter therefore requires no bootstrap reinstall.
+The GitHub Actions SSH client sends keepalives every 30 seconds and tolerates
+six unanswered probes while preserving strict known-host verification.
 
 The bootstrap creates an empty local Git repository without network access,
 then performs the fixed-origin control fetch with Git HTTP/1.1 and three
@@ -108,6 +113,13 @@ network. Both containers reach host port `5431` through
 database exposure is a throwaway-staging limitation; developer access should
 use SSH tunneling.
 
+Staging bounds each API and Identity one-shot migration to 300 seconds, allows
+30 seconds from `TERM` to `KILL`, and reports the failed stage plus safe Compose
+status. Each one-shot container has a deterministic name; after failure the
+script force-removes only that container and verifies its absence. Exit status
+`137` is reported as ambiguous `SIGKILL` or timeout escalation. These limits
+are versioned deployment behavior, not environment or PostgreSQL configuration.
+
 ### Security and portability
 
 Staging uses HTTPS and browser/API authentication. Its normal API runtime runs
@@ -167,6 +179,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 
 - [Temporary shared-VM deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
+- [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)

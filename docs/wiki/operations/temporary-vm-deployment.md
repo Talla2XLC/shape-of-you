@@ -31,8 +31,9 @@ configuration or credential material into the repository.
 - Environment `staging` contains required secrets/variables.
 - Both `staging.shape-of-you.ru` and `identity.staging.shape-of-you.ru` resolve
   publicly to `STAGING_PUBLIC_IPV4`.
-- VM has Docker Engine, Compose plugin, `curl`, `getent`, `flock`, systemd, and
-  `visudo`; ports `80` and `443` are allowed by the provider firewall.
+- VM has Docker Engine, Compose plugin, GNU `timeout`, `curl`, `getent`, `flock`,
+  systemd, and `visudo`; ports `80` and `443` are allowed by the provider
+  firewall.
 - In `shared-ingress` mode, `/opt/shared-vm-ingress` exclusively owns those
   ports, external network `shared-vm-ingress` exists, HTTP reaches
   `shape-of-you-edge:8080`, and SNI/PROXY routing reaches port `8443`.
@@ -119,8 +120,10 @@ file during a move.
 
 `publish-staging.yml` publishes SHA tags for API, Identity, edge, and the
 project Certbot image and records provenance/SBOM; digest is deployment
-authority. After quality and publication for a `main` push, it automatically
-invokes `deploy-staging.yml` with all four digests. Manual targeted retry
+authority. A `main` push containing any path outside Markdown, `docs/**`, and
+`plans/**` runs quality and publication, then automatically invokes
+`deploy-staging.yml` with all four digests. Documentation-only and plan-only
+pushes skip the whole publication workflow. Manual targeted retry
 supplies full commit SHA, all image digests, separate API and Identity schema
 backward-compatibility flags, and the write-smoke choice. Fitness Tracker
 imports are not part of deployment; controlled runs use the operator
@@ -139,6 +142,16 @@ The versioned controller strictly validates the complete allowlist, creates
 runtime env, uses temporary `DOCKER_CONFIG`, and runs `deploy.sh`. CI sends no
 Compose, scripts, paths, or arbitrary shell. Successful release updates
 `current` and `previous`.
+
+The Actions SSH client sends a keepalive every 30 seconds and fails only after
+six unanswered probes; `BatchMode`, the dedicated key, and strict known-host
+verification remain mandatory. API and Identity migrations each have a fixed
+300-second limit with a 30-second `TERM`-to-`KILL` grace period. A failure names
+the migration and exit status; a timeout also reports the limit and safe
+Compose/container status. Each one-shot migration uses a deterministic name;
+failure force-removes only that container and verifies its absence. Status
+`137` is reported as ambiguous `SIGKILL` or timeout escalation. No runtime
+environment value configures these limits.
 
 For the control-tree fetch only, the bootstrap initializes the local Git
 repository before network access and runs the fixed-origin fetch over Git
@@ -211,9 +224,10 @@ separate approval, the operator:
    rollback readiness;
 6. retired the temporary gate.
 
-The cutover completed on 2026-08-05. Every successful `main` publication now
-invokes staging deployment automatically. Direct `Deploy staging` dispatch
-remains available for an explicit retry or operator-selected release. The
+The cutover completed on 2026-08-05. Every successful non-documentation-only
+`main` publication invokes staging deployment automatically. Direct
+`Deploy staging` dispatch remains available for an explicit retry or
+operator-selected release. The
 historical sequence prevented the new workflow input contract from racing the
 old installed root wrapper; the stable bootstrap removes this class of
 steady-state rollout race.
@@ -272,6 +286,7 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Dedicated identity ADR](../../adr/20260729-use-dedicated-staging-deployment-identity.md)
 - [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
+- [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 

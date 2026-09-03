@@ -18,6 +18,7 @@ bootstrap_started=false
 identity_enabled=false
 rollback_schema_compatible=false
 rollback_client_compatible=false
+active_migration_container=
 
 if [ -z "$RELEASE_ENV_INPUT" ] || [ ! -f "$RELEASE_ENV_INPUT" ]; then
   printf '%s\n' "Usage: deploy.sh <release-env-file>" >&2
@@ -123,7 +124,93 @@ compose() {
   fi
 }
 
+remove_migration_container() {
+  container_name=$1
+
+  docker rm --force "$container_name" >/dev/null 2>&1 || true
+  if ! remaining_container=$(docker container ls --all --quiet \
+    --filter "name=^/${container_name}$"); then
+    printf '%s\n' \
+      "Could not verify cleanup of migration container $container_name." >&2
+    return 1
+  fi
+  if [ -n "$remaining_container" ]; then
+    printf '%s\n' \
+      "Migration container $container_name is still present after forced cleanup." >&2
+    return 1
+  fi
+  printf '%s\n' "Migration container $container_name is no longer present." >&2
+}
+
+run_migration() {
+  migration_name=$1
+  migration_service=$2
+  migration_container="${COMPOSE_PROJECT}-${migration_service}-migration"
+  active_migration_container=$migration_container
+
+  printf '%s\n' "Starting $migration_name (timeout: 300 seconds)."
+  set +e
+  if [ "$identity_enabled" = "true" ]; then
+    timeout --signal=TERM --kill-after=30s 300s \
+      docker compose \
+      --project-name "$COMPOSE_PROJECT" \
+      --env-file "$RELEASE_DIR/release.env" \
+      --file "$COMPOSE_FILE" \
+      --file "$COMPOSE_TOPOLOGY_FILE" \
+      --file "$IDENTITY_COMPOSE_FILE" \
+      --profile operations run --name "$migration_container" --rm \
+      "$migration_service"
+  else
+    timeout --signal=TERM --kill-after=30s 300s \
+      docker compose \
+      --project-name "$COMPOSE_PROJECT" \
+      --env-file "$RELEASE_DIR/release.env" \
+      --file "$COMPOSE_FILE" \
+      --file "$COMPOSE_TOPOLOGY_FILE" \
+      --profile operations run --name "$migration_container" --rm \
+      "$migration_service"
+  fi
+  migration_status=$?
+  set -e
+
+  if [ "$migration_status" -eq 0 ]; then
+    if ! remove_migration_container "$migration_container"; then
+      active_migration_container=
+      return 1
+    fi
+    active_migration_container=
+    printf '%s\n' "$migration_name completed."
+    return 0
+  fi
+
+  if [ "$migration_status" -eq 124 ]; then
+    printf '%s\n' \
+      "$migration_name timed out after 300 seconds (exit status $migration_status)." >&2
+  elif [ "$migration_status" -eq 137 ]; then
+    printf '%s\n' \
+      "$migration_name ended with SIGKILL or timeout escalation (exit status 137)." >&2
+  else
+    printf '%s\n' \
+      "$migration_name failed (exit status $migration_status)." >&2
+  fi
+  printf '%s\n' "Compose status after $migration_name failure:" >&2
+  compose ps --all "$migration_service" >&2 || true
+  if ! docker inspect --format 'Migration container state: {{.State.Status}}' \
+    "$migration_container" >&2; then
+    printf '%s\n' "Migration container state: not present." >&2
+  fi
+  if ! remove_migration_container "$migration_container"; then
+    active_migration_container=
+    return 1
+  fi
+  active_migration_container=
+  return "$migration_status"
+}
+
 cleanup() {
+  if [ -n "$active_migration_container" ]; then
+    remove_migration_container "$active_migration_container" || true
+  fi
   if [ "$bootstrap_started" = "true" ]; then
     compose rm --force --stop edge-bootstrap >/dev/null 2>&1 || true
   fi
@@ -185,9 +272,9 @@ if [ "$bootstrap_started" = "true" ]; then
   bootstrap_started=false
 fi
 
-compose --profile operations run --rm migrate
+run_migration 'API migration' migrate
 if [ "$identity_enabled" = "true" ]; then
-  compose --profile operations run --rm identity-migrate
+  run_migration 'Identity migration' identity-migrate
   compose --profile operations run --rm identity-reconcile-oauth-clients
   compose up --detach --wait --wait-timeout 90 api identity
 else

@@ -11,6 +11,7 @@ COMPOSE_PROJECT=${COMPOSE_PROJECT:-shape-of-you-staging}
 
 command -v docker >/dev/null 2>&1
 command -v curl >/dev/null 2>&1
+command -v timeout >/dev/null 2>&1
 docker info >/dev/null
 docker compose version >/dev/null
 

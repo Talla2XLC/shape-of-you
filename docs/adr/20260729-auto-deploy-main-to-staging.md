@@ -5,7 +5,7 @@ title: "Automatically deploy main to staging"
 status: accepted
 date: 2026-07-29
 supersedes: null
-superseded_by: null
+superseded_by: "decisions-20260903-bound-automatic-staging-delivery"
 tags:
   - "deployment"
   - "staging"

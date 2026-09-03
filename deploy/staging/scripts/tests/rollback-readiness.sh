@@ -41,6 +41,16 @@ printf '%s\n' \
   '#!/bin/sh' \
   'set -eu' \
   'printf "%s\\n" "$*" >> "$FAKE_DOCKER_LOG"' \
+  'if [ "${1:-}" = inspect ]; then' \
+  '  case "$*" in' \
+  '    *-migration*)' \
+  '      case "$*" in' \
+  '        *--format*) printf "%s\\n" "Migration container state: running"; exit 0 ;;' \
+  '        *) exit 1 ;;' \
+  '      esac' \
+  '      ;;' \
+  '  esac' \
+  'fi' \
   'case "$*" in' \
   '  *" ps --quiet "*) printf "%s\\n" fake-container ;;' \
   '  *"up --detach --wait --wait-timeout 90 --remove-orphans api edge"*) touch "$FAKE_WAIT_MARKER" ;;' \
@@ -54,6 +64,14 @@ printf '%s\n' \
   'exit 0' \
   > "$TEST_ROOT/fake-bin/flock"
 chmod 0755 "$TEST_ROOT/fake-bin/flock"
+
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'shift 3' \
+  'exec "$@"' \
+  > "$TEST_ROOT/fake-bin/timeout"
+chmod 0755 "$TEST_ROOT/fake-bin/timeout"
 
 printf '%s\n' \
   '#!/bin/sh' \
@@ -160,5 +178,89 @@ run_automatic_rollback_case true true true true
 run_automatic_rollback_case true true false false
 run_automatic_rollback_case false true true false
 run_automatic_rollback_case true false true false
+
+printf '%s\n' \
+  '#!/bin/sh' \
+  'exit 124' \
+  > "$TEST_ROOT/fake-bin/timeout"
+chmod 0755 "$TEST_ROOT/fake-bin/timeout"
+timeout_log="$TEST_ROOT/migration-timeout.log"
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$GATE_DEPLOY_ROOT" \
+  COMPOSE_FILE="$GATE_PACKAGE/compose.yaml" \
+  IDENTITY_COMPOSE_FILE="$GATE_PACKAGE/compose.identity.yaml" \
+  sh "$GATE_PACKAGE/scripts/deploy.sh" "$gate_release_env" \
+  >"$timeout_log" 2>&1; then
+  printf '%s\n' 'A timed-out API migration unexpectedly succeeded.' >&2
+  exit 1
+fi
+grep -F -- 'API migration timed out after 300 seconds (exit status 124).' \
+  "$timeout_log" >/dev/null
+grep -F -- 'Compose status after API migration failure:' \
+  "$timeout_log" >/dev/null
+grep -F -- 'Migration container state: running' "$timeout_log" >/dev/null
+grep -F -- 'rm --force shape-of-you-staging-migrate-migration' \
+  "$FAKE_DOCKER_LOG" >/dev/null
+grep -F -- 'Migration container shape-of-you-staging-migrate-migration is no longer present.' \
+  "$timeout_log" >/dev/null
+
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'case "$*" in' \
+  '  *" identity-migrate") exit 124 ;;' \
+  'esac' \
+  'shift 3' \
+  'exec "$@"' \
+  > "$TEST_ROOT/fake-bin/timeout"
+chmod 0755 "$TEST_ROOT/fake-bin/timeout"
+identity_timeout_log="$TEST_ROOT/identity-migration-timeout.log"
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$GATE_DEPLOY_ROOT" \
+  COMPOSE_FILE="$GATE_PACKAGE/compose.yaml" \
+  IDENTITY_COMPOSE_FILE="$GATE_PACKAGE/compose.identity.yaml" \
+  sh "$GATE_PACKAGE/scripts/deploy.sh" "$gate_release_env" \
+  >"$identity_timeout_log" 2>&1; then
+  printf '%s\n' 'A timed-out Identity migration unexpectedly succeeded.' >&2
+  exit 1
+fi
+grep -F -- 'API migration completed.' "$identity_timeout_log" >/dev/null
+grep -F -- 'Identity migration timed out after 300 seconds (exit status 124).' \
+  "$identity_timeout_log" >/dev/null
+grep -F -- 'rm --force shape-of-you-staging-identity-migrate-migration' \
+  "$FAKE_DOCKER_LOG" >/dev/null
+
+printf '%s\n' '#!/bin/sh' 'exit 137' > "$TEST_ROOT/fake-bin/timeout"
+chmod 0755 "$TEST_ROOT/fake-bin/timeout"
+sigkill_log="$TEST_ROOT/migration-sigkill.log"
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$GATE_DEPLOY_ROOT" \
+  COMPOSE_FILE="$GATE_PACKAGE/compose.yaml" \
+  IDENTITY_COMPOSE_FILE="$GATE_PACKAGE/compose.identity.yaml" \
+  sh "$GATE_PACKAGE/scripts/deploy.sh" "$gate_release_env" \
+  >"$sigkill_log" 2>&1; then
+  printf '%s\n' 'A SIGKILL-ended API migration unexpectedly succeeded.' >&2
+  exit 1
+fi
+grep -F -- 'API migration ended with SIGKILL or timeout escalation (exit status 137).' \
+  "$sigkill_log" >/dev/null
+if grep -F -- 'API migration timed out' "$sigkill_log" >/dev/null; then
+  printf '%s\n' 'Exit status 137 was incorrectly reported as a definite timeout.' >&2
+  exit 1
+fi
+
+printf '%s\n' '#!/bin/sh' 'exit 42' > "$TEST_ROOT/fake-bin/timeout"
+chmod 0755 "$TEST_ROOT/fake-bin/timeout"
+failure_log="$TEST_ROOT/migration-failure.log"
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$GATE_DEPLOY_ROOT" \
+  COMPOSE_FILE="$GATE_PACKAGE/compose.yaml" \
+  IDENTITY_COMPOSE_FILE="$GATE_PACKAGE/compose.identity.yaml" \
+  sh "$GATE_PACKAGE/scripts/deploy.sh" "$gate_release_env" \
+  >"$failure_log" 2>&1; then
+  printf '%s\n' 'A failed API migration unexpectedly succeeded.' >&2
+  exit 1
+fi
+grep -F -- 'API migration failed (exit status 42).' "$failure_log" >/dev/null
 
 printf '%s\n' 'rollback readiness regression test passed.'

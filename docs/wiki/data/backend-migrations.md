@@ -29,6 +29,13 @@ pnpm db:migrate:identity
 The API image contains the migration runner, but the normal API process never
 runs migrations. Local Compose and staging use a one-shot migration service
 from the same image digest. Drizzle journal applies only pending SQL files.
+Staging independently limits the API and Identity one-shot commands to 300
+seconds with a 30-second termination grace period. Timeout behavior belongs to
+the versioned deployment script rather than PostgreSQL or runtime environment
+configuration, and failure diagnostics identify the owning migration without
+printing database URLs. Deterministic one-shot container names allow the script
+to force-remove a failed migration and fail closed unless its absence can be
+verified.
 
 Migration sequence:
 
