@@ -12,7 +12,7 @@
     "dev": "tsx watch src/server.ts",
     "dev:local": "node --watch --env-file=.env.local --import tsx src/server.ts",
     "start": "node dist/server.js",
-    "lint": "eslint src test drizzle.config.ts",
+    "lint": "eslint src test drizzle.config.ts vitest.config.ts vitest.restore.config.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
