@@ -17,7 +17,8 @@ tags:
 Implemented Recovery separates shared device definitions, Person-owned typed
 observations, and reproducible readiness/load-risk assessments. Real device
 data remains forbidden until the implemented authenticated-erasure lifecycle is
-released with approved independent manifest storage and a staging restore drill.
+released with approved independent journal storage and an owner-backed staging
+restore drill.
 
 ## Content
 
@@ -47,11 +48,21 @@ collection but is not erasure. Corrections replace full observations.
 Connection erasure uses an API-owned durable request.
 Fresh passkey authentication quarantines the connection immediately, while an
 idempotent worker removes connection-derived observations, assessments, and
-Coaching outputs. Exact `retainUntil` expiry uses the same path. Manual
-observations without a connection and shared provider/model definitions remain.
-An independently recoverable erasure manifest must be replayed before a restored
-database can serve traffic. The repository includes a mode-`0600`, immutable,
-checksummed export/apply command and an isolated pre-erasure restore drill.
+Coaching outputs. The worker cannot claim the request until its accepted intent
+has been sealed into the independent journal and acknowledged in PostgreSQL.
+Exact `retainUntil` expiry uses the same path. Manual observations without a
+connection and shared provider/model definitions remain.
+
+The restore authority is a typed append-only SQLite journal outside the
+restorable PostgreSQL and release boundaries. It records accepted intent before
+physical deletion and completion evidence afterward. Restore replay follows
+accepted intent even when completion is absent, so a crash cannot make an old
+backup authoritative again. Schema, file permissions, hash-chain integrity, and
+the required completeness cutoff must verify before a restored database can
+serve traffic. The repository includes sync/inspect/apply commands and a real
+isolated PostgreSQL 17 `pg_dump`/`pg_restore` drill on a private non-`5431`
+port. A same-host journal or test checkpoint alone is not production-ready; an
+owner-approved immutable independent copy is still required.
 
 Immutable ReadinessAssessment/LoadRiskAssessment pin exact policy version,
 analysis window, evidence checksum, and typed observation/training links.
@@ -67,12 +78,14 @@ scores. Assessment never mutates Training.
 - [Recovery ADR](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md).
 - [Wearable sleep score and Recovery MCP input](../../adr/20260831-model-wearable-sleep-score-and-normalize-recovery-mcp-input.md).
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md).
+- [Independent typed Recovery erasure journal](../../adr/20260904-use-independent-typed-recovery-erasure-journal.md).
 
 ## Open questions
 
 - Real provider credentials and ingestion authentication.
-- Cluster-owner approval of independent manifest storage, maximum backup
-  lifetime, release, and a drill against the actual staging backup topology.
+- Cluster-owner approval of journal retention, protected external immutable
+  storage, maximum backup lifetime, and a drill against the actual staging
+  backup topology.
 
 ## Related material
 

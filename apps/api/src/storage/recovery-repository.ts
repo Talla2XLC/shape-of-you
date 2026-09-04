@@ -1044,6 +1044,7 @@ export class RecoveryRepository implements RecoveryStore {
          select id
            from recovery_erasure_requests
           where status <> 'completed'
+            and journal_accepted_at is not null
             and next_attempt_at <= $1
             and (status = 'pending' or lease_until < $1)
           order by requested_at, id
@@ -1157,6 +1158,8 @@ export class RecoveryRepository implements RecoveryStore {
             leaseOwner: null,
             leaseUntil: null,
             completedAt: new Date(),
+            journalAcceptedAt: existing.journalAcceptedAt ?? new Date(),
+            journalCompletedAt: new Date(),
             lastFailureCode: null
           })
           .where(eq(recoveryErasureRequests.id, marker.id));

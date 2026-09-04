@@ -54,17 +54,20 @@ Ownership classes:
 - Person-owned facts, plans, observations, consent, connections,
   recommendations, decisions, and media metadata;
 - external source records with provider identity/checksum/parser/review
-  lifecycle.
+lifecycle.
 
 Historical facts pin exact shared versions and relevant snapshots. Recovery
 consent governs future collection; revocation is not erasure. Real wearable
-data waits for a restore-tested release and approved independent manifest
-storage. API owns the implemented durable erasure
-request, quarantine, dependency-aware deletion, and minimal receipt. The backup
-boundary owns an independently recoverable erasure manifest and must replay it
-before restored data can become ready. Identity supplies a short-lived,
-single-use, purpose-bound fresh-passkey authority through an API contract; it
-does not access API persistence.
+data waits for a restore-tested release and approved independent journal
+storage. API owns the implemented durable erasure request, quarantine,
+dependency-aware deletion, and minimal receipt. Physical deletion is gated by
+durable acknowledgement that accepted intent was sealed outside PostgreSQL.
+The backup boundary owns the independently recoverable typed append-only SQLite
+journal and must replay every accepted intent before restored data can become
+ready. Completion evidence is recorded afterward but is not required to
+suppress restored data. Identity supplies a short-lived, single-use,
+purpose-bound fresh-passkey authority through an API contract; it does not
+access API persistence.
 
 Media binaries live in private S3-compatible storage; PostgreSQL owns metadata
 and authorization. Object-key knowledge grants no access.
@@ -103,6 +106,7 @@ facts and owns no lifecycle or historical authority.
 - [Identity ADR](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Shared-reference ADR](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
 - [Recovery retention and erasure ADR](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)
+- [Independent typed Recovery erasure journal ADR](../../adr/20260904-use-independent-typed-recovery-erasure-journal.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Progress overview API](../api/progress-overview.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

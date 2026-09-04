@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "test:recovery-restore": "vitest run --config vitest.restore.config.ts",
     "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "db:migrate": "tsx src/database/migrate.ts",
     "db:migrate:local": "node --env-file=.env.local --import tsx src/database/migrate.ts",
@@ -30,7 +31,8 @@
     "fitness-tracker:weight:dry-run": "tsx src/commands/import-fitness-tracker.ts --domain weight --mode dry-run",
     "identity-access:revoke": "tsx src/commands/change-identity-access.ts --action revoke",
     "chat-assistant:binding": "tsx src/commands/manage-chat-assistant-binding.ts",
-    "recovery-erasure:manifest": "tsx src/commands/manage-recovery-erasure-manifest.ts"
+    "recovery-erasure:manifest": "tsx src/commands/manage-recovery-erasure-manifest.ts",
+    "recovery-erasure:journal": "tsx src/commands/manage-recovery-erasure-journal.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

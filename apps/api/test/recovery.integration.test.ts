@@ -24,6 +24,13 @@ let databaseUrl: string;
 const personA = "00000000-0000-4000-8000-000000000001";
 const personB = "00000000-0000-4000-8000-000000000002";
 
+async function acknowledgeAcceptedErasure(requestId: string): Promise<void> {
+  await database.pool.query(
+    "update recovery_erasure_requests set journal_accepted_at = now() where id = $1",
+    [requestId]
+  );
+}
+
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:17-alpine")
     .withDatabase("shape_of_you_recovery_test")
@@ -312,6 +319,8 @@ describe("Recovery PostgreSQL vertical", () => {
       sourceReference: { ...deviceInput.sourceReference, externalRecordId: "after-request" }
     })).rejects.toThrow("not permitted");
 
+    expect(await repository.claimErasure("integration-worker", 30_000)).toBeNull();
+    await acknowledgeAcceptedErasure(request.id);
     const job = await repository.claimErasure("integration-worker", 30_000);
     expect(job).toMatchObject({ id: request.id, personId: personA, connectionId: connection.id });
     await repository.completeErasure(job!);
@@ -390,6 +399,11 @@ describe("Recovery PostgreSQL vertical", () => {
         expect.objectContaining({ id: indefinite.id, status: "active", erasureRequestedAt: null })
       ])
     );
+    const expiredRequest = await database.pool.query<{ id: string }>(
+      "select id from recovery_erasure_requests where connection_id = $1",
+      [expired.id]
+    );
+    await acknowledgeAcceptedErasure(expiredRequest.rows[0]!.id);
     const claims = await Promise.all([
       repository.claimErasure("retention-worker-a", 30_000),
       repository.claimErasure("retention-worker-b", 30_000)
@@ -506,6 +520,7 @@ describe("Recovery PostgreSQL vertical", () => {
       "user_request",
       "00000000-0000-4000-8000-000000000096"
     );
+    await acknowledgeAcceptedErasure(request.id);
     const job = await repository.claimErasure("restore-drill-worker", 30_000);
     expect(job?.id).toBe(request.id);
     await repository.completeErasure(job!);

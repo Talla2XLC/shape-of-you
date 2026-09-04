@@ -370,6 +370,10 @@ describe("Coaching PostgreSQL vertical", () => {
 
     expect((await coaching.list(personA, {})).items).toEqual([]);
     expect(await recovery.findAssessment(personA, recoveryAssessmentId)).toBeNull();
+    await database.pool.query(
+      "update recovery_erasure_requests set journal_accepted_at = now() where id = $1",
+      [request.id]
+    );
     const job = await recovery.claimErasure("coaching-erasure-worker", 30_000);
     expect(job?.id).toBe(request.id);
     await recovery.completeErasure(job!);

@@ -2645,7 +2645,15 @@ export const recoveryErasureRequests = pgTable(
       .notNull(),
     quarantinedAt: timestamp("quarantined_at", { withTimezone: true, mode: "date" })
       .notNull(),
-    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" })
+    journalAcceptedAt: timestamp("journal_accepted_at", {
+      withTimezone: true,
+      mode: "date"
+    }),
+    completedAt: timestamp("completed_at", { withTimezone: true, mode: "date" }),
+    journalCompletedAt: timestamp("journal_completed_at", {
+      withTimezone: true,
+      mode: "date"
+    })
   },
   (table) => [
     foreignKey({
@@ -2680,6 +2688,11 @@ export const recoveryErasureRequests = pgTable(
       sql`(${table.status} = 'pending' AND ${table.completedAt} IS NULL)
           OR (${table.status} = 'processing' AND ${table.leaseOwner} IS NOT NULL AND ${table.leaseUntil} IS NOT NULL AND ${table.completedAt} IS NULL)
           OR (${table.status} = 'completed' AND ${table.leaseOwner} IS NULL AND ${table.leaseUntil} IS NULL AND ${table.completedAt} IS NOT NULL)`
+    ),
+    check(
+      "recovery_erasure_journal_shape",
+      sql`${table.journalCompletedAt} IS NULL
+          OR (${table.journalAcceptedAt} IS NOT NULL AND ${table.completedAt} IS NOT NULL)`
     )
   ]
 );
