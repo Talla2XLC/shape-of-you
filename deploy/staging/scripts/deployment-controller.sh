@@ -202,6 +202,9 @@ esac
 
 test -f "$CONTROL_STAGING/scripts/deploy.sh" || fail 'Verified deployment script is missing.'
 test -f "$CONTROL_STAGING/compose.yaml" || fail 'Verified Compose file is missing.'
+JOURNAL_SYNC_INSTALLER=$CONTROL_STAGING/system/install-recovery-erasure-sync-assets.sh
+test -f "$JOURNAL_SYNC_INSTALLER" && test ! -L "$JOURNAL_SYNC_INSTALLER" ||
+  fail 'Verified Recovery erasure sync installer is missing or unsafe.'
 
 umask 077
 install -d -m 0700 /etc/shape-of-you/staging
@@ -262,3 +265,5 @@ IDENTITY_RUNTIME_ENV="$IDENTITY_RUNTIME_ENV" \
 RUN_WRITE_SMOKE="$RUN_WRITE_SMOKE" \
 DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
   sh "$CONTROL_STAGING/scripts/deploy.sh" "$RELEASE_ENV"
+
+sh "$JOURNAL_SYNC_INSTALLER"

@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, open, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -104,6 +104,15 @@ async function stopPostgres(): Promise<void> {
   if (stopped || postgres.exitCode !== null) return;
   postgres.kill("SIGKILL");
   await new Promise<void>((resolve) => postgres.once("exit", () => resolve()));
+}
+
+async function syncPath(path: string): Promise<void> {
+  const handle = await open(path, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
 }
 
 beforeAll(async () => {
@@ -299,11 +308,12 @@ describe("Recovery erasure restore safety", () => {
     const liveJournalPath = join(temporaryRoot, "live-journal.sqlite");
     const acceptedCheckpoint = join(temporaryRoot, "accepted-checkpoint.sqlite");
     const journal = await RecoveryErasureJournal.create(liveJournalPath);
+    journal.close();
     const unavailableCheckpoint = join(temporaryRoot, "unavailable-checkpoint.sqlite");
     await writeFile(unavailableCheckpoint, "reserved", { mode: 0o600 });
     await expect(synchronizeRecoveryErasureJournal(
       source.pool,
-      journal,
+      liveJournalPath,
       unavailableCheckpoint
     )).rejects.toThrow();
     expect(await repository.claimErasure("blocked-after-checkpoint-failure", 30_000)).toBeNull();
@@ -312,11 +322,66 @@ describe("Recovery erasure restore safety", () => {
       [request.id]
     );
     expect(unacknowledged.rows[0]?.journal_accepted_at).toBeNull();
-    const acceptedSync = await synchronizeRecoveryErasureJournal(
+
+    const failedFlushCheckpoint = join(temporaryRoot, "failed-flush-checkpoint.sqlite");
+    await expect(synchronizeRecoveryErasureJournal(
       source.pool,
-      journal,
-      acceptedCheckpoint
+      liveJournalPath,
+      failedFlushCheckpoint,
+      {
+        checkpointDurability: {
+          syncFile: async () => {
+            throw new Error("synthetic checkpoint flush failure");
+          },
+          syncDirectory: async () => undefined
+        }
+      }
+    )).rejects.toThrow("synthetic checkpoint flush failure");
+    await expect(access(failedFlushCheckpoint)).rejects.toThrow();
+    const unacknowledgedAfterFlushFailure = await source.pool.query<{
+      journal_accepted_at: Date | null;
+    }>(
+      "select journal_accepted_at from recovery_erasure_requests where id = $1",
+      [request.id]
     );
+    expect(unacknowledgedAfterFlushFailure.rows[0]?.journal_accepted_at).toBeNull();
+
+    let releaseDurableFlush: (() => void) | undefined;
+    const durableFlushReleased = new Promise<void>((resolve) => {
+      releaseDurableFlush = resolve;
+    });
+    let notifyFileFlushed: (() => void) | undefined;
+    const fileFlushed = new Promise<void>((resolve) => {
+      notifyFileFlushed = resolve;
+    });
+    const acceptedSyncPromise = synchronizeRecoveryErasureJournal(
+      source.pool,
+      liveJournalPath,
+      acceptedCheckpoint,
+      {
+        checkpointDurability: {
+          syncFile: async (path) => {
+            await syncPath(path);
+            notifyFileFlushed?.();
+            await durableFlushReleased;
+          },
+          syncDirectory: syncPath
+        }
+      }
+    );
+    await fileFlushed;
+    await expect(synchronizeRecoveryErasureJournal(
+      source.pool,
+      liveJournalPath,
+      join(temporaryRoot, "parallel-checkpoint.sqlite")
+    )).rejects.toThrow("already running");
+    const stillUnacknowledged = await source.pool.query<{ journal_accepted_at: Date | null }>(
+      "select journal_accepted_at from recovery_erasure_requests where id = $1",
+      [request.id]
+    );
+    expect(stillUnacknowledged.rows[0]?.journal_accepted_at).toBeNull();
+    releaseDurableFlush?.();
+    const acceptedSync = await acceptedSyncPromise;
     const job = await repository.claimErasure("local-restore-worker", 30_000);
     expect(job?.id).toBe(request.id);
     await repository.completeErasure(job!);
@@ -324,10 +389,22 @@ describe("Recovery erasure restore safety", () => {
     const completedCheckpoint = join(temporaryRoot, "completed-checkpoint.sqlite");
     const completedSync = await synchronizeRecoveryErasureJournal(
       source.pool,
-      journal,
+      liveJournalPath,
       completedCheckpoint
     );
-    journal.close();
+    const noOpCheckpoint = join(temporaryRoot, "no-op-checkpoint.sqlite");
+    const noOpSync = await synchronizeRecoveryErasureJournal(
+      source.pool,
+      liveJournalPath,
+      noOpCheckpoint,
+      { onlyIfPending: true }
+    );
+    expect(noOpSync).toMatchObject({
+      acceptedCount: 0,
+      completedCount: 0,
+      checkpointCreated: false
+    });
+    await expect(access(noOpCheckpoint)).rejects.toThrow();
     expect(completedSync.completedCount).toBe(1);
 
     await run("createdb", [

@@ -71,6 +71,15 @@ no deletion deadline. This protects against restoring an old logical database
 dump but not against loss, compromise, or filesystem rollback of the whole VM.
 An off-host or immutable copy remains the recommended target state.
 
+The repository-managed unattended path uses a root-scheduled one-shot container
+from the active API image. It directly mounts that owner-only directory,
+serializes synchronization, creates a unique sealed checkpoint only for pending
+acknowledgements, and acknowledges PostgreSQL only after durable flush and
+verification. Missing or invalid journal storage therefore keeps physical
+erasure blocked. The source and CI contract are accepted; direct provider
+ingestion remains gated on separately approved staging deployment and runtime
+verification.
+
 Immutable ReadinessAssessment/LoadRiskAssessment pin exact policy version,
 analysis window, evidence checksum, and typed observation/training links.
 Missing/low-quality evidence limits confidence; hard safety stops override
@@ -86,12 +95,13 @@ scores. Assessment never mutates Training.
 - [Wearable sleep score and Recovery MCP input](../../adr/20260831-model-wearable-sleep-score-and-normalize-recovery-mcp-input.md).
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md).
 - [Temporary same-host Recovery erasure journal](../../adr/20260904-temporarily-use-same-host-recovery-erasure-journal.md).
+- [Automated Recovery erasure journal synchronization](../../adr/20260904-automate-recovery-erasure-journal-with-root-scheduled-one-shot.md).
 
 ## Open questions
 
 - Real provider credentials and ingestion authentication.
-- Provisioning and verification of the first same-host live journal and sealed
-  completeness checkpoint before direct Garmin ingestion.
+- Deployment and runtime verification of automatic journal synchronization
+  before direct Garmin ingestion.
 - A finite backup lifetime and off-host or immutable journal copy for VM-loss
   protection.
 

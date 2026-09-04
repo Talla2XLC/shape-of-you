@@ -105,6 +105,18 @@ serving copy of the current chain and private key. A root-owned systemd timer
 runs the renewal check twice daily, validates nginx, and reloads it. Certbot has
 no Docker socket, and application services receive no TLS material.
 
+A separate root-owned systemd timer schedules Recovery erasure journal
+synchronization. Each invocation validates the fixed owner-only host journal,
+then launches a short-lived non-root container from the active API digest with
+the host directory directly bind-mounted and the existing root-owned API
+environment passed as an env file. The command runs only for pending journal
+acknowledgements, seals and durably verifies a unique checkpoint before updating
+PostgreSQL, and fails closed on journal or mount errors. It is not a long-lived
+Compose worker, and the internet-facing API receives no journal mount. The
+versioned installer runs from the verified deployment controller only after a
+successful application deployment, so future releases require no manual wrapper
+changes.
+
 API owns `shape_of_you_api`; Identity independently owns
 `shape_of_you_identity`. Each has a separate login, credentials, root-owned
 runtime env file, one-shot migration service, and database-access Docker
@@ -185,6 +197,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
 - [Runtime resolution for replaceable staging upstreams](../../adr/20260828-resolve-replaceable-staging-upstreams-at-runtime.md)
+- [Root-scheduled Recovery erasure journal synchronization](../../adr/20260904-automate-recovery-erasure-journal-with-root-scheduled-one-shot.md)
 
 ## Open questions
 

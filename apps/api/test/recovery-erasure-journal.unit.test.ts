@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -101,5 +101,38 @@ describe("Recovery erasure journal", () => {
 
     await chmod(path, 0o644);
     await expect(RecoveryErasureJournal.open(path)).rejects.toThrow("mode-0600");
+  });
+
+  it("removes an unacknowledgeable checkpoint when durable flush fails", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "journal.sqlite");
+    const checkpointDirectory = join(directory, "checkpoints");
+    const checkpointPath = join(checkpointDirectory, "checkpoint.sqlite");
+    await mkdir(checkpointDirectory, { mode: 0o700 });
+    const journal = await RecoveryErasureJournal.create(path);
+    journal.appendCheckpoint("2026-09-04T08:10:00.000Z");
+
+    await expect(journal.createSealedCheckpoint(checkpointPath, {
+      syncFile: async () => {
+        throw new Error("synthetic durable flush failure");
+      },
+      syncDirectory: async () => undefined
+    })).rejects.toThrow("synthetic durable flush failure");
+    await expect(access(checkpointPath)).rejects.toThrow();
+    journal.close();
+  });
+
+  it("rejects a permissive checkpoint directory", async () => {
+    const directory = await temporaryDirectory();
+    const path = join(directory, "journal.sqlite");
+    const checkpointDirectory = join(directory, "checkpoints");
+    await mkdir(checkpointDirectory, { mode: 0o755 });
+    const journal = await RecoveryErasureJournal.create(path);
+    journal.appendCheckpoint("2026-09-04T08:10:00.000Z");
+
+    await expect(journal.createSealedCheckpoint(
+      join(checkpointDirectory, "checkpoint.sqlite")
+    )).rejects.toThrow("mode-0700");
+    journal.close();
   });
 });

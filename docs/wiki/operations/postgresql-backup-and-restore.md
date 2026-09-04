@@ -71,6 +71,18 @@ first live journal and sealed checkpoint were verified offline through their
 exact completeness cutoff. Both directories are mode `0700`; both SQLite files
 are regular owner files mode `0600`.
 
+The repository now defines the unattended non-empty synchronization path. A
+root-owned systemd timer runs a one-shot, non-root container from the active
+immutable API image. The runner passes the existing root-owned API environment
+file directly to Docker and bind-mounts the owner-only host journal before the
+command starts. It requires the existing live journal, validates fixed
+ownership and modes, and fails without acknowledging PostgreSQL when storage is
+missing, unsafe, corrupt, or unwritable. The verified deployment controller
+installs or refreshes these versioned assets only after a successful normal
+deployment; no VM wrapper edit is part of a release. Staging activation and
+runtime verification still require their separately approved deployment and VM
+operations.
+
 Every restore stays isolated and unready until a sealed journal checkpoint is
 proven complete through the owner-approved erasure cutoff and replayed. Restore
 suppression follows accepted intent even if completion is absent. A missing,
@@ -111,13 +123,14 @@ This is a bootstrap-only exception. Never use temporary container storage plus
 post-sync copying when at least one erasure request exists: PostgreSQL could be
 acknowledged before the durable host copy exists.
 
-Every future non-empty sync must bind the host journal directory directly at
-the CLI `--journal` and `--checkpoint` paths before the command starts. Run the
-existing API image with its existing database identity; do not copy credentials
-into a second file or print container environment. If direct mounting or
-credential access is unavailable, stop: the request remains quarantined and the
-worker remains fail-closed. Use a new checkpoint path for every sync; existing
-checkpoints are never overwritten.
+For unattended operation, `sync-pending` checks for unacknowledged accepted or
+completed events under a PostgreSQL advisory lock. An empty queue creates no
+checkpoint. A non-empty queue receives an internally generated UTC-plus-UUID
+path opened exclusively, so an existing checkpoint cannot be replaced. The
+command flushes the checkpoint file and parent directory and verifies the
+sealed copy before writing acknowledgement timestamps. Any failure leaves the
+request quarantined and the erasure worker fail-closed. The long-lived API has
+no journal mount, and the timer does not create a second database identity.
 
 Inspect a sealed checkpoint without database access:
 
@@ -172,6 +185,10 @@ verified manual backup remains on the VM.
   sealed completeness checkpoint. The running API kept the same container ID
   and start time, remained healthy, and had zero restarts; no compose, deploy,
   migration, PostgreSQL configuration, or port change occurred.
+- TASK-0100 added the repository-managed systemd one-shot/timer, direct-mount
+  runner, pending-only journal command, durable checkpoint boundary, advisory
+  serialization, and CI contracts. Independent Quality accepted the source;
+  no deployment or VM operation was performed as part of that review.
 
 ## Decisions
 
@@ -186,8 +203,8 @@ verified manual backup remains on the VM.
 
 ## Open questions
 
-- A direct host-mounted execution path for future non-empty journal syncs before
-  direct Garmin ingestion processes real erasure requests.
+- Deployment and runtime verification of the repository-managed journal timer
+  on staging before direct Garmin ingestion processes real erasure requests.
 - A future finite backup retention policy and journal safety margin.
 - Independent off-host or immutable storage for VM-loss protection.
 
@@ -199,3 +216,4 @@ verified manual backup remains on the VM.
 - [Recovery retention and erasure ADR](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)
 - [Independent typed Recovery erasure journal ADR](../../adr/20260904-use-independent-typed-recovery-erasure-journal.md)
 - [Temporary same-host Recovery erasure journal ADR](../../adr/20260904-temporarily-use-same-host-recovery-erasure-journal.md)
+- [Automated Recovery erasure journal synchronization ADR](../../adr/20260904-automate-recovery-erasure-journal-with-root-scheduled-one-shot.md)

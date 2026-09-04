@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 
 import { createDatabase } from "../database/context.js";
@@ -6,7 +8,10 @@ import {
   inspectRecoveryErasureJournal,
   synchronizeRecoveryErasureJournal
 } from "../recovery/recovery-erasure-journal-sync.js";
-import { RecoveryErasureJournal } from "../recovery/recovery-erasure-journal.js";
+import {
+  assertPrivateRecoveryErasureJournalDirectory,
+  RecoveryErasureJournal
+} from "../recovery/recovery-erasure-journal.js";
 import { RecoveryRepository } from "../storage/recovery-repository.js";
 
 function required(value: string | undefined, name: string): string {
@@ -29,6 +34,11 @@ function database() {
   });
 }
 
+function uniqueCheckpointPath(directory: string): string {
+  const timestamp = new Date().toISOString().replaceAll(/[-:.]/g, "");
+  return join(directory, `checkpoint-${timestamp}-${randomUUID()}.sqlite`);
+}
+
 /** Synchronizes, inspects, or applies the independent typed erasure journal. */
 async function main(): Promise<void> {
   const { values } = parseArgs({
@@ -36,16 +46,20 @@ async function main(): Promise<void> {
       action: { type: "string" },
       journal: { type: "string" },
       checkpoint: { type: "string" },
+      "checkpoint-directory": { type: "string" },
       "required-through": { type: "string" }
     }
   });
-  if (values.action !== "sync" && values.action !== "inspect" && values.action !== "apply") {
-    throw new Error("--action must be sync, inspect, or apply");
+  if (values.action !== "sync" && values.action !== "sync-pending"
+    && values.action !== "inspect" && values.action !== "apply") {
+    throw new Error("--action must be sync, sync-pending, inspect, or apply");
   }
   const journalPath = required(values.journal, "--journal");
 
   if (values.action === "inspect") {
-    if (values.checkpoint) throw new Error("Inspect does not accept --checkpoint");
+    if (values.checkpoint || values["checkpoint-directory"]) {
+      throw new Error("Inspect does not accept checkpoint output options");
+    }
     const verified = await inspectRecoveryErasureJournal(
       journalPath,
       values["required-through"]
@@ -56,10 +70,38 @@ async function main(): Promise<void> {
     return;
   }
 
+  if (values.action === "sync-pending") {
+    if (values.checkpoint || values["required-through"]) {
+      throw new Error("Sync-pending accepts only --journal and --checkpoint-directory");
+    }
+    const checkpointDirectory = required(
+      values["checkpoint-directory"],
+      "--checkpoint-directory"
+    );
+    await assertPrivateRecoveryErasureJournalDirectory(checkpointDirectory);
+    const context = database();
+    try {
+      const result = await synchronizeRecoveryErasureJournal(
+        context.pool,
+        journalPath,
+        uniqueCheckpointPath(checkpointDirectory),
+        { onlyIfPending: true }
+      );
+      process.stdout.write(result.checkpointCreated
+        ? `Recovery erasure journal checkpoint sealed (${result.acceptedCount} accepted, ${result.completedCount} completed, complete through ${result.completeThrough}).\n`
+        : "Recovery erasure journal has no pending acknowledgements.\n");
+    } finally {
+      await context.pool.end();
+    }
+    return;
+  }
+
   const context = database();
   try {
     if (values.action === "apply") {
-      if (values.checkpoint) throw new Error("Apply does not accept --checkpoint");
+      if (values.checkpoint || values["checkpoint-directory"]) {
+        throw new Error("Apply does not accept checkpoint output options");
+      }
       const verified = await applyRecoveryErasureJournal(
         new RecoveryRepository(context),
         journalPath,
@@ -74,6 +116,9 @@ async function main(): Promise<void> {
     if (values["required-through"]) {
       throw new Error("Sync does not accept --required-through");
     }
+    if (values["checkpoint-directory"]) {
+      throw new Error("Sync does not accept --checkpoint-directory");
+    }
     let journal: RecoveryErasureJournal;
     try {
       journal = await RecoveryErasureJournal.open(journalPath);
@@ -81,18 +126,15 @@ async function main(): Promise<void> {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       journal = await RecoveryErasureJournal.create(journalPath);
     }
-    try {
-      const result = await synchronizeRecoveryErasureJournal(
-        context.pool,
-        journal,
-        required(values.checkpoint, "--checkpoint")
-      );
-      process.stdout.write(
-        `Recovery erasure journal checkpoint sealed (${result.acceptedCount} accepted, ${result.completedCount} completed, complete through ${result.completeThrough}).\n`
-      );
-    } finally {
-      journal.close();
-    }
+    journal.close();
+    const result = await synchronizeRecoveryErasureJournal(
+      context.pool,
+      journalPath,
+      required(values.checkpoint, "--checkpoint")
+    );
+    process.stdout.write(
+      `Recovery erasure journal checkpoint sealed (${result.acceptedCount} accepted, ${result.completedCount} completed, complete through ${result.completeThrough}).\n`
+    );
   } finally {
     await context.pool.end();
   }
@@ -104,4 +146,3 @@ main().catch((error: unknown) => {
   );
   process.exitCode = 1;
 });
-

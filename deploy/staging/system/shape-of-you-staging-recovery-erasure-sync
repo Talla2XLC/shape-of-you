@@ -1,0 +1,103 @@
+#!/bin/sh
+set -eu
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+DEPLOY_ROOT=/opt/shape-of-you/staging
+RELEASE_ENV=$DEPLOY_ROOT/current/release.env
+RUNTIME_ENV=/etc/shape-of-you/staging/api.env
+JOURNAL_OWNER=talla2xlc
+JOURNAL_ROOT=/home/talla2xlc/recovery-erasure-journal
+JOURNAL_FILE=$JOURNAL_ROOT/live.sqlite
+CHECKPOINT_DIRECTORY=$JOURNAL_ROOT/checkpoints
+CONTAINER_JOURNAL_ROOT=/var/lib/shape-of-you/recovery-erasure-journal
+DATABASE_NETWORK=shape-of-you-staging_database_access
+LOCK_FILE=/run/shape-of-you-staging.lock
+
+fail() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+
+private_directory() {
+  path=$1
+  expected_uid=$2
+  expected_gid=$3
+  [ -d "$path" ] && [ ! -L "$path" ] ||
+    fail 'Recovery erasure journal directory is missing or unsafe.'
+  [ "$(stat -c %u "$path")" = "$expected_uid" ] ||
+    fail 'Recovery erasure journal directory has the wrong owner.'
+  [ "$(stat -c %g "$path")" = "$expected_gid" ] ||
+    fail 'Recovery erasure journal directory has the wrong group.'
+  [ "$(stat -c %a "$path")" = 700 ] ||
+    fail 'Recovery erasure journal directory must use mode 0700.'
+}
+
+private_file() {
+  path=$1
+  expected_uid=$2
+  expected_gid=$3
+  [ -f "$path" ] && [ ! -L "$path" ] ||
+    fail 'Recovery erasure live journal is missing or unsafe.'
+  [ "$(stat -c %u "$path")" = "$expected_uid" ] ||
+    fail 'Recovery erasure live journal has the wrong owner.'
+  [ "$(stat -c %g "$path")" = "$expected_gid" ] ||
+    fail 'Recovery erasure live journal has the wrong group.'
+  [ "$(stat -c %a "$path")" = 600 ] ||
+    fail 'Recovery erasure live journal must use mode 0600.'
+}
+
+[ "$(id -u)" -eq 0 ] || fail 'Run as root.'
+[ "$#" -eq 0 ] || fail 'Recovery erasure journal sync accepts no arguments.'
+command -v docker >/dev/null 2>&1 || fail 'docker is required.'
+command -v flock >/dev/null 2>&1 || fail 'flock is required.'
+command -v stat >/dev/null 2>&1 || fail 'stat is required.'
+[ -f "$RELEASE_ENV" ] && [ ! -L "$RELEASE_ENV" ] ||
+  fail 'Active staging release metadata is unavailable.'
+[ -f "$RUNTIME_ENV" ] && [ ! -L "$RUNTIME_ENV" ] ||
+  fail 'API runtime identity is unavailable.'
+[ "$(stat -c %u "$RUNTIME_ENV")" = 0 ] || fail 'API runtime identity must be root-owned.'
+[ "$(stat -c %a "$RUNTIME_ENV")" = 600 ] || fail 'API runtime identity must use mode 0600.'
+
+# release.env is root-controlled deployment metadata and contains no credentials.
+# shellcheck disable=SC1090
+. "$RELEASE_ENV"
+: "${API_IMAGE:?API_IMAGE is required}"
+: "${API_DIGEST:?API_DIGEST is required}"
+printf '%s\n' "$API_IMAGE" |
+  grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/shape-of-you-api$' ||
+  fail 'Active API image is invalid.'
+printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' ||
+  fail 'Active API digest is invalid.'
+
+journal_uid=$(id -u "$JOURNAL_OWNER") || fail 'Recovery erasure journal owner is unavailable.'
+journal_gid=$(id -g "$JOURNAL_OWNER") || fail 'Recovery erasure journal owner group is unavailable.'
+private_directory "$JOURNAL_ROOT" "$journal_uid" "$journal_gid"
+private_directory "$CHECKPOINT_DIRECTORY" "$journal_uid" "$journal_gid"
+private_file "$JOURNAL_FILE" "$journal_uid" "$journal_gid"
+docker network inspect "$DATABASE_NETWORK" >/dev/null 2>&1 ||
+  fail 'API database access network is unavailable.'
+
+exec 9>"$LOCK_FILE"
+if ! flock -n 9; then
+  printf '%s\n' 'Recovery erasure journal sync skipped because staging deployment is active.'
+  exit 0
+fi
+
+docker run --rm --pull never --init \
+  --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=16m,mode=0700 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --user "$journal_uid:$journal_gid" \
+  --memory 192m \
+  --pids-limit 64 \
+  --network "$DATABASE_NETWORK" \
+  --add-host host.docker.internal:host-gateway \
+  --env-file "$RUNTIME_ENV" \
+  --mount "type=bind,src=$JOURNAL_ROOT,dst=$CONTAINER_JOURNAL_ROOT" \
+  "$API_IMAGE@$API_DIGEST" \
+  node dist/commands/manage-recovery-erasure-journal.js \
+  --action sync-pending \
+  --journal "$CONTAINER_JOURNAL_ROOT/live.sqlite" \
+  --checkpoint-directory "$CONTAINER_JOURNAL_ROOT/checkpoints"
+

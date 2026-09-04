@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { chmod, lstat, open, rm } from "node:fs/promises";
 import { backup, DatabaseSync } from "node:sqlite";
+import { dirname } from "node:path";
 
 import type { RecoveryErasureReason } from "@shape-of-you/contracts";
 
@@ -85,6 +86,38 @@ async function assertPrivateRegularFile(path: string): Promise<void> {
     throw new Error("Recovery erasure journal must be a regular mode-0600 file");
   }
 }
+
+/** Verifies that a journal directory is private, real, and safe for new files. */
+export async function assertPrivateRecoveryErasureJournalDirectory(
+  path: string
+): Promise<void> {
+  const metadata = await lstat(path);
+  if (metadata.isSymbolicLink() || !metadata.isDirectory() || (metadata.mode & 0o077) !== 0) {
+    throw new Error("Recovery erasure journal directory must be a real mode-0700 directory");
+  }
+}
+
+/** Injectable durability boundary used before a checkpoint can be acknowledged. */
+export interface RecoveryErasureCheckpointDurability {
+  /** Flushes all checkpoint file data and metadata to durable storage. */
+  readonly syncFile: (path: string) => Promise<void>;
+  /** Flushes the checkpoint directory entry to durable storage. */
+  readonly syncDirectory: (path: string) => Promise<void>;
+}
+
+async function syncPath(path: string): Promise<void> {
+  const handle = await open(path, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+const checkpointDurability: RecoveryErasureCheckpointDurability = {
+  syncFile: syncPath,
+  syncDirectory: syncPath
+};
 
 function initialize(database: DatabaseSync, journalId: string, createdAt: string): void {
   database.exec(`
@@ -265,16 +298,32 @@ export class RecoveryErasureJournal implements Disposable {
     });
   }
 
-  /** Creates a new mode-0600 SQLite backup containing the current verified chain. */
-  public async createSealedCheckpoint(outputPath: string): Promise<void> {
+  /**
+   * Creates and durably publishes a new mode-0600 SQLite backup.
+   *
+   * @param outputPath - New checkpoint path; an existing path is never replaced.
+   * @param durability - File and directory flush boundary, injectable for fault tests.
+   */
+  public async createSealedCheckpoint(
+    outputPath: string,
+    durability: RecoveryErasureCheckpointDurability = checkpointDurability
+  ): Promise<void> {
     this.verifyChain();
+    const outputDirectory = dirname(outputPath);
+    await assertPrivateRecoveryErasureJournalDirectory(outputDirectory);
     const handle = await open(outputPath, "wx", 0o600);
     await handle.close();
     try {
       await backup(this.database, outputPath);
       await chmod(outputPath, 0o600);
+      await durability.syncFile(outputPath);
+      await durability.syncDirectory(outputDirectory);
       const checkpoint = await RecoveryErasureJournal.open(outputPath, { readOnly: true });
-      checkpoint.close();
+      try {
+        checkpoint.verify();
+      } finally {
+        checkpoint.close();
+      }
     } catch (error) {
       await rm(outputPath, { force: true });
       throw error;

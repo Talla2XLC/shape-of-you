@@ -30,6 +30,9 @@ jobs:
       - name: Test stable deployment bootstrap contract
         run: sh deploy/staging/scripts/tests/deployment-bootstrap-contract.sh
 
+      - name: Test Recovery erasure journal synchronization contract
+        run: sh deploy/staging/scripts/tests/recovery-erasure-sync-contract.sh
+
       - name: Test frontend edge contract
         run: sh deploy/staging/scripts/tests/frontend-edge-contract.sh
 

@@ -1,0 +1,30 @@
+[Unit]
+Description=Synchronize the Shape of You Recovery erasure journal
+Documentation=https://github.com/Talla2XLC/shape-of-you
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+ExecStart=/bin/sh /usr/local/libexec/shape-of-you-staging-recovery-erasure-sync
+TimeoutStartSec=5min
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+ReadWritePaths=/run
+
