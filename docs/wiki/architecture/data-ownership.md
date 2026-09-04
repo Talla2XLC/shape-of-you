@@ -106,7 +106,7 @@ facts and owns no lifecycle or historical authority.
 - [Identity ADR](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Shared-reference ADR](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
 - [Recovery retention and erasure ADR](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)
-- [Independent typed Recovery erasure journal ADR](../../adr/20260904-use-independent-typed-recovery-erasure-journal.md)
+- [Temporary same-host Recovery erasure journal ADR](../../adr/20260904-temporarily-use-same-host-recovery-erasure-journal.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Progress overview API](../api/progress-overview.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

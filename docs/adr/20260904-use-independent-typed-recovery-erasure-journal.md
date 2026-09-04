@@ -2,10 +2,10 @@
 id: use-independent-typed-recovery-erasure-journal
 kind: adr
 title: "Хранить принятые и завершённые удаления Recovery в независимом типизированном журнале"
-status: accepted
+status: superseded
 date: 2026-09-04
 supersedes: []
-superseded_by: null
+superseded_by: "temporarily-use-same-host-recovery-erasure-journal"
 tags:
   - architecture
   - privacy
@@ -15,6 +15,11 @@ tags:
 ---
 
 # Хранить принятые и завершённые удаления Recovery в независимом типизированном журнале
+
+Это решение superseded временным owner-approved same-host exception в
+ADR `20260904-temporarily-use-same-host-recovery-erasure-journal`. Typed journal
+и fail-closed restore contract сохранены, но storage failure boundary временно
+ослаблен и больше не защищает от потери всей PostgreSQL VM.
 
 ## Context
 
@@ -148,4 +153,3 @@ fail-closed. Общий cluster и его backup policy drill не изменя�
 - [Recovery and Readiness](../wiki/domain/recovery-and-readiness.md)
 - [Staging PostgreSQL backup and restore](../wiki/operations/postgresql-backup-and-restore.md)
 - [Data ownership](../wiki/architecture/data-ownership.md)
-

@@ -17,8 +17,9 @@ tags:
 Implemented Recovery separates shared device definitions, Person-owned typed
 observations, and reproducible readiness/load-risk assessments. Real device
 data remains forbidden until the implemented authenticated-erasure lifecycle is
-released with approved independent journal storage and an owner-backed staging
-restore drill.
+released with a provisioned and verified journal checkpoint. The owner-backed
+staging restore drill is complete; the owner temporarily accepts same-host
+journal storage for logical-restore protection only.
 
 ## Content
 
@@ -54,15 +55,21 @@ Exact `retainUntil` expiry uses the same path. Manual observations without a
 connection and shared provider/model definitions remain.
 
 The restore authority is a typed append-only SQLite journal outside the
-restorable PostgreSQL and release boundaries. It records accepted intent before
-physical deletion and completion evidence afterward. Restore replay follows
-accepted intent even when completion is absent, so a crash cannot make an old
-backup authoritative again. Schema, file permissions, hash-chain integrity, and
-the required completeness cutoff must verify before a restored database can
-serve traffic. The repository includes sync/inspect/apply commands and a real
-isolated PostgreSQL 17 `pg_dump`/`pg_restore` drill on a private non-`5431`
-port. A same-host journal or test checkpoint alone is not production-ready; an
-owner-approved immutable independent copy is still required.
+restorable PostgreSQL, release, and manual-backup directories. It records
+accepted intent before physical deletion and completion evidence afterward.
+Restore replay follows accepted intent even when completion is absent, so a
+crash cannot make an old backup authoritative again. Schema, file permissions,
+hash-chain integrity, and the required completeness cutoff must verify before a
+restored database can serve traffic. The repository includes sync/inspect/apply
+commands and a real isolated PostgreSQL 17 `pg_dump`/`pg_restore` drill on a
+private non-`5431` port.
+
+The temporary owner-approved storage boundary is a separate owner-controlled
+directory on the PostgreSQL VM with mode `0700` and journal/checkpoint files
+with mode `0600`. Markers are retained indefinitely while manual backups have
+no deletion deadline. This protects against restoring an old logical database
+dump but not against loss, compromise, or filesystem rollback of the whole VM.
+An off-host or immutable copy remains the recommended target state.
 
 Immutable ReadinessAssessment/LoadRiskAssessment pin exact policy version,
 analysis window, evidence checksum, and typed observation/training links.
@@ -78,14 +85,15 @@ scores. Assessment never mutates Training.
 - [Recovery ADR](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md).
 - [Wearable sleep score and Recovery MCP input](../../adr/20260831-model-wearable-sleep-score-and-normalize-recovery-mcp-input.md).
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md).
-- [Independent typed Recovery erasure journal](../../adr/20260904-use-independent-typed-recovery-erasure-journal.md).
+- [Temporary same-host Recovery erasure journal](../../adr/20260904-temporarily-use-same-host-recovery-erasure-journal.md).
 
 ## Open questions
 
 - Real provider credentials and ingestion authentication.
-- Cluster-owner approval of journal retention, protected external immutable
-  storage, maximum backup lifetime, and a drill against the actual staging
-  backup topology.
+- Provisioning and verification of the first same-host live journal and sealed
+  completeness checkpoint before direct Garmin ingestion.
+- A finite backup lifetime and off-host or immutable journal copy for VM-loss
+  protection.
 
 ## Related material
 
