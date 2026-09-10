@@ -28,6 +28,10 @@ import { DailyContextNoteModule } from "../daily-context-notes/daily-context-not
 import { ProgressOverviewModule } from "../progress-overview/progress-overview.module.js";
 import { ChatAssistantModule } from "../chat-assistant/chat-assistant.module.js";
 import type { ChatAssistantConversationBindingStore } from "../storage/chat-assistant-conversation-binding-repository.js";
+import type { IntegrationStore } from "../integrations/integration-store.js";
+import type { HealthDataProvider } from "../integrations/provider.js";
+import type { ConnectionCredentialCipher } from "../integrations/credential-cipher.js";
+import { IntegrationModule } from "../integrations/integration.module.js";
 import {
   PERSON_CONTEXT,
   BODY_MEASUREMENT_SESSION_STORE,
@@ -42,7 +46,11 @@ import {
   READINESS_PROBE,
   WEIGHT_MEASUREMENT_STORE,
   DAILY_CONTEXT_NOTE_STORE,
-  CHAT_ASSISTANT_CONVERSATION_BINDING_STORE
+  CHAT_ASSISTANT_CONVERSATION_BINDING_STORE,
+  INTEGRATION_STORE,
+  INTEGRATION_PROVIDER,
+  INTEGRATION_CIPHER,
+  INTEGRATION_WORKER_ENABLED
 } from "./tokens.js";
 
 /** Explicit runtime dependencies composed before Nest creates the module graph. */
@@ -77,6 +85,14 @@ export interface AppModuleOptions {
   readonly readinessProbe: ReadinessProbe;
   /** Database context available to the application, when configured. */
   readonly database: DatabaseContext | undefined;
+  /** Durable state for external account integrations, null when disabled. */
+  readonly integrationStore: IntegrationStore | null;
+  /** Selected provider transport, null until runtime configuration enables it. */
+  readonly integrationProvider: HealthDataProvider | null;
+  /** Runtime-only credential encryption boundary. */
+  readonly integrationCipher: ConnectionCredentialCipher | null;
+  /** Whether the API process starts bounded provider reconciliation. */
+  readonly integrationWorkerEnabled: boolean;
   /** Whether application shutdown must close the supplied database context. */
   readonly ownsDatabase: boolean;
 }
@@ -144,6 +160,10 @@ class RuntimeDependenciesModule {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
+        { provide: INTEGRATION_STORE, useValue: options.integrationStore },
+        { provide: INTEGRATION_PROVIDER, useValue: options.integrationProvider },
+        { provide: INTEGRATION_CIPHER, useValue: options.integrationCipher },
+        { provide: INTEGRATION_WORKER_ENABLED, useValue: options.integrationWorkerEnabled },
         {
           provide: DatabaseLifecycle,
           useValue: new DatabaseLifecycle(
@@ -167,6 +187,10 @@ class RuntimeDependenciesModule {
         CHAT_ASSISTANT_CONVERSATION_BINDING_STORE,
         WEIGHT_MEASUREMENT_STORE,
         READINESS_PROBE,
+        INTEGRATION_STORE,
+        INTEGRATION_PROVIDER,
+        INTEGRATION_CIPHER,
+        INTEGRATION_WORKER_ENABLED,
         DatabaseLifecycle
       ]
     };
@@ -199,7 +223,8 @@ export class AppModule {
         DailyContextNoteModule,
         DailyProjectionModule,
         ProgressOverviewModule,
-        ChatAssistantModule
+        ChatAssistantModule,
+        IntegrationModule
       ]
     };
   }

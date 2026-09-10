@@ -387,6 +387,13 @@ button.button {
   gap: 1.25rem;
 }
 
+.connection-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  margin-top: 24px;
+}
+
 .privacy-warning {
   border: 1px solid color-mix(in srgb, var(--danger, #ef6a6a) 55%, transparent);
   border-radius: 1rem;
@@ -864,6 +871,29 @@ button.button {
   .site-footer,
   .main-content {
     width: min(100% - 28px, 1180px);
+  }
+
+  .site-header {
+    min-height: 0;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+    padding: 16px 0;
+  }
+
+  .header-links {
+    width: 100%;
+    flex-wrap: wrap;
+    column-gap: 1rem;
+    row-gap: 0.65rem;
+  }
+
+  .connection-actions .button {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    padding-block: 12px;
+    text-align: center;
   }
 
   .site-footer,

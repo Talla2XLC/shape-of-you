@@ -7,7 +7,7 @@ export const SourceChannelSchema = {
 
 export const PersistedSourceChannelSchema = {
   type: "string",
-  enum: ["manual", "google_sheets", "import", "device"]
+  enum: ["manual", "google_sheets", "import", "device", "account"]
 } as const;
 
 export const SourceReferenceInputSchema = {
@@ -94,7 +94,7 @@ export const SourceReferenceSchema = {
 /** Persisted public provenance without a private raw source snapshot. */
 export interface SourceReference {
   readonly id: string;
-  readonly channel: "manual" | "google_sheets" | "import" | "device";
+  readonly channel: "manual" | "google_sheets" | "import" | "device" | "account";
   readonly externalSystem: string | null;
   readonly externalRecordId: string | null;
   readonly occurredAt: string | null;

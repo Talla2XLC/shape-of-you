@@ -4,6 +4,7 @@ import {
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { randomBytes } from "node:crypto";
 
 import type { AppConfig } from "@shape-of-you/config";
 import { buildApp, getFastifyInstance } from "../src/app.js";
@@ -14,6 +15,12 @@ import {
   exportRecoveryErasureManifest
 } from "../src/recovery/recovery-erasure-manifest.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
+import { IntegrationRepository } from "../src/storage/integration-repository.js";
+import { TrainingRepository } from "../src/storage/training-repository.js";
+import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
+import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
+import { IntegrationService } from "../src/integrations/integration.service.js";
+import { SyntheticPersonContext } from "../src/application/person-context.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
@@ -23,6 +30,8 @@ let databaseUrl: string;
 
 const personA = "00000000-0000-4000-8000-000000000001";
 const personB = "00000000-0000-4000-8000-000000000002";
+const personC = "00000000-0000-4000-8000-000000000003";
+const personD = "00000000-0000-4000-8000-000000000004";
 
 async function acknowledgeAcceptedErasure(requestId: string): Promise<void> {
   await database.pool.query(
@@ -53,8 +62,8 @@ beforeAll(async () => {
   await runMigrations(databaseUrl);
   database = createDatabase(config);
   await database.pool.query(
-    "insert into persons (id, kind, status) values ($1, 'real', 'active')",
-    [personB]
+    "insert into persons (id, kind, status) values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active')",
+    [personB, personC, personD]
   );
   repository = new RecoveryRepository(database);
   app = await buildApp({ config, database });
@@ -67,6 +76,116 @@ afterAll(async () => {
 });
 
 describe("Recovery PostgreSQL vertical", () => {
+  it("imports account wellness through IntegrationService with no-op, A-B-A, field removal and disconnect stop", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const provider = new FakeHealthDataProvider();
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const id = "00000000-0000-4000-8000-000000000121";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000122";
+    const consentId = "00000000-0000-4000-8000-000000000123";
+    const credential = cipher.encrypt("wellness-token", `intervals_icu:${personD}:${id}`);
+    await integrations.activate({ id, recoveryConnectionId, consentId, personId: personD, externalUserId: "athlete-d", credential, authorizationStartedAt: new Date(Date.now() - 1_000) });
+    const service = new IntegrationService(new SyntheticPersonContext(personD), integrations, provider, cipher, repository, training);
+    const connection = (await integrations.findActive(personD))!;
+    const wellness = { identity: "2026-09-06", localDate: "2026-09-06", timezone: "UTC", totalSleepMinutes: 400, sleepScore: null, restingHeartRate: null, hrvRmssd: null, bodyBattery: null };
+
+    provider.reconciliation = { wellness: [wellness], activities: [] };
+    await service.reconcileConnection(connection);
+    await service.reconcileConnection(connection);
+    provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: 450 }], activities: [] };
+    await service.reconcileConnection(connection);
+    provider.reconciliation = { wellness: [wellness], activities: [] };
+    await service.reconcileConnection(connection);
+    await service.reconcileConnection(connection);
+    provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: null }], activities: [] };
+    await service.reconcileConnection(connection);
+
+    const history = await database.pool.query<{ count: string; withdrawals: string }>(
+      "select count(*)::text as count, count(withdrawn_at)::text as withdrawals from recovery_observations where person_id = $1 and connection_id = $2",
+      [personD, recoveryConnectionId]
+    );
+    expect(history.rows[0]).toEqual({ count: "4", withdrawals: "1" });
+    expect((await repository.listObservations(personD, { limit: 50 })).items).toHaveLength(0);
+    await integrations.beginDisconnect(personD, "test disconnect");
+    provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: 500 }], activities: [] };
+    await service.reconcileConnection(connection);
+    expect((await database.pool.query("select 1 from recovery_observations where person_id = $1", [personD])).rowCount).toBe(4);
+
+    await database.pool.query("update integration_connections set next_attempt_at = now() where id = $1", [id]);
+    const firstRetry = await integrations.claimRemoteDisconnectDue("worker-timeout", 30_000);
+    expect(firstRetry?.id).toBe(id);
+    provider.nextFailure = "provider_timeout";
+    await service.retryRemoteDisconnect(firstRetry!);
+    expect(await integrations.status(personD)).toMatchObject({ lifecycle: "disconnected", failureCode: "provider_timeout" });
+    await database.pool.query("update integration_connections set next_attempt_at = now() where id = $1", [id]);
+    const secondRetry = await integrations.claimRemoteDisconnectDue("worker-retry", 30_000);
+    await service.retryRemoteDisconnect(secondRetry!);
+    expect(await integrations.claimRemoteDisconnectDue("worker-finished", 30_000)).toBeNull();
+    expect(await integrations.status(personD)).toMatchObject({ lifecycle: "disconnected", failureCode: null });
+    const erasure = await repository.requestErasure(personD, recoveryConnectionId, "person-d-erasure", "retention_expired", null);
+    expect(erasure.status).toBe("pending");
+    await expect(integrations.activate({ id, recoveryConnectionId, consentId: "00000000-0000-4000-8000-000000000124", personId: personD, externalUserId: "athlete-d", credential, authorizationStartedAt: new Date() }))
+      .rejects.toThrow("erasure must complete");
+  });
+
+  it("persists encrypted Intervals state and immutable activity corrections", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const id = "00000000-0000-4000-8000-000000000111";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000112";
+    const consentId = "00000000-0000-4000-8000-000000000113";
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const credential = cipher.encrypt("opaque-provider-token", `intervals_icu:${personC}:${id}`);
+
+    await integrations.createAuthorization(personC, "a".repeat(64), "/connections", new Date(Date.now() + 60_000));
+    expect(await integrations.consumeAuthorization("a".repeat(64), new Date())).toMatchObject({ personId: personC, returnTo: "/connections" });
+    expect(await integrations.consumeAuthorization("a".repeat(64), new Date())).toBeNull();
+    await integrations.createAuthorization(personC, "d".repeat(64), "/connections", new Date(Date.now() - 1));
+    expect(await integrations.consumeAuthorization("d".repeat(64), new Date())).toBeNull();
+    await integrations.activate({ id, recoveryConnectionId, consentId, personId: personC, externalUserId: "athlete-c", credential, authorizationStartedAt: new Date(Date.now() - 1_000) });
+    expect(await integrations.status(personC)).toMatchObject({ lifecycle: "active", recoveryConnectionId });
+
+    const connection = await integrations.findActive(personC);
+    expect(connection).not.toBeNull();
+    const activity = {
+      identity: "activity-c", occurredAt: "2026-09-07T06:00:00.000Z", localDate: "2026-09-07", timezone: "UTC",
+      name: "Run", durationSeconds: 3600, distanceMeters: 10_000, trainingLoad: 80,
+      averageHeartRate: 145, maximumHeartRate: 175, deviceName: "Garmin Test", garminAttributed: true
+    };
+    const trainingInput = (value: typeof activity, checksum: string) => ({
+      connectionId: connection!.id, personId: connection!.personId, providerIdentity: value.identity,
+      normalizedChecksum: checksum, occurredAt: value.occurredAt, localDate: value.localDate, timezone: value.timezone,
+      name: value.name, durationSeconds: value.durationSeconds, distanceMeters: value.distanceMeters,
+      trainingLoad: value.trainingLoad, averageHeartRate: value.averageHeartRate, maximumHeartRate: value.maximumHeartRate,
+      deviceName: value.deviceName, sourceProvider: "intervals_icu", garminAttributed: value.garminAttributed
+    });
+    expect(await training.importExternalActivity(trainingInput(activity, "b".repeat(64)))).toBe("created");
+    expect(await training.importExternalActivity(trainingInput(activity, "b".repeat(64)))).toBe("unchanged");
+    expect(await training.importExternalActivity(trainingInput({ ...activity, durationSeconds: 3660 }, "c".repeat(64)))).toBe("corrected");
+    expect(await training.importExternalActivity(trainingInput(activity, "b".repeat(64)))).toBe("corrected");
+    const rows = await database.pool.query<{ count: string; garmin: boolean }>(
+      "select count(*)::text as count, bool_and(garmin_attributed) as garmin from integration_activity_facts where connection_id = $1",
+      [id]
+    );
+    expect(rows.rows[0]).toEqual({ count: "3", garmin: true });
+    expect(await training.listExternalActivities(personC)).toHaveLength(1);
+
+    const disconnect = await integrations.beginDisconnect(personC, "test disconnect");
+    expect(disconnect?.id).toBe(id);
+    expect(await integrations.status(personC)).toMatchObject({ lifecycle: "disconnected" });
+    await expect(integrations.activate({ id, recoveryConnectionId, consentId: "00000000-0000-4000-8000-000000000114", personId: personC, externalUserId: "athlete-c", credential, authorizationStartedAt: new Date(0) }))
+      .rejects.toThrow("superseded by disconnect");
+    expect(await training.importExternalActivity(trainingInput({ ...activity, durationSeconds: 3_720 }, "e".repeat(64)))).toBe("stopped");
+    expect((await database.pool.query("select 1 from integration_activity_facts where connection_id = $1", [id])).rowCount).toBe(3);
+    await integrations.completeRemoteDisconnect(id);
+    const erasure = await repository.requestErasure(personC, recoveryConnectionId, "activity-erasure", "retention_expired", null);
+    await acknowledgeAcceptedErasure(erasure.id);
+    const job = await repository.claimErasure("activity-erasure-worker", 30_000);
+    await repository.completeErasure(job!);
+    expect(await training.listExternalActivities(personC)).toHaveLength(0);
+  });
+
   it("applies the additive Recovery migration on a clean schema", async () => {
     const clean = await database.pool.query<{ name: string | null }>(
       `select to_regclass('public.recovery_observations')::text as name

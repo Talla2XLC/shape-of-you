@@ -53,6 +53,7 @@ import {
   recoveryDeviceModelVersions,
   recoveryDevices,
   recoveryErasureRequests,
+  integrationConnections,
   recoveryMetricDetails,
   recoveryObservations,
   recoveryProviders,
@@ -133,6 +134,8 @@ export interface RecoveryStore {
   revokeConsent(personId: string, consentId: string, input: RevokeRecoveryConsent): Promise<RecoveryConsent>;
   createObservation(personId: string, input: CreateRecoveryObservation): Promise<CreatedRecoveryObservation>;
   correctObservation(personId: string, id: string, input: CorrectRecoveryObservation): Promise<CreatedRecoveryObservation>;
+  /** Appends an immutable terminal correction that removes a provider field from current projections. */
+  withdrawObservation(personId: string, id: string, dedupeKey: string, reason: string): Promise<CreatedRecoveryObservation>;
   findObservation(personId: string, id: string): Promise<RecoveryObservation | null>;
   listObservations(personId: string, query: ListRecoveryObservationsQuery): Promise<RecoveryObservationList>;
   /** Reads every current observation for one exact Person-local calendar date. */
@@ -367,30 +370,32 @@ export class RecoveryRepository implements RecoveryStore {
     };
   }
 
-  private async assertDeviceConsent(transaction: DatabaseTransaction, personId: string, input: CreateRecoveryObservation): Promise<void> {
-    if (input.sourceReference.channel !== "device") return;
-    const rows = await transaction
+  private async assertConnectedConsent(transaction: DatabaseTransaction, personId: string, input: CreateRecoveryObservation): Promise<void> {
+    if (input.sourceReference.channel !== "device" && input.sourceReference.channel !== "account") return;
+    const base = transaction
       .select({ consent: recoveryConsents })
       .from(recoveryConsents)
       .innerJoin(recoveryConnections, and(
         eq(recoveryConsents.connectionId, recoveryConnections.id),
         eq(recoveryConsents.personId, recoveryConnections.personId)
       ))
-      .innerJoin(recoveryDevices, eq(recoveryConnections.id, recoveryDevices.connectionId))
-      .innerJoin(recoveryDeviceCapabilities, eq(recoveryDevices.modelVersionId, recoveryDeviceCapabilities.modelVersionId))
       .innerJoin(recoveryConsentKinds, eq(recoveryConsents.id, recoveryConsentKinds.consentId))
-      .where(and(
+      .$dynamic();
+    const rows = await (input.sourceReference.channel === "device"
+      ? base.innerJoin(recoveryDevices, eq(recoveryConnections.id, recoveryDevices.connectionId))
+        .innerJoin(recoveryDeviceCapabilities, eq(recoveryDevices.modelVersionId, recoveryDeviceCapabilities.modelVersionId))
+      : base).where(and(
         eq(recoveryConsents.id, input.consentId!),
         eq(recoveryConsents.connectionId, input.connectionId!),
         eq(recoveryConsents.personId, personId),
         eq(recoveryConsents.status, "active"),
         eq(recoveryConnections.status, "active"),
         eq(recoveryConsentKinds.kind, input.kind),
-        eq(recoveryDeviceCapabilities.kind, input.kind),
+        ...(input.sourceReference.channel === "device" ? [eq(recoveryDeviceCapabilities.kind, input.kind)] : []),
         or(isNull(recoveryConsents.retainUntil), gte(recoveryConsents.retainUntil, new Date(input.observedUntil!)))
       )).limit(1);
     if (!rows[0]) {
-      throw new ConflictError("Device observation is not permitted by active consent and retention");
+      throw new ConflictError("Connected observation is not permitted by active consent and retention");
     }
   }
 
@@ -408,7 +413,7 @@ export class RecoveryRepository implements RecoveryStore {
     correction?: { readonly supersedesId: string; readonly reason: string }
   ): Promise<CreatedRecoveryObservation> {
     const time = validateRecoveryObservation(input);
-    await this.assertDeviceConsent(transaction, personId, input);
+    await this.assertConnectedConsent(transaction, personId, input);
     const source = await ensureSourceReference(transaction, personId, input.sourceReference);
     const inserted = await transaction.insert(recoveryObservations).values({
       personId,
@@ -495,6 +500,44 @@ export class RecoveryRepository implements RecoveryStore {
     });
   }
 
+  public withdrawObservation(personId: string, id: string, dedupeKey: string, reason: string): Promise<CreatedRecoveryObservation> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const originals = await transaction.select().from(recoveryObservations).where(and(
+        eq(recoveryObservations.id, id), eq(recoveryObservations.personId, personId), this.visibleObservation(transaction)
+      )).limit(1);
+      const original = originals[0];
+      if (!original) throw new NotFoundError("Recovery observation was not found");
+      const successor = await transaction.query.recoveryObservations.findFirst({ where: eq(recoveryObservations.supersedesId, id) });
+      if (successor) return { created: false, observation: await this.hydrateObservation(transaction, successor) };
+      const hydrated = await this.hydrateObservation(transaction, original);
+      const result = await this.insertObservation(transaction, personId, {
+        kind: hydrated.kind,
+        observedFrom: hydrated.observedFrom,
+        observedUntil: hydrated.observedUntil,
+        temporalPrecision: hydrated.temporalPrecision,
+        localDate: hydrated.localDate,
+        timezone: hydrated.timezone,
+        quality: hydrated.quality,
+        connectionId: hydrated.connectionId,
+        consentId: hydrated.consentId,
+        dedupeKey,
+        sourceReference: {
+          channel: hydrated.sourceReference.channel,
+          externalSystem: hydrated.sourceReference.externalSystem,
+          externalRecordId: hydrated.sourceReference.externalRecordId,
+          occurredAt: hydrated.sourceReference.occurredAt
+        },
+        detail: hydrated.detail,
+        reason
+      }, { supersedesId: id, reason });
+      if (result.created) {
+        await transaction.update(recoveryObservations).set({ withdrawnAt: new Date() }).where(eq(recoveryObservations.id, result.observation.id));
+      }
+      return result;
+    });
+  }
+
   public async findObservation(personId: string, id: string): Promise<RecoveryObservation | null> {
     return this.database.db.transaction(async (transaction) => {
       const rows = await transaction
@@ -503,6 +546,7 @@ export class RecoveryRepository implements RecoveryStore {
         .where(and(
           eq(recoveryObservations.id, id),
           eq(recoveryObservations.personId, personId),
+          isNull(recoveryObservations.withdrawnAt),
           this.visibleObservation(transaction)
         ))
         .limit(1);
@@ -515,6 +559,7 @@ export class RecoveryRepository implements RecoveryStore {
       const successor = alias(recoveryObservations, "recovery_observation_successor");
       const filters = [
         eq(recoveryObservations.personId, personId),
+        isNull(recoveryObservations.withdrawnAt),
         this.visibleObservation(transaction),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       ];
@@ -534,6 +579,7 @@ export class RecoveryRepository implements RecoveryStore {
       const rows = await transaction.select().from(recoveryObservations).where(and(
         eq(recoveryObservations.personId, personId),
         eq(recoveryObservations.localDate, localDate),
+        isNull(recoveryObservations.withdrawnAt),
         this.visibleObservation(transaction),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       )).orderBy(desc(recoveryObservations.observedUntil), desc(recoveryObservations.id));
@@ -549,6 +595,7 @@ export class RecoveryRepository implements RecoveryStore {
         eq(recoveryObservations.personId, personId),
         gte(recoveryObservations.localDate, from),
         lte(recoveryObservations.localDate, to),
+        isNull(recoveryObservations.withdrawnAt),
         this.visibleObservation(transaction),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       )).orderBy(desc(recoveryObservations.localDate), desc(recoveryObservations.observedUntil), desc(recoveryObservations.id));
@@ -975,6 +1022,16 @@ export class RecoveryRepository implements RecoveryStore {
           eq(recoveryConsents.personId, personId),
           eq(recoveryConsents.status, "active")
         ));
+      await transaction.update(integrationConnections).set({
+        lifecycle: "disconnected",
+        importEnabled: false,
+        disconnectedAt: now,
+        remoteDisconnectPending: true,
+        updatedAt: now
+      }).where(and(
+        eq(integrationConnections.recoveryConnectionId, connectionId),
+        eq(integrationConnections.personId, personId)
+      ));
       return this.toErasureRequest(request);
     });
   }

@@ -107,8 +107,38 @@ import {
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
   ProgressOverviewQuerySchema,
-  ProgressOverviewSchema
+  ProgressOverviewSchema,
+  DisconnectIntegrationSchema,
+  GarminIntervalsConnectionSchema,
+  IntegrationAuthorizationStartSchema,
+  StartGarminIntervalsAuthorizationSchema
 } from "@shape-of-you/contracts";
+
+function integrationPaths(): Record<string, object> {
+  return {
+    "/v1/integrations/garmin-intervals": {
+      get: {
+        tags: ["integrations"],
+        summary: "Read Garmin via Intervals.icu connection and sync state",
+        responses: { "200": { description: "Safe connection projection", content: { "application/json": { schema: GarminIntervalsConnectionSchema } } } }
+      }
+    },
+    "/v1/integrations/garmin-intervals/authorization": {
+      post: {
+        tags: ["integrations"], summary: "Start Person-bound Intervals.icu OAuth",
+        requestBody: { required: true, content: { "application/json": { schema: StartGarminIntervalsAuthorizationSchema } } },
+        responses: { "200": { description: "Top-level authorization URL", content: { "application/json": { schema: IntegrationAuthorizationStartSchema } } } }
+      }
+    },
+    "/v1/integrations/garmin-intervals/disconnect": {
+      post: {
+        tags: ["integrations"], summary: "Stop import and retry provider disconnect",
+        requestBody: { required: true, content: { "application/json": { schema: DisconnectIntegrationSchema } } },
+        responses: { "200": { description: "Disconnected connection projection", content: { "application/json": { schema: GarminIntervalsConnectionSchema } } } }
+      }
+    }
+  };
+}
 
 function schemaParameter(
   name: string,
@@ -1537,7 +1567,8 @@ export function createOpenApiDocument(): object {
       ...dailyContextNotePaths(),
       ...dailyProjectionPaths(),
       ...progressOverviewPaths(),
-      ...intakePaths()
+      ...intakePaths(),
+      ...integrationPaths()
     }
   };
 }

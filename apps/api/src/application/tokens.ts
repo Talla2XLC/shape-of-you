@@ -45,3 +45,12 @@ export const DAILY_CONTEXT_NOTE_STORE = Symbol("DAILY_CONTEXT_NOTE_STORE");
 export const CHAT_ASSISTANT_CONVERSATION_BINDING_STORE = Symbol(
   "CHAT_ASSISTANT_CONVERSATION_BINDING_STORE"
 );
+
+/** Injection token for durable external integration state. */
+export const INTEGRATION_STORE = Symbol("INTEGRATION_STORE");
+/** Injection token for the selected in-process health data provider. */
+export const INTEGRATION_PROVIDER = Symbol("INTEGRATION_PROVIDER");
+/** Injection token for the runtime-only connection credential cipher. */
+export const INTEGRATION_CIPHER = Symbol("INTEGRATION_CIPHER");
+/** Injection token controlling the in-process integration reconciler. */
+export const INTEGRATION_WORKER_ENABLED = Symbol("INTEGRATION_WORKER_ENABLED");

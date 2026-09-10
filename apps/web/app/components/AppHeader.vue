@@ -21,6 +21,10 @@
       >Progress</a>
       <a
         class="quiet-link"
+        href="/connections"
+      >Connections</a>
+      <a
+        class="quiet-link"
         href="/privacy"
       >Privacy</a>
     </nav>

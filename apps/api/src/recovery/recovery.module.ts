@@ -7,9 +7,11 @@ import {
 } from "./recovery.controller.js";
 import { RecoveryService } from "./recovery.service.js";
 import { RecoveryErasureWorker } from "./recovery-erasure.worker.js";
+import { IntegrationModule } from "../integrations/integration.module.js";
 
 /** Recovery observations, consent and assessment module. */
 @Module({
+  imports: [IntegrationModule],
   controllers: [RecoveryConnectionController, RecoveryObservationController, RecoveryAssessmentController],
   providers: [RecoveryService, RecoveryErasureWorker],
   exports: [RecoveryService]

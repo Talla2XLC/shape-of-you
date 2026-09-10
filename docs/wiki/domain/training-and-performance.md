@@ -13,8 +13,9 @@ tags:
 ## Summary
 
 Training separates shared exercise definitions, Person-owned programs,
-performed workouts, and derived results. A program is not proof of execution,
-and recommendation acceptance never mutates it automatically.
+performed workouts, external activity facts, and derived results. A program is
+not proof of execution, and recommendation acceptance never mutates it
+automatically.
 
 ## Content
 
@@ -25,6 +26,14 @@ and recommendation acceptance never mutates it automatically.
   sets, repetitions, and RIR. At most one version is active.
 - Immutable `WorkoutSession` contains performed exercises and individual sets
   with actual weight/repetitions/RIR. Correction replaces the full session.
+- `TrainingRepository` also owns immutable connection-linked activity facts
+  imported from Intervals.icu. They retain typed duration, distance, training
+  load, heart-rate summary, device name, provider identity, and normalized
+  checksum rather than a raw provider payload. Garmin attribution is set only
+  when device metadata identifies Garmin.
+- Repeated external identity plus checksum is a no-op. Changed content creates
+  an immutable successor, including a later return to a previously seen value.
+  Current reads expose only the latest fact.
 - `PersonalRecord` is a projection over current sets: highest weight, then more
   repetitions on ties.
 - Progression candidates are projections. Acceptance creates a new inactive
@@ -37,11 +46,13 @@ and recommendation acceptance never mutates it automatically.
 ## Decisions
 
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md).
+- [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
 
 ## Open questions
 
-- Production progression policy, richer exercise substitutions, and external
-  catalog source/moderation.
+- Production progression policy, richer exercise substitutions, external
+  catalog source/moderation, and live Intervals.icu activity-contract
+  validation.
 
 ## Related material
 

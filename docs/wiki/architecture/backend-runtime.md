@@ -15,8 +15,8 @@ tags:
 
 Current runtime is one NestJS API in `apps/api` using `FastifyAdapter`,
 PostgreSQL, and Drizzle. It implements Physical State, Nutrition, Training,
-Recovery, Coaching, asynchronous Intake, and an OAuth-protected MCP adapter in
-one modular deployable.
+Recovery, Coaching, asynchronous Intake, an in-process Intervals.icu adapter,
+and an OAuth-protected MCP adapter in one modular deployable.
 
 ## Content
 
@@ -46,6 +46,16 @@ versioned exercises/programs, immutable sessions/sets, records, and progression
 projections. Recovery and Coaching retain typed facts, policies, evidence, and
 ownership boundaries.
 
+The Integrations module coordinates the disabled-by-default `Garmin via
+Intervals.icu` flow. It owns one-use Person-bound OAuth transactions,
+authenticated encryption of per-connection tokens, a technical inbox, sync
+projection, and a bounded reconciliation loop inside the API process. Provider
+transport and payload validation end at the adapter; Recovery and Training
+receive provider-neutral typed commands. The worker claims due import and
+remote-disconnect retry work through PostgreSQL leases and `SKIP LOCKED`.
+Provider failures degrade only connection sync health and do not couple normal
+domain reads to Intervals.icu.
+
 When all three OAuth trust values are configured, the API also exposes a
 stateless Streamable HTTP MCP endpoint at `/mcp` and protected-resource
 metadata. Its eight allowlisted tools reuse existing application services.
@@ -70,11 +80,14 @@ operator mappings are provisioned.
 - [NestJS and Nuxt](../../adr/20260729-use-nestjs-with-fastify-and-nuxt.md)
 - [PostgreSQL queue](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md)
 - [PostgreSQL with Drizzle](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md)
+- [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 
 ## Open questions
 
 - Metrics, tracing, security monitoring, and SLOs.
 - Authentication coverage for non-MCP API routes before real-data activation.
+- Live Intervals.icu OAuth and data-contract verification after application
+  approval and credential provisioning.
 
 ## Related material
 
@@ -82,3 +95,4 @@ operator mappings are provisioned.
 - [Repository/runtime](repository-and-runtime.md)
 - [Deployment](deployment.md)
 - [API documentation](../api/intake.md)
+- [Connections API](../api/connections.md)

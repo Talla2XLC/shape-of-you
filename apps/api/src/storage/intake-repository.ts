@@ -782,7 +782,7 @@ export class IntakeRepository implements IntakeStore {
       if (!row) {
         throw new Error("Typed Intake weight item could not be loaded");
       }
-      if (row.sourceReference.channel === "device") {
+      if (row.sourceReference.channel === "device" || row.sourceReference.channel === "account") {
         throw new DomainValidationError("Device source is not supported by Intake");
       }
       const input: CreateWeightMeasurement = {

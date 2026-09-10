@@ -15,17 +15,22 @@ tags:
 ## Summary
 
 Implemented Recovery separates shared device definitions, Person-owned typed
-observations, and reproducible readiness/load-risk assessments. Real device
-data remains forbidden until the implemented authenticated-erasure lifecycle is
-released with a provisioned and verified journal checkpoint. The owner-backed
-staging restore drill is complete; the owner temporarily accepts same-host
-journal storage for logical-restore protection only.
+observations, account connections, and reproducible readiness/load-risk
+assessments. The Garmin-via-Intervals.icu path is implemented behind a disabled
+feature flag; real import still requires external OAuth application approval,
+runtime credentials, migration application, deployment, and a live smoke test.
+The owner-backed staging restore drill is complete; the owner temporarily
+accepts same-host journal storage for logical-restore protection only.
 
 ## Content
 
 Shared provider/device-model/capability definitions use immutable versions.
 Person owns connections, device instances, consent, retention state, and
-observations. No real provider credentials are stored.
+observations. A connection may represent either a physical device or an
+authorized account. Per-connection Intervals.icu access tokens are stored only
+as authenticated ciphertext bound to provider, Person, and connection; global
+OAuth credentials and encryption keys are runtime configuration. Neither is
+returned by public projections or written to logs.
 
 Immutable RecoveryObservation stores UTC interval, IANA timezone/local date,
 source, quality, idempotency, correction metadata, and exactly one typed detail:
@@ -46,11 +51,20 @@ consent.
 Device observations require active matching consent; revocation stops future
 collection but is not erasure. Corrections replace full observations.
 
+The Intervals.icu adapter imports supported wellness fields through an
+account-level source channel. Sleep duration, sleep score, resting heart rate,
+HRV rMSSD, and Body Battery become typed immutable observations. The same
+provider identity and normalized checksum is a no-op; changed or removed fields
+create immutable successor observations. Wellness provenance remains
+`intervals_icu_wellness` and may include Garmin because Intervals.icu does not
+reliably expose the original provider for each wellness field.
+
 Connection erasure uses an API-owned durable request.
 Fresh passkey authentication quarantines the connection immediately, while an
 idempotent worker removes connection-derived observations, assessments, and
-Coaching outputs. The worker cannot claim the request until its accepted intent
-has been sealed into the independent journal and acknowledged in PostgreSQL.
+Coaching outputs, plus linked Training facts. The worker cannot claim the
+request until its accepted intent has been sealed into the independent journal
+and acknowledged in PostgreSQL.
 Exact `retainUntil` expiry uses the same path. Manual observations without a
 connection and shared provider/model definitions remain.
 
@@ -71,13 +85,15 @@ no deletion deadline. This protects against restoring an old logical database
 dump but not against loss, compromise, or filesystem rollback of the whole VM.
 An off-host or immutable copy remains the recommended target state.
 
-The repository-managed unattended path uses a root-scheduled one-shot container
-from the active API image. It directly mounts that owner-only directory,
+The repository-managed unattended erasure-journal path uses a root-scheduled
+one-shot container from the active API image. It directly mounts that
+owner-only directory,
 serializes synchronization, creates a unique sealed checkpoint only for pending
 acknowledgements, and acknowledges PostgreSQL only after durable flush and
 verification. Missing or invalid journal storage therefore keeps physical
-erasure blocked. The source and CI contract are accepted; direct provider
-ingestion remains gated on separately approved staging deployment and runtime
+erasure blocked. The source and CI contract are accepted. Provider ingestion is
+implemented but remains disabled until separately approved registration,
+credentials, migration application, staging deployment, and runtime
 verification.
 
 Immutable ReadinessAssessment/LoadRiskAssessment pin exact policy version,
@@ -96,12 +112,14 @@ scores. Assessment never mutates Training.
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md).
 - [Temporary same-host Recovery erasure journal](../../adr/20260904-temporarily-use-same-host-recovery-erasure-journal.md).
 - [Automated Recovery erasure journal synchronization](../../adr/20260904-automate-recovery-erasure-journal-with-root-scheduled-one-shot.md).
+- [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
 
 ## Open questions
 
-- Real provider credentials and ingestion authentication.
-- Deployment and runtime verification of automatic journal synchronization
-  before direct Garmin ingestion.
+- Intervals.icu OAuth application approval, credentials, migration application,
+  and live provider validation.
+- Supporter/dormancy and commercial-use policy confirmation for unattended
+  production synchronization.
 - A finite backup lifetime and off-host or immutable journal copy for VM-loss
   protection.
 

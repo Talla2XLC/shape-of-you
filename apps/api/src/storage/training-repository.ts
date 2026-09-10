@@ -35,6 +35,8 @@ import type { DatabaseContext } from "../database/context.js";
 import {
   performedExercises,
   performedSets,
+  integrationActivityFacts,
+  integrationConnections,
   sourceReferences,
   trainingExerciseCatalogSourceRecords,
   trainingExerciseCatalogSources,
@@ -98,8 +100,36 @@ export interface StagedExerciseSourceRecord {
   readonly created: boolean;
 }
 
+/** Provider-neutral typed activity command accepted by the Training boundary. */
+export interface ImportExternalActivity {
+  readonly connectionId: string;
+  readonly personId: string;
+  readonly providerIdentity: string;
+  readonly normalizedChecksum: string;
+  readonly occurredAt: string;
+  readonly localDate: string;
+  readonly timezone: string;
+  readonly name: string;
+  readonly durationSeconds: number;
+  readonly distanceMeters: number | null;
+  readonly trainingLoad: number | null;
+  readonly averageHeartRate: number | null;
+  readonly maximumHeartRate: number | null;
+  readonly deviceName: string | null;
+  readonly sourceProvider: string;
+  readonly garminAttributed: boolean;
+}
+
+/** Current immutable external activity projection owned by Training. */
+export interface ExternalActivityFact extends ImportExternalActivity {
+  readonly id: string;
+  readonly supersedesId: string | null;
+}
+
 /** Persistence contract for Training catalog, plans, facts, and projections. */
 export interface TrainingStore {
+  importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped">;
+  listExternalActivities(personId: string): Promise<readonly ExternalActivityFact[]>;
   createExercise(personId: string, input: CreateExercise): Promise<Exercise>;
   appendExerciseVersion(
     personId: string,
@@ -230,6 +260,47 @@ async function lockPerson(
 /** PostgreSQL implementation of the Training persistence boundary. */
 export class TrainingRepository implements TrainingStore {
   public constructor(private readonly database: DatabaseContext) {}
+
+  public importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped"> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, input.personId);
+      const enabled = await transaction.query.integrationConnections.findFirst({
+        columns: { id: true },
+        where: and(eq(integrationConnections.id, input.connectionId), eq(integrationConnections.personId, input.personId), eq(integrationConnections.importEnabled, true))
+      });
+      if (!enabled) return "stopped";
+      const currentRows = await transaction.execute(sql<{ id: string; normalized_checksum: string }>`select id, normalized_checksum from integration_activity_facts current where current.connection_id = ${input.connectionId} and current.provider_identity = ${input.providerIdentity} and not exists (select 1 from integration_activity_facts successor where successor.supersedes_id = current.id) limit 1`);
+      const current = currentRows.rows[0] as { readonly id: string; readonly normalized_checksum: string } | undefined;
+      if (current?.normalized_checksum === input.normalizedChecksum) return "unchanged";
+      await transaction.insert(integrationActivityFacts).values({
+        connectionId: input.connectionId, personId: input.personId, providerIdentity: input.providerIdentity,
+        normalizedChecksum: input.normalizedChecksum, occurredAt: new Date(input.occurredAt), localDate: input.localDate,
+        timezone: input.timezone, name: input.name, durationSeconds: input.durationSeconds,
+        distanceMeters: input.distanceMeters?.toFixed(3), trainingLoad: input.trainingLoad?.toFixed(3),
+        averageHeartRate: input.averageHeartRate?.toFixed(3), maximumHeartRate: input.maximumHeartRate?.toFixed(3),
+        deviceName: input.deviceName, sourceProvider: input.sourceProvider, garminAttributed: input.garminAttributed,
+        supersedesId: current?.id ?? null, correctionReason: current ? "provider_record_changed" : null
+      });
+      return current ? "corrected" : "created";
+    });
+  }
+
+  public async listExternalActivities(personId: string): Promise<readonly ExternalActivityFact[]> {
+    const successor = alias(integrationActivityFacts, "external_activity_successor");
+    const rows = await this.database.db.select().from(integrationActivityFacts).where(and(
+      eq(integrationActivityFacts.personId, personId),
+      notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, integrationActivityFacts.id)))
+    )).orderBy(desc(integrationActivityFacts.occurredAt));
+    return rows.map((row) => ({
+      id: row.id, connectionId: row.connectionId, personId: row.personId,
+      providerIdentity: row.providerIdentity, normalizedChecksum: row.normalizedChecksum,
+      occurredAt: row.occurredAt.toISOString(), localDate: row.localDate, timezone: row.timezone,
+      name: row.name, durationSeconds: row.durationSeconds, distanceMeters: numberOrNull(row.distanceMeters),
+      trainingLoad: numberOrNull(row.trainingLoad), averageHeartRate: numberOrNull(row.averageHeartRate),
+      maximumHeartRate: numberOrNull(row.maximumHeartRate), deviceName: row.deviceName,
+      sourceProvider: row.sourceProvider, garminAttributed: row.garminAttributed, supersedesId: row.supersedesId
+    }));
+  }
 
   private accessible(
     row: Pick<TrainingExerciseRow, "visibility" | "ownerPersonId">,

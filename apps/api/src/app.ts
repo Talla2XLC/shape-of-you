@@ -58,6 +58,11 @@ import {
   type DailyContextNoteStore
 } from "./storage/daily-context-note-repository.js";
 import type { IntakeParser } from "./domain/intake.js";
+import { IntegrationRepository } from "./storage/integration-repository.js";
+import { IntervalsIcuProvider } from "./integrations/intervals-icu/provider.js";
+import { ConnectionCredentialCipher, parseIntegrationKeyRing } from "./integrations/credential-cipher.js";
+import { IntegrationService } from "./integrations/integration.service.js";
+import { registerIntegrationCallback } from "./integrations/integration.controller.js";
 import { WeightMeasurementService } from "./weight-measurements/weight-measurement.service.js";
 import { BodyMeasurementSessionService } from "./body-measurement-sessions/body-measurement-session.service.js";
 import { NutritionService } from "./nutrition/nutrition.service.js";
@@ -215,6 +220,23 @@ export async function buildApp(
   const identitySubjectMappings = database
     ? new IdentitySubjectMappingRepository(database)
     : null;
+  const integrationEnabled = options.config.INTERVALS_ICU_ENABLED === true;
+  const integrationStore = database
+    ? new IntegrationRepository(database)
+    : null;
+  const integrationProvider = integrationEnabled
+    ? new IntervalsIcuProvider({
+        clientId: options.config.INTERVALS_ICU_CLIENT_ID!,
+        clientSecret: options.config.INTERVALS_ICU_CLIENT_SECRET!,
+        redirectUri: options.config.INTERVALS_ICU_REDIRECT_URI!
+      })
+    : null;
+  const integrationCipher = integrationEnabled
+    ? new ConnectionCredentialCipher(
+        options.config.INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID!,
+        parseIntegrationKeyRing(options.config.INTEGRATION_ENCRYPTION_KEY_RING!)
+      )
+    : null;
   const browserAuth =
     identitySubjectMappings &&
     personContext instanceof RequestPersonContext &&
@@ -269,6 +291,10 @@ export async function buildApp(
       personContext,
       readinessProbe,
       database,
+      integrationStore,
+      integrationProvider,
+      integrationCipher,
+      integrationWorkerEnabled: integrationEnabled && options.config.NODE_ENV !== "test",
       ownsDatabase
     }),
     adapter,
@@ -308,6 +334,7 @@ export async function buildApp(
     browserAuth.register(getFastifyInstance(app));
     browserAuth.guardApiRoutes(getFastifyInstance(app), personContext);
   }
+  registerIntegrationCallback(getFastifyInstance(app), app.get(IntegrationService));
 
   app.useGlobalFilters(new ApplicationExceptionFilter());
   await app.init();

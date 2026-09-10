@@ -74,7 +74,7 @@ export type RecoveryRiskLevel = "low" | "moderate" | "high" | "blocked";
 export type RecoveryAssessmentDataQuality = "insufficient" | "limited" | "sufficient";
 
 export type RecoverySourceReferenceInput = Omit<SourceReferenceInput, "channel"> & {
-  readonly channel: "manual" | "google_sheets" | "import" | "device";
+  readonly channel: "manual" | "google_sheets" | "import" | "device" | "account";
 };
 
 export const RecoverySourceReferenceInputSchema = {
@@ -82,7 +82,7 @@ export const RecoverySourceReferenceInputSchema = {
   $id: "RecoverySourceReferenceInput",
   properties: {
     ...SourceReferenceInputSchema.properties,
-    channel: { type: "string", enum: ["manual", "google_sheets", "import", "device"] }
+    channel: { type: "string", enum: ["manual", "google_sheets", "import", "device", "account"] }
   }
 } as const;
 

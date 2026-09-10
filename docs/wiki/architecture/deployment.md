@@ -177,6 +177,14 @@ ring. The key ring is a protected staging secret, is never exposed to the
 static Web artifact, and lets the API verify a retained key during a bounded
 rotation overlap.
 
+The versioned handoff also carries the optional Intervals.icu integration
+contract: `INTERVALS_ICU_ENABLED`, client id, client secret, exact HTTPS
+redirect URI, integration encryption key ring, and active key id. Disabled is
+the default. Enabling fails configuration validation unless the complete set is
+present. Values travel through the existing protected Environment and
+root-owned API environment; no release requires manual VM editing, and no
+provider credential is embedded in the repository or static Web artifact.
+
 The edge exposes the API-owned MCP endpoint at `/api/mcp` while its internal
 route remains `/mcp`. Deploying the endpoint does not itself authorize a user:
 the API migration, explicit Identity subject-to-User binding, registered
@@ -198,11 +206,13 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [API-owned browser sessions](../../adr/20260812-use-api-owned-browser-session-cookies.md)
 - [Runtime resolution for replaceable staging upstreams](../../adr/20260828-resolve-replaceable-staging-upstreams-at-runtime.md)
 - [Root-scheduled Recovery erasure journal synchronization](../../adr/20260904-automate-recovery-erasure-journal-with-root-scheduled-one-shot.md)
+- [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 
 ## Open questions
 
-- Shared-cluster backup/restore; authentication before real data; target cloud,
-  SLO, and long-term secrets policy.
+- Shared-cluster backup/restore; target cloud, SLO, long-term secrets policy,
+  and separately approved Intervals.icu registration, credential provisioning,
+  migration application, deployment, and live smoke verification.
 
 ## Related material
 

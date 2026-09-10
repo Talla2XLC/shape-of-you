@@ -57,11 +57,13 @@ Ownership classes:
 lifecycle.
 
 Historical facts pin exact shared versions and relevant snapshots. Recovery
-consent governs future collection; revocation is not erasure. Real wearable
-data waits for a restore-tested release and approved independent journal
-storage. API owns the implemented durable erasure request, quarantine,
-dependency-aware deletion, and minimal receipt. Physical deletion is gated by
-durable acknowledgement that accepted intent was sealed outside PostgreSQL.
+consent governs future collection; revocation is not erasure. An account-level
+Intervals.icu connection owns its encrypted Person token, import enablement,
+sync state, technical delivery identities, and links to typed Recovery and
+Training facts. Provider payload JSON is not domain authority. API owns the
+implemented durable erasure request, quarantine, dependency-aware deletion,
+and minimal receipt. Physical deletion is gated by durable acknowledgement
+that accepted intent was sealed outside PostgreSQL.
 The backup boundary owns the independently recoverable typed append-only SQLite
 journal and must replay every accepted intent before restored data can become
 ready. Completion evidence is recorded afterward but is not required to
@@ -107,6 +109,7 @@ facts and owns no lifecycle or historical authority.
 - [Shared-reference ADR](../../adr/20260731-separate-shared-reference-definitions-from-person-owned-state.md)
 - [Recovery retention and erasure ADR](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)
 - [Temporary same-host Recovery erasure journal ADR](../../adr/20260904-temporarily-use-same-host-recovery-erasure-journal.md)
+- [Garmin through Intervals.icu ADR](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Progress overview API](../api/progress-overview.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

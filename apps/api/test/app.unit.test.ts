@@ -202,6 +202,8 @@ const nutritionStore: NutritionStore = {
 };
 
 const trainingStore: TrainingStore = {
+  importExternalActivity: unreachable,
+  listExternalActivities: unreachable,
   createExercise: unreachable,
   appendExerciseVersion: unreachable,
   findExercise: unreachable,
@@ -232,6 +234,7 @@ const recoveryStore: RecoveryStore = {
   revokeConsent: unreachable,
   createObservation: unreachable,
   correctObservation: unreachable,
+  withdrawObservation: unreachable,
   findObservation: unreachable,
   listObservations: unreachable,
   listObservationsForLocalDate: unreachable,
@@ -342,6 +345,18 @@ describe("API bootstrap", () => {
     expect(openapi.json().paths).toHaveProperty("/v1/day-projections");
     expect(openapi.json().paths).toHaveProperty("/v1/daily-context-notes");
     expect(openapi.json().paths).toHaveProperty("/v1/progress-overview");
+    expect(openapi.json().paths).toHaveProperty("/v1/integrations/garmin-intervals");
+
+    const integration = await fastify.inject({
+      method: "GET",
+      url: "/v1/integrations/garmin-intervals"
+    });
+    expect(integration.statusCode).toBe(200);
+    expect(integration.json()).toMatchObject({
+      provider: "intervals_icu",
+      lifecycle: "unavailable",
+      recoveryConnectionId: null
+    });
 
     await app.close();
   });

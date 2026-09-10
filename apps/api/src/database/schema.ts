@@ -44,7 +44,8 @@ export const sourceChannel = pgEnum("source_channel", [
   "manual",
   "google_sheets",
   "import",
-  "device"
+  "device",
+  "account"
 ]);
 export const importDomain = pgEnum("import_domain", [
   "weight",
@@ -225,6 +226,26 @@ export const recoveryAssessmentDataQuality = pgEnum(
   "recovery_assessment_data_quality",
   ["insufficient", "limited", "sufficient"]
 );
+export const integrationConnectionLifecycle = pgEnum(
+  "integration_connection_lifecycle",
+  ["active", "degraded", "disconnected"]
+);
+export const integrationSyncFailure = pgEnum("integration_sync_failure", [
+  "authorization_required",
+  "provider_rate_limited",
+  "provider_timeout",
+  "provider_unavailable",
+  "provider_response_invalid"
+]);
+export const integrationInboxKind = pgEnum("integration_inbox_kind", [
+  "wellness",
+  "activity"
+]);
+export const integrationInboxStatus = pgEnum("integration_inbox_status", [
+  "pending",
+  "normalized",
+  "failed"
+]);
 export const coachingRecommendationKind = pgEnum(
   "coaching_recommendation_kind",
   ["training_adjustment"]
@@ -2718,6 +2739,7 @@ export const recoveryObservations = pgTable(
     dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
     supersedesId: uuid("supersedes_id"),
     correctionReason: varchar("correction_reason", { length: 512 }),
+    withdrawnAt: timestamp("withdrawn_at", { withTimezone: true, mode: "date" }),
     createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull()
@@ -2754,8 +2776,8 @@ export const recoveryObservations = pgTable(
     ),
     check(
       "recovery_observations_device_shape",
-      sql`(${table.source}::text = 'device' AND ${table.connectionId} IS NOT NULL AND ${table.consentId} IS NOT NULL)
-          OR (${table.source}::text <> 'device' AND ${table.connectionId} IS NULL AND ${table.consentId} IS NULL)`
+      sql`(${table.source}::text IN ('device', 'account') AND ${table.connectionId} IS NOT NULL AND ${table.consentId} IS NOT NULL)
+          OR (${table.source}::text NOT IN ('device', 'account') AND ${table.connectionId} IS NULL AND ${table.consentId} IS NULL)`
     ),
     check(
       "recovery_observations_correction_shape",
@@ -2893,6 +2915,187 @@ export const recoverySubjectiveDetails = pgTable(
           AND ${table.muscleSoreness} BETWEEN 1 AND 5
           AND ${table.stress} BETWEEN 1 AND 5
           AND ${table.sleepQuality} BETWEEN 1 AND 5`
+    )
+  ]
+);
+
+/** Short-lived one-use authorization intent; only the hash of OAuth state is stored. */
+export const integrationAuthorizationTransactions = pgTable(
+  "integration_authorization_transactions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    providerKey: varchar("provider_key", { length: 64 }).notNull(),
+    stateHash: varchar("state_hash", { length: 64 }).notNull(),
+    returnTo: varchar("return_to", { length: 2048 }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true, mode: "date" }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true, mode: "date" }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "integration_auth_transaction_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }).onDelete("cascade"),
+    unique("integration_auth_transaction_state_uq").on(table.providerKey, table.stateHash),
+    index("integration_auth_transaction_expiry_idx").on(table.expiresAt),
+    check("integration_auth_transaction_return_to", sql`${table.returnTo} LIKE '/%' AND ${table.returnTo} NOT LIKE '//%'`)
+  ]
+);
+
+/** Person-owned authorization and sync projection for an external provider. */
+export const integrationConnections = pgTable(
+  "integration_connections",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    recoveryConnectionId: uuid("recovery_connection_id").notNull(),
+    consentId: uuid("consent_id").notNull(),
+    providerKey: varchar("provider_key", { length: 64 }).notNull(),
+    externalUserId: varchar("external_user_id", { length: 128 }).notNull(),
+    lifecycle: integrationConnectionLifecycle("lifecycle").default("active").notNull(),
+    importEnabled: boolean("import_enabled").default(true).notNull(),
+    credentialKeyId: varchar("credential_key_id", { length: 64 }),
+    credentialNonce: varchar("credential_nonce", { length: 64 }),
+    credentialCiphertext: text("credential_ciphertext"),
+    credentialTag: varchar("credential_tag", { length: 64 }),
+    failureCode: integrationSyncFailure("failure_code"),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true, mode: "date" }),
+    lastSuccessfulSyncAt: timestamp("last_successful_sync_at", { withTimezone: true, mode: "date" }),
+    lastDataAt: timestamp("last_data_at", { withTimezone: true, mode: "date" }),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    leaseOwner: varchar("lease_owner", { length: 128 }),
+    leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
+    remoteDisconnectPending: boolean("remote_disconnect_pending").default(false).notNull(),
+    connectedAt: timestamp("connected_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    disconnectedAt: timestamp("disconnected_at", { withTimezone: true, mode: "date" }),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "integration_connection_recovery_person_fk",
+      columns: [table.recoveryConnectionId, table.personId],
+      foreignColumns: [recoveryConnections.id, recoveryConnections.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "integration_connection_consent_recovery_fk",
+      columns: [table.consentId, table.recoveryConnectionId, table.personId],
+      foreignColumns: [recoveryConsents.id, recoveryConsents.connectionId, recoveryConsents.personId]
+    }).onDelete("cascade"),
+    unique("integration_connections_person_provider_uq").on(table.personId, table.providerKey),
+    unique("integration_connections_recovery_uq").on(table.recoveryConnectionId),
+    index("integration_connections_claim_idx").on(table.importEnabled, table.nextAttemptAt, table.leaseUntil),
+    check(
+      "integration_connections_credential_shape",
+      sql`(${table.credentialKeyId} IS NULL AND ${table.credentialNonce} IS NULL AND ${table.credentialCiphertext} IS NULL AND ${table.credentialTag} IS NULL)
+        OR (${table.credentialKeyId} IS NOT NULL AND ${table.credentialNonce} IS NOT NULL AND ${table.credentialCiphertext} IS NOT NULL AND ${table.credentialTag} IS NOT NULL)`
+    ),
+    check(
+      "integration_connections_lifecycle_shape",
+      sql`(${table.lifecycle} = 'disconnected' AND ${table.importEnabled} = false AND ${table.disconnectedAt} IS NOT NULL)
+        OR (${table.lifecycle} <> 'disconnected' AND ${table.disconnectedAt} IS NULL)`
+    )
+  ]
+);
+
+/** Bounded technical inbox identity; raw provider JSON is intentionally absent. */
+export const integrationInbox = pgTable(
+  "integration_inbox",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    connectionId: uuid("connection_id").notNull(),
+    kind: integrationInboxKind("kind").notNull(),
+    providerIdentity: varchar("provider_identity", { length: 256 }).notNull(),
+    checksum: varchar("checksum", { length: 64 }).notNull(),
+    status: integrationInboxStatus("status").default("pending").notNull(),
+    failureCode: integrationSyncFailure("failure_code"),
+    receivedAt: timestamp("received_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    normalizedAt: timestamp("normalized_at", { withTimezone: true, mode: "date" })
+  },
+  (table) => [
+    foreignKey({
+      name: "integration_inbox_connection_fk",
+      columns: [table.connectionId],
+      foreignColumns: [integrationConnections.id]
+    }).onDelete("cascade"),
+    unique("integration_inbox_delivery_uq").on(table.connectionId, table.kind, table.providerIdentity, table.checksum)
+  ]
+);
+
+/** Current pointer from a provider fact identity to its immutable Recovery chain. */
+export const integrationRecoveryFacts = pgTable(
+  "integration_recovery_facts",
+  {
+    connectionId: uuid("connection_id").notNull(),
+    providerIdentity: varchar("provider_identity", { length: 256 }).notNull(),
+    factKey: varchar("fact_key", { length: 64 }).notNull(),
+    normalizedChecksum: varchar("normalized_checksum", { length: 64 }).notNull(),
+    observationId: uuid("observation_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "integration_recovery_fact_connection_fk",
+      columns: [table.connectionId],
+      foreignColumns: [integrationConnections.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "integration_recovery_fact_observation_fk",
+      columns: [table.observationId],
+      foreignColumns: [recoveryObservations.id]
+    }).onDelete("cascade"),
+    unique("integration_recovery_fact_identity_uq").on(table.connectionId, table.providerIdentity, table.factKey)
+  ]
+);
+
+/** Typed immutable external activity summary owned by Training. */
+export const integrationActivityFacts = pgTable(
+  "integration_activity_facts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    connectionId: uuid("connection_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    providerIdentity: varchar("provider_identity", { length: 256 }).notNull(),
+    normalizedChecksum: varchar("normalized_checksum", { length: 64 }).notNull(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true, mode: "date" }).notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    name: varchar("name", { length: 256 }).notNull(),
+    durationSeconds: integer("duration_seconds").notNull(),
+    distanceMeters: numeric("distance_meters", { precision: 12, scale: 3 }),
+    trainingLoad: numeric("training_load", { precision: 12, scale: 3 }),
+    averageHeartRate: numeric("average_heart_rate", { precision: 8, scale: 3 }),
+    maximumHeartRate: numeric("maximum_heart_rate", { precision: 8, scale: 3 }),
+    deviceName: varchar("device_name", { length: 256 }),
+    sourceProvider: varchar("source_provider", { length: 64 }).notNull(),
+    garminAttributed: boolean("garmin_attributed").notNull(),
+    supersedesId: uuid("supersedes_id"),
+    correctionReason: varchar("correction_reason", { length: 256 }),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "integration_activity_connection_fk",
+      columns: [table.connectionId],
+      foreignColumns: [integrationConnections.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "integration_activity_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "integration_activity_supersedes_fk",
+      columns: [table.supersedesId],
+      foreignColumns: [table.id]
+    }),
+    uniqueIndex("integration_activity_supersedes_uq").on(table.supersedesId).where(sql`${table.supersedesId} IS NOT NULL`),
+    check("integration_activity_duration_nonnegative", sql`${table.durationSeconds} >= 0`),
+    check(
+      "integration_activity_correction_shape",
+      sql`(${table.supersedesId} IS NULL AND ${table.correctionReason} IS NULL)
+        OR (${table.supersedesId} IS NOT NULL AND ${table.correctionReason} IS NOT NULL)`
     )
   ]
 );
@@ -3601,6 +3804,10 @@ export type RecoveryObservationRow = typeof recoveryObservations.$inferSelect;
 export type RecoveryAssessmentRow = typeof recoveryAssessments.$inferSelect;
 /** Persisted durable Recovery connection-erasure request and receipt. */
 export type RecoveryErasureRequestRow = typeof recoveryErasureRequests.$inferSelect;
+/** Persisted external provider connection and safe sync projection. */
+export type IntegrationConnectionRow = typeof integrationConnections.$inferSelect;
+/** Persisted typed external activity summary. */
+export type IntegrationActivityFactRow = typeof integrationActivityFacts.$inferSelect;
 /** Persisted shared or private Nutrition Brand identity. */
 export type NutritionBrandRow = typeof nutritionBrands.$inferSelect;
 /** Persisted immutable Nutrition Brand version. */

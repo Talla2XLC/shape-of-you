@@ -203,6 +203,7 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
   ).toBe(true);
   const brand = page.getByRole("link", { name: "Shape of You home" });
   const myDay = page.getByRole("banner").getByRole("link", { name: "Progress" });
+  const connections = page.getByRole("banner").getByRole("link", { name: "Connections" });
   const privacy = page.getByRole("banner").getByRole("link", { name: "Privacy" });
   const continueLink = page.getByRole("link", { name: "Continue with a passkey" });
   await expect(continueLink).toBeVisible();
@@ -210,6 +211,8 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
   await expect(brand).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(myDay).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(connections).toBeFocused();
   await page.keyboard.press("Tab");
   await expect(privacy).toBeFocused();
   await page.keyboard.press("Tab");
@@ -229,6 +232,97 @@ test("landing keeps keyboard focus, reduced motion, and mobile width usable", as
     Number.parseFloat(getComputedStyle(element).transitionDuration)
   );
   expect(transitionSeconds).toBeLessThanOrEqual(0.001);
+});
+
+test("connections completes the browser-safe fake provider management flow", async ({ context, page }) => {
+  await mockApiSession(page, 204);
+  const csrf = opaqueValue();
+  await context.addCookies([{
+    name: "__Host-shape_of_you_api_csrf",
+    value: csrf,
+    domain: "localhost",
+    path: "/",
+    secure: true,
+    httpOnly: false,
+    sameSite: "Lax"
+  }]);
+
+  const connectionId = randomUUID();
+  const disconnected = {
+    provider: "intervals_icu",
+    displayName: "Garmin via Intervals.icu",
+    recoveryConnectionId: connectionId,
+    lifecycle: "disconnected",
+    failureCode: null,
+    lastAttemptAt: null,
+    lastSuccessfulSyncAt: null,
+    lastDataAt: null,
+    connectedAt: null,
+    disconnectedAt: "2026-09-07T12:00:00.000Z"
+  } as const;
+  const degraded = {
+    ...disconnected,
+    lifecycle: "degraded",
+    failureCode: "provider_timeout",
+    lastAttemptAt: "2026-09-07T12:34:00.000Z",
+    lastSuccessfulSyncAt: "2026-09-07T11:20:00.000Z",
+    lastDataAt: "2026-09-07T11:18:00.000Z",
+    connectedAt: "2026-09-01T08:00:00.000Z",
+    disconnectedAt: null
+  } as const;
+
+  await page.route(/\/api\/v1\/integrations\/garmin-intervals$/u, (route) =>
+    fulfillJson(route, page.url().includes("fake-provider-consent=approved") ? degraded : disconnected)
+  );
+  await page.route(/\/api\/v1\/integrations\/garmin-intervals\/authorization$/u, async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+    expect(route.request().postDataJSON()).toEqual({ returnTo: "/connections" });
+    expect(route.request().postData() ?? "").not.toMatch(/token|password|code/iu);
+    await fulfillJson(route, {
+      authorizationUrl: "/connections?fake-provider-consent=approved"
+    });
+  });
+  await page.route(/\/api\/v1\/integrations\/garmin-intervals\/disconnect$/u, async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+    expect(route.request().postDataJSON()).toEqual({ reason: "user requested disconnect" });
+    expect(route.request().postData() ?? "").not.toMatch(/token|password|code/iu);
+    await fulfillJson(route, disconnected);
+  });
+  await page.route("**/api/browser-auth/recovery-erasure/start", async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+    expect(route.request().postDataJSON()).toEqual({ connectionId });
+    await fulfillJson(route, { authorizationUrl: "/fresh-passkey-erasure" });
+  });
+
+  await page.setViewportSize({ width: 320, height: 720 });
+  await page.goto("/connections");
+  await expect(page.getByRole("heading", { name: "Garmin via Intervals.icu" })).toBeVisible();
+  await expect(page.getByText("First connect Garmin inside Intervals.icu")).toBeVisible();
+  await expect(page.getByText("Shape of You never receives your Garmin password or Garmin token.")).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await page.getByRole("button", { name: "Connect Garmin via Intervals.icu" }).click();
+  await expect(page).toHaveURL(/\/connections\?fake-provider-consent=approved$/u);
+  await expect(page.getByRole("heading", { name: "degraded" })).toBeVisible();
+  for (const label of ["Last attempt:", "Last successful sync:", "Last new data:"]) {
+    const row = page.getByText(label, { exact: false });
+    await expect(row).toContainText("2026");
+    await expect(row).not.toContainText("Never");
+  }
+  await expect(page.getByRole("status")).toContainText("Previously imported data is safe");
+  await expect(page.getByRole("status")).toContainText("Intervals.icu did not respond in time.");
+  await expect(page.getByText("Wellness records are attributed to Intervals.icu and may include Garmin.")).toBeVisible();
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+  expect(await page.locator("body").innerText()).not.toMatch(/access[_ -]?token|authorization code/iu);
+
+  await page.getByRole("button", { name: "Disconnect" }).click();
+  await expect(page.getByRole("heading", { name: "disconnected" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Confirm with passkey and delete imported data" })).toBeVisible();
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+
+  await page.getByRole("button", { name: "Confirm with passkey and delete imported data" }).click();
+  await expect(page).toHaveURL(/\/fresh-passkey-erasure$/u);
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 });
 
 test("protected dated day route starts sign-in with its path and query", async ({ page }) => {

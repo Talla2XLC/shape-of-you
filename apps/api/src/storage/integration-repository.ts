@@ -1,0 +1,282 @@
+import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
+import type { GarminIntervalsConnection } from "@shape-of-you/contracts";
+
+import type { DatabaseContext } from "../database/context.js";
+import {
+  integrationAuthorizationTransactions,
+  integrationConnections,
+  integrationInbox,
+  integrationRecoveryFacts,
+  recoveryConnections,
+  recoveryConsentKinds,
+  recoveryConsents,
+  recoveryErasureRequests,
+  recoveryProviders
+} from "../database/schema.js";
+import type {
+  ActiveIntegrationConnection,
+  ConsumedAuthorizationTransaction,
+  IntegrationConnectionIdentity,
+  IntegrationStore,
+  RecoveryFactPointer
+} from "../integrations/integration-store.js";
+import type { IntegrationFailureCode } from "../integrations/provider.js";
+import { ConflictError } from "../domain/errors.js";
+
+const providerKey = "intervals_icu";
+
+/** PostgreSQL implementation of the in-process provider integration boundary. */
+export class IntegrationRepository implements IntegrationStore {
+  public constructor(private readonly database: DatabaseContext) {}
+
+  public async createAuthorization(personId: string, stateHash: string, returnTo: string, expiresAt: Date): Promise<void> {
+    await this.database.db.insert(integrationAuthorizationTransactions).values({
+      personId, providerKey, stateHash, returnTo, expiresAt
+    });
+  }
+
+  public async consumeAuthorization(stateHash: string, now: Date): Promise<ConsumedAuthorizationTransaction | null> {
+    const rows = await this.database.db.update(integrationAuthorizationTransactions)
+      .set({ consumedAt: now })
+      .where(and(
+        eq(integrationAuthorizationTransactions.providerKey, providerKey),
+        eq(integrationAuthorizationTransactions.stateHash, stateHash),
+        isNull(integrationAuthorizationTransactions.consumedAt),
+        gte(integrationAuthorizationTransactions.expiresAt, now)
+      ))
+      .returning();
+    return rows[0] ? { personId: rows[0].personId, returnTo: rows[0].returnTo, createdAt: rows[0].createdAt } : null;
+  }
+
+  public async authorizationIdentity(personId: string): Promise<IntegrationConnectionIdentity | null> {
+    const rows = await this.database.db.select({ integration: integrationConnections, recovery: recoveryConnections })
+      .from(integrationConnections)
+      .innerJoin(recoveryConnections, eq(integrationConnections.recoveryConnectionId, recoveryConnections.id))
+      .where(and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, providerKey)))
+      .limit(1);
+    const row = rows[0];
+    if (!row) return null;
+    if (row.recovery.erasureRequestedAt) throw new Error("Connection erasure must complete before reauthorization");
+    return { id: row.integration.id, recoveryConnectionId: row.integration.recoveryConnectionId };
+  }
+
+  public async activate(input: {
+    readonly id: string; readonly recoveryConnectionId: string; readonly consentId: string;
+    readonly personId: string; readonly externalUserId: string; readonly credential: { readonly keyId: string; readonly nonce: string; readonly ciphertext: string; readonly tag: string };
+    readonly authorizationStartedAt: Date;
+  }): Promise<void> {
+    await this.database.db.transaction(async (transaction) => {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${input.personId}))`);
+      const providers = await transaction.insert(recoveryProviders)
+        .values({ key: providerKey, name: "Intervals.icu" })
+        .onConflictDoNothing().returning();
+      const provider = providers[0] ?? await transaction.query.recoveryProviders.findFirst({ where: eq(recoveryProviders.key, providerKey) });
+      if (!provider) throw new Error("Intervals.icu provider could not be resolved");
+
+      const previous = await transaction.query.integrationConnections.findFirst({
+        where: and(eq(integrationConnections.personId, input.personId), eq(integrationConnections.providerKey, providerKey))
+      });
+      if (previous && previous.id !== input.id) throw new ConflictError("Concurrent authorization changed the connection identity");
+      if (previous) {
+        const recovery = await transaction.query.recoveryConnections.findFirst({ where: and(eq(recoveryConnections.id, previous.recoveryConnectionId), eq(recoveryConnections.personId, input.personId)) });
+        const erasure = await transaction.query.recoveryErasureRequests.findFirst({ where: and(eq(recoveryErasureRequests.connectionId, previous.recoveryConnectionId), eq(recoveryErasureRequests.personId, input.personId)) });
+        if (!recovery || recovery.erasureRequestedAt || erasure) throw new ConflictError("Connection erasure must complete before reauthorization");
+        if (previous.disconnectedAt && previous.disconnectedAt >= input.authorizationStartedAt) throw new ConflictError("Authorization was superseded by disconnect");
+      }
+      if (previous) {
+        await transaction.update(recoveryConnections).set({
+          status: "active", disconnectedAt: null
+        }).where(eq(recoveryConnections.id, previous.recoveryConnectionId));
+      } else {
+        await transaction.insert(recoveryConnections).values({
+          id: input.recoveryConnectionId,
+          personId: input.personId,
+          providerId: provider.id,
+          dedupeKey: `${providerKey}:${input.externalUserId}`
+        });
+      }
+      await transaction.insert(recoveryConsents).values({
+        id: input.consentId,
+        personId: input.personId,
+        connectionId: input.recoveryConnectionId,
+        purpose: "Import Recovery wellness from Intervals.icu",
+        retentionMode: "indefinite"
+      });
+      await transaction.insert(recoveryConsentKinds).values([
+        { consentId: input.consentId, kind: "sleep" },
+        { consentId: input.consentId, kind: "metric" }
+      ]);
+      const values = {
+        consentId: input.consentId, externalUserId: input.externalUserId,
+        lifecycle: "active" as const, importEnabled: true,
+        credentialKeyId: input.credential.keyId, credentialNonce: input.credential.nonce,
+        credentialCiphertext: input.credential.ciphertext, credentialTag: input.credential.tag,
+        failureCode: null, disconnectedAt: null, remoteDisconnectPending: false, nextAttemptAt: new Date(), updatedAt: new Date()
+      };
+      if (previous) {
+        await transaction.update(integrationConnections).set(values).where(eq(integrationConnections.id, previous.id));
+      } else {
+        await transaction.insert(integrationConnections).values({
+          id: input.id, personId: input.personId, recoveryConnectionId: input.recoveryConnectionId,
+          providerKey, ...values
+        });
+      }
+    });
+  }
+
+  public async status(personId: string): Promise<GarminIntervalsConnection | null> {
+    const row = await this.database.db.query.integrationConnections.findFirst({
+      where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, providerKey))
+    });
+    if (!row) {
+      const pending = await this.database.db.query.integrationAuthorizationTransactions.findFirst({
+        where: and(
+          eq(integrationAuthorizationTransactions.personId, personId),
+          eq(integrationAuthorizationTransactions.providerKey, providerKey),
+          isNull(integrationAuthorizationTransactions.consumedAt),
+          gte(integrationAuthorizationTransactions.expiresAt, new Date())
+        )
+      });
+      return pending ? {
+        provider: "intervals_icu", displayName: "Garmin via Intervals.icu", recoveryConnectionId: null,
+        lifecycle: "connecting", failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null,
+        lastDataAt: null, connectedAt: null, disconnectedAt: null
+      } : null;
+    }
+    return {
+      provider: "intervals_icu",
+      displayName: "Garmin via Intervals.icu",
+      recoveryConnectionId: row.recoveryConnectionId,
+      lifecycle: row.lifecycle,
+      failureCode: row.failureCode,
+      lastAttemptAt: row.lastAttemptAt?.toISOString() ?? null,
+      lastSuccessfulSyncAt: row.lastSuccessfulSyncAt?.toISOString() ?? null,
+      lastDataAt: row.lastDataAt?.toISOString() ?? null,
+      connectedAt: row.connectedAt.toISOString(),
+      disconnectedAt: row.disconnectedAt?.toISOString() ?? null
+    };
+  }
+
+  public async findActive(personId: string): Promise<ActiveIntegrationConnection | null> {
+    const row = await this.database.db.query.integrationConnections.findFirst({
+      where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.importEnabled, true))
+    });
+    if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
+    return {
+      id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
+      credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+    };
+  }
+
+  public async findForErasure(personId: string, recoveryConnectionId: string): Promise<ActiveIntegrationConnection | null> {
+    const row = await this.database.db.query.integrationConnections.findFirst({
+      where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.recoveryConnectionId, recoveryConnectionId))
+    });
+    if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
+    return {
+      id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
+      credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+    };
+  }
+
+  public async claimDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null> {
+    return this.database.db.transaction(async (transaction) => {
+      const now = new Date();
+      const candidates = await transaction.select().from(integrationConnections)
+        .where(and(
+          eq(integrationConnections.importEnabled, true),
+          lte(integrationConnections.nextAttemptAt, now),
+          or(isNull(integrationConnections.leaseUntil), lte(integrationConnections.leaseUntil, now))
+        )).orderBy(integrationConnections.nextAttemptAt).limit(1).for("update", { skipLocked: true });
+      const row = candidates[0];
+      if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
+      await transaction.update(integrationConnections).set({ leaseOwner: workerId, leaseUntil: new Date(now.valueOf() + leaseMs) }).where(eq(integrationConnections.id, row.id));
+      return {
+        id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
+        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+      };
+    });
+  }
+
+  public async claimRemoteDisconnectDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null> {
+    return this.database.db.transaction(async (transaction) => {
+      const now = new Date();
+      const candidates = await transaction.select().from(integrationConnections).where(and(
+        eq(integrationConnections.remoteDisconnectPending, true), lte(integrationConnections.nextAttemptAt, now),
+        or(isNull(integrationConnections.leaseUntil), lte(integrationConnections.leaseUntil, now))
+      )).orderBy(integrationConnections.nextAttemptAt).limit(1).for("update", { skipLocked: true });
+      const row = candidates[0];
+      if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
+      await transaction.update(integrationConnections).set({ leaseOwner: workerId, leaseUntil: new Date(now.valueOf() + leaseMs) }).where(eq(integrationConnections.id, row.id));
+      return { id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
+        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag } };
+    });
+  }
+
+  public async releaseClaim(id: string): Promise<void> {
+    await this.database.db.update(integrationConnections).set({ leaseOwner: null, leaseUntil: null }).where(eq(integrationConnections.id, id));
+  }
+
+  public async beginDisconnect(personId: string, reason: string): Promise<ActiveIntegrationConnection | null> {
+    return this.database.db.transaction(async (transaction) => {
+      await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${personId}))`);
+      const row = await transaction.query.integrationConnections.findFirst({
+        where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, providerKey))
+      });
+      if (!row) return null;
+      const active = row.credentialKeyId && row.credentialNonce && row.credentialCiphertext && row.credentialTag ? {
+        id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
+        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+      } : null;
+      const now = new Date();
+      await transaction.update(integrationConnections).set({
+        lifecycle: "disconnected", importEnabled: false, disconnectedAt: now,
+        remoteDisconnectPending: Boolean(active), updatedAt: now
+      }).where(eq(integrationConnections.id, row.id));
+      await transaction.update(recoveryConnections).set({ status: "disconnected", disconnectedAt: now })
+        .where(eq(recoveryConnections.id, row.recoveryConnectionId));
+      await transaction.update(recoveryConsents).set({ status: "revoked", revokedAt: now, revocationReason: reason })
+        .where(and(eq(recoveryConsents.id, row.consentId), eq(recoveryConsents.status, "active")));
+      return active;
+    });
+  }
+
+  public async completeRemoteDisconnect(id: string): Promise<void> {
+    await this.database.db.update(integrationConnections).set({
+      remoteDisconnectPending: false, credentialKeyId: null, credentialNonce: null,
+      credentialCiphertext: null, credentialTag: null, failureCode: null, leaseOwner: null, leaseUntil: null, updatedAt: new Date()
+    }).where(eq(integrationConnections.id, id));
+  }
+  public async failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode): Promise<void> {
+    await this.database.db.update(integrationConnections).set({ failureCode, nextAttemptAt: new Date(Date.now() + 60_000), leaseOwner: null, leaseUntil: null, updatedAt: new Date() }).where(eq(integrationConnections.id, id));
+  }
+  public async markSyncSucceeded(id: string, hasData: boolean): Promise<void> {
+    const now = new Date();
+    await this.database.db.update(integrationConnections).set({ lifecycle: "active", failureCode: null, lastAttemptAt: now, lastSuccessfulSyncAt: now, ...(hasData ? { lastDataAt: now } : {}), nextAttemptAt: new Date(now.valueOf() + 300_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.importEnabled, true)));
+  }
+  public async markSyncFailed(id: string, failureCode: IntegrationFailureCode): Promise<void> {
+    const now = new Date();
+    await this.database.db.update(integrationConnections).set({ lifecycle: "degraded", failureCode, lastAttemptAt: now, nextAttemptAt: new Date(now.valueOf() + 60_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.importEnabled, true)));
+  }
+
+  public async recordInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<boolean> {
+    const inserted = await this.database.db.insert(integrationInbox).values({ connectionId: id, kind, providerIdentity: identity, checksum }).onConflictDoNothing().returning({ id: integrationInbox.id });
+    if (inserted[0]) return true;
+    const latest = await this.database.db.query.integrationInbox.findFirst({
+      where: and(eq(integrationInbox.connectionId, id), eq(integrationInbox.kind, kind), eq(integrationInbox.providerIdentity, identity)),
+      orderBy: [sql`${integrationInbox.normalizedAt} desc nulls last`, desc(integrationInbox.receivedAt)]
+    });
+    return latest?.checksum !== checksum || latest.status !== "normalized";
+  }
+  public async completeInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<void> {
+    await this.database.db.update(integrationInbox).set({ status: "normalized", normalizedAt: new Date(), failureCode: null }).where(and(eq(integrationInbox.connectionId, id), eq(integrationInbox.kind, kind), eq(integrationInbox.providerIdentity, identity), eq(integrationInbox.checksum, checksum)));
+  }
+  public async recoveryFact(id: string, identity: string, factKey: string): Promise<RecoveryFactPointer | null> {
+    const row = await this.database.db.query.integrationRecoveryFacts.findFirst({ where: and(eq(integrationRecoveryFacts.connectionId, id), eq(integrationRecoveryFacts.providerIdentity, identity), eq(integrationRecoveryFacts.factKey, factKey)) });
+    return row ? { checksum: row.normalizedChecksum, observationId: row.observationId } : null;
+  }
+  public async linkRecoveryFact(id: string, identity: string, factKey: string, checksum: string, observationId: string): Promise<void> {
+    await this.database.db.insert(integrationRecoveryFacts).values({ connectionId: id, providerIdentity: identity, factKey, normalizedChecksum: checksum, observationId }).onConflictDoUpdate({ target: [integrationRecoveryFacts.connectionId, integrationRecoveryFacts.providerIdentity, integrationRecoveryFacts.factKey], set: { normalizedChecksum: checksum, observationId, updatedAt: new Date() } });
+  }
+
+}

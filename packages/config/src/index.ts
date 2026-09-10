@@ -34,6 +34,12 @@ const environmentSchema = z.object({
       "API_BROWSER_SESSION_KEYS must contain one or more keys of at least 32 characters"
     )
     .optional(),
+  INTERVALS_ICU_ENABLED: z.enum(["true", "false"]).transform((value) => value === "true").optional(),
+  INTERVALS_ICU_CLIENT_ID: z.string().min(1).max(128).optional(),
+  INTERVALS_ICU_CLIENT_SECRET: z.string().min(16).max(1024).optional(),
+  INTERVALS_ICU_REDIRECT_URI: z.string().url().optional(),
+  INTEGRATION_ENCRYPTION_KEY_RING: z.string().min(1).optional(),
+  INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID: z.string().min(1).max(64).optional(),
   SHUTDOWN_TIMEOUT_MS: z.coerce
     .number()
     .int()
@@ -87,6 +93,20 @@ const environmentSchema = z.object({
       code: "custom",
       path: ["API_BROWSER_ORIGIN"],
       message: "Browser OAuth settings are required in authenticated mode"
+    });
+  }
+  const integrationSettings = [
+    environment.INTERVALS_ICU_CLIENT_ID,
+    environment.INTERVALS_ICU_CLIENT_SECRET,
+    environment.INTERVALS_ICU_REDIRECT_URI,
+    environment.INTEGRATION_ENCRYPTION_KEY_RING,
+    environment.INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID
+  ];
+  if (environment.INTERVALS_ICU_ENABLED && !integrationSettings.every(Boolean)) {
+    context.addIssue({
+      code: "custom",
+      path: ["INTERVALS_ICU_ENABLED"],
+      message: "Intervals.icu credentials, exact redirect URI, and integration encryption key ring are required when enabled"
     });
   }
 });

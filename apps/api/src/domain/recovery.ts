@@ -95,10 +95,10 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
   if (input.kind !== input.detail.type) {
     throw new DomainValidationError("Observation kind must match its typed detail");
   }
-  const device = input.sourceReference.channel === "device";
-  if (device !== (input.connectionId !== null && input.consentId !== null)) {
+  const connected = input.sourceReference.channel === "device" || input.sourceReference.channel === "account";
+  if (connected !== (input.connectionId !== null && input.consentId !== null)) {
     throw new DomainValidationError(
-      "Device observations require connectionId and consentId; other sources forbid them"
+      "Connected observations require connectionId and consentId; other sources forbid them"
     );
   }
   const expectedUnits = {
