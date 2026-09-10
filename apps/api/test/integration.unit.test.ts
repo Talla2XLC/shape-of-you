@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import type { FastifyInstance } from "fastify";
 
 import {
   ConnectionCredentialCipher,
@@ -12,6 +13,7 @@ import {
   normalizedChecksum
 } from "../src/integrations/intervals-icu/normalizer.js";
 import { IntervalsIcuProvider } from "../src/integrations/intervals-icu/provider.js";
+import { registerIntegrationCallback } from "../src/integrations/integration.controller.js";
 import { IntegrationProviderError } from "../src/integrations/provider.js";
 import { IntegrationService } from "../src/integrations/integration.service.js";
 import type { IntegrationStore } from "../src/integrations/integration-store.js";
@@ -65,6 +67,84 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     expect(url.origin + url.pathname).toBe("https://intervals.icu/oauth/authorize");
     expect(url.searchParams.get("scope")).toBe("ACTIVITY:READ,WELLNESS:READ");
     expect(url.searchParams.get("state")).toBe("one-use-state");
+  });
+
+  it("exchanges a code using the documented form and nested athlete identity", async () => {
+    const request = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      token_type: "Bearer",
+      access_token: "documented-access-token",
+      scope: "ACTIVITY:READ,WELLNESS:READ",
+      athlete: { id: "i705019", name: "Test Athlete" }
+    }), { status: 200 }));
+    const provider = new IntervalsIcuProvider({
+      clientId: "shape-test",
+      clientSecret: "not-a-real-secret-value",
+      redirectUri: "https://shape.example/api/integrations/intervals-icu/callback",
+      fetch: request
+    });
+
+    await expect(provider.exchangeAuthorizationCode("one-use-code")).resolves.toEqual({
+      accessToken: "documented-access-token",
+      externalUserId: "i705019"
+    });
+    const [url, init] = request.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://intervals.icu/api/oauth/token");
+    expect(init.method).toBe("POST");
+    expect(Object.fromEntries((init.body as URLSearchParams).entries())).toEqual({
+      client_id: "shape-test",
+      client_secret: "not-a-real-secret-value",
+      code: "one-use-code"
+    });
+  });
+
+  it("revokes access through the documented disconnect endpoint", async () => {
+    const request = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const provider = new IntervalsIcuProvider({
+      clientId: "shape-test",
+      clientSecret: "not-a-real-secret-value",
+      redirectUri: "https://shape.example/api/integrations/intervals-icu/callback",
+      fetch: request
+    });
+
+    await provider.disconnect("opaque-test-token");
+
+    expect(request).toHaveBeenCalledWith(
+      "https://intervals.icu/api/v1/disconnect-app",
+      expect.objectContaining({
+        method: "DELETE",
+        headers: expect.objectContaining({ authorization: "Bearer opaque-test-token" })
+      })
+    );
+  });
+
+  it("logs only a bounded callback failure category before redirecting", async () => {
+    type CallbackHandler = (
+      request: { readonly query: Record<string, unknown> },
+      reply: { readonly header: ReturnType<typeof vi.fn>; readonly redirect: ReturnType<typeof vi.fn> }
+    ) => Promise<void>;
+    let callback: CallbackHandler | null = null;
+    const warn = vi.fn();
+    const fastify = {
+      log: { warn },
+      get: (_path: string, _options: unknown, handler: CallbackHandler) => { callback = handler; }
+    } as unknown as FastifyInstance;
+    const service = {
+      completeAuthorization: vi.fn().mockRejectedValue(
+        new IntegrationProviderError("provider_response_invalid")
+      )
+    } as unknown as IntegrationService;
+    const reply = { header: vi.fn(), redirect: vi.fn() };
+
+    registerIntegrationCallback(fastify, service);
+    await callback!({ query: { state: "private-state", code: "private-code" } }, reply);
+
+    expect(warn).toHaveBeenCalledWith(
+      { failureCode: "provider_response_invalid" },
+      "Intervals.icu authorization callback failed"
+    );
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-state");
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("private-code");
+    expect(reply.redirect).toHaveBeenCalledWith("/connections?provider=authorization_failed");
   });
 
   it.each([

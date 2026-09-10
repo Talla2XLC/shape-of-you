@@ -13,6 +13,7 @@ import {
 
 import { JsonSchemaPipe, JsonSchemaResponseInterceptor } from "../http/json-schema.js";
 import { IntegrationService } from "./integration.service.js";
+import { IntegrationProviderError } from "./provider.js";
 
 /** Authenticated browser API for Garmin through Intervals.icu. */
 @Controller("v1/integrations/garmin-intervals")
@@ -46,13 +47,17 @@ export function registerIntegrationCallback(fastify: FastifyInstance, service: I
       if (!state) throw new Error("Provider authorization state is missing");
       if (!code || typeof query.error === "string") {
         await service.denyAuthorization(state);
-        throw new Error("Provider authorization was denied");
+        throw new IntegrationProviderError("authorization_required");
       }
       const returnTo = await service.completeAuthorization(state, code);
       reply.header("cache-control", "no-store");
       reply.header("referrer-policy", "no-referrer");
       reply.redirect(`${returnTo}${returnTo.includes("?") ? "&" : "?"}provider=connected`);
-    } catch {
+    } catch (error) {
+      const failureCode = error instanceof IntegrationProviderError
+        ? error.failureCode
+        : "provider_unavailable";
+      fastify.log.warn({ failureCode }, "Intervals.icu authorization callback failed");
       reply.header("cache-control", "no-store");
       reply.header("referrer-policy", "no-referrer");
       reply.redirect("/connections?provider=authorization_failed");

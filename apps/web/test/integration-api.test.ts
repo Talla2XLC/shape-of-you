@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 
-import { IntegrationApiError, integrationApi, integrationFailureReason } from "../app/lib/integration-api";
+import {
+  IntegrationApiError,
+  integrationApi,
+  integrationAuthorizationResultMessage,
+  integrationFailureReason
+} from "../app/lib/integration-api";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -35,9 +40,19 @@ describe("integration API", () => {
     expect(integrationFailureReason(null)).toBeNull();
   });
 
+  it("maps an OAuth callback failure without exposing provider details", () => {
+    expect(integrationAuthorizationResultMessage("authorization_failed")).toBe(
+      "Intervals.icu authorization could not be completed. Please try again."
+    );
+    expect(integrationAuthorizationResultMessage("connected")).toBeNull();
+    expect(integrationAuthorizationResultMessage(["authorization_failed"])).toBeNull();
+  });
+
   it("renders last attempt and the mapped degraded reason on the Connections page", async () => {
     const page = await readFile(new URL("../app/pages/connections.vue", import.meta.url), "utf8");
     expect(page).toContain("Last attempt:");
     expect(page).toContain("integrationFailureReason(status.failureCode)");
+    expect(page).toContain("integrationAuthorizationResultMessage(route.query.provider)");
+    expect(page).toContain("window.history.replaceState");
   });
 });

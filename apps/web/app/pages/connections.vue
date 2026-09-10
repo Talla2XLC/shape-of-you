@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { integrationApi, integrationFailureReason, type GarminIntervalsStatus } from "~/lib/integration-api";
+import {
+  integrationApi,
+  integrationAuthorizationResultMessage,
+  integrationFailureReason,
+  type GarminIntervalsStatus
+} from "~/lib/integration-api";
 import { userMessage } from "~/lib/user-message";
 
 definePageMeta({ middleware: "api-session" });
@@ -7,8 +12,15 @@ definePageMeta({ middleware: "api-session" });
 const status = ref<GarminIntervalsStatus | null>(null);
 const busy = ref(false);
 const message = ref("");
+const route = useRoute();
 
 onMounted(async () => {
+  message.value = integrationAuthorizationResultMessage(route.query.provider) ?? "";
+  if (route.query.provider !== undefined) {
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete("provider");
+    window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+  }
   try { status.value = await integrationApi.status(); }
   catch (error) { message.value = userMessage(error); }
 });

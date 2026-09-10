@@ -35,6 +35,15 @@ export function integrationFailureReason(code: GarminIntervalsStatus["failureCod
   }[code];
 }
 
+/** Maps the bounded OAuth callback result to safe user-facing copy. */
+export function integrationAuthorizationResultMessage(
+  result: string | readonly (string | null)[] | null | undefined
+): string | null {
+  return result === "authorization_failed"
+    ? "Intervals.icu authorization could not be completed. Please try again."
+    : null;
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const csrf = init.method && init.method !== "GET" ? readCookie(document.cookie, csrfCookieName) : null;
   const response = await fetch(path, {

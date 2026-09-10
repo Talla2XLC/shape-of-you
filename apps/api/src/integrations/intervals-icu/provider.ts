@@ -50,19 +50,20 @@ export class IntervalsIcuProvider implements HealthDataProvider {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
       body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
         client_id: this.options.clientId,
         client_secret: this.options.clientSecret,
-        redirect_uri: this.options.redirectUri
+        code
       })
     });
     if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
     const record = value as Record<string, unknown>;
     if (typeof record.access_token !== "string" || record.access_token.length < 8) invalid();
-    const externalUserId = typeof record.athlete_id === "string"
-      ? record.athlete_id
-      : typeof record.athlete_id === "number" ? String(record.athlete_id) : null;
+    const athlete = record.athlete;
+    if (!athlete || typeof athlete !== "object" || Array.isArray(athlete)) invalid();
+    const athleteId = (athlete as Record<string, unknown>).id;
+    const externalUserId = typeof athleteId === "string"
+      ? athleteId
+      : typeof athleteId === "number" ? String(athleteId) : null;
     if (!externalUserId || externalUserId.length > 128) invalid();
     return { accessToken: record.access_token, externalUserId };
   }
@@ -81,8 +82,8 @@ export class IntervalsIcuProvider implements HealthDataProvider {
   }
 
   public async disconnect(accessToken: string): Promise<void> {
-    await this.fetchJson(`${apiOrigin}/api/v1/athlete/0/disconnect-app`, {
-      method: "POST",
+    await this.fetchJson(`${apiOrigin}/api/v1/disconnect-app`, {
+      method: "DELETE",
       headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }
     }, true);
   }
