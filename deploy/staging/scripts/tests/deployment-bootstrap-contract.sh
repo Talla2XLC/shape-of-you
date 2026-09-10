@@ -69,7 +69,6 @@ write_identity_request() {
     printf 'IDENTITY_CHATGPT_REDIRECT_URI=%s\n' "$callback"
     printf '%s\n' 'IDENTITY_WEB_REDIRECT_URI=https://staging.shape-of-you.ru/api/browser-auth/callback'
     printf '%s\n' 'API_BROWSER_SESSION_KEYS=fixture-browser-session-key-ring'
-    printf '%s\n' 'INTERVALS_ICU_ENABLED=false'
     printf '%s\n' 'GHCR_TOKEN=fixture-token'
   } > "$request_file"
 }
@@ -90,6 +89,21 @@ assert_callback_rejected_without_echo() {
     rm -f "$request_file" "$output_file"
     exit 1
   fi
+  rm -f "$request_file" "$output_file"
+}
+
+assert_partial_intervals_config_rejected() {
+  request_file=$(mktemp "${TMPDIR:-/tmp}/shape-of-you-intervals-request.XXXXXX")
+  output_file=$(mktemp "${TMPDIR:-/tmp}/shape-of-you-intervals-output.XXXXXX")
+  write_identity_request 'https://chatgpt.com/connector_platform_oauth_redirect' "$request_file"
+  printf '%s\n' 'INTERVALS_ICU_CLIENT_ID=shape-of-you' >> "$request_file"
+  if env SHAPE_OF_YOU_STAGING_LOCK_HELD=true \
+    sh "$CONTROLLER" < "$request_file" > "$output_file" 2>&1; then
+    printf '%s\n' 'Partial Intervals.icu configuration was accepted.' >&2
+    rm -f "$request_file" "$output_file"
+    exit 1
+  fi
+  grep -F -- 'Intervals.icu credentials, redirect URI, and integration encryption settings must be supplied together.' "$output_file" >/dev/null
   rm -f "$request_file" "$output_file"
 }
 
@@ -124,7 +138,9 @@ assert_contains "$CONTROLLER" 'Duplicate input:'
 assert_contains "$CONTROLLER" 'DATABASE_URL'
 assert_contains "$CONTROLLER" 'GHCR_TOKEN'
 assert_contains "$CONTROLLER" 'API_BROWSER_SESSION_KEYS'
-assert_contains "$CONTROLLER" 'INTERVALS_ICU_ENABLED'
+assert_not_contains "$CONTROLLER" 'INTERVALS_ICU_ENABLED'
+assert_contains "$CONTROLLER" 'integration_settings_count'
+assert_contains "$CONTROLLER" 'must be supplied together.'
 assert_contains "$CONTROLLER" 'INTEGRATION_ENCRYPTION_KEY_RING'
 assert_contains "$CONTROLLER" 'docker login ghcr.io'
 assert_contains "$CONTROLLER" 'Deployment controller must be invoked by the root-owned bootstrap.'
@@ -179,6 +195,7 @@ assert_callback_rejected_without_echo 'https://chatgpt.com/connector_platform_oa
 assert_callback_rejected_without_echo 'https://chatgpt.com/connector_platform_oauth_redirect#fragment'
 multiline_callback=$(printf 'https://chatgpt.com/connector_platform_oauth_redirect\nFUTURE_FIELD=injected')
 assert_callback_rejected_without_echo "$multiline_callback"
+assert_partial_intervals_config_rejected
 
 sh -n "$BOOTSTRAP"
 sh -n "$CONTROLLER"

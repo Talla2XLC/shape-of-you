@@ -220,7 +220,13 @@ export async function buildApp(
   const identitySubjectMappings = database
     ? new IdentitySubjectMappingRepository(database)
     : null;
-  const integrationEnabled = options.config.INTERVALS_ICU_ENABLED === true;
+  const integrationEnabled = [
+    options.config.INTERVALS_ICU_CLIENT_ID,
+    options.config.INTERVALS_ICU_CLIENT_SECRET,
+    options.config.INTERVALS_ICU_REDIRECT_URI,
+    options.config.INTEGRATION_ENCRYPTION_KEY_RING,
+    options.config.INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID
+  ].every(Boolean);
   const integrationStore = database
     ? new IntegrationRepository(database)
     : null;
