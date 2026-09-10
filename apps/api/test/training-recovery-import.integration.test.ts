@@ -9,6 +9,8 @@ import { TrainingImportApplyService } from "../src/import/training-import-apply.
 
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
+let isTearingDown = false;
+let unexpectedPoolError: Error | undefined;
 
 beforeAll(async () => {
   process.env.PERSON_CONTEXT_MODE = "synthetic";
@@ -20,11 +22,20 @@ beforeAll(async () => {
     .start();
   await runMigrations(container.getConnectionUri());
   pool = new Pool({ connectionString: container.getConnectionUri() });
+  pool.on("error", (error: Error & { code?: string }) => {
+    if (!(isTearingDown && error.code === "57P01")) {
+      unexpectedPoolError = error;
+    }
+  });
 }, 120_000);
 
 afterAll(async () => {
+  isTearingDown = true;
   await pool?.end();
   await container?.stop();
+  if (unexpectedPoolError) {
+    throw unexpectedPoolError;
+  }
 });
 
 describe("unified Training and Recovery apply", () => {

@@ -112,14 +112,15 @@ describe("Recovery PostgreSQL vertical", () => {
     await service.reconcileConnection(connection);
     expect((await database.pool.query("select 1 from recovery_observations where person_id = $1", [personD])).rowCount).toBe(4);
 
-    await database.pool.query("update integration_connections set next_attempt_at = now() where id = $1", [id]);
+    await database.pool.query("update integration_connections set next_attempt_at = now() - interval '1 second' where id = $1", [id]);
     const firstRetry = await integrations.claimRemoteDisconnectDue("worker-timeout", 30_000);
     expect(firstRetry?.id).toBe(id);
     provider.nextFailure = "provider_timeout";
     await service.retryRemoteDisconnect(firstRetry!);
     expect(await integrations.status(personD)).toMatchObject({ lifecycle: "disconnected", failureCode: "provider_timeout" });
-    await database.pool.query("update integration_connections set next_attempt_at = now() where id = $1", [id]);
+    await database.pool.query("update integration_connections set next_attempt_at = now() - interval '1 second' where id = $1", [id]);
     const secondRetry = await integrations.claimRemoteDisconnectDue("worker-retry", 30_000);
+    expect(secondRetry?.id).toBe(id);
     await service.retryRemoteDisconnect(secondRetry!);
     expect(await integrations.claimRemoteDisconnectDue("worker-finished", 30_000)).toBeNull();
     expect(await integrations.status(personD)).toMatchObject({ lifecycle: "disconnected", failureCode: null });
