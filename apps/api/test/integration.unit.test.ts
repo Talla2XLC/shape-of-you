@@ -128,9 +128,16 @@ describe("Garmin via Intervals.icu integration contracts", () => {
       log: { warn },
       get: (_path: string, _options: unknown, handler: CallbackHandler) => { callback = handler; }
     } as unknown as FastifyInstance;
+    const providerDiagnostic = {
+      operation: "oauth_token_exchange" as const,
+      httpStatus: 400,
+      headers: { "content-type": "application/json", "x-request-id": "intervals-request-123" },
+      responseBody: '{"error":"invalid_client"}',
+      responseBodyTruncated: false
+    };
     const service = {
       completeAuthorization: vi.fn().mockRejectedValue(
-        new IntegrationProviderError("provider_response_invalid")
+        new IntegrationProviderError("provider_response_invalid", undefined, providerDiagnostic)
       )
     } as unknown as IntegrationService;
     const reply = { header: vi.fn(), redirect: vi.fn() };
@@ -139,7 +146,7 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     await callback!({ query: { state: "private-state", code: "private-code" } }, reply);
 
     expect(warn).toHaveBeenCalledWith(
-      { failureCode: "provider_response_invalid" },
+      { failureCode: "provider_response_invalid", providerDiagnostic },
       "Intervals.icu authorization callback failed"
     );
     expect(JSON.stringify(warn.mock.calls)).not.toContain("private-state");
@@ -181,6 +188,72 @@ describe("Garmin via Intervals.icu integration contracts", () => {
       fetch: vi.fn().mockResolvedValue(new Response("{}", { status: 200, headers: { "content-length": "2000001" } }))
     });
     await expect(oversized.exchangeAuthorizationCode("code")).rejects.toMatchObject({ failureCode: "provider_response_invalid" });
+  });
+
+  it("logs bounded redacted token-exchange evidence without credentials or authorization code", async () => {
+    const clientId = "shape-sensitive-client-id";
+    const clientSecret = "sensitive-client-secret-value";
+    const authorizationCode = "sensitive-one-use-authorization-code";
+    const responseBody = JSON.stringify({
+      error: "invalid_client",
+      error_description: `client ${clientId} rejected secret ${clientSecret}`,
+      code: authorizationCode,
+      access_token: "provider-returned-sensitive-token",
+      unknown_token: "1234567890abcdefghijklmnopqrstuvwxyz",
+      contact: "athlete@example.test"
+    });
+    const provider = new IntervalsIcuProvider({
+      clientId,
+      clientSecret,
+      redirectUri: "https://shape.example/callback",
+      fetch: vi.fn().mockResolvedValue(new Response(responseBody, {
+        status: 400,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "intervals-request-123"
+        }
+      }))
+    });
+
+    const error = await provider.exchangeAuthorizationCode(authorizationCode).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(IntegrationProviderError);
+    expect(error).toMatchObject({
+      failureCode: "provider_unavailable",
+      diagnostic: {
+        operation: "oauth_token_exchange",
+        httpStatus: 400,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": "intervals-request-123"
+        },
+        responseBodyTruncated: false
+      }
+    });
+    const serialized = JSON.stringify((error as IntegrationProviderError).diagnostic);
+    expect(serialized).toContain("invalid_client");
+    expect(serialized).not.toContain(clientId);
+    expect(serialized).not.toContain(clientSecret);
+    expect(serialized).not.toContain(authorizationCode);
+    expect(serialized).not.toContain("provider-returned-sensitive-token");
+    expect(serialized).not.toContain("1234567890abcdefghijklmnopqrstuvwxyz");
+    expect(serialized).not.toContain("athlete@example.test");
+  });
+
+  it("bounds oversized token-exchange diagnostics before logging", async () => {
+    const provider = new IntervalsIcuProvider({
+      clientId: "shape-test",
+      clientSecret: "not-a-real-secret-value",
+      redirectUri: "https://shape.example/callback",
+      fetch: vi.fn().mockResolvedValue(new Response("x".repeat(5_000), { status: 502 }))
+    });
+
+    const error = await provider.exchangeAuthorizationCode("one-use-code").catch((caught: unknown) => caught);
+    const diagnostic = (error as IntegrationProviderError).diagnostic;
+
+    expect(diagnostic?.responseBody.length).toBeLessThanOrEqual(4_096);
+    expect(diagnostic?.responseBody).toBe("[redacted-token]");
+    expect(diagnostic?.responseBodyTruncated).toBe(true);
   });
 
   it("binds OAuth state to one Person and consumes it only once", async () => {

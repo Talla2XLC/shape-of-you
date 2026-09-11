@@ -54,11 +54,21 @@ export interface HealthDataProvider {
   disconnect(accessToken: string): Promise<void>;
 }
 
-/** Sanitized provider error that cannot expose response bodies or credentials. */
+/** Bounded, redacted transport evidence that may be written to operational logs. */
+export interface IntegrationProviderDiagnostic {
+  readonly operation: "oauth_token_exchange";
+  readonly httpStatus: number;
+  readonly headers: Readonly<Record<string, string>>;
+  readonly responseBody: string;
+  readonly responseBodyTruncated: boolean;
+}
+
+/** Sanitized provider error that may carry only explicitly redacted, bounded diagnostics. */
 export class IntegrationProviderError extends Error {
   public constructor(
     public readonly failureCode: IntegrationFailureCode,
-    message = "External health provider request failed"
+    message = "External health provider request failed",
+    public readonly diagnostic?: IntegrationProviderDiagnostic
   ) {
     super(message);
     this.name = "IntegrationProviderError";

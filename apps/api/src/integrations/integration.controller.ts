@@ -57,7 +57,10 @@ export function registerIntegrationCallback(fastify: FastifyInstance, service: I
       const failureCode = error instanceof IntegrationProviderError
         ? error.failureCode
         : "provider_unavailable";
-      fastify.log.warn({ failureCode }, "Intervals.icu authorization callback failed");
+      const providerDiagnostic = error instanceof IntegrationProviderError
+        ? error.diagnostic
+        : undefined;
+      fastify.log.warn({ failureCode, providerDiagnostic }, "Intervals.icu authorization callback failed");
       reply.header("cache-control", "no-store");
       reply.header("referrer-policy", "no-referrer");
       reply.redirect("/connections?provider=authorization_failed");

@@ -1,5 +1,7 @@
 import type {
   HealthDataProvider,
+  IntegrationFailureCode,
+  IntegrationProviderDiagnostic,
   ProviderAuthorization,
   ProviderReconciliation
 } from "../provider.js";
@@ -13,7 +15,17 @@ const authorizationEndpoint = "https://intervals.icu/oauth/authorize";
 const tokenEndpoint = "https://intervals.icu/api/oauth/token";
 const apiOrigin = "https://intervals.icu";
 const maxResponseBytes = 2_000_000;
+const maxDiagnosticResponseBytes = 4_096;
 const timeoutMs = 10_000;
+const diagnosticHeaders = [
+  "content-type",
+  "content-length",
+  "date",
+  "retry-after",
+  "x-request-id",
+  "cf-ray",
+  "traceparent"
+] as const;
 
 /** Stable runtime settings for the approved Intervals.icu OAuth application. */
 export interface IntervalsIcuProviderOptions {
@@ -54,6 +66,9 @@ export class IntervalsIcuProvider implements HealthDataProvider {
         client_secret: this.options.clientSecret,
         code
       })
+    }, false, {
+      operation: "oauth_token_exchange",
+      sensitiveValues: [this.options.clientId, this.options.clientSecret, code]
     });
     if (!value || typeof value !== "object" || Array.isArray(value)) invalid();
     const record = value as Record<string, unknown>;
@@ -88,14 +103,23 @@ export class IntervalsIcuProvider implements HealthDataProvider {
     }, true);
   }
 
-  private async fetchJson(url: string, init: RequestInit, allowEmpty = false): Promise<unknown> {
+  private async fetchJson(
+    url: string,
+    init: RequestInit,
+    allowEmpty = false,
+    diagnosticContext?: DiagnosticContext
+  ): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await this.request(url, { ...init, signal: controller.signal });
-      if (response.status === 401 || response.status === 403) throw new IntegrationProviderError("authorization_required");
-      if (response.status === 429) throw new IntegrationProviderError("provider_rate_limited");
-      if (!response.ok) throw new IntegrationProviderError("provider_unavailable");
+      if (!response.ok) {
+        const failureCode = classifyHttpFailure(response.status);
+        const diagnostic = diagnosticContext
+          ? await createDiagnostic(response, diagnosticContext)
+          : undefined;
+        throw new IntegrationProviderError(failureCode, undefined, diagnostic);
+      }
       const declaredLength = Number(response.headers.get("content-length"));
       if (Number.isFinite(declaredLength) && declaredLength > maxResponseBytes) invalid();
       const text = await response.text();
@@ -110,6 +134,84 @@ export class IntervalsIcuProvider implements HealthDataProvider {
       clearTimeout(timer);
     }
   }
+}
+
+interface DiagnosticContext {
+  readonly operation: IntegrationProviderDiagnostic["operation"];
+  readonly sensitiveValues: readonly string[];
+}
+
+function classifyHttpFailure(status: number): IntegrationFailureCode {
+  if (status === 401 || status === 403) return "authorization_required";
+  if (status === 429) return "provider_rate_limited";
+  return "provider_unavailable";
+}
+
+async function createDiagnostic(
+  response: Response,
+  context: DiagnosticContext
+): Promise<IntegrationProviderDiagnostic> {
+  const headers: Record<string, string> = {};
+  for (const name of diagnosticHeaders) {
+    const value = response.headers.get(name);
+    if (value) headers[name] = sanitizeDiagnosticText(value, context.sensitiveValues, 256);
+  }
+  const body = await readBoundedDiagnosticBody(response);
+  return {
+    operation: context.operation,
+    httpStatus: response.status,
+    headers,
+    responseBody: sanitizeDiagnosticText(body.text, context.sensitiveValues, maxDiagnosticResponseBytes),
+    responseBodyTruncated: body.truncated
+  };
+}
+
+async function readBoundedDiagnosticBody(response: Response): Promise<{ text: string; truncated: boolean }> {
+  if (!response.body) return { text: "", truncated: false };
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let readBytes = 0;
+  let truncated = false;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = maxDiagnosticResponseBytes - readBytes;
+      if (value.byteLength > remaining) {
+        text += decoder.decode(value.subarray(0, Math.max(remaining, 0)), { stream: true });
+        truncated = true;
+        await reader.cancel();
+        break;
+      }
+      readBytes += value.byteLength;
+      text += decoder.decode(value, { stream: true });
+      if (readBytes === maxDiagnosticResponseBytes) {
+        const next = await reader.read();
+        truncated = !next.done;
+        if (truncated) await reader.cancel();
+        break;
+      }
+    }
+  } finally {
+    text += decoder.decode();
+    reader.releaseLock();
+  }
+  return { text, truncated };
+}
+
+function sanitizeDiagnosticText(value: string, sensitiveValues: readonly string[], maxCharacters: number): string {
+  let sanitized = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "?");
+  for (const sensitive of sensitiveValues) {
+    if (sensitive) sanitized = sanitized.split(sensitive).join("[redacted]");
+  }
+  sanitized = sanitized
+    .replace(/("(?:access_token|refresh_token|client_secret|code)"\s*:\s*")[^"]*(")/gi, "$1[redacted]$2")
+    .replace(/((?:access_token|refresh_token|client_secret|code)=)[^&\s]*/gi, "$1[redacted]")
+    .replace(/(Bearer\s+)[A-Za-z0-9._~-]+/gi, "$1[redacted]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[redacted-email]")
+    .replace(/\b[A-Za-z0-9._~-]{32,}\b/g, "[redacted-token]");
+  return sanitized.slice(0, maxCharacters);
 }
 
 function invalid(): never {
