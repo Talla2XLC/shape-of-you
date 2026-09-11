@@ -16,6 +16,7 @@ import {
 import type {
   ActiveIntegrationConnection,
   ConsumedAuthorizationTransaction,
+  HistoricalImportClaim,
   IntegrationConnectionIdentity,
   IntegrationStore,
   RecoveryFactPointer
@@ -140,7 +141,8 @@ export class IntegrationRepository implements IntegrationStore {
       return pending ? {
         provider: "intervals_icu", displayName: "Garmin via Intervals.icu", recoveryConnectionId: null,
         lifecycle: "connecting", failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null,
-        lastDataAt: null, connectedAt: null, disconnectedAt: null
+        lastDataAt: null, connectedAt: null, disconnectedAt: null,
+        historicalImport: emptyHistoricalImport()
       } : null;
     }
     return {
@@ -153,7 +155,15 @@ export class IntegrationRepository implements IntegrationStore {
       lastSuccessfulSyncAt: row.lastSuccessfulSyncAt?.toISOString() ?? null,
       lastDataAt: row.lastDataAt?.toISOString() ?? null,
       connectedAt: row.connectedAt.toISOString(),
-      disconnectedAt: row.disconnectedAt?.toISOString() ?? null
+      disconnectedAt: row.disconnectedAt?.toISOString() ?? null,
+      historicalImport: {
+        status: row.historicalImportStatus,
+        processedThroughDate: row.historicalCursorBefore,
+        requestedAt: row.historicalRequestedAt?.toISOString() ?? null,
+        lastAttemptAt: row.historicalLastAttemptAt?.toISOString() ?? null,
+        completedAt: row.historicalCompletedAt?.toISOString() ?? null,
+        failureCode: row.historicalFailureCode
+      }
     };
   }
 
@@ -164,7 +174,10 @@ export class IntegrationRepository implements IntegrationStore {
     if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
     return {
       id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
-      credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+      credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
+      historicalImportStatus: row.historicalImportStatus,
+      historicalCursorBefore: row.historicalCursorBefore,
+      historicalNextAttemptAt: row.historicalNextAttemptAt
     };
   }
 
@@ -175,7 +188,10 @@ export class IntegrationRepository implements IntegrationStore {
     if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
     return {
       id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
-      credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+      credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
+      historicalImportStatus: row.historicalImportStatus,
+      historicalCursorBefore: row.historicalCursorBefore,
+      historicalNextAttemptAt: row.historicalNextAttemptAt
     };
   }
 
@@ -193,7 +209,10 @@ export class IntegrationRepository implements IntegrationStore {
       await transaction.update(integrationConnections).set({ leaseOwner: workerId, leaseUntil: new Date(now.valueOf() + leaseMs) }).where(eq(integrationConnections.id, row.id));
       return {
         id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
-        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
+        historicalImportStatus: row.historicalImportStatus,
+        historicalCursorBefore: row.historicalCursorBefore,
+        historicalNextAttemptAt: row.historicalNextAttemptAt
       };
     });
   }
@@ -209,7 +228,10 @@ export class IntegrationRepository implements IntegrationStore {
       if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
       await transaction.update(integrationConnections).set({ leaseOwner: workerId, leaseUntil: new Date(now.valueOf() + leaseMs) }).where(eq(integrationConnections.id, row.id));
       return { id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
-        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag } };
+        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
+        historicalImportStatus: row.historicalImportStatus,
+        historicalCursorBefore: row.historicalCursorBefore,
+        historicalNextAttemptAt: row.historicalNextAttemptAt };
     });
   }
 
@@ -226,12 +248,28 @@ export class IntegrationRepository implements IntegrationStore {
       if (!row) return null;
       const active = row.credentialKeyId && row.credentialNonce && row.credentialCiphertext && row.credentialTag ? {
         id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
-        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag }
+        credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
+        historicalImportStatus: row.historicalImportStatus,
+        historicalCursorBefore: row.historicalCursorBefore,
+        historicalNextAttemptAt: row.historicalNextAttemptAt
       } : null;
       const now = new Date();
+      const historicalReset = row.historicalImportStatus === "completed"
+        ? { historicalClaimToken: null, historicalClaimUntil: null }
+        : {
+            historicalImportStatus: "not_requested" as const,
+            historicalCursorBefore: null,
+            historicalRequestedAt: null,
+            historicalLastAttemptAt: null,
+            historicalCompletedAt: null,
+            historicalNextAttemptAt: null,
+            historicalFailureCode: null,
+            historicalClaimToken: null,
+            historicalClaimUntil: null
+          };
       await transaction.update(integrationConnections).set({
         lifecycle: "disconnected", importEnabled: false, disconnectedAt: now,
-        remoteDisconnectPending: Boolean(active), updatedAt: now
+        remoteDisconnectPending: Boolean(active), ...historicalReset, updatedAt: now
       }).where(eq(integrationConnections.id, row.id));
       await transaction.update(recoveryConnections).set({ status: "disconnected", disconnectedAt: now })
         .where(eq(recoveryConnections.id, row.recoveryConnectionId));
@@ -239,6 +277,115 @@ export class IntegrationRepository implements IntegrationStore {
         .where(and(eq(recoveryConsents.id, row.consentId), eq(recoveryConsents.status, "active")));
       return active;
     });
+  }
+
+  public async startHistoricalImport(personId: string): Promise<boolean> {
+    const now = new Date();
+    const current = await this.database.db.query.integrationConnections.findFirst({
+      where: and(
+        eq(integrationConnections.personId, personId),
+        eq(integrationConnections.providerKey, providerKey),
+        eq(integrationConnections.importEnabled, true)
+      )
+    });
+    if (!current) return false;
+    if (current.historicalImportStatus === "running") {
+      const active = await this.database.db.update(integrationConnections).set({
+        nextAttemptAt: now,
+        updatedAt: now
+      }).where(and(eq(integrationConnections.id, current.id), eq(integrationConnections.importEnabled, true)))
+        .returning({ id: integrationConnections.id });
+      return active.length > 0;
+    }
+    const restartCompleted = current.historicalImportStatus === "completed";
+    const active = await this.database.db.update(integrationConnections).set({
+      historicalImportStatus: "running",
+      historicalCursorBefore: restartCompleted ? null : current.historicalCursorBefore,
+      historicalRequestedAt: now,
+      historicalLastAttemptAt: null,
+      historicalCompletedAt: null,
+      historicalNextAttemptAt: now,
+      historicalFailureCode: null,
+      historicalClaimToken: null,
+      historicalClaimUntil: null,
+      nextAttemptAt: now,
+      updatedAt: now
+    }).where(and(eq(integrationConnections.id, current.id), eq(integrationConnections.importEnabled, true)))
+      .returning({ id: integrationConnections.id });
+    return active.length > 0;
+  }
+
+  public async claimHistoricalWindow(
+    id: string,
+    expectedConsentId: string,
+    expectedCursorBefore: string | null,
+    claimToken: string,
+    leaseMs: number
+  ): Promise<HistoricalImportClaim | null> {
+    const now = new Date();
+    const rows = await this.database.db.update(integrationConnections).set({
+      historicalClaimToken: claimToken,
+      historicalClaimUntil: new Date(now.valueOf() + leaseMs),
+      historicalLastAttemptAt: now,
+      updatedAt: now
+    }).where(and(
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.consentId, expectedConsentId),
+      eq(integrationConnections.importEnabled, true),
+      eq(integrationConnections.historicalImportStatus, "running"),
+      lte(integrationConnections.historicalNextAttemptAt, now),
+      or(isNull(integrationConnections.historicalClaimUntil), lte(integrationConnections.historicalClaimUntil, now)),
+      sql`${integrationConnections.historicalCursorBefore} IS NOT DISTINCT FROM ${expectedCursorBefore}`
+    )).returning({ cursorBefore: integrationConnections.historicalCursorBefore });
+    return rows[0] ? { claimToken, cursorBefore: rows[0].cursorBefore } : null;
+  }
+
+  public async markHistoricalWindowSucceeded(
+    id: string,
+    claimToken: string,
+    processedThroughDate: string,
+    completed: boolean
+  ): Promise<boolean> {
+    const now = new Date();
+    const rows = await this.database.db.update(integrationConnections).set({
+      historicalImportStatus: completed ? "completed" : "running",
+      historicalCursorBefore: processedThroughDate,
+      historicalCompletedAt: completed ? now : null,
+      historicalNextAttemptAt: completed ? null : new Date(now.valueOf() + 15 * 60_000),
+      historicalFailureCode: null,
+      historicalClaimToken: null,
+      historicalClaimUntil: null,
+      updatedAt: now
+    }).where(and(
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.importEnabled, true),
+      eq(integrationConnections.historicalImportStatus, "running"),
+      eq(integrationConnections.historicalClaimToken, claimToken)
+    )).returning({ id: integrationConnections.id });
+    return rows.length > 0;
+  }
+
+  public async markHistoricalImportFailed(
+    id: string,
+    claimToken: string,
+    failureCode: IntegrationFailureCode,
+    retryable: boolean
+  ): Promise<boolean> {
+    const now = new Date();
+    const rows = await this.database.db.update(integrationConnections).set({
+      historicalImportStatus: retryable ? "running" : "failed",
+      historicalNextAttemptAt: retryable ? new Date(now.valueOf() + 15 * 60_000) : null,
+      historicalFailureCode: failureCode,
+      historicalClaimToken: null,
+      historicalClaimUntil: null,
+      updatedAt: now
+    }).where(and(
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.importEnabled, true),
+      eq(integrationConnections.historicalImportStatus, "running"),
+      eq(integrationConnections.historicalClaimToken, claimToken)
+    )).returning({ id: integrationConnections.id });
+    return rows.length > 0;
   }
 
   public async completeRemoteDisconnect(id: string): Promise<void> {
@@ -250,13 +397,13 @@ export class IntegrationRepository implements IntegrationStore {
   public async failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode): Promise<void> {
     await this.database.db.update(integrationConnections).set({ failureCode, nextAttemptAt: new Date(Date.now() + 60_000), leaseOwner: null, leaseUntil: null, updatedAt: new Date() }).where(eq(integrationConnections.id, id));
   }
-  public async markSyncSucceeded(id: string, hasData: boolean): Promise<void> {
+  public async markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void> {
     const now = new Date();
-    await this.database.db.update(integrationConnections).set({ lifecycle: "active", failureCode: null, lastAttemptAt: now, lastSuccessfulSyncAt: now, ...(hasData ? { lastDataAt: now } : {}), nextAttemptAt: new Date(now.valueOf() + 300_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.importEnabled, true)));
+    await this.database.db.update(integrationConnections).set({ lifecycle: "active", failureCode: null, lastAttemptAt: now, lastSuccessfulSyncAt: now, ...(hasData ? { lastDataAt: now } : {}), nextAttemptAt: new Date(now.valueOf() + 300_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
   }
-  public async markSyncFailed(id: string, failureCode: IntegrationFailureCode): Promise<void> {
+  public async markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void> {
     const now = new Date();
-    await this.database.db.update(integrationConnections).set({ lifecycle: "degraded", failureCode, lastAttemptAt: now, nextAttemptAt: new Date(now.valueOf() + 60_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.importEnabled, true)));
+    await this.database.db.update(integrationConnections).set({ lifecycle: "degraded", failureCode, lastAttemptAt: now, nextAttemptAt: new Date(now.valueOf() + 60_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
   }
 
   public async recordInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<boolean> {
@@ -279,4 +426,15 @@ export class IntegrationRepository implements IntegrationStore {
     await this.database.db.insert(integrationRecoveryFacts).values({ connectionId: id, providerIdentity: identity, factKey, normalizedChecksum: checksum, observationId }).onConflictDoUpdate({ target: [integrationRecoveryFacts.connectionId, integrationRecoveryFacts.providerIdentity, integrationRecoveryFacts.factKey], set: { normalizedChecksum: checksum, observationId, updatedAt: new Date() } });
   }
 
+}
+
+function emptyHistoricalImport(): GarminIntervalsConnection["historicalImport"] {
+  return {
+    status: "not_requested",
+    processedThroughDate: null,
+    requestedAt: null,
+    lastAttemptAt: null,
+    completedAt: null,
+    failureCode: null
+  };
 }

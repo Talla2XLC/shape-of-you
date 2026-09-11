@@ -136,6 +136,14 @@ function integrationPaths(): Record<string, object> {
         requestBody: { required: true, content: { "application/json": { schema: DisconnectIntegrationSchema } } },
         responses: { "200": { description: "Disconnected connection projection", content: { "application/json": { schema: GarminIntervalsConnectionSchema } } } }
       }
+    },
+    "/v1/integrations/garmin-intervals/historical-import": {
+      post: {
+        tags: ["integrations"], summary: "Start or resume an explicit historical import",
+        responses: {
+          "200": { description: "Connection projection with historical import state", content: { "application/json": { schema: GarminIntervalsConnectionSchema } } }
+        }
+      }
     }
   };
 }

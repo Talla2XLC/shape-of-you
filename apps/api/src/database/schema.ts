@@ -237,6 +237,10 @@ export const integrationSyncFailure = pgEnum("integration_sync_failure", [
   "provider_unavailable",
   "provider_response_invalid"
 ]);
+export const integrationHistoricalImportStatus = pgEnum(
+  "integration_historical_import_status",
+  ["not_requested", "running", "completed", "failed"]
+);
 export const integrationInboxKind = pgEnum("integration_inbox_kind", [
   "wellness",
   "activity"
@@ -2970,6 +2974,15 @@ export const integrationConnections = pgTable(
     remoteDisconnectPending: boolean("remote_disconnect_pending").default(false).notNull(),
     connectedAt: timestamp("connected_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     disconnectedAt: timestamp("disconnected_at", { withTimezone: true, mode: "date" }),
+    historicalImportStatus: integrationHistoricalImportStatus("historical_import_status").default("not_requested").notNull(),
+    historicalCursorBefore: date("historical_cursor_before"),
+    historicalRequestedAt: timestamp("historical_requested_at", { withTimezone: true, mode: "date" }),
+    historicalLastAttemptAt: timestamp("historical_last_attempt_at", { withTimezone: true, mode: "date" }),
+    historicalCompletedAt: timestamp("historical_completed_at", { withTimezone: true, mode: "date" }),
+    historicalNextAttemptAt: timestamp("historical_next_attempt_at", { withTimezone: true, mode: "date" }),
+    historicalFailureCode: integrationSyncFailure("historical_failure_code"),
+    historicalClaimToken: uuid("historical_claim_token"),
+    historicalClaimUntil: timestamp("historical_claim_until", { withTimezone: true, mode: "date" }),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
   },
   (table) => [
@@ -2995,6 +3008,38 @@ export const integrationConnections = pgTable(
       "integration_connections_lifecycle_shape",
       sql`(${table.lifecycle} = 'disconnected' AND ${table.importEnabled} = false AND ${table.disconnectedAt} IS NOT NULL)
         OR (${table.lifecycle} <> 'disconnected' AND ${table.disconnectedAt} IS NULL)`
+    ),
+    check(
+      "integration_connections_historical_claim_shape",
+      sql`(${table.historicalClaimToken} IS NULL AND ${table.historicalClaimUntil} IS NULL)
+        OR (${table.historicalClaimToken} IS NOT NULL AND ${table.historicalClaimUntil} IS NOT NULL)`
+    ),
+    check(
+      "integration_connections_historical_state_shape",
+      sql`(${table.historicalImportStatus} = 'not_requested'
+          AND ${table.historicalCursorBefore} IS NULL
+          AND ${table.historicalRequestedAt} IS NULL
+          AND ${table.historicalLastAttemptAt} IS NULL
+          AND ${table.historicalCompletedAt} IS NULL
+          AND ${table.historicalNextAttemptAt} IS NULL
+          AND ${table.historicalFailureCode} IS NULL
+          AND ${table.historicalClaimToken} IS NULL)
+        OR (${table.historicalImportStatus} = 'running'
+          AND ${table.historicalRequestedAt} IS NOT NULL
+          AND ${table.historicalCompletedAt} IS NULL)
+        OR (${table.historicalImportStatus} = 'completed'
+          AND ${table.historicalCursorBefore} = '2000-01-01'
+          AND ${table.historicalRequestedAt} IS NOT NULL
+          AND ${table.historicalCompletedAt} IS NOT NULL
+          AND ${table.historicalNextAttemptAt} IS NULL
+          AND ${table.historicalFailureCode} IS NULL
+          AND ${table.historicalClaimToken} IS NULL)
+        OR (${table.historicalImportStatus} = 'failed'
+          AND ${table.historicalRequestedAt} IS NOT NULL
+          AND ${table.historicalCompletedAt} IS NULL
+          AND ${table.historicalNextAttemptAt} IS NULL
+          AND ${table.historicalFailureCode} IS NOT NULL
+          AND ${table.historicalClaimToken} IS NULL)`
     )
   ]
 );

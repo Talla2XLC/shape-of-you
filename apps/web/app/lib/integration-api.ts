@@ -14,6 +14,14 @@ export interface GarminIntervalsStatus {
   readonly lastDataAt: string | null;
   readonly connectedAt: string | null;
   readonly disconnectedAt: string | null;
+  readonly historicalImport: {
+    readonly status: "not_requested" | "running" | "completed" | "failed";
+    readonly processedThroughDate: string | null;
+    readonly requestedAt: string | null;
+    readonly lastAttemptAt: string | null;
+    readonly completedAt: string | null;
+    readonly failureCode: GarminIntervalsStatus["failureCode"];
+  };
 }
 
 export class IntegrationApiError extends Error {
@@ -72,6 +80,11 @@ export const integrationApi = {
   disconnect() {
     return request<GarminIntervalsStatus>("/api/v1/integrations/garmin-intervals/disconnect", {
       method: "POST", body: JSON.stringify({ reason: "user requested disconnect" })
+    });
+  },
+  startHistoricalImport() {
+    return request<GarminIntervalsStatus>("/api/v1/integrations/garmin-intervals/historical-import", {
+      method: "POST"
     });
   },
   startErasure(connectionId: string) {

@@ -12,19 +12,23 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("integration API", () => {
   it("keeps tokens out of JavaScript and sends CSRF on mutations", async () => {
-    const status = { provider: "intervals_icu", displayName: "Garmin via Intervals.icu", recoveryConnectionId: null, lifecycle: "unavailable", failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, lastDataAt: null, connectedAt: null, disconnectedAt: null };
+    const status = { provider: "intervals_icu", displayName: "Garmin via Intervals.icu", recoveryConnectionId: null, lifecycle: "unavailable", failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, lastDataAt: null, connectedAt: null, disconnectedAt: null, historicalImport: { status: "not_requested", processedThroughDate: null, requestedAt: null, lastAttemptAt: null, completedAt: null, failureCode: null } };
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(status), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ authorizationUrl: "https://intervals.icu/oauth/authorize" }), { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ authorizationUrl: "https://intervals.icu/oauth/authorize" }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(status), { status: 200 }));
     vi.stubGlobal("fetch", fetch);
     vi.stubGlobal("document", { cookie: `__Host-shape_of_you_api_csrf=${"C".repeat(43)}` });
 
     await integrationApi.status();
     await integrationApi.start();
+    await integrationApi.startHistoricalImport();
 
     expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/integrations/garmin-intervals");
     expect(fetch.mock.calls[1]?.[1]).toMatchObject({ method: "POST", credentials: "same-origin" });
     expect((fetch.mock.calls[1]?.[1] as RequestInit).headers).toMatchObject({ "x-csrf-token": "C".repeat(43) });
+    expect(fetch.mock.calls[2]?.[0]).toBe("/api/v1/integrations/garmin-intervals/historical-import");
+    expect((fetch.mock.calls[2]?.[1] as RequestInit).headers).toMatchObject({ "x-csrf-token": "C".repeat(43) });
     expect(JSON.stringify(fetch.mock.calls)).not.toContain("access_token");
   });
 

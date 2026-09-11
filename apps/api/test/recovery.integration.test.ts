@@ -19,6 +19,7 @@ import { IntegrationRepository } from "../src/storage/integration-repository.js"
 import { TrainingRepository } from "../src/storage/training-repository.js";
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
+import type { ProviderReconciliation } from "../src/integrations/provider.js";
 import { IntegrationService } from "../src/integrations/integration.service.js";
 import { SyntheticPersonContext } from "../src/application/person-context.js";
 
@@ -32,6 +33,10 @@ const personA = "00000000-0000-4000-8000-000000000001";
 const personB = "00000000-0000-4000-8000-000000000002";
 const personC = "00000000-0000-4000-8000-000000000003";
 const personD = "00000000-0000-4000-8000-000000000004";
+const personE = "00000000-0000-4000-8000-000000000005";
+const personF = "00000000-0000-4000-8000-000000000006";
+const personG = "00000000-0000-4000-8000-000000000007";
+const personH = "00000000-0000-4000-8000-000000000008";
 
 async function acknowledgeAcceptedErasure(requestId: string): Promise<void> {
   await database.pool.query(
@@ -62,8 +67,8 @@ beforeAll(async () => {
   await runMigrations(databaseUrl);
   database = createDatabase(config);
   await database.pool.query(
-    "insert into persons (id, kind, status) values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active')",
-    [personB, personC, personD]
+    "insert into persons (id, kind, status) values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active'), ($4, 'real', 'active'), ($5, 'real', 'active'), ($6, 'real', 'active'), ($7, 'real', 'active')",
+    [personB, personC, personD, personE, personF, personG, personH]
   );
   repository = new RecoveryRepository(database);
   app = await buildApp({ config, database });
@@ -155,7 +160,8 @@ describe("Recovery PostgreSQL vertical", () => {
       averageHeartRate: 145, maximumHeartRate: 175, deviceName: "Garmin Test", garminAttributed: true
     };
     const trainingInput = (value: typeof activity, checksum: string) => ({
-      connectionId: connection!.id, personId: connection!.personId, providerIdentity: value.identity,
+      connectionId: connection!.id, personId: connection!.personId, consentId: connection!.consentId,
+      providerIdentity: value.identity,
       normalizedChecksum: checksum, occurredAt: value.occurredAt, localDate: value.localDate, timezone: value.timezone,
       name: value.name, durationSeconds: value.durationSeconds, distanceMeters: value.distanceMeters,
       trainingLoad: value.trainingLoad, averageHeartRate: value.averageHeartRate, maximumHeartRate: value.maximumHeartRate,
@@ -185,6 +191,301 @@ describe("Recovery PostgreSQL vertical", () => {
     const job = await repository.claimErasure("activity-erasure-worker", 30_000);
     await repository.completeErasure(job!);
     expect(await training.listExternalActivities(personC)).toHaveLength(0);
+  });
+
+  it("starts historical import explicitly and resumes from the durable bounded cursor", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const provider = new FakeHealthDataProvider();
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const id = "00000000-0000-4000-8000-000000000131";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000132";
+    const consentId = "00000000-0000-4000-8000-000000000133";
+    const credential = cipher.encrypt("history-token", `intervals_icu:${personE}:${id}`);
+    await integrations.activate({
+      id, recoveryConnectionId, consentId, personId: personE,
+      externalUserId: "athlete-e", credential,
+      authorizationStartedAt: new Date(Date.now() - 1_000)
+    });
+    expect(await integrations.status(personE)).toMatchObject({
+      historicalImport: { status: "not_requested", processedThroughDate: null }
+    });
+
+    const service = new IntegrationService(
+      new SyntheticPersonContext(personE), integrations, provider, cipher, repository, training
+    );
+    await expect(service.startHistoricalImport()).resolves.toMatchObject({
+      historicalImport: { status: "running", processedThroughDate: null }
+    });
+    const connection = (await integrations.findActive(personE))!;
+    await service.reconcileConnection(connection);
+
+    expect(provider.reconcileCalls).toHaveLength(2);
+    const [rolling, historical] = provider.reconcileCalls;
+    expect(historical!.newest < rolling!.oldest).toBe(true);
+    const historicalDays = Math.round(
+      (Date.parse(`${historical!.newest}T00:00:00.000Z`) - Date.parse(`${historical!.oldest}T00:00:00.000Z`)) / 86_400_000
+    ) + 1;
+    expect(historicalDays).toBeLessThanOrEqual(180);
+    expect(await integrations.status(personE)).toMatchObject({
+      lifecycle: "active",
+      historicalImport: {
+        status: "running",
+        processedThroughDate: historical!.oldest,
+        failureCode: null
+      }
+    });
+
+    await database.pool.query(
+      "update integration_connections set historical_next_attempt_at = now() - interval '1 second' where id = $1",
+      [id]
+    );
+    await service.reconcileConnection((await integrations.findActive(personE))!);
+    expect(provider.reconcileCalls).toHaveLength(4);
+    const secondHistorical = provider.reconcileCalls[3]!;
+    const expectedSecondNewest = new Date(Date.parse(`${historical!.oldest}T00:00:00.000Z`) - 86_400_000)
+      .toISOString().slice(0, 10);
+    expect(secondHistorical.newest).toBe(expectedSecondNewest);
+    expect(await integrations.status(personE)).toMatchObject({
+      historicalImport: {
+        status: "running",
+        processedThroughDate: secondHistorical.oldest,
+        failureCode: null
+      }
+    });
+
+    await integrations.beginDisconnect(personE, "test disconnect");
+    await expect(service.startHistoricalImport()).rejects.toThrow("active Intervals.icu connection");
+    expect(await integrations.status(personE)).toMatchObject({
+      lifecycle: "disconnected",
+      historicalImport: { status: "not_requested", processedThroughDate: null }
+    });
+  });
+
+  it("restarts completed history after reconnect and fences stale claims across disconnect", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const provider = new FakeHealthDataProvider();
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const id = "00000000-0000-4000-8000-000000000141";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000142";
+    const credential = cipher.encrypt("reimport-token", `intervals_icu:${personF}:${id}`);
+    await integrations.activate({
+      id,
+      recoveryConnectionId,
+      consentId: "00000000-0000-4000-8000-000000000143",
+      personId: personF,
+      externalUserId: "athlete-f",
+      credential,
+      authorizationStartedAt: new Date(Date.now() - 1_000)
+    });
+    await database.pool.query(
+      `update integration_connections set
+         historical_import_status = 'completed',
+         historical_cursor_before = '2000-01-01',
+         historical_requested_at = now() - interval '1 hour',
+         historical_last_attempt_at = now(),
+         historical_completed_at = now(),
+         historical_next_attempt_at = null,
+         historical_failure_code = null,
+         historical_claim_token = null,
+         historical_claim_until = null
+       where id = $1`,
+      [id]
+    );
+
+    await integrations.beginDisconnect(personF, "completed history disconnect");
+    expect(await integrations.status(personF)).toMatchObject({
+      lifecycle: "disconnected",
+      historicalImport: { status: "completed", processedThroughDate: "2000-01-01" }
+    });
+    await integrations.activate({
+      id,
+      recoveryConnectionId,
+      consentId: "00000000-0000-4000-8000-000000000144",
+      personId: personF,
+      externalUserId: "athlete-f",
+      credential,
+      authorizationStartedAt: new Date(Date.now() + 1_000)
+    });
+    const service = new IntegrationService(
+      new SyntheticPersonContext(personF), integrations, provider, cipher, repository, training
+    );
+    expect(await service.startHistoricalImport()).toMatchObject({
+      historicalImport: { status: "running", processedThroughDate: null }
+    });
+
+    const firstClaimToken = "00000000-0000-4000-8000-000000000145";
+    expect(await integrations.claimHistoricalWindow(id, "00000000-0000-4000-8000-000000000144", null, firstClaimToken, 30 * 60_000)).toEqual({
+      claimToken: firstClaimToken,
+      cursorBefore: null
+    });
+    expect(await integrations.claimHistoricalWindow(
+      id,
+      "00000000-0000-4000-8000-000000000144",
+      null,
+      "00000000-0000-4000-8000-000000000146",
+      30 * 60_000
+    )).toBeNull();
+    expect(await integrations.markHistoricalWindowSucceeded(
+      id,
+      "00000000-0000-4000-8000-000000000146",
+      "2026-01-01",
+      false
+    )).toBe(false);
+
+    expect(await integrations.markHistoricalImportFailed(id, firstClaimToken, "provider_timeout", true)).toBe(true);
+    expect(await integrations.status(personF)).toMatchObject({
+      lifecycle: "active",
+      historicalImport: { status: "running", processedThroughDate: null, failureCode: "provider_timeout" }
+    });
+    await database.pool.query(
+      "update integration_connections set historical_next_attempt_at = now() - interval '1 second' where id = $1",
+      [id]
+    );
+    const retryClaimToken = "00000000-0000-4000-8000-000000000147";
+    expect(await integrations.claimHistoricalWindow(id, "00000000-0000-4000-8000-000000000144", null, retryClaimToken, 30 * 60_000)).not.toBeNull();
+
+    await integrations.beginDisconnect(personF, "claim fencing disconnect");
+    expect(await integrations.markHistoricalWindowSucceeded(id, retryClaimToken, "2026-01-01", false)).toBe(false);
+    expect(await integrations.status(personF)).toMatchObject({
+      lifecycle: "disconnected",
+      historicalImport: { status: "not_requested", processedThroughDate: null, failureCode: null }
+    });
+  });
+
+  it("rejects a stale historical activity response after disconnect and reconnect", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const provider = new FakeHealthDataProvider();
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const id = "00000000-0000-4000-8000-000000000151";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000152";
+    const oldConsentId = "00000000-0000-4000-8000-000000000153";
+    const newConsentId = "00000000-0000-4000-8000-000000000154";
+    const credential = cipher.encrypt("race-token", `intervals_icu:${personG}:${id}`);
+    await integrations.activate({
+      id,
+      recoveryConnectionId,
+      consentId: oldConsentId,
+      personId: personG,
+      externalUserId: "athlete-g",
+      credential,
+      authorizationStartedAt: new Date(Date.now() - 1_000)
+    });
+    const service = new IntegrationService(
+      new SyntheticPersonContext(personG), integrations, provider, cipher, repository, training
+    );
+    await service.startHistoricalImport();
+    const staleConnection = (await integrations.findActive(personG))!;
+    let releaseHistorical!: (result: ProviderReconciliation) => void;
+    let reportHistoricalStarted!: () => void;
+    const historicalStarted = new Promise<void>((resolve) => { reportHistoricalStarted = resolve; });
+    const heldHistorical = new Promise<ProviderReconciliation>((resolve) => { releaseHistorical = resolve; });
+    provider.reconcile = async (accessToken: string, oldest: string, newest: string) => {
+      provider.reconcileCalls.push({ accessToken, oldest, newest });
+      if (provider.reconcileCalls.length === 1) return { wellness: [], activities: [] };
+      reportHistoricalStarted();
+      return await heldHistorical;
+    };
+
+    const staleReconciliation = service.reconcileConnection(staleConnection);
+    await historicalStarted;
+    await integrations.beginDisconnect(personG, "disconnect while history request is held");
+    await integrations.activate({
+      id,
+      recoveryConnectionId,
+      consentId: newConsentId,
+      personId: personG,
+      externalUserId: "athlete-g",
+      credential,
+      authorizationStartedAt: new Date(Date.now() + 1_000)
+    });
+    releaseHistorical({
+      wellness: [],
+      activities: [{
+        identity: "stale-history-activity",
+        occurredAt: "2020-01-02T06:00:00.000Z",
+        localDate: "2020-01-02",
+        timezone: "UTC",
+        name: "Stale run",
+        durationSeconds: 3_600,
+        distanceMeters: 10_000,
+        trainingLoad: 75,
+        averageHeartRate: 145,
+        maximumHeartRate: 175,
+        deviceName: "Garmin Test",
+        garminAttributed: true
+      }]
+    });
+    await staleReconciliation;
+
+    expect((await database.pool.query(
+      "select 1 from integration_activity_facts where connection_id = $1 and provider_identity = 'stale-history-activity'",
+      [id]
+    )).rowCount).toBe(0);
+    expect(await integrations.status(personG)).toMatchObject({
+      lifecycle: "active",
+      historicalImport: { status: "not_requested", processedThroughDate: null }
+    });
+  });
+
+  it("does not let a stale rolling worker claim newly restarted history", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const provider = new FakeHealthDataProvider();
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const id = "00000000-0000-4000-8000-000000000161";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000162";
+    const oldConsentId = "00000000-0000-4000-8000-000000000163";
+    const newConsentId = "00000000-0000-4000-8000-000000000164";
+    const credential = cipher.encrypt("held-rolling-token", `intervals_icu:${personH}:${id}`);
+    await integrations.activate({
+      id,
+      recoveryConnectionId,
+      consentId: oldConsentId,
+      personId: personH,
+      externalUserId: "athlete-h",
+      credential,
+      authorizationStartedAt: new Date(Date.now() - 1_000)
+    });
+    await integrations.startHistoricalImport(personH);
+    const staleConnection = (await integrations.findActive(personH))!;
+    let releaseRolling!: (result: ProviderReconciliation) => void;
+    let reportRollingStarted!: () => void;
+    const rollingStarted = new Promise<void>((resolve) => { reportRollingStarted = resolve; });
+    const heldRolling = new Promise<ProviderReconciliation>((resolve) => { releaseRolling = resolve; });
+    provider.reconcile = async (accessToken: string, oldest: string, newest: string) => {
+      provider.reconcileCalls.push({ accessToken, oldest, newest });
+      reportRollingStarted();
+      return await heldRolling;
+    };
+    const staleService = new IntegrationService(
+      new SyntheticPersonContext(personH), integrations, provider, cipher, repository, training
+    );
+
+    const staleReconciliation = staleService.reconcileConnection(staleConnection);
+    await rollingStarted;
+    await integrations.beginDisconnect(personH, "disconnect while rolling request is held");
+    await integrations.activate({
+      id,
+      recoveryConnectionId,
+      consentId: newConsentId,
+      personId: personH,
+      externalUserId: "athlete-h",
+      credential,
+      authorizationStartedAt: new Date(Date.now() + 1_000)
+    });
+    await staleService.startHistoricalImport();
+    releaseRolling({ wellness: [], activities: [] });
+    await staleReconciliation;
+
+    expect(provider.reconcileCalls).toHaveLength(1);
+    expect(await integrations.status(personH)).toMatchObject({
+      lifecycle: "active",
+      lastSuccessfulSyncAt: null,
+      historicalImport: { status: "running", processedThroughDate: null, lastAttemptAt: null }
+    });
   });
 
   it("applies the additive Recovery migration on a clean schema", async () => {

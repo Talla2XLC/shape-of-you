@@ -258,7 +258,15 @@ test("connections completes the browser-safe fake provider management flow", asy
     lastSuccessfulSyncAt: null,
     lastDataAt: null,
     connectedAt: null,
-    disconnectedAt: "2026-09-07T12:00:00.000Z"
+    disconnectedAt: "2026-09-07T12:00:00.000Z",
+    historicalImport: {
+      status: "not_requested",
+      processedThroughDate: null,
+      requestedAt: null,
+      lastAttemptAt: null,
+      completedAt: null,
+      failureCode: null
+    }
   } as const;
   const degraded = {
     ...disconnected,
@@ -288,6 +296,21 @@ test("connections completes the browser-safe fake provider management flow", asy
     expect(route.request().postData() ?? "").not.toMatch(/token|password|code/iu);
     await fulfillJson(route, disconnected);
   });
+  await page.route(/\/api\/v1\/integrations\/garmin-intervals\/historical-import$/u, async (route) => {
+    expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
+    expect(route.request().postData()).toBeNull();
+    await fulfillJson(route, {
+      ...degraded,
+      historicalImport: {
+        status: "running",
+        processedThroughDate: null,
+        requestedAt: "2026-09-07T12:35:00.000Z",
+        lastAttemptAt: null,
+        completedAt: null,
+        failureCode: null
+      }
+    });
+  });
   await page.route("**/api/browser-auth/recovery-erasure/start", async (route) => {
     expect(route.request().headers()["x-csrf-token"]).toBe(csrf);
     expect(route.request().postDataJSON()).toEqual({ connectionId });
@@ -315,12 +338,20 @@ test("connections completes the browser-safe fake provider management flow", asy
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
   expect(await page.locator("body").innerText()).not.toMatch(/access[_ -]?token|authorization code/iu);
 
+  await expect(page.getByRole("button", { name: "Import historical data…" })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Import historical data…" }).click();
+  await expect(page.getByRole("button", { name: "Importing historical data…" })).toBeDisabled();
+
   await page.getByRole("button", { name: "Disconnect" }).click();
   await expect(page.getByRole("heading", { name: "disconnected" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Confirm with passkey and delete imported data" })).toBeVisible();
+  const deleteImported = page.getByRole("button", { name: "Delete imported data…" });
+  await expect(deleteImported).toBeVisible();
+  await expect(page.getByText("Passkey confirmation is required.", { exact: false })).toBeVisible();
+  expect(await deleteImported.evaluate((button) => button.getBoundingClientRect().width)).toBeLessThan(280);
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 
-  await page.getByRole("button", { name: "Confirm with passkey and delete imported data" }).click();
+  await deleteImported.click();
   await expect(page).toHaveURL(/\/fresh-passkey-erasure$/u);
   expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
 });

@@ -35,6 +35,12 @@ export class IntegrationController {
   public disconnect(@Body(new JsonSchemaPipe<DisconnectIntegration>(DisconnectIntegrationSchema)) input: DisconnectIntegration): Promise<GarminIntervalsConnection> {
     return this.service.disconnect(input);
   }
+
+  @Post("historical-import")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(GarminIntervalsConnectionSchema))
+  public startHistoricalImport(): Promise<GarminIntervalsConnection> {
+    return this.service.startHistoricalImport();
+  }
 }
 
 /** Registers the exact OAuth callback with request logging disabled for its code query. */

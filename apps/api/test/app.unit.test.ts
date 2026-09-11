@@ -346,6 +346,7 @@ describe("API bootstrap", () => {
     expect(openapi.json().paths).toHaveProperty("/v1/daily-context-notes");
     expect(openapi.json().paths).toHaveProperty("/v1/progress-overview");
     expect(openapi.json().paths).toHaveProperty("/v1/integrations/garmin-intervals");
+    expect(openapi.json().paths).toHaveProperty("/v1/integrations/garmin-intervals/historical-import");
 
     const integration = await fastify.inject({
       method: "GET",
@@ -355,7 +356,8 @@ describe("API bootstrap", () => {
     expect(integration.json()).toMatchObject({
       provider: "intervals_icu",
       lifecycle: "unavailable",
-      recoveryConnectionId: null
+      recoveryConnectionId: null,
+      historicalImport: { status: "not_requested", processedThroughDate: null }
     });
 
     await app.close();

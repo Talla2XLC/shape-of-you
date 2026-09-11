@@ -218,6 +218,20 @@
       "when": 1788785628462,
       "tag": "20260907125348_task0101_garmin_intervals",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789134606005,
+      "tag": "20260911135006_task0106_user_initiated_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789135607484,
+      "tag": "20260911140647_task0106_history_fencing",
+      "breakpoints": true
     }
   ]
 }

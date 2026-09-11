@@ -104,6 +104,8 @@ export interface StagedExerciseSourceRecord {
 export interface ImportExternalActivity {
   readonly connectionId: string;
   readonly personId: string;
+  /** Consent generation captured with the provider request; stale generations must not write. */
+  readonly consentId: string;
   readonly providerIdentity: string;
   readonly normalizedChecksum: string;
   readonly occurredAt: string;
@@ -121,7 +123,7 @@ export interface ImportExternalActivity {
 }
 
 /** Current immutable external activity projection owned by Training. */
-export interface ExternalActivityFact extends ImportExternalActivity {
+export interface ExternalActivityFact extends Omit<ImportExternalActivity, "consentId"> {
   readonly id: string;
   readonly supersedesId: string | null;
 }
@@ -266,7 +268,12 @@ export class TrainingRepository implements TrainingStore {
       await lockPerson(transaction, input.personId);
       const enabled = await transaction.query.integrationConnections.findFirst({
         columns: { id: true },
-        where: and(eq(integrationConnections.id, input.connectionId), eq(integrationConnections.personId, input.personId), eq(integrationConnections.importEnabled, true))
+        where: and(
+          eq(integrationConnections.id, input.connectionId),
+          eq(integrationConnections.personId, input.personId),
+          eq(integrationConnections.consentId, input.consentId),
+          eq(integrationConnections.importEnabled, true)
+        )
       });
       if (!enabled) return "stopped";
       const currentRows = await transaction.execute(sql<{ id: string; normalized_checksum: string }>`select id, normalized_checksum from integration_activity_facts current where current.connection_id = ${input.connectionId} and current.provider_identity = ${input.providerIdentity} and not exists (select 1 from integration_activity_facts successor where successor.supersedes_id = current.id) limit 1`);

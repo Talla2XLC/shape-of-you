@@ -19,10 +19,13 @@ import type { ActiveIntegrationConnection, IntegrationStore } from "./integratio
 import type { HealthDataProvider, ProviderWellnessRecord } from "./provider.js";
 import { IntegrationProviderError } from "./provider.js";
 import { normalizedChecksum } from "./intervals-icu/normalizer.js";
-import { DomainValidationError } from "../domain/errors.js";
+import { ConflictError, DomainValidationError } from "../domain/errors.js";
 
 const transactionTtlMs = 10 * 60_000;
 const reconciliationWindowDays = 14;
+const historicalWindowDays = 180;
+const historicalLowerBound = "2000-01-01";
+const historicalClaimLeaseMs = 30 * 60_000;
 
 /** Coordinates OAuth, typed import, disconnect and sync state inside the API. */
 @Injectable()
@@ -98,6 +101,16 @@ export class IntegrationService {
     return await this.store!.status(personId) ?? unavailableStatus("disconnected");
   }
 
+  /** Starts or resumes the current Person's explicitly requested historical import. */
+  public async startHistoricalImport(): Promise<GarminIntervalsConnection> {
+    this.assertEnabled();
+    const personId = this.personContext.getPersonId();
+    if (!await this.store!.startHistoricalImport(personId)) {
+      throw new ConflictError("An active Intervals.icu connection is required");
+    }
+    return await this.store!.status(personId) ?? unavailableStatus("disconnected");
+  }
+
   /** Reconciles one Person connection; provider failures only degrade sync state. */
   public async reconcilePerson(personId: string): Promise<void> {
     this.assertEnabled();
@@ -134,32 +147,81 @@ export class IntegrationService {
       const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id));
       const today = new Date();
       const from = new Date(today.valueOf() - reconciliationWindowDays * 86_400_000);
-      const result = await this.provider!.reconcile(token, isoDate(from), isoDate(today));
-      let changed = false;
-      for (const wellness of result.wellness) changed = await this.importWellness(connection, wellness) || changed;
-      for (const activity of result.activities) {
-        const checksum = normalizedChecksum(activity);
-        if (!await this.store!.recordInbox(connection.id, "activity", activity.identity, checksum)) continue;
-        const outcome = await this.training.importExternalActivity({
-          connectionId: connection.id, personId: connection.personId,
-          providerIdentity: activity.identity, normalizedChecksum: checksum,
-          occurredAt: activity.occurredAt, localDate: activity.localDate, timezone: activity.timezone,
-          name: activity.name, durationSeconds: activity.durationSeconds, distanceMeters: activity.distanceMeters,
-          trainingLoad: activity.trainingLoad, averageHeartRate: activity.averageHeartRate,
-          maximumHeartRate: activity.maximumHeartRate, deviceName: activity.deviceName,
-          sourceProvider: "intervals_icu", garminAttributed: activity.garminAttributed
-        });
-        if (outcome === "stopped") continue;
-        await this.store!.completeInbox(connection.id, "activity", activity.identity, checksum);
-        changed = outcome !== "unchanged" || changed;
+      const rollingFrom = isoDate(from);
+      const changed = await this.reconcileRange(connection, token, rollingFrom, isoDate(today));
+      await this.store!.markSyncSucceeded(connection.id, connection.consentId, changed);
+
+      if (
+        connection.historicalImportStatus === "running"
+        && (!connection.historicalNextAttemptAt || connection.historicalNextAttemptAt <= today)
+      ) {
+        await this.reconcileHistoricalWindow(connection, token, rollingFrom);
       }
-      await this.store!.markSyncSucceeded(connection.id, changed);
     } catch (error) {
       const failure = error instanceof IntegrationProviderError ? error.failureCode : "provider_unavailable";
-      await this.store!.markSyncFailed(connection.id, failure);
+      await this.store!.markSyncFailed(connection.id, connection.consentId, failure);
     } finally {
       await this.store!.releaseClaim(connection.id);
     }
+  }
+
+  private async reconcileHistoricalWindow(
+    connection: ActiveIntegrationConnection,
+    token: string,
+    rollingFrom: string
+  ): Promise<void> {
+    const claimToken = randomUUID();
+    const claim = await this.store!.claimHistoricalWindow(
+      connection.id,
+      connection.consentId,
+      connection.historicalCursorBefore,
+      claimToken,
+      historicalClaimLeaseMs
+    );
+    if (!claim) return;
+    const cursorBefore = claim.cursorBefore ?? rollingFrom;
+    const newest = addDays(cursorBefore, -1);
+    if (newest < historicalLowerBound) {
+      await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, historicalLowerBound, true);
+      return;
+    }
+    const candidateOldest = addDays(newest, -(historicalWindowDays - 1));
+    const oldest = candidateOldest < historicalLowerBound ? historicalLowerBound : candidateOldest;
+    try {
+      await this.reconcileRange(connection, token, oldest, newest);
+      await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, oldest, oldest === historicalLowerBound);
+    } catch (error) {
+      const failure = error instanceof IntegrationProviderError ? error.failureCode : "provider_unavailable";
+      await this.store!.markHistoricalImportFailed(connection.id, claimToken, failure, isRetryableHistoryFailure(failure));
+    }
+  }
+
+  private async reconcileRange(
+    connection: ActiveIntegrationConnection,
+    token: string,
+    oldest: string,
+    newest: string
+  ): Promise<boolean> {
+    const result = await this.provider!.reconcile(token, oldest, newest);
+    let changed = false;
+    for (const wellness of result.wellness) changed = await this.importWellness(connection, wellness) || changed;
+    for (const activity of result.activities) {
+      const checksum = normalizedChecksum(activity);
+      if (!await this.store!.recordInbox(connection.id, "activity", activity.identity, checksum)) continue;
+      const outcome = await this.training.importExternalActivity({
+        connectionId: connection.id, personId: connection.personId, consentId: connection.consentId,
+        providerIdentity: activity.identity, normalizedChecksum: checksum,
+        occurredAt: activity.occurredAt, localDate: activity.localDate, timezone: activity.timezone,
+        name: activity.name, durationSeconds: activity.durationSeconds, distanceMeters: activity.distanceMeters,
+        trainingLoad: activity.trainingLoad, averageHeartRate: activity.averageHeartRate,
+        maximumHeartRate: activity.maximumHeartRate, deviceName: activity.deviceName,
+        sourceProvider: "intervals_icu", garminAttributed: activity.garminAttributed
+      });
+      if (outcome === "stopped") continue;
+      await this.store!.completeInbox(connection.id, "activity", activity.identity, checksum);
+      changed = outcome !== "unchanged" || changed;
+    }
+    return changed;
   }
 
   private async importWellness(connection: ActiveIntegrationConnection, wellness: ProviderWellnessRecord): Promise<boolean> {
@@ -231,7 +293,23 @@ function metric(metricName: "sleep_score" | "resting_heart_rate" | "hrv_rmssd" |
 function associatedData(personId: string, connectionId: string): string { return `intervals_icu:${personId}:${connectionId}`; }
 function stateHash(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function isoDate(value: Date): string { return value.toISOString().slice(0, 10); }
+function addDays(value: string, days: number): string {
+  const date = new Date(`${value}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return isoDate(date);
+}
+function isRetryableHistoryFailure(value: IntegrationProviderError["failureCode"]): boolean {
+  return value === "provider_rate_limited" || value === "provider_timeout" || value === "provider_unavailable";
+}
 function isSafeReturnTo(value: string): boolean { return value.startsWith("/") && !value.startsWith("//") && !value.includes("\\") && !value.includes("#"); }
 function unavailableStatus(lifecycle: "unavailable" | "disconnected" = "unavailable"): GarminIntervalsConnection {
-  return { provider: "intervals_icu", displayName: "Garmin via Intervals.icu", recoveryConnectionId: null, lifecycle, failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, lastDataAt: null, connectedAt: null, disconnectedAt: null };
+  return {
+    provider: "intervals_icu", displayName: "Garmin via Intervals.icu", recoveryConnectionId: null,
+    lifecycle, failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, lastDataAt: null,
+    connectedAt: null, disconnectedAt: null,
+    historicalImport: {
+      status: "not_requested", processedThroughDate: null, requestedAt: null,
+      lastAttemptAt: null, completedAt: null, failureCode: null
+    }
+  };
 }

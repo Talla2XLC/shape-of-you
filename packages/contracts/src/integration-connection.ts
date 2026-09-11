@@ -14,13 +14,34 @@ export const IntegrationSyncFailureSchema = {
   enum: ["authorization_required", "provider_rate_limited", "provider_timeout", "provider_unavailable", "provider_response_invalid"]
 } as const;
 
+/** Durable lifecycle of a Person-requested historical provider import. */
+export const IntegrationHistoricalImportStatusSchema = {
+  type: "string",
+  enum: ["not_requested", "running", "completed", "failed"]
+} as const;
+
+/** Browser-safe progress projection without provider payloads or credentials. */
+export const IntegrationHistoricalImportSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "processedThroughDate", "requestedAt", "lastAttemptAt", "completedAt", "failureCode"],
+  properties: {
+    status: IntegrationHistoricalImportStatusSchema,
+    processedThroughDate: { anyOf: [{ type: "string", format: "date" }, { type: "null" }] },
+    requestedAt: nullableDateTime,
+    lastAttemptAt: nullableDateTime,
+    completedAt: nullableDateTime,
+    failureCode: { anyOf: [IntegrationSyncFailureSchema, { type: "null" }] }
+  }
+} as const;
+
 export const GarminIntervalsConnectionSchema = {
   $id: "GarminIntervalsConnection",
   type: "object",
   additionalProperties: false,
   required: [
     "provider", "displayName", "recoveryConnectionId", "lifecycle", "failureCode", "lastAttemptAt",
-    "lastSuccessfulSyncAt", "lastDataAt", "connectedAt", "disconnectedAt"
+    "lastSuccessfulSyncAt", "lastDataAt", "connectedAt", "disconnectedAt", "historicalImport"
   ],
   properties: {
     provider: { const: "intervals_icu" },
@@ -32,7 +53,8 @@ export const GarminIntervalsConnectionSchema = {
     lastSuccessfulSyncAt: nullableDateTime,
     lastDataAt: nullableDateTime,
     connectedAt: nullableDateTime,
-    disconnectedAt: nullableDateTime
+    disconnectedAt: nullableDateTime,
+    historicalImport: IntegrationHistoricalImportSchema
   }
 } as const;
 

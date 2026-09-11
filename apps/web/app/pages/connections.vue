@@ -13,6 +13,13 @@ const status = ref<GarminIntervalsStatus | null>(null);
 const busy = ref(false);
 const message = ref("");
 const route = useRoute();
+let statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
+
+async function refreshStatus(silent = false): Promise<void> {
+  if (busy.value) return;
+  try { status.value = await integrationApi.status(); }
+  catch (error) { if (!silent) message.value = userMessage(error); }
+}
 
 onMounted(async () => {
   message.value = integrationAuthorizationResultMessage(route.query.provider) ?? "";
@@ -21,9 +28,11 @@ onMounted(async () => {
     cleanUrl.searchParams.delete("provider");
     window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
   }
-  try { status.value = await integrationApi.status(); }
-  catch (error) { message.value = userMessage(error); }
+  await refreshStatus();
+  statusRefreshTimer = setInterval(() => void refreshStatus(true), 30_000);
 });
+
+onBeforeUnmount(() => { if (statusRefreshTimer) clearInterval(statusRefreshTimer); });
 
 async function connect(): Promise<void> {
   busy.value = true;
@@ -45,6 +54,15 @@ async function disconnect(): Promise<void> {
   finally { busy.value = false; }
 }
 
+async function importHistoricalData(): Promise<void> {
+  if (!window.confirm("Import all available historical Activity and Wellness data from Intervals.icu? This may take some time.")) return;
+  busy.value = true;
+  message.value = "";
+  try { status.value = await integrationApi.startHistoricalImport(); }
+  catch (error) { message.value = userMessage(error); }
+  finally { busy.value = false; }
+}
+
 async function erase(): Promise<void> {
   if (!status.value?.recoveryConnectionId) return;
   busy.value = true;
@@ -62,6 +80,13 @@ function formatted(value: string | null): string {
   if (!value) return "Never";
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function historicalActionLabel(value: GarminIntervalsStatus["historicalImport"]["status"] | undefined): string {
+  if (value === "running") return "Importing historical data…";
+  if (value === "failed") return "Retry historical import…";
+  if (value === "completed") return "Import historical data again…";
+  return "Import historical data…";
 }
 </script>
 
@@ -112,6 +137,60 @@ function formatted(value: string | null): string {
         Wellness records are attributed to Intervals.icu and may include Garmin.
         An activity is labelled Garmin only when its device metadata confirms Garmin.
       </p>
+      <div
+        v-if="status?.lifecycle === 'active' || status?.lifecycle === 'degraded'"
+        class="historical-import"
+      >
+        <h3>
+          Historical data
+        </h3>
+        <p
+          v-if="status.historicalImport.status === 'not_requested'"
+          class="item-meta"
+        >
+          Not imported. Current data continues to sync automatically.
+        </p>
+        <p
+          v-else-if="status.historicalImport.status === 'running' && status.historicalImport.failureCode"
+          class="item-meta"
+          role="status"
+        >
+          Historical import is temporarily paused. {{ integrationFailureReason(status.historicalImport.failureCode) }}
+          It will retry automatically; already imported data is safe.
+        </p>
+        <p
+          v-else-if="status.historicalImport.status === 'running'"
+          class="item-meta"
+          role="status"
+        >
+          Import in progress.<template v-if="status.historicalImport.processedThroughDate">
+            Checked back through {{ status.historicalImport.processedThroughDate }}.
+          </template>
+        </p>
+        <p
+          v-else-if="status.historicalImport.status === 'completed'"
+          class="item-meta"
+          role="status"
+        >
+          Import completed {{ formatted(status.historicalImport.completedAt) }}.
+        </p>
+        <p
+          v-else
+          class="item-meta"
+          role="status"
+        >
+          Historical import stopped safely. Already imported data is safe.
+          {{ integrationFailureReason(status.historicalImport.failureCode) }}
+        </p>
+        <button
+          class="button button-secondary compact-button"
+          type="button"
+          :disabled="busy || status.historicalImport.status === 'running'"
+          @click="importHistoricalData"
+        >
+          {{ historicalActionLabel(status.historicalImport.status) }}
+        </button>
+      </div>
       <div class="connection-actions">
         <button
           v-if="status?.lifecycle !== 'active' && status?.lifecycle !== 'degraded'"
@@ -131,16 +210,27 @@ function formatted(value: string | null): string {
         >
           Disconnect
         </button>
+      </div>
+      <section
+        v-if="status?.recoveryConnectionId"
+        class="connection-danger-zone"
+        aria-labelledby="connection-danger-title"
+      >
+        <h3 id="connection-danger-title">
+          Danger zone
+        </h3>
+        <p class="item-meta">
+          Permanently deletes data imported through this connection. Passkey confirmation is required.
+        </p>
         <button
-          v-if="status?.recoveryConnectionId"
-          class="button button-danger"
+          class="button button-danger-outline compact-button"
           type="button"
           :disabled="busy"
           @click="erase"
         >
-          Confirm with passkey and delete imported data
+          Delete imported data…
         </button>
-      </div>
+      </section>
     </article>
   </section>
 </template>

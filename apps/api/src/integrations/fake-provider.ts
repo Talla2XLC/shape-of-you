@@ -10,6 +10,7 @@ export class FakeHealthDataProvider implements HealthDataProvider {
   public reconciliation: ProviderReconciliation = { wellness: [], activities: [] };
   public nextFailure: IntegrationFailureCode | null = null;
   public disconnectedTokens: string[] = [];
+  public reconcileCalls: Array<{ accessToken: string; oldest: string; newest: string }> = [];
 
   public authorizationUrl(state: string): string {
     return `https://provider.invalid/oauth/authorize?state=${encodeURIComponent(state)}`;
@@ -21,8 +22,9 @@ export class FakeHealthDataProvider implements HealthDataProvider {
     return { accessToken: `fake-token-${code}`, externalUserId: "fake-athlete" };
   }
 
-  public async reconcile(): Promise<ProviderReconciliation> {
+  public async reconcile(accessToken = "fake-token", oldest = "2000-01-01", newest = "2000-01-01"): Promise<ProviderReconciliation> {
     this.failIfRequested();
+    this.reconcileCalls.push({ accessToken, oldest, newest });
     return this.reconciliation;
   }
 

@@ -327,4 +327,82 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     await expect(service.denyAuthorization(deniedState)).resolves.toBeUndefined();
     await expect(service.denyAuthorization(deniedState)).rejects.toMatchObject({ failureCode: "authorization_required" });
   });
+
+  it("runs history only after explicit state and keeps its failure separate from live sync", async () => {
+    const personId = "00000000-0000-4000-8000-000000000201";
+    const connectionId = "00000000-0000-4000-8000-000000000202";
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const credential = cipher.encrypt("history-token", `intervals_icu:${personId}:${connectionId}`);
+    const markSyncSucceeded = vi.fn();
+    const markSyncFailed = vi.fn();
+    const markHistoricalImportFailed = vi.fn();
+    const markHistoricalWindowSucceeded = vi.fn();
+    const releaseClaim = vi.fn();
+    const claimHistoricalWindow = vi.fn(async (
+      _id: string,
+      _consentId: string,
+      cursorBefore: string | null,
+      claimToken: string
+    ): Promise<{ claimToken: string; cursorBefore: string | null } | null> => ({
+      claimToken,
+      cursorBefore
+    }));
+    const store = {
+      markSyncSucceeded,
+      markSyncFailed,
+      markHistoricalImportFailed,
+      markHistoricalWindowSucceeded,
+      claimHistoricalWindow,
+      releaseClaim
+    } as unknown as IntegrationStore;
+    const reconcile = vi.fn()
+      .mockResolvedValueOnce({ wellness: [], activities: [] })
+      .mockRejectedValueOnce(new IntegrationProviderError("provider_timeout"));
+    const provider = {
+      reconcile
+    } as unknown as FakeHealthDataProvider;
+    const service = new IntegrationService(
+      new SyntheticPersonContext(personId), store, provider, cipher,
+      {} as RecoveryStore, {} as TrainingStore
+    );
+    const base = {
+      id: connectionId,
+      personId,
+      recoveryConnectionId: "00000000-0000-4000-8000-000000000203",
+      consentId: "00000000-0000-4000-8000-000000000204",
+      credential,
+      historicalCursorBefore: null,
+      historicalNextAttemptAt: new Date(0)
+    } as const;
+
+    await service.reconcileConnection({ ...base, historicalImportStatus: "running" });
+
+    expect(reconcile).toHaveBeenCalledTimes(2);
+    const [, historicalOldest, historicalNewest] = reconcile.mock.calls[1]!;
+    expect(historicalNewest < reconcile.mock.calls[0]![1]).toBe(true);
+    expect((Date.parse(`${historicalNewest}T00:00:00.000Z`) - Date.parse(`${historicalOldest}T00:00:00.000Z`)) / 86_400_000 + 1).toBeLessThanOrEqual(180);
+    expect(markSyncSucceeded).toHaveBeenCalledOnce();
+    expect(markHistoricalImportFailed).toHaveBeenCalledWith(connectionId, expect.any(String), "provider_timeout", true);
+    expect(markSyncFailed).not.toHaveBeenCalled();
+    expect(releaseClaim).toHaveBeenCalledWith(connectionId);
+
+    reconcile.mockClear();
+    reconcile.mockResolvedValue({ wellness: [], activities: [] });
+    await service.reconcileConnection({ ...base, historicalImportStatus: "not_requested" });
+    expect(reconcile).toHaveBeenCalledTimes(1);
+    expect(claimHistoricalWindow).toHaveBeenCalledTimes(1);
+
+    reconcile.mockClear();
+    claimHistoricalWindow.mockResolvedValueOnce(null);
+    await service.reconcileConnection({ ...base, historicalImportStatus: "running" });
+    expect(reconcile).toHaveBeenCalledTimes(1);
+
+    reconcile.mockClear();
+    await service.reconcileConnection({
+      ...base,
+      historicalImportStatus: "running",
+      historicalCursorBefore: "2000-01-02"
+    });
+    expect(markHistoricalWindowSucceeded).toHaveBeenCalledWith(connectionId, expect.any(String), "2000-01-01", true);
+  });
 });

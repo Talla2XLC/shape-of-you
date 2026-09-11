@@ -394,6 +394,34 @@ button.button {
   margin-top: 24px;
 }
 
+.historical-import,
+.connection-danger-zone {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  margin-top: 24px;
+  padding-top: 20px;
+}
+
+.historical-import h3,
+.historical-import p,
+.connection-danger-zone h3,
+.connection-danger-zone p {
+  margin-bottom: 0;
+}
+
+.connection-danger-zone h3 {
+  color: var(--coral);
+}
+
+.button-danger-outline {
+  background: transparent;
+  border-color: color-mix(in srgb, var(--coral) 75%, transparent);
+  color: var(--coral);
+  width: fit-content;
+}
+
 .privacy-warning {
   border: 1px solid color-mix(in srgb, var(--danger, #ef6a6a) 55%, transparent);
   border-radius: 1rem;

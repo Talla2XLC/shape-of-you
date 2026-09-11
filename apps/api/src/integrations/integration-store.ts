@@ -17,6 +17,9 @@ export interface ActiveIntegrationConnection {
   readonly recoveryConnectionId: string;
   readonly consentId: string;
   readonly credential: EncryptedCredential;
+  readonly historicalImportStatus: "not_requested" | "running" | "completed" | "failed";
+  readonly historicalCursorBefore: string | null;
+  readonly historicalNextAttemptAt: Date | null;
 }
 
 /** Persisted current pointer for an imported Recovery fact. */
@@ -29,6 +32,12 @@ export interface RecoveryFactPointer {
 export interface IntegrationConnectionIdentity {
   readonly id: string;
   readonly recoveryConnectionId: string;
+}
+
+/** Fenced right to issue one historical provider request for the current cursor. */
+export interface HistoricalImportClaim {
+  readonly claimToken: string;
+  readonly cursorBefore: string | null;
 }
 
 /** Durable provider integration persistence boundary. */
@@ -52,10 +61,14 @@ export interface IntegrationStore {
   claimRemoteDisconnectDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null>;
   releaseClaim(id: string): Promise<void>;
   beginDisconnect(personId: string, reason: string): Promise<ActiveIntegrationConnection | null>;
+  startHistoricalImport(personId: string): Promise<boolean>;
+  claimHistoricalWindow(id: string, expectedConsentId: string, expectedCursorBefore: string | null, claimToken: string, leaseMs: number): Promise<HistoricalImportClaim | null>;
+  markHistoricalWindowSucceeded(id: string, claimToken: string, processedThroughDate: string, completed: boolean): Promise<boolean>;
+  markHistoricalImportFailed(id: string, claimToken: string, failureCode: IntegrationFailureCode, retryable: boolean): Promise<boolean>;
   completeRemoteDisconnect(id: string): Promise<void>;
   failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode): Promise<void>;
-  markSyncSucceeded(id: string, hasData: boolean): Promise<void>;
-  markSyncFailed(id: string, failureCode: IntegrationFailureCode): Promise<void>;
+  markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void>;
+  markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void>;
   recordInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<boolean>;
   completeInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<void>;
   recoveryFact(id: string, identity: string, factKey: string): Promise<RecoveryFactPointer | null>;
