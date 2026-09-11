@@ -85,8 +85,11 @@ export class IntervalsIcuProvider implements HealthDataProvider {
 
   public async reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string): Promise<ProviderReconciliation> {
     const headers = { authorization: `Bearer ${accessToken}`, accept: "application/json" };
+    const wellnessUrl = new URL(`${apiOrigin}/api/v1/athlete/0/wellness`);
+    wellnessUrl.searchParams.set("oldest", fromLocalDate);
+    wellnessUrl.searchParams.set("newest", toLocalDate);
     const [wellness, activities] = await Promise.all([
-      this.fetchJson(`${apiOrigin}/api/v1/athlete/0/wellness/${fromLocalDate}/${toLocalDate}`, { headers }),
+      this.fetchJson(wellnessUrl.toString(), { headers }),
       this.fetchJson(`${apiOrigin}/api/v1/athlete/0/activities?oldest=${fromLocalDate}&newest=${toLocalDate}`, { headers })
     ]);
     if (!Array.isArray(wellness) || !Array.isArray(activities) || wellness.length > 400 || activities.length > 2_000) invalid();

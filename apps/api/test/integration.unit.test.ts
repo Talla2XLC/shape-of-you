@@ -97,6 +97,37 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     });
   });
 
+  it("reconciles wellness and activities through the documented date-range endpoints", async () => {
+    const request = vi.fn()
+      .mockResolvedValueOnce(new Response("[]", { status: 200 }))
+      .mockResolvedValueOnce(new Response("[]", { status: 200 }));
+    const provider = new IntervalsIcuProvider({
+      clientId: "shape-test",
+      clientSecret: "not-a-real-secret-value",
+      redirectUri: "https://shape.example/api/integrations/intervals-icu/callback",
+      fetch: request
+    });
+
+    await expect(provider.reconcile("opaque-test-token", "2026-09-01", "2026-09-11")).resolves.toEqual({
+      wellness: [],
+      activities: []
+    });
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledWith(
+      "https://intervals.icu/api/v1/athlete/0/wellness?oldest=2026-09-01&newest=2026-09-11",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer opaque-test-token" })
+      })
+    );
+    expect(request).toHaveBeenCalledWith(
+      "https://intervals.icu/api/v1/athlete/0/activities?oldest=2026-09-01&newest=2026-09-11",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer opaque-test-token" })
+      })
+    );
+  });
+
   it("revokes access through the documented disconnect endpoint", async () => {
     const request = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
     const provider = new IntervalsIcuProvider({
