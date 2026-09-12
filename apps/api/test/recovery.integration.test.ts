@@ -93,29 +93,82 @@ describe("Recovery PostgreSQL vertical", () => {
     await integrations.activate({ id, recoveryConnectionId, consentId, personId: personD, externalUserId: "athlete-d", credential, authorizationStartedAt: new Date(Date.now() - 1_000) });
     const service = new IntegrationService(new SyntheticPersonContext(personD), integrations, provider, cipher, repository, training);
     const connection = (await integrations.findActive(personD))!;
-    const wellness = { identity: "2026-09-06", localDate: "2026-09-06", timezone: "UTC", totalSleepMinutes: 400, sleepScore: null, restingHeartRate: null, hrvRmssd: null, bodyBattery: null };
+    const wellness = {
+      identity: "2026-09-06",
+      localDate: "2026-09-06",
+      timezone: "UTC",
+      totalSleepMinutes: 400,
+      sleepScore: 82,
+      restingHeartRate: 52,
+      averageSleepingHeartRate: 49,
+      hrvRmssd: 61,
+      oxygenSaturation: 96.5,
+      respirationRate: 15.4,
+      bodyBatteryMinimum: 17,
+      bodyBatteryMaximum: 92
+    };
 
     provider.reconciliation = { wellness: [wellness], activities: [] };
     await service.reconcileConnection(connection);
     await service.reconcileConnection(connection);
-    provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: 450 }], activities: [] };
+    expect(
+      (await repository.listObservations(personD, { limit: 50 })).items
+        .filter((item) => item.detail.type === "metric")
+        .map((item) => item.detail.type === "metric" ? item.detail.metric : null)
+        .sort()
+    ).toEqual([
+      "body_battery_max",
+      "body_battery_min",
+      "hrv_rmssd",
+      "night_heart_rate",
+      "oxygen_saturation",
+      "respiration_rate",
+      "resting_heart_rate",
+      "sleep_score"
+    ]);
+    provider.reconciliation = {
+      wellness: [{
+        ...wellness,
+        totalSleepMinutes: 450,
+        averageSleepingHeartRate: 48,
+        oxygenSaturation: 97,
+        respirationRate: 14.9,
+        bodyBatteryMinimum: 15,
+        bodyBatteryMaximum: 94
+      }],
+      activities: []
+    };
     await service.reconcileConnection(connection);
     provider.reconciliation = { wellness: [wellness], activities: [] };
     await service.reconcileConnection(connection);
     await service.reconcileConnection(connection);
-    provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: null }], activities: [] };
+    provider.reconciliation = {
+      wellness: [{
+        ...wellness,
+        totalSleepMinutes: null,
+        sleepScore: null,
+        restingHeartRate: null,
+        averageSleepingHeartRate: null,
+        hrvRmssd: null,
+        oxygenSaturation: null,
+        respirationRate: null,
+        bodyBatteryMinimum: null,
+        bodyBatteryMaximum: null
+      }],
+      activities: []
+    };
     await service.reconcileConnection(connection);
 
     const history = await database.pool.query<{ count: string; withdrawals: string }>(
       "select count(*)::text as count, count(withdrawn_at)::text as withdrawals from recovery_observations where person_id = $1 and connection_id = $2",
       [personD, recoveryConnectionId]
     );
-    expect(history.rows[0]).toEqual({ count: "4", withdrawals: "1" });
+    expect(history.rows[0]).toEqual({ count: "30", withdrawals: "9" });
     expect((await repository.listObservations(personD, { limit: 50 })).items).toHaveLength(0);
     await integrations.beginDisconnect(personD, "test disconnect");
     provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: 500 }], activities: [] };
     await service.reconcileConnection(connection);
-    expect((await database.pool.query("select 1 from recovery_observations where person_id = $1", [personD])).rowCount).toBe(4);
+    expect((await database.pool.query("select 1 from recovery_observations where person_id = $1", [personD])).rowCount).toBe(30);
 
     await database.pool.query("update integration_connections set next_attempt_at = now() - interval '1 second' where id = $1", [id]);
     const firstRetry = await integrations.claimRemoteDisconnectDue("worker-timeout", 30_000);
@@ -133,6 +186,17 @@ describe("Recovery PostgreSQL vertical", () => {
     expect(erasure.status).toBe("pending");
     await expect(integrations.activate({ id, recoveryConnectionId, consentId: "00000000-0000-4000-8000-000000000124", personId: personD, externalUserId: "athlete-d", credential, authorizationStartedAt: new Date() }))
       .rejects.toThrow("erasure must complete");
+    await acknowledgeAcceptedErasure(erasure.id);
+    const erasureJob = await repository.claimErasure("person-d-erasure-worker", 30_000);
+    await repository.completeErasure(erasureJob!);
+    expect((await database.pool.query(
+      "select 1 from recovery_observations where person_id = $1 and connection_id = $2",
+      [personD, recoveryConnectionId]
+    )).rowCount).toBe(0);
+    expect((await database.pool.query(
+      "select 1 from integration_recovery_facts where connection_id = $1",
+      [id]
+    )).rowCount).toBe(0);
   });
 
   it("persists encrypted Intervals state and immutable activity corrections", async () => {
@@ -197,6 +261,23 @@ describe("Recovery PostgreSQL vertical", () => {
     const integrations = new IntegrationRepository(database);
     const training = new TrainingRepository(database);
     const provider = new FakeHealthDataProvider();
+    provider.reconciliation = {
+      wellness: [{
+        identity: "2026-09-05",
+        localDate: "2026-09-05",
+        timezone: "UTC",
+        totalSleepMinutes: 430,
+        sleepScore: 80,
+        restingHeartRate: 54,
+        averageSleepingHeartRate: 50,
+        hrvRmssd: 59,
+        oxygenSaturation: 96,
+        respirationRate: 15,
+        bodyBatteryMinimum: 20,
+        bodyBatteryMaximum: 88
+      }],
+      activities: []
+    };
     const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
     const id = "00000000-0000-4000-8000-000000000131";
     const recoveryConnectionId = "00000000-0000-4000-8000-000000000132";
@@ -221,6 +302,7 @@ describe("Recovery PostgreSQL vertical", () => {
     await service.reconcileConnection(connection);
 
     expect(provider.reconcileCalls).toHaveLength(2);
+    expect((await repository.listObservations(personE, { limit: 50 })).items).toHaveLength(9);
     const [rolling, historical] = provider.reconcileCalls;
     expect(historical!.newest < rolling!.oldest).toBe(true);
     const historicalDays = Math.round(
@@ -242,6 +324,7 @@ describe("Recovery PostgreSQL vertical", () => {
     );
     await service.reconcileConnection((await integrations.findActive(personE))!);
     expect(provider.reconcileCalls).toHaveLength(4);
+    expect((await repository.listObservations(personE, { limit: 50 })).items).toHaveLength(9);
     const secondHistorical = provider.reconcileCalls[3]!;
     const expectedSecondNewest = new Date(Date.parse(`${historical!.oldest}T00:00:00.000Z`) - 86_400_000)
       .toISOString().slice(0, 10);

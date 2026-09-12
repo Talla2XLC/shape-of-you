@@ -35,6 +35,19 @@ The MCP `get_active_training_program` adapter preserves that domain distinction
 without changing HTTP semantics: it returns `status: active` with the program
 or `status: absent` with `program: null`. Other failures remain tool errors.
 
+The MCP `get_training_context` read composes the active program with a bounded
+list of recent current WorkoutSessions. An active program is the only planned
+authority. When it is absent, recent sessions are completed evidence that may
+support a proposal but are not a plan.
+
+After the user explicitly confirms a complete program snapshot, MCP
+`save_confirmed_training_program` atomically creates and activates its first
+version or appends and activates a new immutable version. The command uses the
+previously read active program id and lock version, rejects stale expectations,
+and returns an idempotent no-op when the active snapshot already matches. Coach
+must read the active program back before claiming that the change is saved.
+The existing HTTP draft/version/activation lifecycle is unchanged.
+
 New programs/versions are inactive. Activation uses `expectedLockVersion`; one
 Person cannot have two active programs.
 
@@ -75,3 +88,4 @@ pending acceptance.
 - [Training domain](../domain/training-and-performance.md)
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
 - [MCP active-program absence ADR](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md)
+- [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md)

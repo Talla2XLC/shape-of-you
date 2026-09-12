@@ -372,6 +372,78 @@ export type ActivateTrainingProgramVersion = FromSchema<
   typeof ActivateTrainingProgramVersionSchema
 >;
 
+const confirmedProgramExpectationProperties = {
+  expectedActiveProgramId: nullableUuidSchema,
+  expectedLockVersion: {
+    anyOf: [
+      { type: "integer", minimum: 0 },
+      { type: "null" }
+    ]
+  }
+} as const;
+
+export const SaveConfirmedTrainingProgramSchema = {
+  $id: "SaveConfirmedTrainingProgram",
+  type: "object",
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "expectedActiveProgramId",
+        "expectedLockVersion",
+        "name",
+        "note",
+        "workouts"
+      ],
+      properties: {
+        ...confirmedProgramExpectationProperties,
+        expectedActiveProgramId: { type: "null" },
+        expectedLockVersion: { type: "null" },
+        ...programVersionInputProperties
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "expectedActiveProgramId",
+        "expectedLockVersion",
+        "name",
+        "note",
+        "workouts"
+      ],
+      properties: {
+        ...confirmedProgramExpectationProperties,
+        expectedActiveProgramId: uuidSchema,
+        expectedLockVersion: { type: "integer", minimum: 0 },
+        ...programVersionInputProperties
+      }
+    }
+  ]
+} as const;
+
+/** Explicitly confirmed complete program snapshot with an optimistic active-state expectation. */
+export type SaveConfirmedTrainingProgram = FromSchema<
+  typeof SaveConfirmedTrainingProgramSchema
+>;
+
+export const SaveConfirmedTrainingProgramResultSchema = {
+  $id: "SaveConfirmedTrainingProgramResult",
+  type: "object",
+  additionalProperties: false,
+  required: ["outcome", "program"],
+  properties: {
+    outcome: { type: "string", enum: ["created", "updated", "unchanged"] },
+    program: TrainingProgramSchema
+  }
+} as const;
+
+/** Result of atomically creating, revising, or deduplicating a confirmed program. */
+export type SaveConfirmedTrainingProgramResult = FromSchema<
+  typeof SaveConfirmedTrainingProgramResultSchema
+>;
+
 const performedSetInputProperties = {
   weightKg: nullableWeightSchema,
   reps: {
@@ -666,6 +738,50 @@ export const WorkoutSessionListSchema = {
 export type WorkoutSessionList = FromSchema<
   typeof WorkoutSessionListSchema
 >;
+
+export const TrainingContextQuerySchema = {
+  $id: "TrainingContextQuery",
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    historyLimit: { type: "integer", minimum: 1, maximum: 50, default: 20 }
+  }
+} as const;
+
+/** Bounded query for active training authority and recent completed evidence. */
+export type TrainingContextQuery = FromSchema<
+  typeof TrainingContextQuerySchema
+>;
+
+export const TrainingContextSchema = {
+  $id: "TrainingContext",
+  type: "object",
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "program", "recentSessions"],
+      properties: {
+        status: { const: "active" },
+        program: TrainingProgramSchema,
+        recentSessions: WorkoutSessionListSchema
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "program", "recentSessions"],
+      properties: {
+        status: { const: "absent" },
+        program: { type: "null" },
+        recentSessions: WorkoutSessionListSchema
+      }
+    }
+  ]
+} as const;
+
+/** Active planned authority plus bounded completed-session evidence. */
+export type TrainingContext = FromSchema<typeof TrainingContextSchema>;
 
 export const PersonalRecordSchema = {
   type: "object",

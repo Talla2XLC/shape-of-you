@@ -78,6 +78,21 @@ describe("Recovery domain", () => {
     })).toThrow("unit is incompatible");
   });
 
+  it.each(["body_battery_min", "body_battery_max"] as const)(
+    "keeps %s as a distinct score metric",
+    (metric) => {
+      expect(validateRecoveryObservation({
+        ...manualMetric,
+        dedupeKey: `manual:${metric}:2026-10-25`,
+        detail: { type: "metric", metric, value: 50, unit: "score" }
+      })).toMatchObject({ localDate: "2026-10-25" });
+      expect(() => validateRecoveryObservation({
+        ...manualMetric,
+        detail: { type: "metric", metric, value: 50, unit: "percent" }
+      })).toThrow("unit is incompatible");
+    }
+  );
+
   it("lets hard stops dominate readiness and caps confidence for poor evidence", () => {
     const result = evaluateRecovery(policy, [{
       id: "subjective-1",

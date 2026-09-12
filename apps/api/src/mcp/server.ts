@@ -27,6 +27,10 @@ import {
   ListWorkoutSessionsQuerySchema,
   MealListSchema,
   RecoveryObservationListSchema,
+  SaveConfirmedTrainingProgramResultSchema,
+  SaveConfirmedTrainingProgramSchema,
+  TrainingContextQuerySchema,
+  TrainingContextSchema,
   TrainingProgramSchema,
   WeightMeasurementListSchema,
   WorkoutSessionListSchema,
@@ -49,6 +53,8 @@ import {
   type ListRecoveryObservationsQuery,
   type ListWeightMeasurementsQuery,
   type ListWorkoutSessionsQuery,
+  type SaveConfirmedTrainingProgram,
+  type TrainingContextQuery,
 } from "@shape-of-you/contracts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -86,7 +92,15 @@ interface McpServices {
   readonly weights: Pick<WeightMeasurementService, "list" | "create" | "correct">;
   readonly bodyMeasurements: Pick<BodyMeasurementSessionService, "list" | "create" | "correct">;
   readonly nutrition: Pick<NutritionService, "listMeals" | "createMeal" | "correctMeal">;
-  readonly training: Pick<TrainingService, "listWorkoutSessions" | "createWorkoutSession" | "correctWorkoutSession" | "findActiveProgram">;
+  readonly training: Pick<
+    TrainingService,
+    | "listWorkoutSessions"
+    | "createWorkoutSession"
+    | "correctWorkoutSession"
+    | "findActiveProgram"
+    | "saveConfirmedProgram"
+    | "getTrainingContext"
+  >;
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
@@ -206,6 +220,14 @@ const activeTrainingProgramResultContent = coachResultContent(
   "Use only an active result as a planned training artifact. An absent result means no active program; an error does not."
 );
 
+const trainingContextResultContent = coachResultContent(
+  "Use an active program as planned authority. When it is absent, recent completed sessions are evidence for a proposal only and must never be presented as an existing plan."
+);
+
+const confirmedTrainingProgramWriteResultContent = coachResultContent(
+  "The explicitly confirmed program was persisted. Silently read the active program again and compare the complete snapshot before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as active."
+);
+
 const dailyProjectionResultContent = coachResultContent(
   "Use this exact-date projection as the current daily starting point. For a full Daily Coach answer, separate Planned, Proposed now, and Actually completed, then give one clear Next step plus bounded nutrition, training, and recovery guidance grounded in available evidence.",
   dailyCoachReplyShape
@@ -222,6 +244,8 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
+  "Before strength-program advice, read the composed training context. Only its active program is planned authority. If no active program exists, use recent completed sessions only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
+  "Saving or changing a training program is material: first show the complete proposed snapshot and obtain explicit user confirmation. Preserve exercises, order, loads, and progression exactly as confirmed. After saving, read the active program again and compare the complete snapshot before claiming success; any failed or inconsistent read-back leaves the program unverified. " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
   "Present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
@@ -502,6 +526,30 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
         }
       },
       () => activeTrainingProgramResultContent
+    ),
+    defineTool(
+      "get_training_context",
+      "Read the authorized person's active training authority together with bounded recent completed sessions. When the active program is absent, sessions remain historical evidence for a proposal and are never a plan.",
+      TrainingContextQuerySchema,
+      TrainingContextSchema,
+      false,
+      MCP_READ_SCOPE,
+      (input) =>
+        services.training.getTrainingContext(input as TrainingContextQuery),
+      () => trainingContextResultContent
+    ),
+    defineTool(
+      "save_confirmed_training_program",
+      "Persist and activate one complete training-program snapshot only after the user explicitly confirmed every workout, exercise order, load, and progression. Supply the active identity and lock from the preceding read, or both null only when absence was read. Repeated identical snapshots are safe. After success, read the active program again and compare the complete snapshot before claiming it is saved.",
+      SaveConfirmedTrainingProgramSchema,
+      SaveConfirmedTrainingProgramResultSchema,
+      true,
+      MCP_WORKOUT_WRITE_SCOPE,
+      (input) =>
+        services.training.saveConfirmedProgram(
+          input as SaveConfirmedTrainingProgram
+        ),
+      () => confirmedTrainingProgramWriteResultContent
     ),
     defineTool(
       "list_workout_sessions",

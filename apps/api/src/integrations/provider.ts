@@ -20,8 +20,12 @@ export interface ProviderWellnessRecord {
   readonly totalSleepMinutes: number | null;
   readonly sleepScore: number | null;
   readonly restingHeartRate: number | null;
+  readonly averageSleepingHeartRate: number | null;
   readonly hrvRmssd: number | null;
-  readonly bodyBattery: number | null;
+  readonly oxygenSaturation: number | null;
+  readonly respirationRate: number | null;
+  readonly bodyBatteryMinimum: number | null;
+  readonly bodyBatteryMaximum: number | null;
 }
 
 /** Narrow provider-neutral activity summary; detailed routes/FIT remain excluded. */

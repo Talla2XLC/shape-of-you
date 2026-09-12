@@ -84,6 +84,17 @@ program from valid absence. Only its typed `absent` result proves that no
 `Planned` training artifact is available; a tool failure remains unknown and
 stops dependent coaching without chat-history or Sheets fallback.
 
+`get_training_context` makes the same boundary durable while returning bounded
+recent WorkoutSession evidence. With no active program, Coach may reconstruct a
+candidate from completed sessions only as `Proposed now`; it cannot label or
+activate that candidate as `Planned`. A material program change requires the
+user to confirm the complete workouts, exercise order, loads, and progression.
+`save_confirmed_training_program` then performs one Person-scoped atomic
+create-or-version-and-activate command with optimistic expectations and
+duplicate no-op behavior. Coach verifies the complete active snapshot through
+a typed read before reporting success. The persisted active program is shared
+authority across conversations; per-chat memory is not an authority source.
+
 ## Evidence
 
 - Coaching schema/contracts/integration tests.
@@ -97,6 +108,7 @@ stops dependent coaching without chat-history or Sheets fallback.
 - [Unquantified Meal amount and natural Coach language](../../adr/20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md).
 - [Per-result proactive Coach policy](../../adr/20260902-deliver-coach-reply-policy-in-every-relevant-mcp-result.md).
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
+- [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md).
 
 ## Open questions
 

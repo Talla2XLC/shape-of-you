@@ -23,6 +23,8 @@ import type {
   ExerciseOverlay,
   PersonalRecordList,
   ProgressionCandidateList,
+  SaveConfirmedTrainingProgram,
+  SaveConfirmedTrainingProgramResult,
   TrainingProgram,
   TrainingProgramVersion,
   UpsertExerciseOverlay,
@@ -59,6 +61,7 @@ import {
 import {
   calculateProgressionWeight,
   canAccessTrainingExercise,
+  trainingProgramSnapshotMatches,
   validateTrainingProgramVersion
 } from "../domain/training.js";
 import { deriveLocalDate } from "../domain/weight-measurement.js";
@@ -162,6 +165,10 @@ export interface TrainingStore {
     versionId: string,
     input: ActivateTrainingProgramVersion
   ): Promise<TrainingProgram>;
+  saveConfirmedProgram(
+    personId: string,
+    input: SaveConfirmedTrainingProgram
+  ): Promise<SaveConfirmedTrainingProgramResult>;
   findProgram(personId: string, id: string): Promise<TrainingProgram | null>;
   findActiveProgram(personId: string): Promise<TrainingProgram | null>;
   createWorkoutSession(
@@ -903,6 +910,116 @@ export class TrainingRepository implements TrainingStore {
         throw new ConflictError("TrainingProgram changed concurrently");
       }
       return this.serializeProgram(transaction, updated);
+    });
+  }
+
+  public async saveConfirmedProgram(
+    personId: string,
+    input: SaveConfirmedTrainingProgram
+  ): Promise<SaveConfirmedTrainingProgramResult> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const [activeRow] = await transaction
+        .select()
+        .from(trainingPrograms)
+        .where(
+          and(
+            eq(trainingPrograms.personId, personId),
+            sql`${trainingPrograms.activeVersionId} IS NOT NULL`
+          )
+        )
+        .limit(1);
+      const active = activeRow
+        ? await this.serializeProgram(transaction, activeRow)
+        : null;
+
+      if (
+        active?.activeVersion &&
+        trainingProgramSnapshotMatches(active.activeVersion, input)
+      ) {
+        return { outcome: "unchanged", program: active };
+      }
+
+      if (!active) {
+        if (
+          input.expectedActiveProgramId !== null ||
+          input.expectedLockVersion !== null
+        ) {
+          throw new ConflictError("Active TrainingProgram changed concurrently");
+        }
+        const [created] = await transaction
+          .insert(trainingPrograms)
+          .values({ personId })
+          .returning();
+        if (!created) {
+          throw new Error("TrainingProgram insert failed");
+        }
+        const version = await this.insertProgramVersionContents(
+          transaction,
+          personId,
+          created.id,
+          1,
+          input
+        );
+        const [activated] = await transaction
+          .update(trainingPrograms)
+          .set({
+            currentVersionId: version.id,
+            activeVersionId: version.id,
+            lockVersion: 1
+          })
+          .where(
+            and(
+              eq(trainingPrograms.id, created.id),
+              eq(trainingPrograms.personId, personId),
+              eq(trainingPrograms.lockVersion, 0)
+            )
+          )
+          .returning();
+        if (!activated) {
+          throw new ConflictError("TrainingProgram changed concurrently");
+        }
+        return {
+          outcome: "created",
+          program: await this.serializeProgram(transaction, activated)
+        };
+      }
+
+      if (
+        input.expectedActiveProgramId !== active.id ||
+        input.expectedLockVersion !== active.lockVersion
+      ) {
+        throw new ConflictError("Active TrainingProgram changed concurrently");
+      }
+      const version = await this.insertProgramVersionContents(
+        transaction,
+        personId,
+        active.id,
+        active.currentVersion.version + 1,
+        input
+      );
+      const [updated] = await transaction
+        .update(trainingPrograms)
+        .set({
+          currentVersionId: version.id,
+          activeVersionId: version.id,
+          lockVersion: active.lockVersion + 1
+        })
+        .where(
+          and(
+            eq(trainingPrograms.id, active.id),
+            eq(trainingPrograms.personId, personId),
+            eq(trainingPrograms.lockVersion, active.lockVersion)
+          )
+        )
+        .returning();
+      if (!updated) {
+        throw new ConflictError("TrainingProgram changed concurrently");
+      }
+      return {
+        outcome: "updated",
+        program: await this.serializeProgram(transaction, updated)
+      };
     });
   }
 

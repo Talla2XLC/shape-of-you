@@ -14,6 +14,10 @@ import type {
   ListWorkoutSessionsQuery,
   PersonalRecordList,
   ProgressionCandidateList,
+  SaveConfirmedTrainingProgram,
+  SaveConfirmedTrainingProgramResult,
+  TrainingContext,
+  TrainingContextQuery,
   TrainingProgram,
   UpsertExerciseOverlay,
   WorkoutSession,
@@ -132,6 +136,30 @@ export class TrainingService {
       throw new NotFoundError("Active TrainingProgram was not found");
     }
     return program;
+  }
+
+  /** Atomically persists one explicitly confirmed active program snapshot. */
+  public saveConfirmedProgram(
+    input: SaveConfirmedTrainingProgram
+  ): Promise<SaveConfirmedTrainingProgramResult> {
+    return this.store.saveConfirmedProgram(
+      this.personContext.getPersonId(),
+      input
+    );
+  }
+
+  /** Reads active plan authority together with bounded completed-session evidence. */
+  public async getTrainingContext(
+    query: TrainingContextQuery
+  ): Promise<TrainingContext> {
+    const personId = this.personContext.getPersonId();
+    const [program, recentSessions] = await Promise.all([
+      this.store.findActiveProgram(personId),
+      this.store.listWorkoutSessions(personId, query.historyLimit ?? 20)
+    ]);
+    return program
+      ? { status: "active", program, recentSessions }
+      : { status: "absent", program: null, recentSessions };
   }
 
   /** Creates one idempotent immutable WorkoutSession fact. */

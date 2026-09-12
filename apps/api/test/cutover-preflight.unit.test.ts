@@ -83,6 +83,16 @@ describe("cutover preflight", () => {
       tools: tools.filter((item) => item.name !== "record_meal"),
       canaries
     })).toThrow("record_meal");
+    expect(cutoverWriterTools).toContainEqual({
+      name: "get_training_context",
+      scope: "person:read",
+      canaryRequired: false
+    });
+    expect(cutoverWriterTools).toContainEqual({
+      name: "save_confirmed_training_program",
+      scope: "workout:write",
+      canaryRequired: true
+    });
   });
 
   it("builds a deterministic zero-write post-checkpoint replay plan", () => {

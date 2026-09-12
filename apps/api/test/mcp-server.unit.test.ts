@@ -139,7 +139,9 @@ const unavailableServices = {
     listWorkoutSessions: unreachable,
     createWorkoutSession: unreachable,
     correctWorkoutSession: unreachable,
-    findActiveProgram: unreachable
+    findActiveProgram: unreachable,
+    saveConfirmedProgram: unreachable,
+    getTrainingContext: unreachable
   },
   recovery: {
     listObservations: unreachable,
@@ -206,6 +208,18 @@ describe("MCP HTTP adapter", () => {
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "only status absent proves that no active program exists"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Before strength-program advice, read the composed training context"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "recent completed sessions only as evidence for a clearly proposed program"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "obtain explicit user confirmation"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "compare the complete snapshot before claiming success"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "label the affected field unknown"
@@ -342,7 +356,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(20);
+    expect(body.result.tools).toHaveLength(22);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -370,6 +384,8 @@ describe("MCP HTTP adapter", () => {
       record_meal: MCP_MEAL_WRITE_SCOPE,
       correct_meal: MCP_MEAL_WRITE_SCOPE,
       get_active_training_program: MCP_READ_SCOPE,
+      get_training_context: MCP_READ_SCOPE,
+      save_confirmed_training_program: MCP_WORKOUT_WRITE_SCOPE,
       list_workout_sessions: MCP_READ_SCOPE,
       record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       correct_workout_session: MCP_WORKOUT_WRITE_SCOPE,
@@ -440,7 +456,7 @@ describe("MCP HTTP adapter", () => {
     }) => detail.properties.type.const === "metric");
     expect(metricDetailSchema.properties.metric.enum).toContain("sleep_score");
     expect(metricDetailSchema.allOf).toContainEqual(expect.objectContaining({
-      if: { properties: { metric: { enum: ["body_battery", "sleep_score"] } } },
+      if: { properties: { metric: { enum: ["body_battery", "body_battery_min", "body_battery_max", "sleep_score"] } } },
       then: {
         properties: {
           value: { minimum: 0, maximum: 100 },
@@ -506,6 +522,42 @@ describe("MCP HTTP adapter", () => {
       securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
     });
     expect(ToolSchema.safeParse(activeTrainingProgramTool).success).toBe(true);
+    const trainingContextTool = body.result.tools.find(
+      (tool: { name: string }) => tool.name === "get_training_context"
+    );
+    expect(trainingContextTool).toMatchObject({
+      inputSchema: {
+        $id: "TrainingContextQuery",
+        properties: { historyLimit: { minimum: 1, maximum: 50 } }
+      },
+      outputSchema: { $id: "TrainingContext", oneOf: expect.any(Array) },
+      annotations: { readOnlyHint: true },
+      securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
+    });
+    const saveProgramTool = body.result.tools.find(
+      (tool: { name: string }) =>
+        tool.name === "save_confirmed_training_program"
+    );
+    expect(saveProgramTool).toMatchObject({
+      inputSchema: {
+        $id: "SaveConfirmedTrainingProgram",
+        oneOf: expect.any(Array)
+      },
+      outputSchema: {
+        $id: "SaveConfirmedTrainingProgramResult",
+        required: ["outcome", "program"]
+      },
+      annotations: { readOnlyHint: false },
+      securitySchemes: [{ scopes: [MCP_WORKOUT_WRITE_SCOPE] }]
+    });
+    expect(saveProgramTool.description).toContain(
+      "only after the user explicitly confirmed"
+    );
+    expect(saveProgramTool.description).toContain(
+      "read the active program again"
+    );
+    expect(ToolSchema.safeParse(trainingContextTool).success).toBe(true);
+    expect(ToolSchema.safeParse(saveProgramTool).success).toBe(true);
   });
 
   it("returns the OAuth challenge from a protected tool call", async () => {
@@ -531,6 +583,196 @@ describe("MCP HTTP adapter", () => {
         ]
       }
     });
+  });
+
+  it("dispatches composed training context and confirmed program persistence", async () => {
+    const authorizedFastify = Fastify();
+    const pair = await generateKeyPair("ES256");
+    const jwk = await exportJWK(pair.publicKey);
+    const token = await new SignJWT({
+      client_id: "chatgpt-runtime",
+      scope: [MCP_READ_SCOPE, MCP_WORKOUT_WRITE_SCOPE].join(" ")
+    })
+      .setProtectedHeader({ alg: "ES256", kid: "training-program-v1" })
+      .setIssuer("https://identity.example.test")
+      .setSubject("identity-account-1")
+      .setAudience("https://api.example.test/api/mcp")
+      .setIssuedAt()
+      .setExpirationTime("10m")
+      .sign(pair.privateKey);
+    const programId = "00000000-0000-4000-8000-000000000401";
+    const exerciseVersionId = "00000000-0000-4000-8000-000000000402";
+    const getTrainingContext = vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "absent",
+        program: null,
+        recentSessions: { items: [{ id: "historical-session" }] }
+      })
+      .mockResolvedValueOnce({
+        status: "active",
+        program: { id: programId, lockVersion: 1 },
+        recentSessions: { items: [] }
+      })
+      .mockResolvedValueOnce({
+        status: "absent",
+        program: null,
+        recentSessions: { items: [] }
+      })
+      .mockRejectedValueOnce(new Error("Training repository unavailable"));
+    const saveConfirmedProgram = vi.fn().mockResolvedValue({
+      outcome: "created",
+      program: { id: programId, lockVersion: 1 }
+    });
+    registerMcpRoutes({
+      fastify: authorizedFastify,
+      issuer: "https://identity.example.test",
+      resource: "https://api.example.test/api/mcp",
+      authorizer: new McpAuthorizer(
+        "https://identity.example.test",
+        "https://unused.test/jwks",
+        "https://api.example.test/api/mcp",
+        {
+          resolveAuthorizedPersons: async () => [
+            {
+              personId: "00000000-0000-4000-8000-000000000001",
+              roles: ["owner"]
+            }
+          ]
+        },
+        createLocalJWKSet({
+          keys: [{ ...jwk, kid: "training-program-v1", use: "sig" }]
+        })
+      ),
+      personContext: new RequestPersonContext(),
+      services: {
+        ...unavailableServices,
+        training: {
+          ...unavailableServices.training,
+          getTrainingContext,
+          saveConfirmedProgram
+        }
+      }
+    });
+    const call = (id: number, name: string, args: Record<string, unknown>) =>
+      authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id,
+          method: "tools/call",
+          params: { name, arguments: args }
+        }
+      });
+    const confirmedProgram = {
+      expectedActiveProgramId: null,
+      expectedLockVersion: null,
+      name: "Confirmed A/B",
+      note: null,
+      workouts: [
+        {
+          name: "A",
+          prescriptions: [
+            {
+              exerciseVersionId,
+              loadBasis: "external_weight",
+              targetWeightKg: 20,
+              targetSets: 3,
+              targetRepsMin: 8,
+              targetRepsMax: 10,
+              targetRir: 2,
+              progressionIncrementKg: 2,
+              note: null
+            }
+          ]
+        }
+      ]
+    };
+
+    try {
+      const absent = (
+        await call(200, "get_training_context", { historyLimit: 10 })
+      ).json().result;
+      expect(absent).toMatchObject({
+        structuredContent: {
+          status: "absent",
+          program: null,
+          recentSessions: { items: [{ id: "historical-session" }] }
+        }
+      });
+      expect(absent.content[0].text).toContain(
+        "sessions are evidence for a proposal only"
+      );
+
+      const invalid = (
+        await call(201, "save_confirmed_training_program", {
+          ...confirmedProgram,
+          expectedActiveProgramId: programId
+        })
+      ).json().result;
+      expect(invalid).toMatchObject({ isError: true });
+      expect(saveConfirmedProgram).not.toHaveBeenCalled();
+
+      const saved = (
+        await call(202, "save_confirmed_training_program", confirmedProgram)
+      ).json().result;
+      expect(saved).toMatchObject({
+        structuredContent: {
+          outcome: "created",
+          program: { id: programId, lockVersion: 1 }
+        }
+      });
+      expect(saved.content[0].text).toContain(
+        "compare the complete snapshot before claiming success"
+      );
+      expect(saveConfirmedProgram).toHaveBeenCalledWith(confirmedProgram);
+
+      const active = (
+        await call(203, "get_training_context", {})
+      ).json().result;
+      expect(active).toMatchObject({
+        structuredContent: {
+          status: "active",
+          program: { id: programId, lockVersion: 1 }
+        }
+      });
+      expect(getTrainingContext).toHaveBeenNthCalledWith(1, {
+        historyLimit: 10
+      });
+      expect(getTrainingContext).toHaveBeenNthCalledWith(2, {});
+
+      const absentWithoutHistory = (
+        await call(204, "get_training_context", {})
+      ).json().result;
+      expect(absentWithoutHistory).toMatchObject({
+        structuredContent: {
+          status: "absent",
+          program: null,
+          recentSessions: { items: [] }
+        }
+      });
+      const unavailable = (
+        await call(205, "get_training_context", {})
+      ).json().result;
+      expect(unavailable).toMatchObject({
+        isError: true,
+        content: [
+          {
+            text: expect.stringContaining(
+              "Do not claim that an unverified read or failed change succeeded"
+            )
+          }
+        ]
+      });
+      expect(unavailable.structuredContent).toBeUndefined();
+    } finally {
+      await authorizedFastify.close();
+    }
   });
 
   it("normalizes connector-compatible Workout sets before domain dispatch", async () => {

@@ -36,7 +36,9 @@ describe("Garmin via Intervals.icu integration contracts", () => {
   it("normalizes only the supported typed wellness and activity surface", () => {
     const wellness = normalizeIntervalsWellness({
       id: "2026-09-07", sleepSecs: 27_000, sleepScore: 84,
-      restingHR: 51, hrv: 63, bodyBattery: 77, ignoredProviderField: "ignored"
+      restingHR: 51, avgSleepingHR: 48, hrv: 63, spO2: 96.5,
+      respiration: 15.2, BodyBatteryMin: 18, BodyBatteryMax: 91,
+      bodyBattery: 77, ignoredProviderField: "ignored"
     });
     const activity = normalizeIntervalsActivity({
       id: "i123", name: "Morning Run", start_date: "2026-09-07T06:00:00Z",
@@ -45,7 +47,20 @@ describe("Garmin via Intervals.icu integration contracts", () => {
       average_heartrate: 146, max_heartrate: 177, device_name: "Garmin Forerunner 965"
     });
 
-    expect(wellness).toMatchObject({ totalSleepMinutes: 450, hrvRmssd: 63, timezone: "UTC" });
+    expect(wellness).toEqual({
+      identity: "2026-09-07",
+      localDate: "2026-09-07",
+      timezone: "UTC",
+      totalSleepMinutes: 450,
+      sleepScore: 84,
+      restingHeartRate: 51,
+      averageSleepingHeartRate: 48,
+      hrvRmssd: 63,
+      oxygenSaturation: 96.5,
+      respirationRate: 15.2,
+      bodyBatteryMinimum: 18,
+      bodyBatteryMaximum: 91
+    });
     expect(activity).toMatchObject({ durationSeconds: 3_300, garminAttributed: true, localDate: "2026-09-07" });
     expect(normalizedChecksum(wellness)).toBe(normalizedChecksum({ ...wellness }));
   });
@@ -55,6 +70,19 @@ describe("Garmin via Intervals.icu integration contracts", () => {
       expect.objectContaining({ failureCode: "provider_response_invalid" })
     );
     expect(() => normalizeIntervalsActivity({ id: "a" })).toThrow(IntegrationProviderError);
+  });
+
+  it.each([
+    { id: "2026-09-07", avgSleepingHR: 301 },
+    { id: "2026-09-07", spO2: 101 },
+    { id: "2026-09-07", respiration: -1 },
+    { id: "2026-09-07", BodyBatteryMin: "18" },
+    { id: "2026-09-07", BodyBatteryMax: 101 },
+    { id: "2026-09-07", BodyBatteryMin: 91, BodyBatteryMax: 18 }
+  ])("rejects an invalid typed wellness value without exposing transport data", (record) => {
+    expect(() => normalizeIntervalsWellness(record)).toThrowError(
+      expect.objectContaining({ failureCode: "provider_response_invalid" })
+    );
   });
 
   it("constructs the allowlisted minimal OAuth request", () => {
@@ -114,12 +142,18 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     });
 
     expect(request).toHaveBeenCalledTimes(2);
-    expect(request).toHaveBeenCalledWith(
-      "https://intervals.icu/api/v1/athlete/0/wellness?oldest=2026-09-01&newest=2026-09-11",
-      expect.objectContaining({
-        headers: expect.objectContaining({ authorization: "Bearer opaque-test-token" })
-      })
+    const [wellnessUrl, wellnessInit] = request.mock.calls[0] as [string, RequestInit];
+    const parsedWellnessUrl = new URL(wellnessUrl);
+    expect(parsedWellnessUrl.origin + parsedWellnessUrl.pathname).toBe(
+      "https://intervals.icu/api/v1/athlete/0/wellness"
     );
+    expect(parsedWellnessUrl.searchParams.get("oldest")).toBe("2026-09-01");
+    expect(parsedWellnessUrl.searchParams.get("newest")).toBe("2026-09-11");
+    expect(parsedWellnessUrl.searchParams.get("fields")).toBe(
+      "id,updated,sleepSecs,sleepScore,restingHR,avgSleepingHR,hrv,spO2,respiration,BodyBatteryMin,BodyBatteryMax"
+    );
+    expect(parsedWellnessUrl.searchParams.has("access_token")).toBe(false);
+    expect(wellnessInit.headers).toEqual(expect.objectContaining({ authorization: "Bearer opaque-test-token" }));
     expect(request).toHaveBeenCalledWith(
       "https://intervals.icu/api/v1/athlete/0/activities?oldest=2026-09-01&newest=2026-09-11",
       expect.objectContaining({

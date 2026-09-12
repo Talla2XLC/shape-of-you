@@ -16,11 +16,12 @@ tags:
 
 Implemented Recovery separates shared device definitions, Person-owned typed
 observations, account connections, and reproducible readiness/load-risk
-assessments. The Garmin-via-Intervals.icu path is implemented behind a disabled
-feature flag; real import still requires external OAuth application approval,
-runtime credentials, migration application, deployment, and a live smoke test.
-The owner-backed staging restore drill is complete; the owner temporarily
-accepts same-host journal storage for logical-restore protection only.
+assessments. The configuration-gated Garmin-via-Intervals.icu path uses OAuth,
+rolling synchronization, and an explicit historical import action. Supported
+wellness values become provider-neutral typed observations; unsupported Garmin
+screen values are not inferred. The owner-backed staging restore drill is
+complete; the owner temporarily accepts same-host journal storage for logical-
+restore protection only.
 
 ## Content
 
@@ -52,12 +53,27 @@ Device observations require active matching consent; revocation stops future
 collection but is not erasure. Corrections replace full observations.
 
 The Intervals.icu adapter imports supported wellness fields through an
-account-level source channel. Sleep duration, sleep score, resting heart rate,
-HRV rMSSD, and Body Battery become typed immutable observations. The same
+account-level source channel. Its explicit whitelist maps sleep duration, sleep
+score, resting heart rate, average sleeping heart rate, HRV rMSSD, SpO2,
+respiration rate, and daily Body Battery minimum and maximum to typed immutable
+observations. `BodyBatteryMin` and `BodyBatteryMax` remain distinct `0..100`
+score metrics; neither is presented as a current Body Battery reading. The same
 provider identity and normalized checksum is a no-op; changed or removed fields
-create immutable successor observations. Wellness provenance remains
-`intervals_icu_wellness` and may include Garmin because Intervals.icu does not
-reliably expose the original provider for each wellness field.
+create immutable correction or withdrawal observations. Wellness provenance
+remains `intervals_icu_wellness` and may include Garmin because Intervals.icu
+does not reliably expose the original provider for each wellness field.
+
+Body Battery requires exact Intervals custom wellness codes
+`BodyBatteryMin` and `BodyBatteryMax` plus enabled Garmin wellness download.
+The regular rolling worker and the explicit historical-import worker share the
+same normalization, deduplication, correction, consent, and erasure path.
+Unknown fields and raw Intervals JSON never become the Recovery domain model.
+
+Intervals can return only values it has received and exposed. Sleep stages,
+overnight minimum SpO2, Garmin readiness or stress, skin temperature, and
+Garmin nightly respiration remain unsupported until a documented Intervals
+field and verified transport fixture exist. Screenshot capture remains a
+manual fallback, not the normal ingestion path for the supported metrics.
 
 Connection erasure uses an API-owned durable request.
 Fresh passkey authentication quarantines the connection immediately, while an
@@ -92,9 +108,9 @@ serializes synchronization, creates a unique sealed checkpoint only for pending
 acknowledgements, and acknowledges PostgreSQL only after durable flush and
 verification. Missing or invalid journal storage therefore keeps physical
 erasure blocked. The source and CI contract are accepted. Provider ingestion is
-implemented but remains disabled until separately approved registration,
-credentials, migration application, staging deployment, and runtime
-verification.
+available only when its stable OAuth and encryption configuration is complete;
+deployment, migration application, and runtime verification remain separately
+controlled operational actions.
 
 Immutable ReadinessAssessment/LoadRiskAssessment pin exact policy version,
 analysis window, evidence checksum, and typed observation/training links.
@@ -104,6 +120,7 @@ scores. Assessment never mutates Training.
 ## Evidence
 
 - Recovery schema/contracts/integration tests.
+- `TASK-0110` independent Quality and Architecture Review acceptance.
 
 ## Decisions
 
@@ -113,11 +130,13 @@ scores. Assessment never mutates Training.
 - [Temporary same-host Recovery erasure journal](../../adr/20260904-temporarily-use-same-host-recovery-erasure-journal.md).
 - [Automated Recovery erasure journal synchronization](../../adr/20260904-automate-recovery-erasure-journal-with-root-scheduled-one-shot.md).
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
+- [Typed Intervals wellness import](../../adr/20260912-import-supported-intervals-wellness-as-typed-recovery.md).
 
 ## Open questions
 
-- Intervals.icu OAuth application approval, credentials, migration application,
-  and live provider validation.
+- Live coverage of optional Garmin wellness fields varies by device, Garmin
+  delivery, Intervals configuration, and historical availability.
+- Production migration application and post-deployment live provider validation.
 - Supporter/dormancy and commercial-use policy confirmation for unattended
   production synchronization.
 - A finite backup lifetime and off-host or immutable journal copy for VM-loss

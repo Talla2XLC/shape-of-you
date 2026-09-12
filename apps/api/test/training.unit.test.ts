@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import type { CreateTrainingProgram } from "@shape-of-you/contracts";
+import type {
+  CreateTrainingProgram,
+  SaveConfirmedTrainingProgram,
+  TrainingProgramVersion
+} from "@shape-of-you/contracts";
 
 import {
   calculateProgressionWeight,
   canAccessTrainingExercise,
+  trainingProgramSnapshotMatches,
   validateTrainingProgramVersion
 } from "../src/domain/training.js";
 
@@ -88,5 +93,46 @@ describe("Training domain", () => {
         ]
       )
     ).toBeNull();
+  });
+
+  it("compares confirmed programs by ordered domain meaning only", () => {
+    const confirmed: SaveConfirmedTrainingProgram = {
+      expectedActiveProgramId: null,
+      expectedLockVersion: null,
+      ...program()
+    };
+    const active: TrainingProgramVersion = {
+      id: "00000000-0000-4000-8000-000000000010",
+      version: 4,
+      name: confirmed.name,
+      note: confirmed.note,
+      createdAt: "2026-09-12T08:00:00.000Z",
+      workouts: confirmed.workouts.map((workout, workoutIndex) => ({
+        position: workoutIndex + 1,
+        name: workout.name,
+        prescriptions: workout.prescriptions.map(
+          (prescription, prescriptionIndex) => ({
+            position: prescriptionIndex + 1,
+            exerciseId: "00000000-0000-4000-8000-000000000011",
+            exerciseLabel: "Historical label",
+            ...prescription
+          })
+        )
+      }))
+    };
+
+    expect(trainingProgramSnapshotMatches(active, confirmed)).toBe(true);
+    expect(
+      trainingProgramSnapshotMatches(active, {
+        ...confirmed,
+        workouts: confirmed.workouts.map((workout) => ({
+          ...workout,
+          prescriptions: workout.prescriptions.map((prescription) => ({
+            ...prescription,
+            targetWeightKg: 102.5
+          }))
+        }))
+      })
+    ).toBe(false);
   });
 });

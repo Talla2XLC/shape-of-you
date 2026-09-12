@@ -20,15 +20,26 @@ export function normalizeIntervalsWellness(value: unknown): ProviderWellnessReco
   const record = asRecord(value);
   const localDate = requiredString(record, "id", 10);
   if (!datePattern.test(localDate)) invalid();
+  const bodyBatteryMinimum = optionalNumber(record, "BodyBatteryMin", 0, 100);
+  const bodyBatteryMaximum = optionalNumber(record, "BodyBatteryMax", 0, 100);
+  if (
+    bodyBatteryMinimum !== null
+    && bodyBatteryMaximum !== null
+    && bodyBatteryMinimum > bodyBatteryMaximum
+  ) invalid();
   return {
     identity: localDate,
     localDate,
     timezone: optionalString(record, "timezone", 64) ?? "UTC",
     totalSleepMinutes: secondsToMinutes(optionalNumber(record, "sleepSecs", 0, 172_800)),
     sleepScore: optionalNumber(record, "sleepScore", 0, 100),
-    restingHeartRate: optionalNumber(record, "restingHR", 0, 300),
-    hrvRmssd: optionalNumber(record, "hrv", 0, 1_000),
-    bodyBattery: optionalNumber(record, "bodyBattery", 0, 100)
+    restingHeartRate: optionalPositiveNumber(record, "restingHR", 300),
+    averageSleepingHeartRate: optionalPositiveNumber(record, "avgSleepingHR", 300),
+    hrvRmssd: optionalPositiveNumber(record, "hrv", 1_000),
+    oxygenSaturation: optionalNumber(record, "spO2", 0, 100),
+    respirationRate: optionalPositiveNumber(record, "respiration", 100),
+    bodyBatteryMinimum,
+    bodyBatteryMaximum
   };
 }
 
@@ -93,6 +104,11 @@ function optionalNumber(record: JsonRecord, key: string, min: number, max: numbe
   const value = record[key];
   if (value === undefined || value === null) return null;
   if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) invalid();
+  return value;
+}
+function optionalPositiveNumber(record: JsonRecord, key: string, max: number): number | null {
+  const value = optionalNumber(record, key, 0, max);
+  if (value === 0) invalid();
   return value;
 }
 function secondsToMinutes(value: number | null): number | null {

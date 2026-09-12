@@ -8,12 +8,14 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { AppConfig } from "@shape-of-you/config";
 
 import { buildApp, getFastifyInstance } from "../src/app.js";
+import { SyntheticPersonContext } from "../src/application/person-context.js";
 import {
   createDatabase,
   type DatabaseContext
 } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
+import { TrainingService } from "../src/training/training.service.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
@@ -404,5 +406,145 @@ describe("Training PostgreSQL vertical", () => {
       reps: 6,
       sessionId: correction.json().id
     });
+  });
+
+  it("atomically saves confirmed programs with deduplication, concurrency, and Person isolation", async () => {
+    const repository = new TrainingRepository(database);
+    const personBService = new TrainingService(
+      repository,
+      new SyntheticPersonContext(personB)
+    );
+    await expect(personBService.getTrainingContext({ historyLimit: 1 }))
+      .resolves.toEqual({
+        status: "absent",
+        program: null,
+        recentSessions: { items: [] }
+      });
+    const exercise = await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0108 Press",
+      category: "strength",
+      movementPattern: "push",
+      equipment: "dumbbell",
+      instructions: null,
+      note: null
+    });
+    const snapshot = {
+      expectedActiveProgramId: null,
+      expectedLockVersion: null,
+      name: "Confirmed A/B",
+      note: "Confirmed by the user",
+      workouts: [
+        {
+          name: "A",
+          prescriptions: [
+            {
+              exerciseVersionId: exercise.currentVersion.id,
+              loadBasis: "external_weight" as const,
+              targetWeightKg: 20,
+              targetSets: 3,
+              targetRepsMin: 8,
+              targetRepsMax: 10,
+              targetRir: 2,
+              progressionIncrementKg: 2,
+              note: null
+            }
+          ]
+        }
+      ]
+    };
+
+    const created = await repository.saveConfirmedProgram(personB, snapshot);
+    expect(created).toMatchObject({
+      outcome: "created",
+      program: {
+        personId: personB,
+        lockVersion: 1,
+        activeVersionId: expect.any(String),
+        activeVersion: { version: 1, name: "Confirmed A/B" },
+        currentVersion: { version: 1, name: "Confirmed A/B" }
+      }
+    });
+    await expect(personBService.getTrainingContext({ historyLimit: 1 }))
+      .resolves.toMatchObject({
+        status: "active",
+        program: { id: created.program.id, personId: personB },
+        recentSessions: { items: [] }
+      });
+    expect(await repository.findProgram(personA, created.program.id)).toBeNull();
+
+    const duplicate = await repository.saveConfirmedProgram(personB, snapshot);
+    expect(duplicate).toMatchObject({
+      outcome: "unchanged",
+      program: {
+        id: created.program.id,
+        lockVersion: 1,
+        activeVersionId: created.program.activeVersionId
+      }
+    });
+    const afterDuplicate = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_program_versions
+        where program_id = $1`,
+      [created.program.id]
+    );
+    expect(afterDuplicate.rows[0]?.count).toBe("1");
+
+    const updated = await repository.saveConfirmedProgram(personB, {
+      ...snapshot,
+      expectedActiveProgramId: created.program.id,
+      expectedLockVersion: created.program.lockVersion,
+      workouts: snapshot.workouts.map((workout) => ({
+        ...workout,
+        prescriptions: workout.prescriptions.map((prescription) => ({
+          ...prescription,
+          targetWeightKg: 22
+        }))
+      }))
+    });
+    expect(updated).toMatchObject({
+      outcome: "updated",
+      program: {
+        id: created.program.id,
+        lockVersion: 2,
+        activeVersion: { version: 2 },
+        currentVersion: { version: 2 }
+      }
+    });
+    expect(updated.program.activeVersionId).toBe(
+      updated.program.currentVersion.id
+    );
+
+    await expect(
+      repository.saveConfirmedProgram(personB, {
+        ...snapshot,
+        expectedActiveProgramId: created.program.id,
+        expectedLockVersion: 1,
+        note: "Stale overwrite"
+      })
+    ).rejects.toThrow("changed concurrently");
+    const afterConflict = await repository.findActiveProgram(personB);
+    expect(afterConflict).toMatchObject({
+      id: created.program.id,
+      lockVersion: 2,
+      activeVersion: { version: 2, note: "Confirmed by the user" }
+    });
+    const afterConflictVersions = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_program_versions
+        where program_id = $1`,
+      [created.program.id]
+    );
+    expect(afterConflictVersions.rows[0]?.count).toBe("2");
+
+    await expect(
+      repository.saveConfirmedProgram(personA, {
+        ...snapshot,
+        expectedActiveProgramId: created.program.id,
+        expectedLockVersion: 2,
+        note: "Cross-person overwrite"
+      })
+    ).rejects.toThrow("changed concurrently");
+    expect((await repository.findActiveProgram(personB))?.lockVersion).toBe(2);
   });
 });

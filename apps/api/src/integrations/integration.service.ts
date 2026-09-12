@@ -231,8 +231,12 @@ export class IntegrationService {
       ...(wellness.totalSleepMinutes === null ? [] : [{ key: "sleep", detail: { type: "sleep" as const, totalSleepMinutes: wellness.totalSleepMinutes, sleepQuality: null } }]),
       ...metric("sleep_score", "score", wellness.sleepScore),
       ...metric("resting_heart_rate", "bpm", wellness.restingHeartRate),
+      ...metric("night_heart_rate", "bpm", wellness.averageSleepingHeartRate),
       ...metric("hrv_rmssd", "ms", wellness.hrvRmssd),
-      ...metric("body_battery", "score", wellness.bodyBattery)
+      ...metric("oxygen_saturation", "percent", wellness.oxygenSaturation),
+      ...metric("respiration_rate", "breaths_per_minute", wellness.respirationRate),
+      ...metric("body_battery_min", "score", wellness.bodyBatteryMinimum),
+      ...metric("body_battery_max", "score", wellness.bodyBatteryMaximum)
     ];
     let changed = false;
     for (const fact of facts) {
@@ -265,7 +269,17 @@ export class IntegrationService {
       changed = persisted.created || changed;
     }
     const present = new Set(facts.map((fact) => fact.key));
-    for (const factKey of ["sleep", "sleep_score", "resting_heart_rate", "hrv_rmssd", "body_battery"] as const) {
+    for (const factKey of [
+      "sleep",
+      "sleep_score",
+      "resting_heart_rate",
+      "night_heart_rate",
+      "hrv_rmssd",
+      "oxygen_saturation",
+      "respiration_rate",
+      "body_battery_min",
+      "body_battery_max"
+    ] as const) {
       if (present.has(factKey)) continue;
       const current = await this.store!.recoveryFact(connection.id, wellness.identity, factKey);
       if (!current || current.checksum === "removed") continue;
@@ -287,7 +301,11 @@ export class IntegrationService {
   }
 }
 
-function metric(metricName: "sleep_score" | "resting_heart_rate" | "hrv_rmssd" | "body_battery", unit: "score" | "bpm" | "ms", value: number | null): readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] {
+function metric(
+  metricName: "sleep_score" | "resting_heart_rate" | "night_heart_rate" | "hrv_rmssd" | "oxygen_saturation" | "respiration_rate" | "body_battery_min" | "body_battery_max",
+  unit: "score" | "bpm" | "ms" | "percent" | "breaths_per_minute",
+  value: number | null
+): readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] {
   return value === null ? [] : [{ key: metricName, detail: { type: "metric", metric: metricName, value, unit } }];
 }
 function associatedData(personId: string, connectionId: string): string { return `intervals_icu:${personId}:${connectionId}`; }

@@ -31,6 +31,8 @@ export const cutoverWriterTools: readonly CutoverWriterToolRequirement[] = [
   { name: "record_meal", scope: "meal:write", canaryRequired: true },
   { name: "correct_meal", scope: "meal:write", canaryRequired: true },
   { name: "get_active_training_program", scope: "person:read", canaryRequired: false },
+  { name: "get_training_context", scope: "person:read", canaryRequired: false },
+  { name: "save_confirmed_training_program", scope: "workout:write", canaryRequired: true },
   { name: "list_workout_sessions", scope: "person:read", canaryRequired: false },
   { name: "record_workout_session", scope: "workout:write", canaryRequired: true },
   { name: "correct_workout_session", scope: "workout:write", canaryRequired: true },

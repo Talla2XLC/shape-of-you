@@ -17,6 +17,19 @@ const apiOrigin = "https://intervals.icu";
 const maxResponseBytes = 2_000_000;
 const maxDiagnosticResponseBytes = 4_096;
 const timeoutMs = 10_000;
+const wellnessFields = [
+  "id",
+  "updated",
+  "sleepSecs",
+  "sleepScore",
+  "restingHR",
+  "avgSleepingHR",
+  "hrv",
+  "spO2",
+  "respiration",
+  "BodyBatteryMin",
+  "BodyBatteryMax"
+] as const;
 const diagnosticHeaders = [
   "content-type",
   "content-length",
@@ -88,6 +101,7 @@ export class IntervalsIcuProvider implements HealthDataProvider {
     const wellnessUrl = new URL(`${apiOrigin}/api/v1/athlete/0/wellness`);
     wellnessUrl.searchParams.set("oldest", fromLocalDate);
     wellnessUrl.searchParams.set("newest", toLocalDate);
+    wellnessUrl.searchParams.set("fields", wellnessFields.join(","));
     const [wellness, activities] = await Promise.all([
       this.fetchJson(wellnessUrl.toString(), { headers }),
       this.fetchJson(`${apiOrigin}/api/v1/athlete/0/activities?oldest=${fromLocalDate}&newest=${toLocalDate}`, { headers })

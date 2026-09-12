@@ -1,6 +1,8 @@
 import type {
   CreateTrainingProgram,
-  CreateTrainingProgramVersion
+  CreateTrainingProgramVersion,
+  SaveConfirmedTrainingProgram,
+  TrainingProgramVersion
 } from "@shape-of-you/contracts";
 
 import { DomainValidationError } from "./errors.js";
@@ -42,7 +44,10 @@ export function canAccessTrainingExercise(
  * @throws DomainValidationError when a repetition range or increment is invalid.
  */
 export function validateTrainingProgramVersion(
-  input: CreateTrainingProgram | CreateTrainingProgramVersion
+  input:
+    | CreateTrainingProgram
+    | CreateTrainingProgramVersion
+    | SaveConfirmedTrainingProgram
 ): void {
   for (const workout of input.workouts) {
     for (const prescription of workout.prescriptions) {
@@ -61,6 +66,59 @@ export function validateTrainingProgramVersion(
       }
     }
   }
+}
+
+/**
+ * Compares an active immutable version with a confirmed snapshot by domain
+ * meaning, excluding generated identifiers, labels, positions, and timestamps.
+ */
+export function trainingProgramSnapshotMatches(
+  active: TrainingProgramVersion,
+  confirmed: SaveConfirmedTrainingProgram
+): boolean {
+  if (
+    active.name !== confirmed.name ||
+    active.note !== confirmed.note ||
+    active.workouts.length !== confirmed.workouts.length
+  ) {
+    return false;
+  }
+
+  return active.workouts.every((activeWorkout, workoutIndex) => {
+    const confirmedWorkout = confirmed.workouts[workoutIndex];
+    if (
+      !confirmedWorkout ||
+      activeWorkout.name !== confirmedWorkout.name ||
+      activeWorkout.prescriptions.length !==
+        confirmedWorkout.prescriptions.length
+    ) {
+      return false;
+    }
+
+    return activeWorkout.prescriptions.every(
+      (activePrescription, prescriptionIndex) => {
+        const confirmedPrescription =
+          confirmedWorkout.prescriptions[prescriptionIndex];
+        return Boolean(
+          confirmedPrescription &&
+            activePrescription.exerciseVersionId ===
+              confirmedPrescription.exerciseVersionId &&
+            activePrescription.loadBasis === confirmedPrescription.loadBasis &&
+            activePrescription.targetWeightKg ===
+              confirmedPrescription.targetWeightKg &&
+            activePrescription.targetSets === confirmedPrescription.targetSets &&
+            activePrescription.targetRepsMin ===
+              confirmedPrescription.targetRepsMin &&
+            activePrescription.targetRepsMax ===
+              confirmedPrescription.targetRepsMax &&
+            activePrescription.targetRir === confirmedPrescription.targetRir &&
+            activePrescription.progressionIncrementKg ===
+              confirmedPrescription.progressionIncrementKg &&
+            activePrescription.note === confirmedPrescription.note
+        );
+      }
+    );
+  });
 }
 
 /**
