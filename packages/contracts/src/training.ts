@@ -739,6 +739,90 @@ export type WorkoutSessionList = FromSchema<
   typeof WorkoutSessionListSchema
 >;
 
+export const ExternalActivitySummarySchema = {
+  $id: "ExternalActivitySummary",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "occurredAt",
+    "localDate",
+    "timezone",
+    "name",
+    "durationSeconds",
+    "distanceMeters",
+    "trainingLoad",
+    "averageHeartRate",
+    "maximumHeartRate",
+    "deviceName",
+    "garminAttributed"
+  ],
+  properties: {
+    id: uuidSchema,
+    occurredAt: { type: "string", format: "date-time" },
+    localDate: { type: "string", format: "date" },
+    timezone: { type: "string", minLength: 1, maxLength: 64 },
+    name: { type: "string", minLength: 1, maxLength: 256 },
+    durationSeconds: {
+      type: "number",
+      minimum: 0,
+      maximum: 604800,
+      multipleOf: 0.001
+    },
+    distanceMeters: {
+      anyOf: [
+        {
+          type: "number",
+          minimum: 0,
+          maximum: 10000000,
+          multipleOf: 0.001
+        },
+        { type: "null" }
+      ]
+    },
+    trainingLoad: {
+      anyOf: [
+        {
+          type: "number",
+          minimum: 0,
+          maximum: 100000,
+          multipleOf: 0.001
+        },
+        { type: "null" }
+      ]
+    },
+    averageHeartRate: {
+      anyOf: [
+        {
+          type: "number",
+          minimum: 0,
+          maximum: 300,
+          multipleOf: 0.001
+        },
+        { type: "null" }
+      ]
+    },
+    maximumHeartRate: {
+      anyOf: [
+        {
+          type: "number",
+          minimum: 0,
+          maximum: 300,
+          multipleOf: 0.001
+        },
+        { type: "null" }
+      ]
+    },
+    deviceName: nullableShortTextSchema,
+    garminAttributed: { type: "boolean" }
+  }
+} as const;
+
+/** Safe provider-neutral projection of one current connected activity fact. */
+export type ExternalActivitySummary = FromSchema<
+  typeof ExternalActivitySummarySchema
+>;
+
 export const TrainingContextQuerySchema = {
   $id: "TrainingContextQuery",
   type: "object",
@@ -760,27 +844,45 @@ export const TrainingContextSchema = {
     {
       type: "object",
       additionalProperties: false,
-      required: ["status", "program", "recentSessions"],
+      required: [
+        "status",
+        "program",
+        "recentSessions",
+        "recentExternalActivities"
+      ],
       properties: {
         status: { const: "active" },
         program: TrainingProgramSchema,
-        recentSessions: WorkoutSessionListSchema
+        recentSessions: WorkoutSessionListSchema,
+        recentExternalActivities: {
+          type: "array",
+          items: ExternalActivitySummarySchema
+        }
       }
     },
     {
       type: "object",
       additionalProperties: false,
-      required: ["status", "program", "recentSessions"],
+      required: [
+        "status",
+        "program",
+        "recentSessions",
+        "recentExternalActivities"
+      ],
       properties: {
         status: { const: "absent" },
         program: { type: "null" },
-        recentSessions: WorkoutSessionListSchema
+        recentSessions: WorkoutSessionListSchema,
+        recentExternalActivities: {
+          type: "array",
+          items: ExternalActivitySummarySchema
+        }
       }
     }
   ]
 } as const;
 
-/** Active planned authority plus bounded completed-session evidence. */
+/** Active planned authority plus separate bounded manual and connected evidence. */
 export type TrainingContext = FromSchema<typeof TrainingContextSchema>;
 
 export const PersonalRecordSchema = {

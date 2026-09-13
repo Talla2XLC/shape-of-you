@@ -418,7 +418,8 @@ describe("Training PostgreSQL vertical", () => {
       .resolves.toEqual({
         status: "absent",
         program: null,
-        recentSessions: { items: [] }
+        recentSessions: { items: [] },
+        recentExternalActivities: []
       });
     const exercise = await repository.createExercise(personA, {
       visibility: "shared",
@@ -469,7 +470,8 @@ describe("Training PostgreSQL vertical", () => {
       .resolves.toMatchObject({
         status: "active",
         program: { id: created.program.id, personId: personB },
-        recentSessions: { items: [] }
+        recentSessions: { items: [] },
+        recentExternalActivities: []
       });
     expect(await repository.findProgram(personA, created.program.id)).toBeNull();
 

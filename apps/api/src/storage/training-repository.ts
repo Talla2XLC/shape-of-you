@@ -134,7 +134,8 @@ export interface ExternalActivityFact extends Omit<ImportExternalActivity, "cons
 /** Persistence contract for Training catalog, plans, facts, and projections. */
 export interface TrainingStore {
   importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped">;
-  listExternalActivities(personId: string): Promise<readonly ExternalActivityFact[]>;
+  /** Lists newest current external-activity revisions for one Person with a SQL-applied bound. */
+  listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]>;
   createExercise(personId: string, input: CreateExercise): Promise<Exercise>;
   appendExerciseVersion(
     personId: string,
@@ -299,12 +300,16 @@ export class TrainingRepository implements TrainingStore {
     });
   }
 
-  public async listExternalActivities(personId: string): Promise<readonly ExternalActivityFact[]> {
+  public async listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]> {
     const successor = alias(integrationActivityFacts, "external_activity_successor");
     const rows = await this.database.db.select().from(integrationActivityFacts).where(and(
       eq(integrationActivityFacts.personId, personId),
       notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, integrationActivityFacts.id)))
-    )).orderBy(desc(integrationActivityFacts.occurredAt));
+    )).orderBy(
+      desc(integrationActivityFacts.occurredAt),
+      desc(integrationActivityFacts.createdAt),
+      desc(integrationActivityFacts.id)
+    ).limit(limit);
     return rows.map((row) => ({
       id: row.id, connectionId: row.connectionId, personId: row.personId,
       providerIdentity: row.providerIdentity, normalizedChecksum: row.normalizedChecksum,

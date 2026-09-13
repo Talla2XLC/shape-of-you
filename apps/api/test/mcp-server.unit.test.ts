@@ -210,10 +210,16 @@ describe("MCP HTTP adapter", () => {
       "only status absent proves that no active program exists"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Before strength-program advice, read the composed training context"
+      "Before training or recovery advice, read the composed training context"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "recent completed sessions only as evidence for a clearly proposed program"
+      "without asking the user to send a screenshot"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "never invent those details or automatically record it as a WorkoutSession"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "do not count both as separate training"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "obtain explicit user confirmation"
@@ -534,6 +540,46 @@ describe("MCP HTTP adapter", () => {
       annotations: { readOnlyHint: true },
       securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
     });
+    for (const branch of trainingContextTool.outputSchema.oneOf) {
+      expect(branch.required).toContain("recentExternalActivities");
+      expect(branch.properties.recentExternalActivities).toMatchObject({
+        type: "array",
+        items: {
+          $id: "ExternalActivitySummary",
+          additionalProperties: false,
+          required: expect.arrayContaining([
+            "id",
+            "occurredAt",
+            "localDate",
+            "name",
+            "durationSeconds",
+            "garminAttributed"
+          ])
+        }
+      });
+      expect(Object.keys(
+        branch.properties.recentExternalActivities.items.properties
+      ).sort()).toEqual([
+        "averageHeartRate",
+        "deviceName",
+        "distanceMeters",
+        "durationSeconds",
+        "garminAttributed",
+        "id",
+        "localDate",
+        "maximumHeartRate",
+        "name",
+        "occurredAt",
+        "timezone",
+        "trainingLoad"
+      ]);
+    }
+    expect(trainingContextTool.description).toContain(
+      "without requesting a screenshot or manual repeat"
+    );
+    expect(trainingContextTool.description).toContain(
+      "never infer exercises or sets"
+    );
     const saveProgramTool = body.result.tools.find(
       (tool: { name: string }) =>
         tool.name === "save_confirmed_training_program"
@@ -607,17 +653,33 @@ describe("MCP HTTP adapter", () => {
       .mockResolvedValueOnce({
         status: "absent",
         program: null,
-        recentSessions: { items: [{ id: "historical-session" }] }
+        recentSessions: { items: [{ id: "historical-session" }] },
+        recentExternalActivities: [{
+          id: "00000000-0000-4000-8000-000000000403",
+          occurredAt: "2026-09-13T06:00:00.000Z",
+          localDate: "2026-09-13",
+          timezone: "Europe/Moscow",
+          name: "Morning run",
+          durationSeconds: 2_400,
+          distanceMeters: 6_000,
+          trainingLoad: 55,
+          averageHeartRate: 144,
+          maximumHeartRate: 168,
+          deviceName: "Garmin Test",
+          garminAttributed: true
+        }]
       })
       .mockResolvedValueOnce({
         status: "active",
         program: { id: programId, lockVersion: 1 },
-        recentSessions: { items: [] }
+        recentSessions: { items: [] },
+        recentExternalActivities: []
       })
       .mockResolvedValueOnce({
         status: "absent",
         program: null,
-        recentSessions: { items: [] }
+        recentSessions: { items: [] },
+        recentExternalActivities: []
       })
       .mockRejectedValueOnce(new Error("Training repository unavailable"));
     const saveConfirmedProgram = vi.fn().mockResolvedValue({
@@ -702,11 +764,15 @@ describe("MCP HTTP adapter", () => {
         structuredContent: {
           status: "absent",
           program: null,
-          recentSessions: { items: [{ id: "historical-session" }] }
+          recentSessions: { items: [{ id: "historical-session" }] },
+          recentExternalActivities: [{ name: "Morning run" }]
         }
       });
       expect(absent.content[0].text).toContain(
-        "sessions are evidence for a proposal only"
+        "historical evidence is proposal input only"
+      );
+      expect(absent.content[0].text).toContain(
+        "never supplies exercises or sets"
       );
 
       const invalid = (
@@ -753,7 +819,8 @@ describe("MCP HTTP adapter", () => {
         structuredContent: {
           status: "absent",
           program: null,
-          recentSessions: { items: [] }
+          recentSessions: { items: [] },
+          recentExternalActivities: []
         }
       });
       const unavailable = (

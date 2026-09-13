@@ -35,10 +35,21 @@ The MCP `get_active_training_program` adapter preserves that domain distinction
 without changing HTTP semantics: it returns `status: active` with the program
 or `status: absent` with `program: null`. Other failures remain tool errors.
 
-The MCP `get_training_context` read composes the active program with a bounded
-list of recent current WorkoutSessions. An active program is the only planned
-authority. When it is absent, recent sessions are completed evidence that may
-support a proposal but are not a plan.
+The MCP `get_training_context` read composes the active program with separate
+bounded lists of recent current `WorkoutSession` facts and connected
+`ExternalActivitySummary` facts. An active program is the only planned
+authority. When it is absent, both collections remain completed evidence that
+may support a proposal but are not a plan. Connected activity summaries expose
+only safe typed occurrence, duration, distance, load, heart-rate, device, and
+normalized Garmin-attribution fields; provider identities, connection or
+consent identifiers, checksums, credentials, and raw payloads stay internal.
+
+`WorkoutSession` remains the detailed authority for performed exercises and
+sets. An external activity summary can prove that a run, ride, or other activity
+occurred, but it never creates exercises, repetitions, weight, or RIR. Coach
+uses an imported summary without asking the user to repeat it or provide a
+screenshot and does not count a plausible cross-source match as two workouts
+without sufficient evidence.
 
 After the user explicitly confirms a complete program snapshot, MCP
 `save_confirmed_training_program` atomically creates and activates its first
@@ -89,3 +100,4 @@ pending acceptance.
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
 - [MCP active-program absence ADR](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md)
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md)
+- [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md)

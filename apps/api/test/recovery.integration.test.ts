@@ -17,6 +17,7 @@ import {
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 import { IntegrationRepository } from "../src/storage/integration-repository.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
+import { TrainingService } from "../src/training/training.service.js";
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
 import type { ProviderReconciliation } from "../src/integrations/provider.js";
@@ -240,7 +241,25 @@ describe("Recovery PostgreSQL vertical", () => {
       [id]
     );
     expect(rows.rows[0]).toEqual({ count: "3", garmin: true });
-    expect(await training.listExternalActivities(personC)).toHaveLength(1);
+    expect(await training.listExternalActivities(personC, 10)).toHaveLength(1);
+    const newerActivity = {
+      ...activity,
+      identity: "activity-c-2",
+      occurredAt: "2026-09-08T06:00:00.000Z",
+      localDate: "2026-09-08",
+      name: "Ride"
+    };
+    expect(await training.importExternalActivity(
+      trainingInput(newerActivity, "d".repeat(64))
+    )).toBe("created");
+    expect(await training.listExternalActivities(personC, 1)).toMatchObject([
+      { providerIdentity: "activity-c-2", name: "Ride" }
+    ]);
+    expect(await training.listExternalActivities(personB, 10)).toEqual([]);
+    expect(await training.listExternalActivities(personC, 10)).toMatchObject([
+      { providerIdentity: "activity-c-2" },
+      { providerIdentity: "activity-c", durationSeconds: 3600 }
+    ]);
 
     const disconnect = await integrations.beginDisconnect(personC, "test disconnect");
     expect(disconnect?.id).toBe(id);
@@ -248,13 +267,13 @@ describe("Recovery PostgreSQL vertical", () => {
     await expect(integrations.activate({ id, recoveryConnectionId, consentId: "00000000-0000-4000-8000-000000000114", personId: personC, externalUserId: "athlete-c", credential, authorizationStartedAt: new Date(0) }))
       .rejects.toThrow("superseded by disconnect");
     expect(await training.importExternalActivity(trainingInput({ ...activity, durationSeconds: 3_720 }, "e".repeat(64)))).toBe("stopped");
-    expect((await database.pool.query("select 1 from integration_activity_facts where connection_id = $1", [id])).rowCount).toBe(3);
+    expect((await database.pool.query("select 1 from integration_activity_facts where connection_id = $1", [id])).rowCount).toBe(4);
     await integrations.completeRemoteDisconnect(id);
     const erasure = await repository.requestErasure(personC, recoveryConnectionId, "activity-erasure", "retention_expired", null);
     await acknowledgeAcceptedErasure(erasure.id);
     const job = await repository.claimErasure("activity-erasure-worker", 30_000);
     await repository.completeErasure(job!);
-    expect(await training.listExternalActivities(personC)).toHaveLength(0);
+    expect(await training.listExternalActivities(personC, 10)).toHaveLength(0);
   });
 
   it("starts historical import explicitly and resumes from the durable bounded cursor", async () => {
@@ -276,7 +295,20 @@ describe("Recovery PostgreSQL vertical", () => {
         bodyBatteryMinimum: 20,
         bodyBatteryMaximum: 88
       }],
-      activities: []
+      activities: [{
+        identity: "history-run-e",
+        occurredAt: "2026-09-05T06:00:00.000Z",
+        localDate: "2026-09-05",
+        timezone: "UTC",
+        name: "Historical run",
+        durationSeconds: 2_700,
+        distanceMeters: 7_000,
+        trainingLoad: 62,
+        averageHeartRate: 146,
+        maximumHeartRate: 172,
+        deviceName: "Garmin Test",
+        garminAttributed: true
+      }]
     };
     const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
     const id = "00000000-0000-4000-8000-000000000131";
@@ -303,6 +335,33 @@ describe("Recovery PostgreSQL vertical", () => {
 
     expect(provider.reconcileCalls).toHaveLength(2);
     expect((await repository.listObservations(personE, { limit: 50 })).items).toHaveLength(9);
+    const trainingContext = await new TrainingService(
+      training,
+      new SyntheticPersonContext(personE)
+    ).getTrainingContext({ historyLimit: 10 });
+    expect(trainingContext).toMatchObject({
+      status: "absent",
+      recentExternalActivities: [{
+        name: "Historical run",
+        localDate: "2026-09-05",
+        distanceMeters: 7_000,
+        garminAttributed: true
+      }]
+    });
+    expect(Object.keys(trainingContext.recentExternalActivities[0]!).sort()).toEqual([
+      "averageHeartRate",
+      "deviceName",
+      "distanceMeters",
+      "durationSeconds",
+      "garminAttributed",
+      "id",
+      "localDate",
+      "maximumHeartRate",
+      "name",
+      "occurredAt",
+      "timezone",
+      "trainingLoad"
+    ]);
     const [rolling, historical] = provider.reconcileCalls;
     expect(historical!.newest < rolling!.oldest).toBe(true);
     const historicalDays = Math.round(
@@ -325,6 +384,7 @@ describe("Recovery PostgreSQL vertical", () => {
     await service.reconcileConnection((await integrations.findActive(personE))!);
     expect(provider.reconcileCalls).toHaveLength(4);
     expect((await repository.listObservations(personE, { limit: 50 })).items).toHaveLength(9);
+    expect(await training.listExternalActivities(personE, 10)).toHaveLength(1);
     const secondHistorical = provider.reconcileCalls[3]!;
     const expectedSecondNewest = new Date(Date.parse(`${historical!.oldest}T00:00:00.000Z`) - 86_400_000)
       .toISOString().slice(0, 10);

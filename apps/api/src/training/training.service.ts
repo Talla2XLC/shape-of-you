@@ -11,6 +11,7 @@ import type {
   CreateWorkoutSession,
   Exercise,
   ExerciseOverlay,
+  ExternalActivitySummary,
   ListWorkoutSessionsQuery,
   PersonalRecordList,
   ProgressionCandidateList,
@@ -30,8 +31,28 @@ import { PERSON_CONTEXT, TRAINING_STORE } from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
 import type {
   CreateWorkoutSessionResult,
+  ExternalActivityFact,
   TrainingStore
 } from "../storage/training-repository.js";
+
+function toExternalActivitySummary(
+  activity: ExternalActivityFact
+): ExternalActivitySummary {
+  return {
+    id: activity.id,
+    occurredAt: activity.occurredAt,
+    localDate: activity.localDate,
+    timezone: activity.timezone,
+    name: activity.name,
+    durationSeconds: activity.durationSeconds,
+    distanceMeters: activity.distanceMeters,
+    trainingLoad: activity.trainingLoad,
+    averageHeartRate: activity.averageHeartRate,
+    maximumHeartRate: activity.maximumHeartRate,
+    deviceName: activity.deviceName,
+    garminAttributed: activity.garminAttributed
+  };
+}
 
 /** Application boundary for Training reference data, plans, facts, and projections. */
 @Injectable()
@@ -148,18 +169,33 @@ export class TrainingService {
     );
   }
 
-  /** Reads active plan authority together with bounded completed-session evidence. */
+  /** Reads active plan authority with separate bounded manual and connected evidence. */
   public async getTrainingContext(
     query: TrainingContextQuery
   ): Promise<TrainingContext> {
     const personId = this.personContext.getPersonId();
-    const [program, recentSessions] = await Promise.all([
+    const historyLimit = query.historyLimit ?? 20;
+    const [program, recentSessions, externalActivities] = await Promise.all([
       this.store.findActiveProgram(personId),
-      this.store.listWorkoutSessions(personId, query.historyLimit ?? 20)
+      this.store.listWorkoutSessions(personId, historyLimit),
+      this.store.listExternalActivities(personId, historyLimit)
     ]);
+    const recentExternalActivities = externalActivities.map(
+      toExternalActivitySummary
+    );
     return program
-      ? { status: "active", program, recentSessions }
-      : { status: "absent", program: null, recentSessions };
+      ? {
+          status: "active",
+          program,
+          recentSessions,
+          recentExternalActivities
+        }
+      : {
+          status: "absent",
+          program: null,
+          recentSessions,
+          recentExternalActivities
+        };
   }
 
   /** Creates one idempotent immutable WorkoutSession fact. */

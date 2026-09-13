@@ -95,6 +95,15 @@ duplicate no-op behavior. Coach verifies the complete active snapshot through
 a typed read before reporting success. The persisted active program is shared
 authority across conversations; per-chat memory is not an authority source.
 
+The same Training context also returns a separate bounded list of current
+connected activity summaries. Coach treats an imported run, ride, or other
+activity as completed evidence without asking the user to resend a screenshot
+or manual reminder. A connected summary is not a detailed `WorkoutSession`:
+Coach does not invent exercises or sets, does not automatically persist it as a
+session, and does not double-count a plausible match between the two collections
+without sufficient identity evidence. Internal integration identities,
+credentials, checksums, and raw provider payloads are not exposed through MCP.
+
 ## Evidence
 
 - Coaching schema/contracts/integration tests.
@@ -109,6 +118,7 @@ authority across conversations; per-chat memory is not an authority source.
 - [Per-result proactive Coach policy](../../adr/20260902-deliver-coach-reply-policy-in-every-relevant-mcp-result.md).
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md).
+- [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 
 ## Open questions
 

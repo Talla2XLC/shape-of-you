@@ -221,7 +221,7 @@ const activeTrainingProgramResultContent = coachResultContent(
 );
 
 const trainingContextResultContent = coachResultContent(
-  "Use an active program as planned authority. When it is absent, recent completed sessions are evidence for a proposal only and must never be presented as an existing plan."
+  "Use an active program as planned authority. Keep detailed completed sessions separate from connected activity summaries. A connected summary confirms the activity and load shown but never supplies exercises or sets. When the program is absent, historical evidence is proposal input only and must never be presented as an existing plan."
 );
 
 const confirmedTrainingProgramWriteResultContent = coachResultContent(
@@ -244,7 +244,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
-  "Before strength-program advice, read the composed training context. Only its active program is planned authority. If no active program exists, use recent completed sessions only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
+  "Before training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
   "Saving or changing a training program is material: first show the complete proposed snapshot and obtain explicit user confirmation. Preserve exercises, order, loads, and progression exactly as confirmed. After saving, read the active program again and compare the complete snapshot before claiming success; any failed or inconsistent read-back leaves the program unverified. " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For Daily Coach, require an exact local date and IANA timezone and call get_daily_projection first, followed only by the typed reads needed for the answer. " +
@@ -529,7 +529,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_training_context",
-      "Read the authorized person's active training authority together with bounded recent completed sessions. When the active program is absent, sessions remain historical evidence for a proposal and are never a plan.",
+      "Read the authorized person's active training authority together with separate bounded recent detailed sessions and connected activity summaries. Use imported activities without requesting a screenshot or manual repeat, never infer exercises or sets from a summary, and do not double-count a possible match. When the active program is absent, historical evidence remains proposal input and is never a plan.",
       TrainingContextQuerySchema,
       TrainingContextSchema,
       false,

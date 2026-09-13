@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type {
   CreateTrainingProgram,
@@ -12,6 +12,9 @@ import {
   trainingProgramSnapshotMatches,
   validateTrainingProgramVersion
 } from "../src/domain/training.js";
+import { SyntheticPersonContext } from "../src/application/person-context.js";
+import type { TrainingStore } from "../src/storage/training-repository.js";
+import { TrainingService } from "../src/training/training.service.js";
 
 const program = (
   targetRepsMin = 6,
@@ -134,5 +137,81 @@ describe("Training domain", () => {
         }))
       })
     ).toBe(false);
+  });
+});
+
+describe("Training context", () => {
+  it("projects bounded connected activities without leaking persistence metadata", async () => {
+    const personId = "00000000-0000-4000-8000-000000000020";
+    const findActiveProgram = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        id: "00000000-0000-4000-8000-000000000023",
+        personId
+      });
+    const listWorkoutSessions = vi.fn().mockResolvedValue({ items: [] });
+    const listExternalActivities = vi.fn().mockResolvedValue([{
+      id: "00000000-0000-4000-8000-000000000021",
+      connectionId: "00000000-0000-4000-8000-000000000022",
+      personId,
+      providerIdentity: "provider-activity-1",
+      normalizedChecksum: "a".repeat(64),
+      occurredAt: "2026-09-13T06:00:00.000Z",
+      localDate: "2026-09-13",
+      timezone: "Europe/Moscow",
+      name: "Morning run",
+      durationSeconds: 2_400,
+      distanceMeters: 6_000,
+      trainingLoad: 55,
+      averageHeartRate: 144,
+      maximumHeartRate: 168,
+      deviceName: "Garmin Test",
+      sourceProvider: "intervals_icu",
+      garminAttributed: true,
+      supersedesId: null
+    }]);
+    const service = new TrainingService(
+      {
+        findActiveProgram,
+        listWorkoutSessions,
+        listExternalActivities
+      } as unknown as TrainingStore,
+      new SyntheticPersonContext(personId)
+    );
+
+    await expect(service.getTrainingContext({ historyLimit: 3 })).resolves.toEqual({
+      status: "absent",
+      program: null,
+      recentSessions: { items: [] },
+      recentExternalActivities: [{
+        id: "00000000-0000-4000-8000-000000000021",
+        occurredAt: "2026-09-13T06:00:00.000Z",
+        localDate: "2026-09-13",
+        timezone: "Europe/Moscow",
+        name: "Morning run",
+        durationSeconds: 2_400,
+        distanceMeters: 6_000,
+        trainingLoad: 55,
+        averageHeartRate: 144,
+        maximumHeartRate: 168,
+        deviceName: "Garmin Test",
+        garminAttributed: true
+      }]
+    });
+    expect(findActiveProgram).toHaveBeenCalledWith(personId);
+    expect(listWorkoutSessions).toHaveBeenCalledWith(personId, 3);
+    expect(listExternalActivities).toHaveBeenCalledWith(personId, 3);
+
+    await expect(service.getTrainingContext({ historyLimit: 1 })).resolves.toMatchObject({
+      status: "active",
+      program: {
+        id: "00000000-0000-4000-8000-000000000023",
+        personId
+      },
+      recentSessions: { items: [] },
+      recentExternalActivities: [{ name: "Morning run" }]
+    });
+    expect(listWorkoutSessions).toHaveBeenNthCalledWith(2, personId, 1);
+    expect(listExternalActivities).toHaveBeenNthCalledWith(2, personId, 1);
   });
 });
