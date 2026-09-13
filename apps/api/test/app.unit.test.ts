@@ -150,6 +150,10 @@ class FakeStore implements WeightMeasurementStore {
     return [baselineMeasurement];
   }
 
+  public async getDataCoverage() {
+    return { firstDataDate: null, lastDataDate: null, days: [] };
+  }
+
   public async history(): Promise<WeightMeasurementHistory> {
     return { items: [baselineMeasurement] };
   }
@@ -197,6 +201,7 @@ const nutritionStore: NutritionStore = {
   listMeals: unreachable,
   listMealsForLocalDate: unreachable,
   listMealsForLocalDateRange: unreachable,
+  getDataCoverage: unreachable,
   mealHistory: unreachable,
   dailyTotals: unreachable
 };
@@ -221,6 +226,7 @@ const trainingStore: TrainingStore = {
   listWorkoutSessions: unreachable,
   listWorkoutSessionsForLocalDate: unreachable,
   listWorkoutSessionsForLocalDateRange: unreachable,
+  getDataCoverage: unreachable,
   workoutSessionHistory: unreachable,
   personalRecords: unreachable,
   progressionCandidates: unreachable,
@@ -240,6 +246,7 @@ const recoveryStore: RecoveryStore = {
   listObservations: unreachable,
   listObservationsForLocalDate: unreachable,
   listObservationsForLocalDateRange: unreachable,
+  getDataCoverage: unreachable,
   observationHistory: unreachable,
   registerPolicyVersion: unreachable,
   createAssessment: unreachable,
@@ -346,6 +353,7 @@ describe("API bootstrap", () => {
     expect(openapi.json().paths).toHaveProperty("/v1/day-projections");
     expect(openapi.json().paths).toHaveProperty("/v1/daily-context-notes");
     expect(openapi.json().paths).toHaveProperty("/v1/progress-overview");
+    expect(openapi.json().paths).toHaveProperty("/v1/progress-data-coverage");
     expect(openapi.json().paths).toHaveProperty("/v1/integrations/garmin-intervals");
     expect(openapi.json().paths).toHaveProperty("/v1/integrations/garmin-intervals/historical-import");
 
@@ -389,14 +397,23 @@ describe("API bootstrap", () => {
   });
 
   it("serves the bounded progress read model without exact-day reads", async () => {
+    const emptyCoverage = async () => ({ firstDataDate: null, lastDataDate: null, days: [] });
     const app = await buildApp({
       config,
-      store: Object.assign(new FakeStore(), { listForLocalDateRange: async () => [] }),
+      store: Object.assign(new FakeStore(), { listForLocalDateRange: async () => [], getDataCoverage: emptyCoverage }),
       ...physicalStateStores,
       bodyMeasurementSessionStore: { ...bodyMeasurementSessionStore, listForLocalDateRange: async () => [] },
-      nutritionStore: { ...nutritionStore, listMealsForLocalDateRange: async () => [] },
-      trainingStore: { ...trainingStore, listWorkoutSessionsForLocalDateRange: async () => [] },
-      recoveryStore: { ...recoveryStore, listObservationsForLocalDateRange: async () => [], listAssessmentsForLocalDateRange: async () => [] },
+      nutritionStore: { ...nutritionStore, listMealsForLocalDateRange: async () => [], getDataCoverage: emptyCoverage },
+      trainingStore: { ...trainingStore, listWorkoutSessionsForLocalDateRange: async () => [], getDataCoverage: emptyCoverage },
+      recoveryStore: {
+        ...recoveryStore,
+        listObservationsForLocalDateRange: async () => [],
+        listAssessmentsForLocalDateRange: async () => [],
+        getDataCoverage: async () => ({
+          sleep: await emptyCoverage(), hrv: await emptyCoverage(),
+          restingHeartRate: await emptyCoverage(), bodyBattery: await emptyCoverage()
+        })
+      },
       coachingStore: { ...coachingStore, listForLocalDateRange: async () => [] },
       readinessProbe: async () => undefined
     });
@@ -424,6 +441,18 @@ describe("API bootstrap", () => {
       url: "/v1/progress-overview?from=2026-08-12&to=2026-08-18&timezone=UTC&extra=forbidden"
     });
     expect(unknown.statusCode).toBe(400);
+    const coverage = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/v1/progress-data-coverage?localDate=2026-08-18&timezone=Europe%2FMoscow"
+    });
+    expect(coverage.statusCode, coverage.body).toBe(200);
+    expect(coverage.json()).toMatchObject({
+      localDate: "2026-08-18",
+      completedThrough: "2026-08-17",
+      timezone: "Europe/Moscow",
+      policyVersion: "profile-data-coverage-v1"
+    });
+    expect(coverage.json().directions).toHaveLength(7);
     await app.close();
   });
 

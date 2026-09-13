@@ -9,6 +9,7 @@ export * from "./integration-connection.js";
 export * from "./person.js";
 export * from "./physical-goal.js";
 export * from "./progress-overview.js";
+export * from "./progress-data-coverage.js";
 export * from "./recovery.js";
 export * from "./nutrition.js";
 export * from "./source-reference.js";

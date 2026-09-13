@@ -8,11 +8,12 @@ import { TrainingModule } from "../training/training.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
 import { ProgressOverviewController } from "./progress-overview.controller.js";
 import { ProgressOverviewService } from "./progress-overview.service.js";
+import { ProgressDataCoverageService } from "./progress-data-coverage.service.js";
 
 /** Composes module-owned range reads without taking ownership of source facts. */
 @Module({
   imports: [WeightMeasurementModule, BodyMeasurementSessionModule, NutritionModule, TrainingModule, RecoveryModule, CoachingModule],
   controllers: [ProgressOverviewController],
-  providers: [ProgressOverviewService]
+  providers: [ProgressOverviewService, ProgressDataCoverageService]
 })
 export class ProgressOverviewModule {}

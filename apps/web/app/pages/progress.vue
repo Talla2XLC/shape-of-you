@@ -2,7 +2,7 @@
 import { beginBrowserSignIn } from "~/lib/browser-auth";
 import { chatAssistantLaunchRoute, chatAssistantStopMessage } from "~/lib/chat-assistant";
 import { dayApi, DayApiError, type DailyProjection } from "~/lib/day-api";
-import { createLatestRequestGate, dayRoute, fetchProgressOverview, trailingRange, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
+import { coverageDirectionLabel, coverageExplanation, createLatestRequestGate, dayRoute, fetchProgressDataCoverage, fetchProgressOverview, formatCoverageFreshness, trailingRange, type ProgressDataCoverage, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
 
 definePageMeta({ middleware: "api-session" });
 useHead({ bodyAttrs: { class: "page-progress" } });
@@ -17,6 +17,9 @@ const error = ref<string | null>(null);
 const todayProjection = ref<DailyProjection | null>(null);
 const todayBusy = ref(false);
 const todayError = ref<string | null>(null);
+const coverage = ref<ProgressDataCoverage | null>(null);
+const coverageBusy = ref(false);
+const coverageError = ref<string | null>(null);
 const todayAutomaticRetryDelayMs = 1_000;
 const coachStopMessage = computed(() => chatAssistantStopMessage(route.query.coach));
 const requestGate = createLatestRequestGate();
@@ -95,8 +98,23 @@ async function loadToday(allowAutomaticRetry = true): Promise<void> {
 function retryToday(): void {
   void loadToday(false);
 }
+async function loadCoverage(): Promise<void> {
+  coverageBusy.value = true;
+  coverageError.value = null;
+  try {
+    coverage.value = await fetchProgressDataCoverage(today, timezone);
+  } catch (caught) {
+    if (typeof caught === "object" && caught !== null && "status" in caught && caught.status === 401) {
+      beginBrowserSignIn(route.fullPath);
+      return;
+    }
+    coverageError.value = "Data readiness is temporarily unavailable.";
+  } finally {
+    coverageBusy.value = false;
+  }
+}
 function choosePeriod(value: 7 | 30 | 365): void { period.value = value; void load(); }
-onMounted(() => { void load(); void loadToday(); });
+onMounted(() => { void load(); void loadToday(); void loadCoverage(); });
 </script>
 
 <template>
@@ -201,6 +219,87 @@ onMounted(() => { void load(); void loadToday(); });
         >
           Review today's record
         </NuxtLink>
+      </template>
+    </section>
+    <section
+      class="coverage-section"
+      aria-labelledby="coverage-heading"
+    >
+      <div class="coverage-heading">
+        <div>
+          <p class="eyebrow">
+            Data readiness
+          </p>
+          <h2 id="coverage-heading">
+            What your profile can support.
+          </h2>
+        </div>
+        <p>Coverage reflects recorded facts from any source. It is not a health score or a medical assessment.</p>
+      </div>
+      <p
+        v-if="coverageBusy"
+        role="status"
+      >
+        Loading data readiness…
+      </p>
+      <div
+        v-else-if="coverageError"
+        class="coverage-error"
+      >
+        <p
+          role="alert"
+          class="notice-error"
+        >
+          {{ coverageError }}
+        </p>
+        <button
+          type="button"
+          class="button button-secondary"
+          @click="loadCoverage"
+        >
+          Try again
+        </button>
+      </div>
+      <template v-else-if="coverage">
+        <p class="coverage-context">
+          Through <time :datetime="coverage.completedThrough">{{ coverage.completedThrough }}</time> · {{ coverage.timezone }}. Today is still in progress and does not reduce 28/90-day regularity.
+        </p>
+        <div class="coverage-grid">
+          <article
+            v-for="direction in coverage.directions"
+            :key="direction.key"
+            class="coverage-card"
+          >
+            <header>
+              <h3>{{ coverageDirectionLabel(direction.key) }}</h3>
+              <span
+                class="coverage-status"
+                :data-status="direction.status"
+              >
+                {{ direction.status }}
+              </span>
+            </header>
+            <p class="coverage-freshness">
+              {{ formatCoverageFreshness(direction.freshnessDays) }}
+            </p>
+            <p class="coverage-history">
+              <template v-if="direction.firstDataDate && direction.lastDataDate">
+                History: <time :datetime="direction.firstDataDate">{{ direction.firstDataDate }}</time>–<time :datetime="direction.lastDataDate">{{ direction.lastDataDate }}</time>
+              </template>
+              <template v-else>
+                No history yet
+              </template>
+            </p>
+            <dl class="coverage-windows">
+              <div><dt>Last 28 days</dt><dd>{{ direction.coverage28.usableDays }} usable · {{ direction.coverage28.recordedDays }} recorded</dd></div>
+              <div><dt>Last 90 days</dt><dd>{{ direction.coverage90.usableDays }} usable · {{ direction.coverage90.recordedDays }} recorded</dd></div>
+              <div><dt>Largest gap</dt><dd>{{ direction.gaps.longestGapDays }} days without usable data</dd></div>
+            </dl>
+            <p class="coverage-explanation">
+              {{ coverageExplanation(direction) }}
+            </p>
+          </article>
+        </div>
       </template>
     </section>
     <p

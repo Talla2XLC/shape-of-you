@@ -440,6 +440,16 @@ describe("Nutrition PostgreSQL vertical", () => {
         })]
       })
     ]);
+    const incompleteCoverage = await new NutritionRepository(database).getDataCoverage(
+      personA,
+      "2026-08-01",
+      "2026-08-31",
+      "2026-09-01"
+    );
+    expect(incompleteCoverage.days.find((day) => day.localDate === "2026-08-29")).toEqual({
+      localDate: "2026-08-29",
+      usable: false
+    });
 
     const corrected = await fastify.inject({
       method: "POST",

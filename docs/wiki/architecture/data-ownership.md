@@ -83,6 +83,11 @@ coordinates bounded reads exported by the existing Physical State, Nutrition,
 Training, Recovery, and Coaching modules and derives no durable `DayRecord`.
 The exact-date `DailyProjection` follows the same rule: it composes current
 facts and owns no lifecycle or historical authority.
+Provider-neutral profile coverage follows the same composition boundary.
+Recovery, Training, Nutrition, and Weight publish lean current-evidence
+summaries; Progress applies a versioned presentation policy without storing a
+profile aggregate or reading provider counters. Source connections continue to
+own import lifecycle only.
 
 ## Evidence
 
@@ -112,4 +117,5 @@ facts and owns no lifecycle or historical authority.
 - [Garmin through Intervals.icu ADR](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Progress overview API](../api/progress-overview.md)
+- [Provider-neutral profile data coverage ADR](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

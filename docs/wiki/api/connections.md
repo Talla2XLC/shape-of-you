@@ -91,6 +91,10 @@ compact outlined `Delete imported data…` action is isolated in a danger zone
 and explains that a fresh passkey confirmation is required. Browser storage
 does not hold OAuth code, state, or token material.
 
+Connections remains the only surface for import lifecycle management. Progress
+shows provider-neutral coverage of the resulting typed Person facts and does
+not expose connection controls or imported-record counts.
+
 ## Evidence
 
 - Integration contracts, API unit/PostgreSQL tests, and Web Playwright flow.
@@ -101,6 +105,7 @@ does not hold OAuth code, state, or token material.
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 - [Import Intervals.icu history only on user request](../../adr/20260911-import-intervals-history-only-on-user-request.md)
 - [Import supported Intervals wellness as typed Recovery](../../adr/20260912-import-supported-intervals-wellness-as-typed-recovery.md)
+- [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)
 
 ## Open questions

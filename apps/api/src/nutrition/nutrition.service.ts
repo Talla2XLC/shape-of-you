@@ -22,6 +22,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { PersonContext } from "../application/person-context.js";
+import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   NUTRITION_STORE,
   PERSON_CONTEXT
@@ -191,6 +192,11 @@ export class NutritionService {
   /** Reads current meal facts across an inclusive Person-local date range. */
   public listMealsForLocalDateRange(from: string, to: string): Promise<readonly Meal[]> {
     return this.store.listMealsForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
+  /** Reads lean current Meal coverage without treating recorded Meals as a complete day. */
+  public getDataCoverage(from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
+    return this.store.getDataCoverage(this.personContext.getPersonId(), from, to, asOf);
   }
 
   /** Reads the append-only correction chain containing one Meal. */

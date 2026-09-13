@@ -695,6 +695,7 @@ export const weightMeasurements = pgTable(
     uniqueIndex("weight_measurements_supersedes_uq")
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
+    index("weight_measurements_person_date_idx").on(table.personId, table.localDate),
     check(
       "weight_measurements_weight_kg_range",
       sql`${table.weightKg} >= 0.500 AND ${table.weightKg} <= 700.000`
@@ -1569,6 +1570,7 @@ export const meals = pgTable(
     uniqueIndex("meals_supersedes_uq")
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
+    index("meals_person_date_idx").on(table.personId, table.localDate),
     check(
       "meals_temporal_shape",
       sql`(${table.temporalPrecision} = 'instant' AND ${table.occurredAt} IS NOT NULL) OR (${table.temporalPrecision} = 'local_date' AND ${table.occurredAt} IS NULL)`
@@ -2281,6 +2283,7 @@ export const workoutSessions = pgTable(
     uniqueIndex("workout_sessions_supersedes_uq")
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
+    index("workout_sessions_person_date_idx").on(table.personId, table.localDate),
     check(
       "workout_sessions_temporal_shape",
       sql`(${table.temporalPrecision} = 'instant' AND ${table.occurredAt} IS NOT NULL)
@@ -2775,6 +2778,7 @@ export const recoveryObservations = pgTable(
     uniqueIndex("recovery_observations_supersedes_uq")
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
+    index("recovery_observations_person_date_idx").on(table.personId, table.localDate),
     check(
       "recovery_observations_temporal_shape",
       sql`(${table.temporalPrecision} = 'instant' AND ${table.observedFrom} IS NOT NULL AND ${table.observedUntil} IS NOT NULL AND ${table.observedUntil} >= ${table.observedFrom})
@@ -3138,6 +3142,7 @@ export const integrationActivityFacts = pgTable(
       foreignColumns: [table.id]
     }),
     uniqueIndex("integration_activity_supersedes_uq").on(table.supersedesId).where(sql`${table.supersedesId} IS NOT NULL`),
+    index("integration_activity_person_date_idx").on(table.personId, table.localDate),
     check("integration_activity_duration_nonnegative", sql`${table.durationSeconds} >= 0`),
     check(
       "integration_activity_correction_shape",

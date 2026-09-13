@@ -684,6 +684,122 @@ button.button {
   font-weight: 700;
 }
 
+.coverage-section {
+  display: grid;
+  gap: 22px;
+}
+
+.coverage-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.coverage-heading .eyebrow,
+.coverage-heading h2,
+.coverage-heading p,
+.coverage-context,
+.coverage-card h3,
+.coverage-card p {
+  margin: 0;
+}
+
+.coverage-heading h2 {
+  margin-top: 6px;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+}
+
+.coverage-heading > p,
+.coverage-context,
+.coverage-freshness,
+.coverage-history,
+.coverage-windows dt {
+  color: var(--muted);
+}
+
+.coverage-heading > p {
+  max-width: 470px;
+  line-height: 1.55;
+}
+
+.coverage-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.coverage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  gap: 14px;
+}
+
+.coverage-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 20px;
+  background: var(--surface-strong);
+}
+
+.coverage-card header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.coverage-card h3 {
+  font-size: 1.2rem;
+}
+
+.coverage-status {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 9px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.coverage-status[data-status="good"] { border-color: var(--lime); color: var(--lime); }
+.coverage-status[data-status="partial"] { border-color: #e5b958; color: #f2ca70; }
+.coverage-status[data-status="sparse"] { color: var(--muted); }
+
+.coverage-windows {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 0;
+}
+
+.coverage-windows div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.coverage-windows dt,
+.coverage-windows dd {
+  margin: 0;
+  font-size: 0.82rem;
+}
+
+.coverage-windows dd {
+  text-align: right;
+  font-weight: 700;
+}
+
+.coverage-explanation {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  line-height: 1.5;
+}
+
 .period-picker {
   flex: none;
   display: flex;
@@ -875,6 +991,11 @@ button.button {
   }
 
   .progress-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .coverage-heading {
     align-items: flex-start;
     flex-direction: column;
   }

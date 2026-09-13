@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createLatestRequestGate, dayRoute, isIanaTimezone, isLocalDate, trailingRange } from "../app/lib/progress";
+import { coverageDirectionLabel, coverageExplanation, createLatestRequestGate, dayRoute, formatCoverageFreshness, isIanaTimezone, isLocalDate, trailingRange, type ProgressDataDirection } from "../app/lib/progress";
 
 describe("progress route contracts", () => {
   it("builds trailing inclusive presets", () => {
@@ -27,5 +27,18 @@ describe("progress route contracts", () => {
     const second = gate.begin();
     expect(gate.isCurrent(first)).toBe(false);
     expect(gate.isCurrent(second)).toBe(true);
+  });
+
+  it("explains provider-neutral readiness without health claims", () => {
+    const direction: ProgressDataDirection = {
+      key: "nutrition", firstDataDate: "2026-06-01", lastDataDate: "2026-08-17", freshnessDays: 1,
+      coverage28: { windowDays: 28, from: "2026-07-21", to: "2026-08-17", recordedDays: 23, usableDays: 21 },
+      coverage90: { windowDays: 90, from: "2026-05-20", to: "2026-08-17", recordedDays: 60, usableDays: 58 },
+      gaps: { significantGapCount: 1, longestGapDays: 4 }, status: "good", reasons: ["partial_records"]
+    };
+    expect(coverageDirectionLabel("resting_heart_rate")).toBe("Resting heart rate");
+    expect(formatCoverageFreshness(1)).toBe("Last recorded yesterday");
+    expect(coverageExplanation(direction)).toContain("full-day intake is not proven");
+    expect(coverageExplanation(direction)).not.toMatch(/health score|medical assessment/iu);
   });
 });

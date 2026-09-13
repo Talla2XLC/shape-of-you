@@ -20,6 +20,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { PersonContext } from "../application/person-context.js";
+import type { RecoveryDataCoverageEvidence } from "../domain/data-coverage.js";
 import { PERSON_CONTEXT, RECOVERY_STORE } from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
 import type {
@@ -78,6 +79,11 @@ export class RecoveryService {
   /** Reads current recovery observations across an inclusive Person-local date range. */
   public listObservationsForLocalDateRange(from: string, to: string): Promise<readonly RecoveryObservation[]> {
     return this.store.listObservationsForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
+  /** Reads lean provider-neutral Recovery coverage summaries for Progress. */
+  public getDataCoverage(from: string, to: string, asOf: string): Promise<RecoveryDataCoverageEvidence> {
+    return this.store.getDataCoverage(this.personContext.getPersonId(), from, to, asOf);
   }
 
   public async observationHistory(id: string): Promise<RecoveryObservationHistory> {

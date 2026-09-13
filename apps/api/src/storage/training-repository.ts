@@ -34,6 +34,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
+import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   performedExercises,
   performedSets,
@@ -193,6 +194,8 @@ export interface TrainingStore {
   /** Reads every current workout session for one exact Person-local date. */
   listWorkoutSessionsForLocalDate(personId: string, localDate: string): Promise<readonly WorkoutSession[]>;
   listWorkoutSessionsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly WorkoutSession[]>;
+  /** Reads current WorkoutSession and external-activity coverage as one date union. */
+  getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<DataCoverageEvidence>;
   workoutSessionHistory(
     personId: string,
     id: string
@@ -1415,6 +1418,36 @@ export class TrainingRepository implements TrainingStore {
       )).orderBy(desc(workoutSessions.localDate), desc(workoutSessions.occurredAt), desc(workoutSessions.id));
       return Promise.all(rows.map((row) => this.serializeSession(transaction, row)));
     });
+  }
+
+  /** {@inheritDoc TrainingStore.getDataCoverage} */
+  public async getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
+    const sessionSuccessor = alias(workoutSessions, "coverage_workout_successor");
+    const activitySuccessor = alias(integrationActivityFacts, "coverage_activity_successor");
+    const currentSessions = and(
+      eq(workoutSessions.personId, personId),
+      lte(workoutSessions.localDate, asOf),
+      notExists(this.database.db.select({ id: sessionSuccessor.id }).from(sessionSuccessor).where(eq(sessionSuccessor.supersedesId, workoutSessions.id)))
+    );
+    const currentActivities = and(
+      eq(integrationActivityFacts.personId, personId),
+      lte(integrationActivityFacts.localDate, asOf),
+      notExists(this.database.db.select({ id: activitySuccessor.id }).from(activitySuccessor).where(eq(activitySuccessor.supersedesId, integrationActivityFacts.id)))
+    );
+    const [sessionBounds, activityBounds, sessionDays, activityDays] = await Promise.all([
+      this.database.db.select({ firstDataDate: sql<string | null>`min(${workoutSessions.localDate})`, lastDataDate: sql<string | null>`max(${workoutSessions.localDate})` }).from(workoutSessions).where(currentSessions),
+      this.database.db.select({ firstDataDate: sql<string | null>`min(${integrationActivityFacts.localDate})`, lastDataDate: sql<string | null>`max(${integrationActivityFacts.localDate})` }).from(integrationActivityFacts).where(currentActivities),
+      this.database.db.selectDistinct({ localDate: workoutSessions.localDate }).from(workoutSessions).where(and(currentSessions, gte(workoutSessions.localDate, from), lte(workoutSessions.localDate, to))),
+      this.database.db.selectDistinct({ localDate: integrationActivityFacts.localDate }).from(integrationActivityFacts).where(and(currentActivities, gte(integrationActivityFacts.localDate, from), lte(integrationActivityFacts.localDate, to)))
+    ]);
+    const firstDates = [sessionBounds[0]?.firstDataDate, activityBounds[0]?.firstDataDate].filter((value): value is string => value !== null && value !== undefined).sort();
+    const lastDates = [sessionBounds[0]?.lastDataDate, activityBounds[0]?.lastDataDate].filter((value): value is string => value !== null && value !== undefined).sort();
+    const dates = new Set([...sessionDays, ...activityDays].map((day) => day.localDate));
+    return {
+      firstDataDate: firstDates[0] ?? null,
+      lastDataDate: lastDates.at(-1) ?? null,
+      days: [...dates].map((localDate) => ({ localDate, usable: true }))
+    };
   }
 
   public async workoutSessionHistory(

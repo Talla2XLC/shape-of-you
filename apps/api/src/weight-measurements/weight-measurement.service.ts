@@ -15,6 +15,7 @@ import {
   WEIGHT_MEASUREMENT_STORE
 } from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
+import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import type {
   CreateWeightMeasurementResult,
   WeightMeasurementStore
@@ -114,6 +115,11 @@ export class WeightMeasurementService {
       from,
       to
     );
+  }
+
+  /** Reads lean current weight evidence bounds and recent dates for Progress. */
+  public getDataCoverage(from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
+    return this.store.getDataCoverage(this.personContext.getPersonId(), from, to, asOf);
   }
 
   /**

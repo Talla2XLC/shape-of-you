@@ -22,6 +22,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
+import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   sourceReferences,
   weightMeasurements,
@@ -128,6 +129,9 @@ export interface WeightMeasurementStore {
     from: string,
     to: string
   ): Promise<readonly WeightMeasurement[]>;
+
+  /** Reads current historical bounds and distinct recent evidence dates without hydration. */
+  getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<DataCoverageEvidence>;
 
   /**
    * Returns the complete ordered correction chain containing a fact.
@@ -516,6 +520,32 @@ export class WeightMeasurementRepository
         desc(weightMeasurements.id)
       );
     return rows.map(serializeJoined);
+  }
+
+  /** {@inheritDoc WeightMeasurementStore.getDataCoverage} */
+  public async getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
+    const successor = alias(weightMeasurements, "coverage_weight_successor");
+    const current = and(
+      eq(weightMeasurements.personId, personId),
+      lte(weightMeasurements.localDate, asOf),
+      notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, weightMeasurements.id)))
+    );
+    const [bounds, days] = await Promise.all([
+      this.database.db.select({
+        firstDataDate: sql<string | null>`min(${weightMeasurements.localDate})`,
+        lastDataDate: sql<string | null>`max(${weightMeasurements.localDate})`
+      }).from(weightMeasurements).where(current),
+      this.database.db.selectDistinct({ localDate: weightMeasurements.localDate }).from(weightMeasurements).where(and(
+        current,
+        gte(weightMeasurements.localDate, from),
+        lte(weightMeasurements.localDate, to)
+      ))
+    ]);
+    return {
+      firstDataDate: bounds[0]?.firstDataDate ?? null,
+      lastDataDate: bounds[0]?.lastDataDate ?? null,
+      days: days.map((day) => ({ localDate: day.localDate, usable: true }))
+    };
   }
 
   /** {@inheritDoc WeightMeasurementStore.history} */

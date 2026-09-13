@@ -90,6 +90,35 @@ async function mockOpenToday(target: Page | BrowserContext): Promise<void> {
   });
 }
 
+async function mockProgressDataCoverage(target: Page | BrowserContext): Promise<void> {
+  const directions = [
+    ["sleep", "good", 0, 24, 82],
+    ["hrv", "partial", 2, 12, 48],
+    ["resting_heart_rate", "good", 1, 23, 80],
+    ["body_battery", "partial", 3, 10, 43],
+    ["training", "partial", 4, 3, 10],
+    ["weight", "sparse", 12, 1, 4],
+    ["nutrition", "partial", 1, 14, 52]
+  ] as const;
+  await target.route("**/api/v1/progress-data-coverage?*", (route) => fulfillJson(route, {
+    localDate: "2026-08-18",
+    completedThrough: "2026-08-17",
+    timezone: "UTC",
+    policyVersion: "profile-data-coverage-v1",
+    directions: directions.map(([key, status, freshnessDays, recent, historical]) => ({
+      key,
+      firstDataDate: "2026-05-20",
+      lastDataDate: freshnessDays === 0 ? "2026-08-18" : `2026-08-${String(18 - freshnessDays).padStart(2, "0")}`,
+      freshnessDays,
+      coverage28: { windowDays: 28, from: "2026-07-21", to: "2026-08-17", recordedDays: recent, usableDays: recent },
+      coverage90: { windowDays: 90, from: "2026-05-20", to: "2026-08-17", recordedDays: historical, usableDays: historical },
+      gaps: { significantGapCount: status === "good" ? 0 : 2, longestGapDays: status === "good" ? 2 : 8 },
+      status,
+      reasons: status === "good" ? [] : [status === "sparse" ? "stale" : "not_enough_recent_data"]
+    }))
+  }));
+}
+
 test("landing starts the API-owned browser authorization flow", async ({ page }) => {
   await mockApiSession(page, 401);
   await page.goto("/");
@@ -407,6 +436,7 @@ test("day layout remains content-sized across phone, tablet, and desktop", async
 
 test("progress renders sparse facts and dated drill-down without exact-day fanout", async ({ page }) => {
   await mockApiSession(page, 204);
+  await mockProgressDataCoverage(page);
   await page.clock.setFixedTime(new Date("2026-08-18T12:00:00.000Z"));
   let overviewReads = 0;
   const overviewUrls: string[] = [];
@@ -442,6 +472,11 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   });
   await page.goto("/progress");
   await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What your profile can support." })).toBeVisible();
+  await expect(page.locator(".coverage-card")).toHaveCount(7);
+  await expect(page.locator(".coverage-card").filter({ hasText: "Sleep" })).toContainText("good");
+  await expect(page.locator(".coverage-card").filter({ hasText: "Nutrition" })).toContainText("full-day intake is not proven");
+  await expect(page.getByText("It is not a health score or a medical assessment.")).toBeVisible();
   const coachLauncher = page.getByRole("link", { name: "Chat with your AI Coach" });
   await expect(coachLauncher).toHaveAttribute(
     "href",
@@ -537,7 +572,7 @@ test("progress launcher renders a bounded fail-closed coach state", async ({ pag
 
   await expect(page).toHaveURL(/\/progress$/u);
   await expect(coachPage).toHaveURL(/\/progress\?coach=misconfigured$/u);
-  await expect(coachPage.getByRole("alert")).toContainText("No fallback was used");
+  await expect(coachPage.locator(".coach-stop")).toContainText("No fallback was used");
   await expect(coachPage.getByRole("link", { name: "Chat with your AI Coach" })).toHaveCount(1);
   await expect(coachPage.locator('a[href*="chatgpt.com"]')).toHaveCount(0);
 });

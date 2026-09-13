@@ -27,6 +27,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { PersonContext } from "../application/person-context.js";
+import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import { PERSON_CONTEXT, TRAINING_STORE } from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
 import type {
@@ -251,6 +252,11 @@ export class TrainingService {
   /** Reads current workout-session facts across an inclusive Person-local date range. */
   public listWorkoutSessionsForLocalDateRange(from: string, to: string): Promise<readonly WorkoutSession[]> {
     return this.store.listWorkoutSessionsForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
+  /** Reads unioned manual and connected training evidence dates for Progress. */
+  public getDataCoverage(from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
+    return this.store.getDataCoverage(this.personContext.getPersonId(), from, to, asOf);
   }
 
   /** Reads the complete append-only correction chain for one session. */

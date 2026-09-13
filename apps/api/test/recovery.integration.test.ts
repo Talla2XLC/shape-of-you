@@ -260,6 +260,20 @@ describe("Recovery PostgreSQL vertical", () => {
       { providerIdentity: "activity-c-2" },
       { providerIdentity: "activity-c", durationSeconds: 3600 }
     ]);
+    const trainingCoverage = await training.getDataCoverage(
+      personC,
+      "2026-06-10",
+      "2026-09-08",
+      "2026-09-09"
+    );
+    expect(trainingCoverage).toMatchObject({
+      firstDataDate: "2026-09-07",
+      lastDataDate: "2026-09-08"
+    });
+    expect([...trainingCoverage.days].sort((left, right) => left.localDate.localeCompare(right.localDate))).toEqual([
+      { localDate: "2026-09-07", usable: true },
+      { localDate: "2026-09-08", usable: true }
+    ]);
 
     const disconnect = await integrations.beginDisconnect(personC, "test disconnect");
     expect(disconnect?.id).toBe(id);
@@ -673,6 +687,99 @@ describe("Recovery PostgreSQL vertical", () => {
       detail: { type: "metric", metric: "sleep_score", value: 86, unit: "score" }
     });
     expect(listed.items).toContainEqual(created.observation);
+  });
+
+  it("summarizes provider-neutral Recovery evidence without treating partial or poor data as usable", async () => {
+    const sourceReference = {
+      channel: "manual" as const,
+      externalSystem: null,
+      externalRecordId: null,
+      occurredAt: null
+    };
+    const common = {
+      observedFrom: null,
+      observedUntil: null,
+      temporalPrecision: "local_date" as const,
+      timezone: "UTC",
+      connectionId: null,
+      consentId: null,
+      sourceReference
+    };
+    await repository.createObservation(personH, {
+      ...common,
+      kind: "sleep",
+      localDate: "2026-09-10",
+      quality: "reliable",
+      dedupeKey: "coverage:sleep:2026-09-10",
+      detail: { type: "sleep", totalSleepMinutes: 440, sleepQuality: 4 }
+    });
+    await repository.createObservation(personH, {
+      ...common,
+      kind: "metric",
+      localDate: "2026-09-11",
+      quality: "poor",
+      dedupeKey: "coverage:hrv:2026-09-11",
+      detail: { type: "metric", metric: "hrv_rmssd", value: 51, unit: "ms" }
+    });
+    await repository.createObservation(personH, {
+      ...common,
+      kind: "metric",
+      localDate: "2026-09-11",
+      quality: "reliable",
+      dedupeKey: "coverage:rhr:2026-09-11",
+      detail: { type: "metric", metric: "resting_heart_rate", value: 54, unit: "bpm" }
+    });
+    await repository.createObservation(personH, {
+      ...common,
+      kind: "metric",
+      localDate: "2026-09-12",
+      quality: "reliable",
+      dedupeKey: "coverage:body-battery-min:2026-09-12",
+      detail: { type: "metric", metric: "body_battery_min", value: 18, unit: "score" }
+    });
+    await repository.createObservation(personH, {
+      ...common,
+      kind: "metric",
+      localDate: "2026-09-12",
+      quality: "reliable",
+      dedupeKey: "coverage:body-battery-max:2026-09-12",
+      detail: { type: "metric", metric: "body_battery_max", value: 82, unit: "score" }
+    });
+
+    const coverage = await repository.getDataCoverage(
+      personH,
+      "2026-06-15",
+      "2026-09-12",
+      "2026-09-13"
+    );
+
+    expect(coverage.sleep).toEqual({
+      firstDataDate: "2026-09-10",
+      lastDataDate: "2026-09-10",
+      days: [{ localDate: "2026-09-10", usable: true }]
+    });
+    expect(coverage.hrv).toEqual({
+      firstDataDate: "2026-09-11",
+      lastDataDate: "2026-09-11",
+      days: [{ localDate: "2026-09-11", usable: false }]
+    });
+    expect(coverage.restingHeartRate.days).toEqual([
+      { localDate: "2026-09-11", usable: true }
+    ]);
+    expect(coverage.bodyBattery.days).toEqual([
+      { localDate: "2026-09-12", usable: true }
+    ]);
+    expect(await repository.getDataCoverage(
+      personG,
+      "2026-06-15",
+      "2026-09-12",
+      "2026-09-13"
+    )).toEqual({
+      sleep: { firstDataDate: null, lastDataDate: null, days: [] },
+      hrv: { firstDataDate: null, lastDataDate: null, days: [] },
+      restingHeartRate: { firstDataDate: null, lastDataDate: null, days: [] },
+      bodyBattery: { firstDataDate: null, lastDataDate: null, days: [] }
+    });
   });
 
   it("reuses shared device knowledge while isolating Person-owned connections", async () => {

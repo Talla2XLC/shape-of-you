@@ -36,6 +36,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
+import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   mealItems,
   meals,
@@ -142,6 +143,8 @@ export interface NutritionStore {
   /** Reads every current meal for one exact Person-local calendar date. */
   listMealsForLocalDate(personId: string, localDate: string): Promise<readonly Meal[]>;
   listMealsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly Meal[]>;
+  /** Reads current Meal bounds plus recorded and nutrient-usable recent dates. */
+  getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<DataCoverageEvidence>;
   mealHistory(
     personId: string,
     id: string
@@ -1337,6 +1340,43 @@ export class NutritionRepository implements NutritionStore {
       );
       return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row)));
     });
+  }
+
+  /** {@inheritDoc NutritionStore.getDataCoverage} */
+  public async getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
+    const successor = alias(meals, "coverage_meal_successor");
+    const current = and(
+      eq(meals.personId, personId),
+      lte(meals.localDate, asOf),
+      notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
+    );
+    const [bounds, items] = await Promise.all([
+      this.database.db.select({
+        firstDataDate: sql<string | null>`min(${meals.localDate})`,
+        lastDataDate: sql<string | null>`max(${meals.localDate})`
+      }).from(meals).where(current),
+      this.database.db.select({
+        localDate: meals.localDate,
+        caloriesKcal: mealItems.caloriesKcal,
+        proteinG: mealItems.proteinG,
+        fatG: mealItems.fatG,
+        carbsG: mealItems.carbsG
+      }).from(meals).innerJoin(mealItems, eq(mealItems.mealId, meals.id)).where(and(
+        current,
+        gte(meals.localDate, from),
+        lte(meals.localDate, to)
+      ))
+    ]);
+    const byDate = new Map<string, boolean>();
+    for (const item of items) {
+      const complete = item.caloriesKcal !== null && item.proteinG !== null && item.fatG !== null && item.carbsG !== null;
+      byDate.set(item.localDate, (byDate.get(item.localDate) ?? true) && complete);
+    }
+    return {
+      firstDataDate: bounds[0]?.firstDataDate ?? null,
+      lastDataDate: bounds[0]?.lastDataDate ?? null,
+      days: [...byDate].map(([localDate, usable]) => ({ localDate, usable }))
+    };
   }
 
   public mealHistory(

@@ -58,5 +58,25 @@ describe("ProgressOverview PostgreSQL read model", () => {
     expect(body.metrics.find((metric: { key: string }) => metric.key === "weight_kg").points).toEqual([{ localDate: "2026-08-17", value: 79.5 }]);
     expect(body.days).toHaveLength(1);
     expect(body.days[0]).toMatchObject({ localDate: "2026-08-17", facts: { weightMeasurements: 1 } });
+
+    const coverageResponse = await fastify.inject({
+      method: "GET",
+      url: "/v1/progress-data-coverage?localDate=2026-08-19&timezone=UTC"
+    });
+    expect(coverageResponse.statusCode, coverageResponse.body).toBe(200);
+    const coverage = coverageResponse.json();
+    expect(coverage).toMatchObject({
+      localDate: "2026-08-19",
+      completedThrough: "2026-08-18",
+      timezone: "UTC",
+      policyVersion: "profile-data-coverage-v1"
+    });
+    expect(coverage.directions).toHaveLength(7);
+    expect(coverage.directions.find((direction: { key: string }) => direction.key === "weight")).toMatchObject({
+      firstDataDate: "2026-08-01",
+      lastDataDate: "2026-08-17",
+      freshnessDays: 2,
+      coverage28: { recordedDays: 2, usableDays: 2 }
+    });
   });
 });

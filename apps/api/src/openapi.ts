@@ -108,6 +108,8 @@ import {
   DailyProjectionSchema,
   ProgressOverviewQuerySchema,
   ProgressOverviewSchema,
+  ProgressDataCoverageQuerySchema,
+  ProgressDataCoverageSchema,
   DisconnectIntegrationSchema,
   GarminIntervalsConnectionSchema,
   IntegrationAuthorizationStartSchema,
@@ -1265,6 +1267,20 @@ function progressOverviewPaths(): Record<string, object> {
         responses: {
           "200": { description: "Progress overview", content: { "application/json": { schema: ProgressOverviewSchema } } },
           "400": { description: "Invalid or unbounded range", content: { "application/json": { schema: ErrorResponseSchema } } }
+        }
+      }
+    },
+    "/v1/progress-data-coverage": {
+      get: {
+        tags: ["progress-overview"],
+        summary: "Read provider-neutral profile data coverage",
+        parameters: [
+          schemaParameter("localDate", "query", true, ProgressDataCoverageQuerySchema.properties.localDate),
+          schemaParameter("timezone", "query", true, ProgressDataCoverageQuerySchema.properties.timezone)
+        ],
+        responses: {
+          "200": { description: "Profile data coverage", content: { "application/json": { schema: ProgressDataCoverageSchema } } },
+          "400": { description: "Invalid Person-local context", content: { "application/json": { schema: ErrorResponseSchema } } }
         }
       }
     }

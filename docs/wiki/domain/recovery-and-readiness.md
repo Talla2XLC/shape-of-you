@@ -117,6 +117,13 @@ analysis window, evidence checksum, and typed observation/training links.
 Missing/low-quality evidence limits confidence; hard safety stops override
 scores. Assessment never mutates Training.
 
+Progress coverage reads current, non-withdrawn observations without depending
+on their provider. Sleep, HRV rMSSD, resting heart rate, and Body Battery remain
+separate directions. Poor-quality observations are recorded but not usable;
+Body Battery needs either a direct point or both daily minimum and maximum to
+make that date usable. These coverage statuses describe evidence sufficiency,
+not physiological readiness or medical quality.
+
 ## Evidence
 
 - Recovery schema/contracts/integration tests.
@@ -131,6 +138,7 @@ scores. Assessment never mutates Training.
 - [Automated Recovery erasure journal synchronization](../../adr/20260904-automate-recovery-erasure-journal-with-root-scheduled-one-shot.md).
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
 - [Typed Intervals wellness import](../../adr/20260912-import-supported-intervals-wellness-as-typed-recovery.md).
+- [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md).
 
 ## Open questions
 

@@ -14,8 +14,8 @@ tags:
 
 ## Summary
 
-The API exposes one bounded, sparse read model for factual progress across an
-explicit Person-local date range. It coordinates existing module-owned range
+The API exposes bounded read models for sparse factual progress and
+provider-neutral profile data coverage. Both coordinate existing module-owned
 reads without becoming a new fact owner or persistence boundary.
 
 ## Content
@@ -45,6 +45,23 @@ reads; it does not loop over dates or call exact-day HTTP endpoints. Each owner
 keeps Person isolation, correction, supersession, and ordering rules. The read
 model has no table, cache, migration, database, credential, or deployable.
 
+`GET /v1/progress-data-coverage?localDate=YYYY-MM-DD&timezone=Area%2FCity`
+reports the result of accumulated Person-owned facts independently of their
+provider or input channel. Its fixed `profile-data-coverage-v1` response has
+separate entries for sleep, HRV, resting heart rate, Body Battery, Training,
+Weight, and Nutrition. Each entry contains historical first/last dates,
+freshness, recorded and usable coverage for the previous 28 and 90 completed
+Person-local days, significant gaps, and an explainable `sparse`, `partial`, or
+`good` status.
+
+The current Person-local day may update freshness and historical bounds but is
+excluded from completed-day coverage. Recovery quality and Body Battery pair
+semantics, current Training sessions and external activities, complete recorded
+Meal nutrients, and Weight cadence are evaluated by their owning modules.
+Historical depth therefore remains distinct from recent regularity. Statuses
+describe sufficiency for recommendation context; they are not a health score,
+medical assessment, or guarantee of recommendation quality.
+
 The authenticated `/progress` screen also presents a compact factual today
 card. That card is intentionally not part of the range overview: it performs
 one separate read through the existing daily projection contract for the
@@ -60,12 +77,15 @@ superseded.
   `apps/api/src/openapi.ts`.
 - Coordinator, owner range ports, unit tests, PostgreSQL integration test, and
   browser E2E accepted for TASK-0043.
+- Coverage contract, owner summaries, policy pins, PostgreSQL integration, and
+  browser E2E accepted for TASK-0107.
 
 ## Decisions
 
 - [Progress overview authenticated default](../../adr/20260818-make-progress-overview-the-authenticated-default.md)
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 - [Independent facts instead of a broad DayRecord](../../adr/20260728-prefer-independent-facts-over-broad-day-record.md)
+- [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 
 ## Open questions
 

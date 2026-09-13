@@ -34,6 +34,9 @@ automatically.
 - Repeated external identity plus checksum is a no-op. Changed content creates
   an immutable successor, including a later return to a previously seen value.
   Current reads expose only the latest fact.
+- Profile coverage unions current WorkoutSession and external activity dates.
+  One Person-local date is counted once regardless of source, and a date without
+  a workout is not described as a missed training day.
 - `PersonalRecord` is a projection over current sets: highest weight, then more
   repetitions on ties.
 - Progression candidates are projections. Acceptance creates a new inactive
@@ -47,6 +50,7 @@ automatically.
 
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md).
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
+- [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md).
 
 ## Open questions
 

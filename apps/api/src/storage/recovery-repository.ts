@@ -37,6 +37,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
+import type { DataCoverageEvidence, RecoveryDataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   performedExercises,
   performedSets,
@@ -141,6 +142,8 @@ export interface RecoveryStore {
   /** Reads every current observation for one exact Person-local calendar date. */
   listObservationsForLocalDate(personId: string, localDate: string): Promise<readonly RecoveryObservation[]>;
   listObservationsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly RecoveryObservation[]>;
+  /** Reads provider-neutral current Recovery bounds and recent evidence without hydration. */
+  getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<RecoveryDataCoverageEvidence>;
   observationHistory(personId: string, id: string): Promise<RecoveryObservationHistory | null>;
   registerPolicyVersion(input: RegisterRecoveryPolicyVersion): Promise<string>;
   createAssessment(personId: string, input: CreateRecoveryAssessment): Promise<CreatedRecoveryAssessment>;
@@ -600,6 +603,70 @@ export class RecoveryRepository implements RecoveryStore {
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       )).orderBy(desc(recoveryObservations.localDate), desc(recoveryObservations.observedUntil), desc(recoveryObservations.id));
       return Promise.all(rows.map((row) => this.hydrateObservation(transaction, row)));
+    });
+  }
+
+  /** {@inheritDoc RecoveryStore.getDataCoverage} */
+  public getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<RecoveryDataCoverageEvidence> {
+    return this.database.db.transaction(async (transaction) => {
+      const successor = alias(recoveryObservations, "coverage_recovery_successor");
+      const current = and(
+        eq(recoveryObservations.personId, personId),
+        lte(recoveryObservations.localDate, asOf),
+        isNull(recoveryObservations.withdrawnAt),
+        this.visibleObservation(transaction),
+        notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
+      );
+      const metricCondition = (metrics: readonly string[]) => and(
+        eq(recoveryObservations.kind, "metric"),
+        sql`${recoveryMetricDetails.metric}::text IN (${sql.join(metrics.map((metric) => sql`${metric}`), sql`, `)})`
+      );
+      const boundsFor = async (condition: ReturnType<typeof and>): Promise<{ firstDataDate: string | null; lastDataDate: string | null }> => {
+        const rows = await transaction.select({
+          firstDataDate: sql<string | null>`min(${recoveryObservations.localDate})`,
+          lastDataDate: sql<string | null>`max(${recoveryObservations.localDate})`
+        }).from(recoveryObservations).leftJoin(recoveryMetricDetails, eq(recoveryMetricDetails.observationId, recoveryObservations.id)).where(and(current, condition));
+        return rows[0] ?? { firstDataDate: null, lastDataDate: null };
+      };
+      const sleepBounds = await boundsFor(eq(recoveryObservations.kind, "sleep"));
+      const hrvBounds = await boundsFor(metricCondition(["hrv_rmssd"]));
+      const restingBounds = await boundsFor(metricCondition(["resting_heart_rate"]));
+      const batteryBounds = await boundsFor(metricCondition(["body_battery", "body_battery_min", "body_battery_max"]));
+      const recent = await transaction.select({
+          localDate: recoveryObservations.localDate,
+          kind: recoveryObservations.kind,
+          quality: recoveryObservations.quality,
+          metric: recoveryMetricDetails.metric
+        }).from(recoveryObservations).leftJoin(recoveryMetricDetails, eq(recoveryMetricDetails.observationId, recoveryObservations.id)).where(and(
+          current,
+          gte(recoveryObservations.localDate, from),
+          lte(recoveryObservations.localDate, to),
+          or(eq(recoveryObservations.kind, "sleep"), metricCondition(["hrv_rmssd", "resting_heart_rate", "body_battery", "body_battery_min", "body_battery_max"]))
+        ));
+      const build = (bounds: { firstDataDate: string | null; lastDataDate: string | null }, predicate: (row: typeof recent[number]) => boolean): DataCoverageEvidence => {
+        const byDate = new Map<string, boolean>();
+        for (const row of recent.filter(predicate)) byDate.set(row.localDate, (byDate.get(row.localDate) ?? false) || row.quality !== "poor");
+        return { ...bounds, days: [...byDate].map(([localDate, usable]) => ({ localDate, usable })) };
+      };
+      const bodyByDate = new Map<string, { reliablePoint: boolean; minimum: boolean; maximum: boolean }>();
+      for (const row of recent.filter((item) => item.metric === "body_battery" || item.metric === "body_battery_min" || item.metric === "body_battery_max")) {
+        const value = bodyByDate.get(row.localDate) ?? { reliablePoint: false, minimum: false, maximum: false };
+        if (row.quality !== "poor") {
+          if (row.metric === "body_battery") value.reliablePoint = true;
+          if (row.metric === "body_battery_min") value.minimum = true;
+          if (row.metric === "body_battery_max") value.maximum = true;
+        }
+        bodyByDate.set(row.localDate, value);
+      }
+      return {
+        sleep: build(sleepBounds, (row) => row.kind === "sleep"),
+        hrv: build(hrvBounds, (row) => row.metric === "hrv_rmssd"),
+        restingHeartRate: build(restingBounds, (row) => row.metric === "resting_heart_rate"),
+        bodyBattery: {
+          ...batteryBounds,
+          days: [...bodyByDate].map(([localDate, value]) => ({ localDate, usable: value.reliablePoint || (value.minimum && value.maximum) }))
+        }
+      };
     });
   }
 
