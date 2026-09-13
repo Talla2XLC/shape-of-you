@@ -1,4 +1,5 @@
 import Fastify from "fastify";
+import { Ajv } from "ajv";
 import {
   createLocalJWKSet,
   exportJWK,
@@ -406,6 +407,24 @@ describe("MCP HTTP adapter", () => {
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
     )?.description).toContain("follow with typed read-back");
+    for (const toolName of [
+      "record_weight_measurement",
+      "correct_weight_measurement"
+    ]) {
+      const weightSchema = body.result.tools.find(
+        (tool: { name: string }) => tool.name === toolName
+      )?.inputSchema.properties.weightKg;
+      expect(weightSchema).toEqual({
+        type: "number",
+        minimum: 0.5,
+        maximum: 700
+      });
+      const validateWeight = new Ajv({ strict: false }).compile(weightSchema);
+      expect(validateWeight(77.1), toolName).toBe(true);
+      expect(validateWeight("77.1"), toolName).toBe(false);
+      expect(validateWeight(0.499), toolName).toBe(false);
+      expect(validateWeight(700.001), toolName).toBe(false);
+    }
     const recordMealTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_meal"
     );
@@ -1228,6 +1247,9 @@ describe("MCP HTTP adapter", () => {
       created: true,
       [key]: result(marker)
     });
+    const createWeight = vi.fn().mockResolvedValue(
+      created("measurement", "record_weight_measurement")
+    );
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1250,7 +1272,7 @@ describe("MCP HTTP adapter", () => {
       services: {
         weights: {
           list: async () => result("list_weight_measurements"),
-          create: async () => created("measurement", "record_weight_measurement"),
+          create: createWeight,
           correct: async () => created("measurement", "correct_weight_measurement")
         },
         bodyMeasurements: {
@@ -1293,7 +1315,7 @@ describe("MCP HTTP adapter", () => {
     const weight = {
       measuredAt: "2026-09-02T06:00:00.000Z",
       timezone: "Europe/Moscow",
-      weightKg: 78.7,
+      weightKg: 77.1,
       sourceReference,
       dedupeKey: "coach-policy-weight"
     };
@@ -1422,6 +1444,31 @@ describe("MCP HTTP adapter", () => {
           /MANDATORY FINAL REPLY:[\s\S]*MUST end with one direct, concrete recommendation or next step[\s\S]*never silently omit the next step\.$/u
         );
       }
+      expect(createWeight).toHaveBeenCalledWith(weight);
+      expect(successfulContent.get("record_weight_measurement")).toContain(
+        "owning-domain read-back"
+      );
+      for (const weightKg of ["77.1", 77.1234, 0.499, 700.001]) {
+        const invalidResponse = await authorizedFastify.inject({
+          method: "POST",
+          url: "/mcp",
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: `Bearer ${token}`
+          },
+          payload: {
+            jsonrpc: "2.0",
+            id: `invalid-weight-${weightKg}`,
+            method: "tools/call",
+            params: {
+              name: "record_weight_measurement",
+              arguments: { ...weight, weightKg }
+            }
+          }
+        });
+        expect(invalidResponse.json().result.isError, String(weightKg)).toBe(true);
+      }
+      expect(createWeight).toHaveBeenCalledOnce();
     } finally {
       await authorizedFastify.close();
     }

@@ -261,6 +261,14 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
 const toolAuthorityInstruction =
   "PostgreSQL authority; no Google Sheets fallback. Fail closed if this tool or its authorization is unavailable. Do not ask an obvious permission question before an unambiguous routine low-risk action, and give proactive evidence-grounded coaching by default.";
 
+const createWeightMeasurementToolInputSchema = connectorWeightSchema(
+  "CreateWeightMeasurementToolInput",
+  CreateWeightMeasurementSchema
+);
+const correctWeightMeasurementToolInputSchema = connectorWeightSchema(
+  "CorrectWeightMeasurementToolInputBody",
+  CorrectWeightMeasurementSchema
+);
 const createWorkoutSessionToolInputSchema = connectorWorkoutSchema(
   "CreateWorkoutSessionToolInput",
   CreateWorkoutSessionSchema
@@ -285,6 +293,8 @@ const correctRecoveryObservationToolInputSchema = connectorRecoverySchema(
   "CorrectRecoveryObservationToolInputBody",
   CorrectRecoveryObservationSchema
 );
+const validateCreateWeightMeasurement = compile(CreateWeightMeasurementSchema);
+const validateCorrectWeightMeasurement = compile(CorrectWeightMeasurementSchema);
 const validateCreateMeal = compile(CreateMealSchema);
 const validateCorrectMeal = compile(CorrectMealSchema);
 const validateCreateRecoveryObservation = compile(CreateRecoveryObservationSchema);
@@ -426,20 +436,31 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     defineTool(
       "record_weight_measurement",
       "Record one idempotent weight measurement from a direct user report; follow with typed read-back.",
-      CreateWeightMeasurementSchema,
+      createWeightMeasurementToolInputSchema,
       undefined,
       true,
       MCP_WEIGHT_WRITE_SCOPE,
-      async (input) => (await services.weights.create(input as CreateWeightMeasurement)).measurement
+      async (input) => (await services.weights.create(
+        normalizeWeightInput(input, validateCreateWeightMeasurement) as CreateWeightMeasurement
+      )).measurement
     ),
     defineTool(
       "correct_weight_measurement",
       "Append one idempotent correction to a uniquely identified current weight measurement; follow with typed read-back.",
-      withIdSchema("CorrectWeightMeasurementToolInput", CorrectWeightMeasurementSchema),
+      withIdSchema(
+        "CorrectWeightMeasurementToolInput",
+        correctWeightMeasurementToolInputSchema
+      ),
       undefined,
       true,
       MCP_WEIGHT_WRITE_SCOPE,
-      async (input) => (await services.weights.correct(input.id as string, input as unknown as CorrectWeightMeasurement)).measurement
+      async (input) => (await services.weights.correct(
+        input.id as string,
+        normalizeWeightInput(
+          input,
+          validateCorrectWeightMeasurement
+        ) as CorrectWeightMeasurement
+      )).measurement
     ),
     defineTool(
       "list_body_measurements",
@@ -670,6 +691,33 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
 
 function emptyObjectSchema(id: string): Readonly<Record<string, unknown>> {
   return { $id: id, type: "object", additionalProperties: false, properties: {} };
+}
+
+function connectorWeightSchema(
+  id: string,
+  schema: {
+    readonly required: readonly string[];
+    readonly properties: Readonly<Record<string, unknown>>;
+  }
+): Readonly<Record<string, unknown>> & {
+  readonly required: readonly string[];
+  readonly properties: Readonly<Record<string, unknown>>;
+} {
+  const weightKgSchema = schema.properties.weightKg as Readonly<
+    Record<string, unknown>
+  >;
+  return {
+    $id: id,
+    type: "object",
+    additionalProperties: false,
+    required: schema.required,
+    properties: {
+      ...schema.properties,
+      weightKg: Object.fromEntries(
+        Object.entries(weightKgSchema).filter(([keyword]) => keyword !== "multipleOf")
+      )
+    }
+  };
 }
 
 function connectorWorkoutSchema(
@@ -918,6 +966,20 @@ function normalizeMealInput(
   assertCompleteCoachMeal(normalized);
   if (!validate(normalized)) {
     throw new ConnectorInputError("Normalized Meal input does not match the domain contract");
+  }
+  return normalized;
+}
+
+function normalizeWeightInput(
+  input: Record<string, unknown>,
+  validate: ValidateFunction
+): Record<string, unknown> {
+  const normalized = { ...input };
+  delete normalized.id;
+  if (!validate(normalized)) {
+    throw new ConnectorInputError(
+      "Normalized WeightMeasurement input does not match the domain contract"
+    );
   }
   return normalized;
 }

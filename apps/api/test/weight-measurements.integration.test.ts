@@ -154,7 +154,7 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
     const payload = {
       measuredAt: "2026-07-28T05:30:00.000Z",
       timezone: "Europe/Moscow",
-      weightKg: 82.125,
+      weightKg: 77.1,
       dedupeKey: "integration:create-read",
       sourceReference: {
         channel: "manual",
@@ -188,11 +188,43 @@ describe("WeightMeasurement PostgreSQL vertical", () => {
     expect(created.json().localDate).toBe("2026-07-28");
     expect(created.json().temporalPrecision).toBe("instant");
     expect(created.json().personId).toBe(syntheticPersonId);
+    expect(created.json().weightKg).toBe(77.1);
+    expect(created.json().sourceReference.channel).toBe("manual");
     expect(duplicate.statusCode).toBe(200);
     expect(duplicate.json().id).toBe(created.json().id);
     expect(read.statusCode).toBe(200);
     expect(read.json().id).toBe(created.json().id);
+    expect(read.json().weightKg).toBe(77.1);
     expect(count.rows[0]?.count).toBe("1");
+  });
+
+  it("rejects non-numeric, over-precise and out-of-range weights", async () => {
+    const fastify = getFastifyInstance(app);
+    const payload = {
+      measuredAt: "2026-07-28T05:31:00.000Z",
+      timezone: "Europe/Moscow",
+      dedupeKey: "integration:invalid-weight",
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-07-28T05:31:00.000Z"
+      }
+    };
+
+    for (const weightKg of ["77.1", 77.1234, 0.499, 700.001]) {
+      const response = await fastify.inject({
+        method: "POST",
+        url: "/v1/weight-measurements",
+        payload: { ...payload, weightKg }
+      });
+      expect(response.statusCode, `${weightKg}: ${response.body}`).toBe(400);
+    }
+    const count = await database.pool.query<{ count: string }>(
+      "select count(*)::text as count from weight_measurements where dedupe_key = $1",
+      [payload.dedupeKey]
+    );
+    expect(count.rows[0]?.count).toBe("0");
   });
 
   it("serializes and orders imported date-only facts without inventing an instant", async () => {
