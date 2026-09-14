@@ -87,7 +87,12 @@ Provider-neutral profile coverage follows the same composition boundary.
 Recovery, Training, Nutrition, and Weight publish lean current-evidence
 summaries; Progress applies a versioned presentation policy without storing a
 profile aggregate or reading provider counters. Source connections continue to
-own import lifecycle only.
+own import lifecycle only. SourceReference also classifies whether evidence is
+eligible for Person-facing context or exists only for operational verification.
+Operational evidence keeps its Person ownership, immutable facts, correction
+chains, and audit provenance, but coverage and readiness projections exclude it
+independently of provider, channel, or date. This classification is internal;
+public writers cannot hide Person evidence by assigning it.
 
 ## Evidence
 
@@ -118,4 +123,5 @@ own import lifecycle only.
 - [Identity and external tool access](identity-and-external-tool-access.md)
 - [Progress overview API](../api/progress-overview.md)
 - [Provider-neutral profile data coverage ADR](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
+- [Operational evidence isolation ADR](../../adr/20260913-separate-operational-evidence-from-person-context.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

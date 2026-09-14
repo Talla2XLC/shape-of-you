@@ -79,6 +79,7 @@ import { deriveLocalDate } from "../domain/weight-measurement.js";
 import {
   discardUnusedSourceReference,
   ensureSourceReference,
+  isPersonContextEvidence,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 
@@ -612,6 +613,7 @@ export class RecoveryRepository implements RecoveryStore {
       const successor = alias(recoveryObservations, "coverage_recovery_successor");
       const current = and(
         eq(recoveryObservations.personId, personId),
+        isPersonContextEvidence(),
         lte(recoveryObservations.localDate, asOf),
         isNull(recoveryObservations.withdrawnAt),
         this.visibleObservation(transaction),
@@ -625,7 +627,10 @@ export class RecoveryRepository implements RecoveryStore {
         const rows = await transaction.select({
           firstDataDate: sql<string | null>`min(${recoveryObservations.localDate})`,
           lastDataDate: sql<string | null>`max(${recoveryObservations.localDate})`
-        }).from(recoveryObservations).leftJoin(recoveryMetricDetails, eq(recoveryMetricDetails.observationId, recoveryObservations.id)).where(and(current, condition));
+        }).from(recoveryObservations).innerJoin(sourceReferences, and(
+          eq(recoveryObservations.sourceReferenceId, sourceReferences.id),
+          eq(recoveryObservations.personId, sourceReferences.personId)
+        )).leftJoin(recoveryMetricDetails, eq(recoveryMetricDetails.observationId, recoveryObservations.id)).where(and(current, condition));
         return rows[0] ?? { firstDataDate: null, lastDataDate: null };
       };
       const sleepBounds = await boundsFor(eq(recoveryObservations.kind, "sleep"));
@@ -637,7 +642,10 @@ export class RecoveryRepository implements RecoveryStore {
           kind: recoveryObservations.kind,
           quality: recoveryObservations.quality,
           metric: recoveryMetricDetails.metric
-        }).from(recoveryObservations).leftJoin(recoveryMetricDetails, eq(recoveryMetricDetails.observationId, recoveryObservations.id)).where(and(
+        }).from(recoveryObservations).innerJoin(sourceReferences, and(
+          eq(recoveryObservations.sourceReferenceId, sourceReferences.id),
+          eq(recoveryObservations.personId, sourceReferences.personId)
+        )).leftJoin(recoveryMetricDetails, eq(recoveryMetricDetails.observationId, recoveryObservations.id)).where(and(
           current,
           gte(recoveryObservations.localDate, from),
           lte(recoveryObservations.localDate, to),

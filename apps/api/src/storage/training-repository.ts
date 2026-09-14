@@ -74,6 +74,7 @@ import { toSourceReference } from "../domain/source-reference.js";
 import {
   discardUnusedSourceReference,
   ensureSourceReference,
+  isPersonContextEvidence,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 
@@ -1426,6 +1427,7 @@ export class TrainingRepository implements TrainingStore {
     const activitySuccessor = alias(integrationActivityFacts, "coverage_activity_successor");
     const currentSessions = and(
       eq(workoutSessions.personId, personId),
+      isPersonContextEvidence(),
       lte(workoutSessions.localDate, asOf),
       notExists(this.database.db.select({ id: sessionSuccessor.id }).from(sessionSuccessor).where(eq(sessionSuccessor.supersedesId, workoutSessions.id)))
     );
@@ -1435,9 +1437,9 @@ export class TrainingRepository implements TrainingStore {
       notExists(this.database.db.select({ id: activitySuccessor.id }).from(activitySuccessor).where(eq(activitySuccessor.supersedesId, integrationActivityFacts.id)))
     );
     const [sessionBounds, activityBounds, sessionDays, activityDays] = await Promise.all([
-      this.database.db.select({ firstDataDate: sql<string | null>`min(${workoutSessions.localDate})`, lastDataDate: sql<string | null>`max(${workoutSessions.localDate})` }).from(workoutSessions).where(currentSessions),
+      this.database.db.select({ firstDataDate: sql<string | null>`min(${workoutSessions.localDate})`, lastDataDate: sql<string | null>`max(${workoutSessions.localDate})` }).from(workoutSessions).innerJoin(sourceReferences, and(eq(workoutSessions.sourceReferenceId, sourceReferences.id), eq(workoutSessions.personId, sourceReferences.personId))).where(currentSessions),
       this.database.db.select({ firstDataDate: sql<string | null>`min(${integrationActivityFacts.localDate})`, lastDataDate: sql<string | null>`max(${integrationActivityFacts.localDate})` }).from(integrationActivityFacts).where(currentActivities),
-      this.database.db.selectDistinct({ localDate: workoutSessions.localDate }).from(workoutSessions).where(and(currentSessions, gte(workoutSessions.localDate, from), lte(workoutSessions.localDate, to))),
+      this.database.db.selectDistinct({ localDate: workoutSessions.localDate }).from(workoutSessions).innerJoin(sourceReferences, and(eq(workoutSessions.sourceReferenceId, sourceReferences.id), eq(workoutSessions.personId, sourceReferences.personId))).where(and(currentSessions, gte(workoutSessions.localDate, from), lte(workoutSessions.localDate, to))),
       this.database.db.selectDistinct({ localDate: integrationActivityFacts.localDate }).from(integrationActivityFacts).where(and(currentActivities, gte(integrationActivityFacts.localDate, from), lte(integrationActivityFacts.localDate, to)))
     ]);
     const firstDates = [sessionBounds[0]?.firstDataDate, activityBounds[0]?.firstDataDate].filter((value): value is string => value !== null && value !== undefined).sort();

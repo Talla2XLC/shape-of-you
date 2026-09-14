@@ -258,6 +258,30 @@ describe("Training PostgreSQL vertical", () => {
     expect(
       await repository.findWorkoutSession(personB, session.json().id)
     ).toBeNull();
+    expect(await repository.getDataCoverage(
+      personA,
+      "2026-07-01",
+      "2026-07-31",
+      "2026-08-01"
+    )).toMatchObject({
+      firstDataDate: "2026-07-31",
+      lastDataDate: "2026-07-31"
+    });
+    await database.pool.query(
+      `update source_references source
+          set evidence_purpose = 'operational_verification'
+         from workout_sessions session
+        where session.id = $1
+          and session.source_reference_id = source.id
+          and session.person_id = source.person_id`,
+      [session.json().id]
+    );
+    expect(await repository.getDataCoverage(
+      personA,
+      "2026-07-01",
+      "2026-07-31",
+      "2026-08-01"
+    )).toEqual({ firstDataDate: null, lastDataDate: null, days: [] });
 
     const renamedExercise = await fastify.inject({
       method: "POST",

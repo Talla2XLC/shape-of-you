@@ -476,6 +476,31 @@ describe("API bootstrap", () => {
     await app.close();
   });
 
+  it("keeps evidence purpose out of the public provenance input", async () => {
+    const app = await buildApp({
+      config,
+      store: new FakeStore(),
+      ...physicalStateStores,
+      readinessProbe: async () => undefined
+    });
+
+    const response = await getFastifyInstance(app).inject({
+      method: "POST",
+      url: "/v1/weight-measurements",
+      payload: {
+        ...baselineInput,
+        sourceReference: {
+          ...baselineInput.sourceReference,
+          evidencePurpose: "operational_verification"
+        }
+      }
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toBe("VALIDATION_ERROR");
+    await app.close();
+  });
+
   it("rejects an invalid IANA timezone", async () => {
     const app = await buildApp({
       config,

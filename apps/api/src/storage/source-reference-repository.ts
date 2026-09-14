@@ -21,6 +21,11 @@ export interface EnsuredSourceReference {
   readonly inserted: boolean;
 }
 
+/** Returns the shared predicate for evidence eligible for Person-facing context. */
+export function isPersonContextEvidence(): ReturnType<typeof eq> {
+  return eq(sourceReferences.evidencePurpose, "person_context");
+}
+
 /**
  * Creates or retrieves a Person-owned typed provenance record.
  *

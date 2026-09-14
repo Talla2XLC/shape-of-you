@@ -79,6 +79,7 @@ import { toSourceReference } from "../domain/source-reference.js";
 import {
   discardUnusedSourceReference,
   ensureSourceReference,
+  isPersonContextEvidence,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 
@@ -1347,6 +1348,7 @@ export class NutritionRepository implements NutritionStore {
     const successor = alias(meals, "coverage_meal_successor");
     const current = and(
       eq(meals.personId, personId),
+      isPersonContextEvidence(),
       lte(meals.localDate, asOf),
       notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
     );
@@ -1354,14 +1356,20 @@ export class NutritionRepository implements NutritionStore {
       this.database.db.select({
         firstDataDate: sql<string | null>`min(${meals.localDate})`,
         lastDataDate: sql<string | null>`max(${meals.localDate})`
-      }).from(meals).where(current),
+      }).from(meals).innerJoin(sourceReferences, and(
+        eq(meals.sourceReferenceId, sourceReferences.id),
+        eq(meals.personId, sourceReferences.personId)
+      )).where(current),
       this.database.db.select({
         localDate: meals.localDate,
         caloriesKcal: mealItems.caloriesKcal,
         proteinG: mealItems.proteinG,
         fatG: mealItems.fatG,
         carbsG: mealItems.carbsG
-      }).from(meals).innerJoin(mealItems, eq(mealItems.mealId, meals.id)).where(and(
+      }).from(meals).innerJoin(sourceReferences, and(
+        eq(meals.sourceReferenceId, sourceReferences.id),
+        eq(meals.personId, sourceReferences.personId)
+      )).innerJoin(mealItems, eq(mealItems.mealId, meals.id)).where(and(
         current,
         gte(meals.localDate, from),
         lte(meals.localDate, to)

@@ -47,6 +47,10 @@ export const sourceChannel = pgEnum("source_channel", [
   "device",
   "account"
 ]);
+export const evidencePurpose = pgEnum("evidence_purpose", [
+  "person_context",
+  "operational_verification"
+]);
 export const importDomain = pgEnum("import_domain", [
   "weight",
   "body",
@@ -547,6 +551,9 @@ export const sourceReferences = pgTable(
       .notNull()
       .references(() => persons.id),
     channel: sourceChannel("channel").notNull(),
+    evidencePurpose: evidencePurpose("evidence_purpose")
+      .default("person_context")
+      .notNull(),
     externalSystem: varchar("external_system", { length: 128 }),
     externalRecordId: varchar("external_record_id", { length: 512 }),
     occurredAt: timestamp("occurred_at", {

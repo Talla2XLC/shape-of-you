@@ -78,5 +78,25 @@ describe("ProgressOverview PostgreSQL read model", () => {
       freshnessDays: 2,
       coverage28: { recordedDays: 2, usableDays: 2 }
     });
+
+    await database.pool.query(
+      `update source_references source
+          set evidence_purpose = 'operational_verification'
+         from weight_measurements measurement
+        where measurement.source_reference_id = source.id
+          and measurement.person_id = source.person_id`
+    );
+    const filteredCoverage = await fastify.inject({
+      method: "GET",
+      url: "/v1/progress-data-coverage?localDate=2026-08-19&timezone=UTC"
+    });
+    expect(filteredCoverage.statusCode, filteredCoverage.body).toBe(200);
+    expect(filteredCoverage.json().directions.find(
+      (direction: { key: string }) => direction.key === "weight"
+    )).toMatchObject({
+      firstDataDate: null,
+      lastDataDate: null,
+      coverage28: { recordedDays: 0, usableDays: 0 }
+    });
   });
 });

@@ -504,6 +504,22 @@ describe("Nutrition PostgreSQL vertical", () => {
       created.json().id,
       corrected.json().id
     ]);
+    await database.pool.query(
+      `update source_references source
+          set evidence_purpose = 'operational_verification'
+         from meals meal
+        where meal.id = $1
+          and meal.source_reference_id = source.id
+          and meal.person_id = source.person_id`,
+      [corrected.json().id]
+    );
+    const filteredCoverage = await new NutritionRepository(database).getDataCoverage(
+      personA,
+      "2026-08-01",
+      "2026-08-31",
+      "2026-09-01"
+    );
+    expect(filteredCoverage.days.find((day) => day.localDate === "2026-08-29")).toBeUndefined();
   });
 
   it("keeps described and estimated Meal amounts distinct", async () => {

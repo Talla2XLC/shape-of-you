@@ -44,6 +44,7 @@ import {
 import {
   discardUnusedSourceReference,
   ensureSourceReference,
+  isPersonContextEvidence,
   type DatabaseTransaction,
   type EnsuredSourceReference
 } from "./source-reference-repository.js";
@@ -527,6 +528,7 @@ export class WeightMeasurementRepository
     const successor = alias(weightMeasurements, "coverage_weight_successor");
     const current = and(
       eq(weightMeasurements.personId, personId),
+      isPersonContextEvidence(),
       lte(weightMeasurements.localDate, asOf),
       notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, weightMeasurements.id)))
     );
@@ -534,8 +536,14 @@ export class WeightMeasurementRepository
       this.database.db.select({
         firstDataDate: sql<string | null>`min(${weightMeasurements.localDate})`,
         lastDataDate: sql<string | null>`max(${weightMeasurements.localDate})`
-      }).from(weightMeasurements).where(current),
-      this.database.db.selectDistinct({ localDate: weightMeasurements.localDate }).from(weightMeasurements).where(and(
+      }).from(weightMeasurements).innerJoin(sourceReferences, and(
+        eq(weightMeasurements.sourceReferenceId, sourceReferences.id),
+        eq(weightMeasurements.personId, sourceReferences.personId)
+      )).where(current),
+      this.database.db.selectDistinct({ localDate: weightMeasurements.localDate }).from(weightMeasurements).innerJoin(sourceReferences, and(
+        eq(weightMeasurements.sourceReferenceId, sourceReferences.id),
+        eq(weightMeasurements.personId, sourceReferences.personId)
+      )).where(and(
         current,
         gte(weightMeasurements.localDate, from),
         lte(weightMeasurements.localDate, to)

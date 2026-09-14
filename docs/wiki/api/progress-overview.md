@@ -62,6 +62,14 @@ Historical depth therefore remains distinct from recent regularity. Statuses
 describe sufficiency for recommendation context; they are not a health score,
 medical assessment, or guarantee of recommendation quality.
 
+Coverage owners consider only SourceReference evidence whose internal purpose
+is `person_context`. Evidence retained solely for operational verification does
+not affect first/last dates, freshness, completed-day windows, gaps, or status.
+The purpose is orthogonal to provider and input channel, is not exposed through
+public write contracts, and does not replace source provenance or Person
+ownership. Imported external Training activities remain provider-neutral
+Person context; only SourceReference-backed manual sessions use this filter.
+
 The authenticated `/progress` screen also presents a compact factual today
 card. That card is intentionally not part of the range overview: it performs
 one separate read through the existing daily projection contract for the
@@ -79,6 +87,8 @@ superseded.
   browser E2E accepted for TASK-0043.
 - Coverage contract, owner summaries, policy pins, PostgreSQL integration, and
   browser E2E accepted for TASK-0107.
+- Exact operational-evidence migration, closed-contract tests, and owner-level
+  seven-direction filtering accepted for the TASK-0107 remediation.
 
 ## Decisions
 
@@ -86,6 +96,7 @@ superseded.
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 - [Independent facts instead of a broad DayRecord](../../adr/20260728-prefer-independent-facts-over-broad-day-record.md)
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
+- [Operational evidence isolation](../../adr/20260913-separate-operational-evidence-from-person-context.md)
 
 ## Open questions
 

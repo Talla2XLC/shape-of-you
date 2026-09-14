@@ -182,6 +182,14 @@ deployed and the single staging connector has passed all 14 required
 writer/lifecycle canaries. TASK-0065 completed the exclusive writer switch;
 TASK-0067 completed the separately approved authority transfer.
 
+Operational writer canaries must authenticate as a dedicated staging Person
+instead of sharing a real Person context. Retained canary SourceReferences are
+classified as `operational_verification`: they remain auditable append-only
+evidence but are ineligible for provider-neutral profile coverage and
+readiness. Legacy TASK-0063 evidence is classified only by an exact,
+fail-closed forward migration; dates and provider names are not eligibility
+rules.
+
 TASK-0079 removes the DayClosure persistence, import, HTTP, Web, OAuth, and MCP
 surface from the repository. `get_daily_projection` remains an always-live
 composition; direct relevant routine reports use idempotent domain writes and

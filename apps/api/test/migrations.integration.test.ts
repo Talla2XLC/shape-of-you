@@ -48,6 +48,20 @@ let expectedMigrations: AppliedMigration[];
 
 const migrationsFolder = new URL("../drizzle/", import.meta.url);
 const syntheticPersonId = "00000000-0000-4000-8000-000000000001";
+const task0063EvidenceIds = [
+  "TASK-0063:body:correct",
+  "TASK-0063:body:record",
+  "TASK-0063:meal:correct",
+  "TASK-0063:meal:record",
+  "TASK-0063:note:correct",
+  "TASK-0063:note:record",
+  "TASK-0063:recovery:correct",
+  "TASK-0063:recovery:record",
+  "TASK-0063:weight:correct",
+  "TASK-0063:weight:record",
+  "TASK-0063:workout:correct:v2",
+  "TASK-0063:workout:record:v2"
+] as const;
 
 function databaseUrl(databaseName: string): string {
   const url = new URL(container.getConnectionUri());
@@ -581,6 +595,113 @@ describe("API migration chain", () => {
       }
     } finally {
       await adminPool.end();
+    }
+  }, 120_000);
+
+  it("classifies only the exact TASK-0063 evidence set as operational", async () => {
+    const databaseName = "shape_of_you_evidence_purpose_upgrade";
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    await adminPool.query(`create database ${databaseName}`);
+    await adminPool.end();
+    const url = databaseUrl(databaseName);
+    const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-evidence-prefix-"));
+    await mkdir(path.join(prefixFolder, "meta"));
+    try {
+      const migrationIndex = journal.entries.findIndex(
+        ({ tag }) => tag === "20260913195201_dusty_albert_cleary"
+      );
+      expect(migrationIndex).toBeGreaterThan(0);
+      const prefixEntries = journal.entries.slice(0, migrationIndex);
+      for (const entry of prefixEntries) {
+        await cp(new URL(`${entry.tag}.sql`, migrationsFolder), path.join(prefixFolder, `${entry.tag}.sql`));
+      }
+      await writeFile(
+        path.join(prefixFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: prefixEntries })
+      );
+      const database = createDatabase(databaseConfig(url));
+      await migrate(database.db, { migrationsFolder: prefixFolder });
+      const personId = "00000000-0000-4000-8000-000000000091";
+      await database.pool.query("insert into persons (id) values ($1)", [personId]);
+      await database.pool.query(
+        `insert into source_references
+           (person_id, channel, external_system, external_record_id)
+         select $1, 'import', 'shape-of-you-staging-canary', marker
+           from unnest($2::text[]) marker`,
+        [personId, task0063EvidenceIds]
+      );
+      await database.pool.query(
+        `insert into source_references
+           (person_id, channel, external_system, external_record_id)
+         values ($1, 'import', 'another-system', 'TASK-0063:weight:record')`,
+        [personId]
+      );
+      await database.pool.end();
+
+      await runMigrations(url);
+      const verification = new Pool({ connectionString: url });
+      const purposes = await verification.query<{ evidence_purpose: string; count: string }>(
+        `select evidence_purpose::text, count(*)::text count
+           from source_references
+          where person_id = $1
+          group by evidence_purpose
+          order by evidence_purpose`,
+        [personId]
+      );
+      expect(purposes.rows).toEqual([
+        { evidence_purpose: "operational_verification", count: "12" },
+        { evidence_purpose: "person_context", count: "1" }
+      ]);
+      await verification.end();
+    } finally {
+      await rm(prefixFolder, { force: true, recursive: true });
+    }
+  }, 120_000);
+
+  it("rejects an incomplete TASK-0063 evidence set before reclassification", async () => {
+    const databaseName = "shape_of_you_evidence_purpose_reject";
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    await adminPool.query(`create database ${databaseName}`);
+    await adminPool.end();
+    const url = databaseUrl(databaseName);
+    const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-evidence-reject-prefix-"));
+    await mkdir(path.join(prefixFolder, "meta"));
+    try {
+      const migrationIndex = journal.entries.findIndex(
+        ({ tag }) => tag === "20260913195201_dusty_albert_cleary"
+      );
+      const prefixEntries = journal.entries.slice(0, migrationIndex);
+      for (const entry of prefixEntries) {
+        await cp(new URL(`${entry.tag}.sql`, migrationsFolder), path.join(prefixFolder, `${entry.tag}.sql`));
+      }
+      await writeFile(
+        path.join(prefixFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: prefixEntries })
+      );
+      const database = createDatabase(databaseConfig(url));
+      await migrate(database.db, { migrationsFolder: prefixFolder });
+      const personId = "00000000-0000-4000-8000-000000000092";
+      await database.pool.query("insert into persons (id) values ($1)", [personId]);
+      await database.pool.query(
+        `insert into source_references
+           (person_id, channel, external_system, external_record_id)
+         values ($1, 'import', 'shape-of-you-staging-canary', $2)`,
+        [personId, task0063EvidenceIds[0]]
+      );
+      await database.pool.end();
+
+      await expect(runMigrations(url)).rejects.toThrow(
+        "TASK-0063 operational evidence backfill found an incomplete or unexpected marker set"
+      );
+      const verification = new Pool({ connectionString: url });
+      const column = await verification.query<{ column_name: string }>(
+        `select column_name from information_schema.columns
+          where table_name = 'source_references' and column_name = 'evidence_purpose'`
+      );
+      expect(column.rows).toEqual([]);
+      await verification.end();
+    } finally {
+      await rm(prefixFolder, { force: true, recursive: true });
     }
   }, 120_000);
 

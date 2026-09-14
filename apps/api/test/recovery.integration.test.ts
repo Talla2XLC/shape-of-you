@@ -769,6 +769,26 @@ describe("Recovery PostgreSQL vertical", () => {
     expect(coverage.bodyBattery.days).toEqual([
       { localDate: "2026-09-12", usable: true }
     ]);
+    await database.pool.query(
+      `update source_references source
+          set evidence_purpose = 'operational_verification'
+         from recovery_observations observation
+        where observation.person_id = $1
+          and observation.source_reference_id = source.id
+          and observation.person_id = source.person_id`,
+      [personH]
+    );
+    expect(await repository.getDataCoverage(
+      personH,
+      "2026-06-15",
+      "2026-09-12",
+      "2026-09-13"
+    )).toEqual({
+      sleep: { firstDataDate: null, lastDataDate: null, days: [] },
+      hrv: { firstDataDate: null, lastDataDate: null, days: [] },
+      restingHeartRate: { firstDataDate: null, lastDataDate: null, days: [] },
+      bodyBattery: { firstDataDate: null, lastDataDate: null, days: [] }
+    });
     expect(await repository.getDataCoverage(
       personG,
       "2026-06-15",
