@@ -2,10 +2,18 @@
 
 ## Статус и разрешение
 
-- Статус: completed locally; release gates remain pending.
+- Статус: rework completed locally; release gates remain pending.
 - Оператор одобрил internal evidence purpose, additive migration и полный
   локальный цикл Developer → Quality → Architecture Review → Wiki.
 - Commit, push, deployment и применение migration не разрешены.
+
+## Rework 2026-09-14
+
+- [x] Ограничить exact-set guard namespace `TASK-0063:%`, не всем
+  `shape-of-you-staging-canary` evidence.
+- [x] Зафиксировать соседний TASK-0068 marker и partial/extra TASK-0063 cases в
+  migration tests.
+- [x] Повторить Developer → независимый Quality → Architecture Review → Wiki.
 
 ## Цель
 

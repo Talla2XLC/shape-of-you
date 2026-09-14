@@ -10,6 +10,7 @@ BEGIN
       SELECT "person_id"
         FROM "source_references"
        WHERE "external_system" = 'shape-of-you-staging-canary'
+         AND "external_record_id" LIKE 'TASK-0063:%'
        GROUP BY "person_id"
       HAVING count(*) <> 12
           OR count(DISTINCT "external_record_id") <> 12

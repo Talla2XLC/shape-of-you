@@ -633,7 +633,8 @@ describe("API migration chain", () => {
       await database.pool.query(
         `insert into source_references
            (person_id, channel, external_system, external_record_id)
-         values ($1, 'import', 'another-system', 'TASK-0063:weight:record')`,
+         values ($1, 'import', 'shape-of-you-staging-canary',
+           'task-0068-confirmed-write-canary-20260827')`,
         [personId]
       );
       await database.pool.end();
@@ -658,8 +659,21 @@ describe("API migration chain", () => {
     }
   }, 120_000);
 
-  it("rejects an incomplete TASK-0063 evidence set before reclassification", async () => {
-    const databaseName = "shape_of_you_evidence_purpose_reject";
+  it.each([
+    {
+      caseName: "incomplete",
+      databaseName: "shape_of_you_evidence_purpose_reject_partial",
+      markers: [task0063EvidenceIds[0]]
+    },
+    {
+      caseName: "extended",
+      databaseName: "shape_of_you_evidence_purpose_reject_extended",
+      markers: [...task0063EvidenceIds, "TASK-0063:unexpected"]
+    }
+  ])("rejects an $caseName TASK-0063 evidence set before reclassification", async ({
+    databaseName,
+    markers
+  }) => {
     const adminPool = new Pool({ connectionString: container.getConnectionUri() });
     await adminPool.query(`create database ${databaseName}`);
     await adminPool.end();
@@ -685,8 +699,9 @@ describe("API migration chain", () => {
       await database.pool.query(
         `insert into source_references
            (person_id, channel, external_system, external_record_id)
-         values ($1, 'import', 'shape-of-you-staging-canary', $2)`,
-        [personId, task0063EvidenceIds[0]]
+         select $1, 'import', 'shape-of-you-staging-canary', marker
+           from unnest($2::text[]) marker`,
+        [personId, markers]
       );
       await database.pool.end();
 

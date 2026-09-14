@@ -47,10 +47,12 @@ synthetic Person защищает будущие canary, но не исправ�
 5. Forward-only migration добавляет enum и column, оставляет все существующие
    references как `person_context` и переводит в
    `operational_verification` только полный точный набор TASK-0063 под
-   `external_system = shape-of-you-staging-canary`.
-6. Backfill работает fail-closed: для каждого Person допустим либо полный набор
-   двенадцати exact external record IDs, либо отсутствие совпадений. Частичный,
-   повторный или расширенный набор останавливает migration до изменения строк.
+   `external_system = shape-of-you-staging-canary`. Другие task namespaces того
+   же operational source не входят в этот исторический backfill.
+6. Backfill работает fail-closed внутри namespace `TASK-0063:%`: для каждого
+   Person допустим либо полный набор двенадцати exact external record IDs, либо
+   отсутствие совпадений. Частичный, повторный или расширенный TASK-0063 набор
+   останавливает migration до изменения строк.
 7. Новые end-to-end canary выполняются только через отдельного authenticated
    staging Person. Internal purpose остаётся дополнительной границей и не
    заменяет Person isolation.
@@ -103,7 +105,8 @@ SourceReference, Recovery consent/connection и Training dependencies. Така�
 ## Verification
 
 - Migration tests проверяют clean install, every-prefix upgrade, полный exact
-  backfill, zero-match и fail-closed partial/extra sets.
+  backfill рядом с другим canary namespace, zero-match и fail-closed
+  partial/extra TASK-0063 sets.
 - Contract tests подтверждают отсутствие `evidencePurpose` в public input и
   output schemas и отклонение дополнительного input property.
 - Repository tests доказывают, что operational evidence не влияет на bounds,
