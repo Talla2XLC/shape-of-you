@@ -686,40 +686,51 @@ button.button {
 
 .coverage-section {
   display: grid;
-  gap: 22px;
+  gap: 16px;
 }
 
 .coverage-heading {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: 24px;
+  display: block;
 }
 
-.coverage-heading .eyebrow,
 .coverage-heading h2,
-.coverage-heading p,
-.coverage-context,
 .coverage-card h3,
 .coverage-card p {
   margin: 0;
 }
 
 .coverage-heading h2 {
-  margin-top: 6px;
   font-size: clamp(1.8rem, 4vw, 3rem);
 }
 
-.coverage-heading > p,
-.coverage-context,
 .coverage-freshness,
 .coverage-history,
 .coverage-windows dt {
   color: var(--muted);
 }
 
-.coverage-heading > p {
-  max-width: 470px;
+.coverage-method {
+  width: fit-content;
+  max-width: 720px;
+  color: var(--muted);
+}
+
+.coverage-method summary,
+.coverage-details summary {
+  width: fit-content;
+  color: var(--ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.coverage-method summary:focus-visible,
+.coverage-details summary:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 4px;
+}
+
+.coverage-method p {
+  margin: 10px 0 0;
   line-height: 1.55;
 }
 
@@ -732,14 +743,14 @@ button.button {
 
 .coverage-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(270px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
   gap: 14px;
 }
 
 .coverage-card {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 10px;
   border: 1px solid var(--line);
   border-radius: 20px;
   padding: 20px;
@@ -771,6 +782,35 @@ button.button {
 .coverage-status[data-status="partial"] { border-color: #e5b958; color: #f2ca70; }
 .coverage-status[data-status="sparse"] { color: var(--muted); }
 
+.coverage-primary {
+  display: grid;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.coverage-primary strong {
+  font-size: 1.35rem;
+}
+
+.coverage-primary span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.coverage-summary {
+  min-height: 2.8em;
+  line-height: 1.4;
+}
+
+.coverage-details {
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.coverage-details[open] summary {
+  margin-bottom: 12px;
+}
+
 .coverage-windows {
   display: grid;
   gap: 8px;
@@ -795,8 +835,8 @@ button.button {
 }
 
 .coverage-explanation {
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
+  margin-top: 12px !important;
+  color: var(--muted);
   line-height: 1.5;
 }
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { coverageDirectionLabel, coverageExplanation, createLatestRequestGate, dayRoute, formatCoverageFreshness, isIanaTimezone, isLocalDate, trailingRange, type ProgressDataDirection } from "../app/lib/progress";
+import { coverageDirectionLabel, coverageExplanation, coverageSummary, createLatestRequestGate, dayRoute, formatCoverageFreshness, formatCoverageGap, isIanaTimezone, isLocalDate, trailingRange, type ProgressDataDirection } from "../app/lib/progress";
 
 describe("progress route contracts", () => {
   it("builds trailing inclusive presets", () => {
@@ -40,5 +40,8 @@ describe("progress route contracts", () => {
     expect(formatCoverageFreshness(1)).toBe("Last recorded yesterday");
     expect(coverageExplanation(direction)).toContain("full-day intake is not proven");
     expect(coverageExplanation(direction)).not.toMatch(/health score|medical assessment/iu);
+    expect(coverageSummary(direction)).toBe("Useful pattern context is available.");
+    expect(formatCoverageGap(1)).toBe("1 day without usable data");
+    expect(formatCoverageGap(2)).toBe("2 days without usable data");
   });
 });

@@ -58,6 +58,27 @@ export function formatCoverageFreshness(days: number | null): string {
   return `Last recorded ${days} days ago`;
 }
 
+/** Summarizes readiness at card level without exposing policy mechanics. */
+export function coverageSummary(direction: ProgressDataDirection): string {
+  if (direction.reasons.includes("no_data")) return "Add a few records to start building context.";
+  if (direction.key === "body_battery" && direction.reasons.includes("partial_records")) {
+    return "More complete recent days would help.";
+  }
+  if (direction.key === "nutrition" && direction.status === "good") {
+    return "Useful pattern context is available.";
+  }
+  if (direction.status === "good") return "Enough recent data for recommendations.";
+  if (direction.status === "partial") return "Some context is available; more regular data would help.";
+  return direction.reasons.includes("stale")
+    ? "Recent data is too limited for recommendations."
+    : "More recent data is needed for recommendations.";
+}
+
+/** Formats a gap duration with correct English singular and plural forms. */
+export function formatCoverageGap(days: number): string {
+  return `${days} ${days === 1 ? "day" : "days"} without usable data`;
+}
+
 /** Explains data sufficiency without making health or medical-quality claims. */
 export function coverageExplanation(direction: ProgressDataDirection): string {
   if (direction.reasons.includes("no_data")) return "No recorded evidence yet. More data is needed before this can inform recommendations.";

@@ -2,7 +2,7 @@
 import { beginBrowserSignIn } from "~/lib/browser-auth";
 import { chatAssistantLaunchRoute, chatAssistantStopMessage } from "~/lib/chat-assistant";
 import { dayApi, DayApiError, type DailyProjection } from "~/lib/day-api";
-import { coverageDirectionLabel, coverageExplanation, createLatestRequestGate, dayRoute, fetchProgressDataCoverage, fetchProgressOverview, formatCoverageFreshness, trailingRange, type ProgressDataCoverage, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
+import { coverageDirectionLabel, coverageExplanation, coverageSummary, createLatestRequestGate, dayRoute, fetchProgressDataCoverage, fetchProgressOverview, formatCoverageFreshness, formatCoverageGap, trailingRange, type ProgressDataCoverage, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
 
 definePageMeta({ middleware: "api-session" });
 useHead({ bodyAttrs: { class: "page-progress" } });
@@ -226,15 +226,9 @@ onMounted(() => { void load(); void loadToday(); void loadCoverage(); });
       aria-labelledby="coverage-heading"
     >
       <div class="coverage-heading">
-        <div>
-          <p class="eyebrow">
-            Data readiness
-          </p>
-          <h2 id="coverage-heading">
-            What your profile can support.
-          </h2>
-        </div>
-        <p>Coverage reflects recorded facts from any source. It is not a health score or a medical assessment.</p>
+        <h2 id="coverage-heading">
+          Data readiness
+        </h2>
       </div>
       <p
         v-if="coverageBusy"
@@ -261,9 +255,11 @@ onMounted(() => { void load(); void loadToday(); void loadCoverage(); });
         </button>
       </div>
       <template v-else-if="coverage">
-        <p class="coverage-context">
-          Through <time :datetime="coverage.completedThrough">{{ coverage.completedThrough }}</time> · {{ coverage.timezone }}. Today is still in progress and does not reduce 28/90-day regularity.
-        </p>
+        <details class="coverage-method">
+          <summary>How readiness works</summary>
+          <p>Coverage reflects recorded facts from any source. It is not a health score or a medical assessment.</p>
+          <p>Regularity uses completed days through <time :datetime="coverage.completedThrough">{{ coverage.completedThrough }}</time> in {{ coverage.timezone }}. Today stays visible as fresh data but does not lower 28/90-day regularity.</p>
+        </details>
         <div class="coverage-grid">
           <article
             v-for="direction in coverage.directions"
@@ -282,22 +278,32 @@ onMounted(() => { void load(); void loadToday(); void loadCoverage(); });
             <p class="coverage-freshness">
               {{ formatCoverageFreshness(direction.freshnessDays) }}
             </p>
-            <p class="coverage-history">
-              <template v-if="direction.firstDataDate && direction.lastDataDate">
-                History: <time :datetime="direction.firstDataDate">{{ direction.firstDataDate }}</time>–<time :datetime="direction.lastDataDate">{{ direction.lastDataDate }}</time>
-              </template>
-              <template v-else>
-                No history yet
-              </template>
+            <p class="coverage-primary">
+              <strong>{{ direction.coverage28.usableDays }} of 28 days</strong>
+              <span>with usable data</span>
             </p>
-            <dl class="coverage-windows">
-              <div><dt>Last 28 days</dt><dd>{{ direction.coverage28.usableDays }} usable · {{ direction.coverage28.recordedDays }} recorded</dd></div>
-              <div><dt>Last 90 days</dt><dd>{{ direction.coverage90.usableDays }} usable · {{ direction.coverage90.recordedDays }} recorded</dd></div>
-              <div><dt>Largest gap</dt><dd>{{ direction.gaps.longestGapDays }} days without usable data</dd></div>
-            </dl>
-            <p class="coverage-explanation">
-              {{ coverageExplanation(direction) }}
+            <p class="coverage-summary">
+              {{ coverageSummary(direction) }}
             </p>
+            <details class="coverage-details">
+              <summary>View details</summary>
+              <p class="coverage-history">
+                <template v-if="direction.firstDataDate && direction.lastDataDate">
+                  History: <time :datetime="direction.firstDataDate">{{ direction.firstDataDate }}</time>–<time :datetime="direction.lastDataDate">{{ direction.lastDataDate }}</time>
+                </template>
+                <template v-else>
+                  No history yet
+                </template>
+              </p>
+              <dl class="coverage-windows">
+                <div><dt>Last 28 days</dt><dd>{{ direction.coverage28.usableDays }} usable · {{ direction.coverage28.recordedDays }} recorded</dd></div>
+                <div><dt>Last 90 days</dt><dd>{{ direction.coverage90.usableDays }} usable · {{ direction.coverage90.recordedDays }} recorded</dd></div>
+                <div><dt>Largest gap</dt><dd>{{ formatCoverageGap(direction.gaps.longestGapDays) }}</dd></div>
+              </dl>
+              <p class="coverage-explanation">
+                {{ coverageExplanation(direction) }}
+              </p>
+            </details>
           </article>
         </div>
       </template>

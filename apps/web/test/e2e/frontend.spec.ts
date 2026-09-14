@@ -112,7 +112,7 @@ async function mockProgressDataCoverage(target: Page | BrowserContext): Promise<
       freshnessDays,
       coverage28: { windowDays: 28, from: "2026-07-21", to: "2026-08-17", recordedDays: recent, usableDays: recent },
       coverage90: { windowDays: 90, from: "2026-05-20", to: "2026-08-17", recordedDays: historical, usableDays: historical },
-      gaps: { significantGapCount: status === "good" ? 0 : 2, longestGapDays: status === "good" ? 2 : 8 },
+      gaps: { significantGapCount: status === "good" ? 0 : 2, longestGapDays: key === "nutrition" ? 1 : status === "good" ? 2 : 8 },
       status,
       reasons: status === "good" ? [] : [status === "sparse" ? "stale" : "not_enough_recent_data"]
     }))
@@ -472,10 +472,21 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   });
   await page.goto("/progress");
   await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "What your profile can support." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Data readiness" })).toBeVisible();
   await expect(page.locator(".coverage-card")).toHaveCount(7);
-  await expect(page.locator(".coverage-card").filter({ hasText: "Sleep" })).toContainText("good");
-  await expect(page.locator(".coverage-card").filter({ hasText: "Nutrition" })).toContainText("full-day intake is not proven");
+  const sleepCoverage = page.locator(".coverage-card").filter({ hasText: "Sleep" });
+  const nutritionCoverage = page.locator(".coverage-card").filter({ hasText: "Nutrition" });
+  await expect(sleepCoverage).toContainText("good");
+  await expect(sleepCoverage).toContainText("24 of 28 days");
+  await expect(sleepCoverage).toContainText("Enough recent data for recommendations.");
+  await expect(nutritionCoverage).toContainText("Some context is available; more regular data would help.");
+  const nutritionExplanation = nutritionCoverage.locator(".coverage-explanation");
+  await expect(nutritionExplanation).not.toBeVisible();
+  await nutritionCoverage.getByText("View details").press("Enter");
+  await expect(nutritionExplanation).toBeVisible();
+  await expect(nutritionExplanation).toContainText("full-day intake is not proven");
+  await expect(nutritionCoverage).toContainText("1 day without usable data");
+  await page.getByText("How readiness works").click();
   await expect(page.getByText("It is not a health score or a medical assessment.")).toBeVisible();
   const coachLauncher = page.getByRole("link", { name: "Chat with your AI Coach" });
   await expect(coachLauncher).toHaveAttribute(
