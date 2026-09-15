@@ -11,6 +11,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
 import type {
   CreateRecoveryObservation,
+  DailyAssessmentResult,
   ListRecoveryObservationsQuery,
   RecoveryObservation
 } from "@shape-of-you/contracts";
@@ -1283,10 +1284,69 @@ describe("MCP HTTP adapter", () => {
     const createWeight = vi.fn().mockResolvedValue(
       created("measurement", "record_weight_measurement")
     );
-    const readDailyAssessment = vi.fn().mockResolvedValue({
+    const readDailyAssessment = vi.fn<() => Promise<DailyAssessmentResult>>().mockResolvedValue({
       state: "timezone_required" as const,
       timezone: null
     });
+    const availableDailyAssessment: DailyAssessmentResult = {
+      state: "available",
+      snapshotId: "00000000-0000-4000-8000-000000000501",
+      localDate: "2026-09-02",
+      timezone: "Europe/Moscow",
+      status: "caution",
+      usedFacts: {
+        recoveryObservationIds: [],
+        recoveryAssessmentIds: [],
+        workoutSessionIds: [],
+        externalActivityIds: [],
+        mealIds: [],
+        weightMeasurementIds: [],
+        activeTrainingProgramVersionId: null,
+        coveragePolicyVersion: "profile-data-coverage-v1",
+        coverageReadiness: {
+          sleep: "partial",
+          hrv: "partial",
+          restingHeartRate: "partial",
+          bodyBattery: "partial",
+          training: "good",
+          weight: "partial",
+          nutrition: "partial"
+        },
+        summary: {
+          recoveryRiskLevel: "moderate",
+          recoveryHardStop: false,
+          sleepMinutes: 453,
+          hrvMs: 55,
+          hrvBaselineMs: 52,
+          restingHeartRateBpm: 48,
+          restingHeartRateBaselineBpm: 52,
+          bodyBattery: 91,
+          bodyBatteryMin: null,
+          bodyBatteryMax: 91,
+          recentWorkoutCount: 1,
+          recentExternalActivityCount: 0,
+          recentTrainingLoad: null,
+          nutritionCompleteness: "partial",
+          mealCount: 1,
+          caloriesKcal: 375,
+          proteinG: 21,
+          latestWeightKg: 77.1
+        }
+      },
+      missingImportantData: ["training_program"],
+      reasons: ["recent_training_load", "partial_nutrition"],
+      recommendedAction: {
+        type: "complete_nutrition_record",
+        text: "Record the next meal after eating.",
+        trainingProgramVersionId: null
+      },
+      alternatives: [],
+      limitations: ["not_medical_advice", "nutrition_records_may_be_incomplete"],
+      confidence: 0.72,
+      policyVersion: "daily-assessment-v1",
+      evidenceChecksum: "a".repeat(64),
+      createdAt: "2026-09-02T09:00:00.000Z"
+    };
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1476,6 +1536,11 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.content[0].text, name).toContain(
             "Do not add a duration, intensity, workout, medical rationale, trend, or substitute action"
           );
+        } else if (name === "get_daily_projection") {
+          expect(toolResult.structuredContent, name).toMatchObject({ marker });
+          expect(toolResult.content[0].text, name).toContain(
+            'API-OWNED DAILY ASSESSMENT RESULT (exact JSON; preserve every decision field): {"state":"timezone_required","timezone":null}'
+          );
         } else if (name === "get_active_training_program") {
           expect(toolResult.structuredContent, name).toMatchObject({
             status: "active",
@@ -1497,10 +1562,103 @@ describe("MCP HTTP adapter", () => {
         );
       }
       expect(createWeight).toHaveBeenCalledWith(weight);
-      expect(readDailyAssessment).toHaveBeenCalledOnce();
+      expect(readDailyAssessment).toHaveBeenCalledTimes(2);
       expect(successfulContent.get("record_weight_measurement")).toContain(
         "owning-domain read-back"
       );
+      readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
+      const compatibleDailyProjection = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "compatible-daily-projection",
+          method: "tools/call",
+          params: {
+            name: "get_daily_projection",
+            arguments: { localDate: "2026-09-02", timezone: "Europe/Moscow" }
+          }
+        }
+      });
+      expect(compatibleDailyProjection.json().result).toMatchObject({
+        structuredContent: { marker: "get_daily_projection" },
+        content: [{ text: expect.stringContaining(JSON.stringify(availableDailyAssessment)) }]
+      });
+      expect(compatibleDailyProjection.json().result.content[0].text).toContain(
+        "Do not recalculate, replace, or embellish the policy decision"
+      );
+
+      readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
+      const historicalDailyProjection = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "historical-daily-projection",
+          method: "tools/call",
+          params: {
+            name: "get_daily_projection",
+            arguments: { localDate: "2026-09-01", timezone: "Europe/Moscow" }
+          }
+        }
+      });
+      expect(historicalDailyProjection.json().result.structuredContent).toEqual({
+        marker: "get_daily_projection"
+      });
+      expect(historicalDailyProjection.json().result.content[0].text).not.toContain(
+        availableDailyAssessment.snapshotId
+      );
+      expect(historicalDailyProjection.json().result.content[0].text).toContain(
+        "FACTUAL-ONLY DAILY PROJECTION"
+      );
+      expect(historicalDailyProjection.json().result.content[0].text).not.toContain(
+        MCP_COACH_FINAL_RESPONSE_REQUIREMENT
+      );
+      expect(historicalDailyProjection.json().result.content[0].text).not.toContain(
+        "safest useful next action"
+      );
+
+      readDailyAssessment.mockRejectedValueOnce(new Error("assessment unavailable"));
+      const projectionWithoutAssessment = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "projection-without-assessment",
+          method: "tools/call",
+          params: {
+            name: "get_daily_projection",
+            arguments: { localDate: "2026-09-02", timezone: "Europe/Moscow" }
+          }
+        }
+      });
+      expect(projectionWithoutAssessment.json().result).toMatchObject({
+        structuredContent: { marker: "get_daily_projection" },
+        content: [{ text: expect.stringContaining("API-OWNED DAILY ASSESSMENT UNAVAILABLE") }]
+      });
+      expect(projectionWithoutAssessment.json().result.isError).not.toBe(true);
+      expect(projectionWithoutAssessment.json().result.content[0].text).toContain(
+        "ask them only to retry the assessment later"
+      );
+      expect(projectionWithoutAssessment.json().result.content[0].text).not.toContain(
+        MCP_COACH_FINAL_RESPONSE_REQUIREMENT
+      );
+      expect(projectionWithoutAssessment.json().result.content[0].text).not.toContain(
+        "safest useful next action"
+      );
+
       readDailyAssessment.mockRejectedValueOnce(new Error("assessment unavailable"));
       const failedDailyAssessment = await authorizedFastify.inject({
         method: "POST",
@@ -1881,18 +2039,18 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(dailyProjectionResult.content[0].text).toContain(
-        "only as a factual view of recorded owning-domain data"
+        "API-OWNED DAILY ASSESSMENT UNAVAILABLE"
       );
       expect(dailyProjectionResult.content[0].text).toContain(
-        "call get_daily_assessment and preserve that result as the sole decision authority"
-      );
-      expect(dailyProjectionResult.content[0].text).toContain(
-        "stop without reconstructing a decision"
+        "Do not derive a status or propose any nutrition, training, recovery, medical, or other next action"
       );
       expect(dailyProjectionResult.content[0].text).not.toContain(
         "give one clear Next step plus bounded nutrition, training, and recovery guidance"
       );
-      expect(dailyProjectionResult.content[0].text).toContain(MCP_COACH_REPLY_POLICY);
+      expect(dailyProjectionResult.content[0].text).not.toContain(MCP_COACH_REPLY_POLICY);
+      expect(dailyProjectionResult.content[0].text).not.toContain(
+        MCP_COACH_FINAL_RESPONSE_REQUIREMENT
+      );
       expect((await call(10, "record_meal", {
         ...dinner,
         items: [{

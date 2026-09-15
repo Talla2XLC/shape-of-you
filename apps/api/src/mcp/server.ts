@@ -47,6 +47,7 @@ import {
   type CreateRecoveryObservation,
   type CreateWeightMeasurement,
   type CreateWorkoutSession,
+  type DailyAssessmentResult,
   type DailyProjectionQuery,
   type ListDailyContextNotesQuery,
   type ListBodyMeasurementSessionsQuery,
@@ -126,6 +127,13 @@ interface ToolDefinition {
   readonly write: boolean;
   readonly execute: (input: Record<string, unknown>) => Promise<unknown>;
   readonly present?: (value: unknown) => string;
+  readonly structured?: (value: unknown) => unknown;
+}
+
+interface DailyProjectionCompatibilityResult {
+  readonly projection: unknown;
+  readonly query: DailyProjectionQuery;
+  readonly assessment: DailyAssessmentResult | null;
 }
 
 class ConnectorInputError extends Error {}
@@ -236,10 +244,31 @@ const confirmedTrainingProgramWriteResultContent = coachResultContent(
   "The explicitly confirmed program was persisted. Silently read the active program again and compare the complete snapshot before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as active."
 );
 
-const dailyProjectionResultContent = coachResultContent(
-  "Use this exact-date projection only as a factual view of recorded owning-domain data. It cannot authorize a daily status or next action. For a full Daily Coach assessment or today's next-action request, call get_daily_assessment and preserve that result as the sole decision authority. If the assessment is unavailable, stop without reconstructing a decision from this projection, other reads, or conversation context.",
-  dailyCoachReplyShape
-);
+const dailyProjectionResultContent =
+  "FACTUAL-ONLY DAILY PROJECTION: Use this exact-date projection only to summarize recorded owning-domain facts. " +
+  "It cannot authorize a daily status, confidence, reasons, limitations, or next action. " +
+  "If the user requested a daily decision and no matching API-owned daily assessment is included, state that the assessment is unavailable for this date and stop. " +
+  "Do not provide a nutrition, training, recovery, medical, or other recommendation from the projection, other reads, or conversation context.";
+
+const unavailableProjectionAssessmentContent =
+  "API-OWNED DAILY ASSESSMENT UNAVAILABLE: Keep the returned projection factual-only. " +
+  "If the user requested a daily decision, say that the current assessment could not be obtained and ask them only to retry the assessment later. " +
+  "Do not derive a status or propose any nutrition, training, recovery, medical, or other next action from the projection, other reads, or conversation context.";
+
+function dailyProjectionCompatibilityContent(
+  result: DailyProjectionCompatibilityResult
+): string {
+  const { assessment, query } = result;
+  if (assessment === null) {
+    return unavailableProjectionAssessmentContent;
+  }
+  if (assessment.state === "available" && (
+    assessment.localDate !== query.localDate || assessment.timezone !== query.timezone
+  )) {
+    return dailyProjectionResultContent;
+  }
+  return `API-OWNED DAILY ASSESSMENT RESULT (exact JSON; preserve every decision field): ${JSON.stringify(assessment)} ${dailyAssessmentResultContent}`;
+}
 
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
@@ -408,7 +437,10 @@ function createServer(
       const result = await options.personContext.run(authorized.personId, () =>
         definition.execute((call.params.arguments ?? {}) as Record<string, unknown>)
       );
-      return successResult(result, definition.present?.(result));
+      return successResult(
+        definition.structured?.(result) ?? result,
+        definition.present?.(result)
+      );
     } catch (error) {
       if (error instanceof McpAuthorizationError) {
         return authorizationErrorResult(
@@ -702,8 +734,21 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       DailyProjectionSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.dailyProjection.projection(input as DailyProjectionQuery),
-      () => dailyProjectionResultContent
+      async (input) => {
+        const query = input as DailyProjectionQuery;
+        const projection = await services.dailyProjection.projection(query);
+        let assessment: DailyAssessmentResult | null = null;
+        try {
+          assessment = await services.dailyAssessment?.read() ?? null;
+        } catch {
+          // A compatibility assessment must not hide an otherwise valid factual projection.
+        }
+        return { projection, query, assessment } satisfies DailyProjectionCompatibilityResult;
+      },
+      (value) => dailyProjectionCompatibilityContent(
+        value as DailyProjectionCompatibilityResult
+      ),
+      (value) => (value as DailyProjectionCompatibilityResult).projection
     )
   ];
 }
@@ -1128,7 +1173,8 @@ function defineTool(
   write: boolean,
   scope: string,
   execute: (input: Record<string, unknown>) => Promise<unknown>,
-  present?: (value: unknown) => string
+  present?: (value: unknown) => string,
+  structured?: (value: unknown) => unknown
 ): ToolDefinition {
   return {
     tool: {
@@ -1153,7 +1199,8 @@ function defineTool(
     scope,
     write,
     execute,
-    present: present ?? (() => write ? routineWriteResultContent : routineReadResultContent)
+    present: present ?? (() => write ? routineWriteResultContent : routineReadResultContent),
+    ...(structured ? { structured } : {})
   };
 }
 

@@ -62,13 +62,20 @@ reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
 chat message never proves execution.
 
 The exact-date factual view remains the always-live `get_daily_projection`
-read. A full Daily Coach decision starts with `get_daily_assessment`; ChatGPT
-explains the returned status, reasons, missing evidence, confidence, and action
-without recalculating them in the prompt. The tool has empty input, uses the
-existing `person:read` scope, and is read-only. Snapshot materialization is an
-internal idempotent API responsibility and does not grant MCP write authority.
-The Person-owned IANA timezone determines the local date. Until it is stored
-through the authenticated first-party HTTP boundary, the read returns
+read. For clients with the current tool catalog, a full Daily Coach decision
+starts with `get_daily_assessment`. For an already open conversation that knows
+only the stable projection read, the API also places the exact matching-day
+`DailyAssessmentResult` in that read's current model-facing content while
+preserving its legacy `DailyProjection` structured result. Both paths use the
+same assessment snapshot and policy authority. ChatGPT explains the returned
+status, reasons, missing evidence, confidence, and action without recalculating,
+replacing, or extending them. A historical or date/timezone-mismatched
+projection remains factual-only; an unavailable assessment cannot authorize a
+fact-derived action and permits only a later retry. Both reads use the existing
+`person:read` scope and are read-only. Snapshot materialization is an internal
+idempotent API responsibility and does not grant MCP write authority. The
+Person-owned IANA timezone determines the local date. Until it is stored through
+the authenticated first-party HTTP boundary, the assessment returns
 `timezone_required` rather than guessing from chat, browser, or provider data.
 
 A direct relevant user report authorizes one routine low-risk idempotent write
@@ -80,13 +87,15 @@ represent a relevant observation safely.
 
 Routine capture stays conversational. The Coach matches the user's language
 and tone and confirms the recorded or corrected facts in one to three natural
-sentences. For a meaningful nutrition, training, recovery, or daily-summary
-interaction, one useful evidence-grounded interpretation and concrete next step
-are mandatory unless the user explicitly asks for raw facts only. A reply that
-only acknowledges or summarizes captured facts is incomplete. When a specific
-domain recommendation cannot be made safely, the Coach still ends with the
-safest useful next action supported by verified facts or asks for the single
-observation needed to make the next recommendation useful. The
+sentences. Outside a full API-owned daily assessment, a meaningful nutrition,
+training, recovery, or factual daily-summary interaction includes one useful
+evidence-grounded interpretation and concrete next step unless the user
+explicitly asks for raw facts only. A reply that only acknowledges or summarizes
+captured facts is incomplete. When a specific domain recommendation cannot be
+made safely, the Coach still ends with the safest useful next action supported
+by verified facts or asks for the single observation needed to make the next
+recommendation useful. A full daily assessment is the exception: it preserves
+the API-returned action and adds no prompt-owned alternative. The
 Coach performs an unambiguous routine write or correction instead of asking
 whether the user wants it recorded, corrected, or estimated. It keeps tool names,
 arguments, identifiers, contract fields, completeness states, and transport
@@ -138,6 +147,8 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - TASK-0086 accepted MCP photo-estimation and read-back fixture.
 - TASK-0112 accepted daily policy, MCP, migration, correction, timezone,
   Person-isolation, and Recovery-erasure tests.
+- TASK-0113 accepted stable-read delivery, frozen-schema compatibility, and
+  fail-closed assessment fallback tests.
 
 ## Decisions
 
@@ -150,6 +161,7 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
+- [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).
 
 ## Open questions
 

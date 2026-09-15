@@ -260,6 +260,17 @@ without recalculating or replacing the decision. Person timezone changes remain
 on the authenticated first-party HTTP boundary; MCP receives no additional
 write scope.
 
+`get_daily_projection` is also the compatibility carrier for already open
+conversations whose cached catalog does not contain `get_daily_assessment`.
+Its public name, input/output schemas, `person:read` scope, and factual
+`DailyProjection` structured result remain unchanged. For the matching current
+Person-local day, the API adds the exact `DailyAssessmentResult` only to the
+fresh model-facing content returned by the stable read. Historical or
+date/timezone-mismatched projections remain factual-only. If the additional
+assessment read is unavailable, the projection still succeeds, but the result
+forbids deriving any daily status or domain action and permits only retrying the
+assessment later.
+
 An existing MCP tool name is also a compatibility identity. Its published
 input schema evolves additively: new fields are optional, old fields remain,
 required sets do not grow, and enum values do not narrow. The API adapter may
@@ -270,7 +281,7 @@ new versioned tool name and an explicit transition period. Client metadata
 refresh remains a release verification step, not a prerequisite imposed on an
 already open user conversation.
 
-Every relevant MCP result carries the current server-owned Coach reply policy
+Relevant routine MCP results carry the current server-owned Coach reply policy
 in model-facing content. Successful results retain typed facts in
 `structuredContent`; validation, execution, and OAuth failures carry a separate
 fail-closed presentation that forbids success claims, advice based on unverified
@@ -287,21 +298,16 @@ supported by verified evidence or the single observation needed next. Tool names
 storage states, transport failures, and other implementation mechanics are not
 part of the routine user-facing response. The one-to-three-sentence shape applies
 to routine captures, corrections, and short factual reads; the structured Daily
-Coach brief has no conflicting sentence limit.
-
-Staging still exposes the previously deployed 23-tool contract until the
-separately approved coordinated deployment and OAuth reconnect. The scope
-contraction invalidates the existing refresh grant under the Identity
-allowlist, so repository acceptance alone is not a live cutover.
+Coach brief has no conflicting sentence limit and may not add an action beyond
+the API-owned assessment. Factual-only or assessment-unavailable projection
+results deliberately omit the generic Coach next-step policy so that it cannot
+override their fail-closed contract.
 
 The MCP initialization response and every tool description publish the same
 PostgreSQL-authority, no-Google-Sheets-fallback, and fail-closed guidance.
 This metadata guides ChatGPT behavior; hard enforcement remains Person-scoped
 OAuth authorization plus PostgreSQL-backed API/domain services with no Sheets
 writer or fallback dependency.
-
-Repository acceptance of the new daily read does not change the deployed MCP
-catalog until a separately approved migration and coordinated deployment.
 
 Authenticated Web exposes one `Chat with your AI Coach` action on Progress.
 The link opens the server-owned launcher in a new top-level browsing context
