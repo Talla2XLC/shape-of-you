@@ -77,7 +77,7 @@ import type { WeightMeasurementService } from "../weight-measurements/weight-mea
 import type { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
 import type { DailyProjectionService } from "../daily-projections/daily-projection.service.js";
 import type { DailyAssessmentService } from "../coaching/daily-assessment.service.js";
-import { NotFoundError } from "../domain/errors.js";
+import { ConflictError, NotFoundError } from "../domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
@@ -203,9 +203,17 @@ const mealWriteResultContent = coachResultContent(
   "Do not say calories are unavailable merely because exact grams were not measured."
 );
 
+const mealCorrectionWriteResultContent = coachResultContent(
+  "The Meal correction has been committed. The returned structured Meal is the canonical transaction result and sufficient typed verification of this write. " +
+  "Do not call list_meals solely to prove that this correction succeeded, and never retract this success because a later optional read is unavailable. " +
+  "Use list_meals only when the user also requested the updated day collection or totals. Acknowledge the persisted correction naturally without exposing internal mechanics."
+);
+
 const mealReadResultContent = coachResultContent(
   "Use these meal facts silently. Acknowledge what was eaten, interpret the nutrition, and give one concrete useful next step. " +
-  "Use stored estimates as approximate values rather than hiding them because exact grams were not measured."
+  "Use stored estimates as approximate values rather than hiding them because exact grams were not measured. " +
+  "Only when the user's unambiguous Meal correction is still pending and no successful correction result has been returned for it, select the current matching Meal from this result, preserve its complete canonical fields and items, overlay only the user's clarification, and immediately perform the correction with that current id. " +
+  "If a successful correction result was already returned, this optional day or totals read must not reapply that correction. Do not ask the user to repeat or confirm the correction."
 );
 
 const workoutWriteResultContent = coachResultContent(
@@ -278,8 +286,8 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "This MCP is the only interactive writer. Keep tool, schema, status, identifier, storage, API, and implementation details out of user-facing replies. " +
   "After a routine fact capture or correction, acknowledge the fact and never invent precision. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
-  "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always read back successful writes and fail closed when MCP authorization, a required tool, or read-back is unavailable or inconsistent. " +
-  "A routine create does not require a pre-read. After a Meal write, call list_meals with localDate only for read-back; do not pass timezone or write fields to list_meals. " +
+  "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always require a typed owning-domain result before claiming success and fail closed when MCP authorization or a required tool is unavailable or inconsistent. " +
+  "A routine create does not require a pre-read. Before a Meal correction, call list_meals with localDate only, select the current Meal, preserve the complete canonical snapshot, and overlay the user's clarification before calling correct_meal. A successful correct_meal result already contains the committed canonical Meal and is sufficient typed verification; do not perform another list solely to prove success. After a Meal create, call list_meals with localDate only for read-back. Never pass timezone or write fields to list_meals. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
@@ -453,6 +461,15 @@ function createServer(
       if (error instanceof ConnectorInputError) {
         return inputErrorResult(definition.tool.name);
       }
+      if (
+        definition.tool.name === "correct_meal" &&
+        (error instanceof ConflictError || error instanceof NotFoundError)
+      ) {
+        return mealCorrectionErrorResult("stale_or_missing_target");
+      }
+      if (definition.tool.name === "correct_meal") {
+        return mealCorrectionErrorResult("retryable_failure");
+      }
       return errorResult(coachFailureResultContent(
         definition.write
           ? "The requested fact was not saved. Say this briefly and naturally without blaming the user."
@@ -556,7 +573,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_meal",
-      "Immediately append one idempotent full-replacement correction to a uniquely identified current Meal without duplicate confirmation. Preserve or improve every item and provide non-unknown amount evidence plus numeric best-effort calories, protein, fat, and carbohydrates; do not replace a useful estimate with an incomplete Meal. Follow with date-scoped read-back, then reply in natural coach language without exposing contract fields or tool mechanics.",
+      "Immediately append one idempotent full-replacement correction to a uniquely identified current Meal without duplicate confirmation. Preserve or improve every item and provide non-unknown amount evidence plus numeric best-effort calories, protein, fat, and carbohydrates; do not replace a useful estimate with an incomplete Meal. The returned canonical Meal is sufficient typed verification; use a later date-scoped read only when the user also requested the updated day or totals, and never reapply an already successful correction. Reply in natural coach language without exposing contract fields or tool mechanics.",
       withIdSchema("CorrectMealToolInput", correctMealToolInputSchema),
       undefined,
       true,
@@ -565,7 +582,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
         input.id as string,
         normalizeMealInput(input, validateCorrectMeal) as unknown as CorrectMeal
       )).meal,
-      () => mealWriteResultContent
+      () => mealCorrectionWriteResultContent
     ),
     defineTool(
       "get_active_training_program",
@@ -1219,12 +1236,22 @@ function successResult(value: unknown, content?: string): CallToolResult {
   };
 }
 
-function errorResult(message: string): CallToolResult {
-  return { isError: true, content: [{ type: "text", text: message }] };
+function errorResult(
+  message: string,
+  structuredContent?: Readonly<Record<string, unknown>>
+): CallToolResult {
+  return {
+    isError: true,
+    content: [{ type: "text", text: message }],
+    ...(structuredContent ? { structuredContent } : {})
+  };
 }
 
 function inputErrorResult(toolName: string): CallToolResult {
-  if (toolName === "record_meal" || toolName === "correct_meal") {
+  if (toolName === "correct_meal") {
+    return mealCorrectionErrorResult("invalid_replacement");
+  }
+  if (toolName === "record_meal") {
     return errorResult(coachFailureResultContent(
       "Retry the Meal once silently from the photo and text already present in the conversation. Every identifiable item must have non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates; estimate realistic portions with text/photo method and bounded confidence because exact measured grams are not required. Do not ask the user for values that can be reasonably estimated, do not save an incomplete Meal, and do not mention internal completeness, tools, staging, APIs, contracts, fields, or this retry. If material food or scale is genuinely unidentifiable, ask one natural clarification instead of claiming it was saved."
     ));
@@ -1249,6 +1276,32 @@ function inputErrorResult(toolName: string): CallToolResult {
   return errorResult(coachFailureResultContent(
     "Retry once silently using the unambiguous facts already present. If essential meaning is genuinely ambiguous, ask one natural clarification; otherwise say briefly that this item could not be completed."
   ));
+}
+
+type MealCorrectionFailureReason =
+  | "invalid_replacement"
+  | "stale_or_missing_target"
+  | "retryable_failure";
+
+function mealCorrectionErrorResult(
+  reason: MealCorrectionFailureReason
+): CallToolResult {
+  const recovery = reason === "retryable_failure"
+    ? "retry_same_correction_once"
+    : "read_current_meal_rebuild_and_retry";
+  const instruction = reason === "retryable_failure"
+    ? "MEAL CORRECTION NOT SAVED: Retry the exact same correction once with the same idempotency key. If it still fails, say naturally that saving is temporarily unavailable."
+    : "MEAL CORRECTION NOT SAVED: Call list_meals for the local date already present in the correction, select the current matching Meal, preserve every canonical field and item, overlay only the user's clarification, and retry correct_meal once with the current id and a correction-specific idempotency key.";
+  return errorResult(
+    coachFailureResultContent(
+      `${instruction} Keep the user's unambiguous clarification as pending correction intent and do not ask them to repeat or reconfirm it. Until a typed success is returned, never claim it was saved or promise to use the unpersisted value in later totals, assessments, or recommendations. Keep this recovery flow and all tool names, ids, fields, and error categories out of the user-facing reply.`
+    ),
+    {
+      state: "not_saved",
+      reason,
+      recovery
+    }
+  );
 }
 
 function authorizationErrorResult(

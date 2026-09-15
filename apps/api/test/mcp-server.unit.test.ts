@@ -17,7 +17,7 @@ import type {
 } from "@shape-of-you/contracts";
 
 import { RequestPersonContext } from "../src/application/person-context.js";
-import { NotFoundError } from "../src/domain/errors.js";
+import { ConflictError, NotFoundError } from "../src/domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
@@ -255,10 +255,16 @@ describe("MCP HTTP adapter", () => {
       "direct relevant user report authorizes one routine low-risk"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Always read back successful writes"
+      "Always require a typed owning-domain result before claiming success"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "A routine create does not require a pre-read"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Before a Meal correction, call list_meals with localDate only"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "sufficient typed verification; do not perform another list solely to prove success"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "list_meals with localDate only"
@@ -491,6 +497,15 @@ describe("MCP HTTP adapter", () => {
     }
     const correctMealTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "correct_meal"
+    );
+    expect(correctMealTool?.description).toContain(
+      "returned canonical Meal is sufficient typed verification"
+    );
+    expect(correctMealTool?.description).toContain(
+      "never reapply an already successful correction"
+    );
+    expect(correctMealTool?.description).not.toContain(
+      "Follow with date-scoped read-back"
     );
     expectLegacyMealToolCompatibility("record_meal", recordMealTool?.inputSchema);
     expectLegacyMealToolCompatibility("correct_meal", correctMealTool?.inputSchema);
@@ -1284,6 +1299,9 @@ describe("MCP HTTP adapter", () => {
     const createWeight = vi.fn().mockResolvedValue(
       created("measurement", "record_weight_measurement")
     );
+    const correctMeal = vi.fn().mockResolvedValue(
+      created("meal", "correct_meal")
+    );
     const readDailyAssessment = vi.fn<() => Promise<DailyAssessmentResult>>().mockResolvedValue({
       state: "timezone_required" as const,
       timezone: null
@@ -1380,7 +1398,7 @@ describe("MCP HTTP adapter", () => {
         nutrition: {
           listMeals: async () => result("list_meals"),
           createMeal: async () => created("meal", "record_meal"),
-          correctMeal: async () => created("meal", "correct_meal")
+          correctMeal
         },
         training: {
           findActiveProgram: async () => result("get_active_training_program"),
@@ -1473,6 +1491,12 @@ describe("MCP HTTP adapter", () => {
       dedupeKey: "coach-policy-note"
     };
     const id = "00000000-0000-4000-8000-000000000401";
+    const mealCorrection = {
+      id,
+      ...meal,
+      dedupeKey: "coach-policy-meal-correction",
+      reason: "Correction"
+    };
     const cases = [
       ["list_weight_measurements", {}, "list_weight_measurements"],
       ["record_weight_measurement", weight, "record_weight_measurement"],
@@ -1482,7 +1506,7 @@ describe("MCP HTTP adapter", () => {
       ["correct_body_measurements", { id, ...body, dedupeKey: "coach-policy-body-correction", reason: "Correction" }, "correct_body_measurements"],
       ["list_meals", { localDate: "2026-09-02" }, "list_meals"],
       ["record_meal", meal, "record_meal"],
-      ["correct_meal", { id, ...meal, dedupeKey: "coach-policy-meal-correction", reason: "Correction" }, "correct_meal"],
+      ["correct_meal", mealCorrection, "correct_meal"],
       ["get_active_training_program", {}, "get_active_training_program"],
       ["list_workout_sessions", { localDate: "2026-09-02" }, "list_workout_sessions"],
       ["record_workout_session", workout, "record_workout_session"],
@@ -1566,6 +1590,119 @@ describe("MCP HTTP adapter", () => {
       expect(successfulContent.get("record_weight_measurement")).toContain(
         "owning-domain read-back"
       );
+      expect(successfulContent.get("list_meals")).toContain(
+        "select the current matching Meal from this result"
+      );
+      expect(successfulContent.get("list_meals")).toContain(
+        "no successful correction result has been returned for it"
+      );
+      expect(successfulContent.get("list_meals")).toContain(
+        "must not reapply that correction"
+      );
+      expect(successfulContent.get("correct_meal")).toContain(
+        "returned structured Meal is the canonical transaction result and sufficient typed verification"
+      );
+      expect(successfulContent.get("correct_meal")).toContain(
+        "Do not call list_meals solely to prove that this correction succeeded"
+      );
+
+      const callMealCorrection = async (
+        rpcId: string,
+        arguments_: Record<string, unknown>
+      ) => (await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: rpcId,
+          method: "tools/call",
+          params: { name: "correct_meal", arguments: arguments_ }
+        }
+      })).json().result;
+
+      const invalidCorrection = await callMealCorrection(
+        "invalid-meal-correction",
+        {
+          ...mealCorrection,
+          dedupeKey: "coach-policy-meal-correction-invalid",
+          items: [{
+            label: "Meal",
+            nutrients: {
+              caloriesKcal: 100,
+              proteinG: null,
+              fatG: null,
+              carbsG: null
+            }
+          }]
+        }
+      );
+      expect(invalidCorrection).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "invalid_replacement",
+          recovery: "read_current_meal_rebuild_and_retry"
+        }
+      });
+      expect(invalidCorrection.content[0].text).toContain(
+        "select the current matching Meal"
+      );
+      expect(invalidCorrection.content[0].text).toContain(
+        "never claim it was saved or promise to use the unpersisted value"
+      );
+
+      for (const [reason, error] of [
+        ["conflict", new ConflictError("Meal was already superseded")],
+        ["not-found", new NotFoundError("Meal was not found")]
+      ] as const) {
+        correctMeal.mockRejectedValueOnce(error);
+        const staleCorrection = await callMealCorrection(
+          `stale-meal-correction-${reason}`,
+          {
+            ...mealCorrection,
+            dedupeKey: `coach-policy-meal-correction-${reason}`
+          }
+        );
+        expect(staleCorrection).toMatchObject({
+          isError: true,
+          structuredContent: {
+            state: "not_saved",
+            reason: "stale_or_missing_target",
+            recovery: "read_current_meal_rebuild_and_retry"
+          }
+        });
+        expect(staleCorrection.content[0].text).toContain(
+          "retry correct_meal once with the current id"
+        );
+      }
+
+      correctMeal.mockRejectedValueOnce(new Error("temporary database failure"));
+      const retryableCorrection = await callMealCorrection(
+        "retryable-meal-correction",
+        {
+          ...mealCorrection,
+          dedupeKey: "coach-policy-meal-correction-retryable"
+        }
+      );
+      expect(retryableCorrection).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "retryable_failure",
+          recovery: "retry_same_correction_once"
+        }
+      });
+      expect(retryableCorrection.content[0].text).toContain(
+        "Retry the exact same correction once with the same idempotency key"
+      );
+      expect(retryableCorrection.content[0].text).toContain(
+        "never claim it was saved or promise to use the unpersisted value"
+      );
+
       readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
       const compatibleDailyProjection = await authorizedFastify.inject({
         method: "POST",

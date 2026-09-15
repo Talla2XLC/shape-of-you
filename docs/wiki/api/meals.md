@@ -75,6 +75,20 @@ natural clarification instead of saving an incomplete interactive Meal.
 User-facing replies describe stored estimates as approximate, and a later
 clarification uses the existing append-only full-snapshot correction.
 
+Natural Meal corrections use a current-read transaction protocol. Before
+assembling the full replacement, the Coach reads the exact local date, selects
+the current matching Meal, preserves its canonical fields and items, and
+overlays only the user's clarification. A successful `correct_meal` response
+contains the canonical Meal serialized from the committed transaction and is
+sufficient write verification; another list is used only when the user also
+requested the updated day or totals, and it must not replay the correction.
+Invalid replacements return a machine-readable re-read/rebuild/retry state;
+stale or missing targets require the same rebase onto the current Meal; other
+execution failures permit one retry with the same idempotency key. Until typed
+success, the clarification remains pending intent and cannot be presented or
+used as a persisted fact. These recovery details remain model-facing and are
+not exposed in the natural user reply.
+
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and
 is never converted to zero. Daily totals also return `incompleteMealCount`; an
@@ -90,6 +104,8 @@ detail creates an append-only full-snapshot correction.
 
 - Nutrition contracts/controller/integration tests.
 - TASK-0086 accepted MCP photo-estimation and read-back fixture.
+- TASK-0114 accepted current-read correction assembly, typed recovery states,
+  canonical command verification, and replay prevention tests.
 
 ## Decisions
 
@@ -99,6 +115,7 @@ detail creates an append-only full-snapshot correction.
   completeness into a user workflow or blocking direct fact capture.
 - [Unquantified Meal amount and natural Coach language](../../adr/20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md).
 - [Backward-compatible MCP tool schemas](../../adr/20260902-evolve-mcp-tool-schemas-backward-compatibly.md).
+- [Transactional Meal correction recovery](../../adr/20260915-make-meal-correction-recovery-transactional.md).
 
 ## Open questions
 

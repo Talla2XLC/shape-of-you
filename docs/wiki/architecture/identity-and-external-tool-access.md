@@ -336,11 +336,12 @@ explicit approval. No client may fall back to chat history or Google Sheets.
 
 Daily Coach is an interaction protocol inside that same conversation, not a
 new chat runtime or persisted daily-plan boundary. MCP initialization guidance
-requires an exact Person-local date and IANA timezone, calls
-`get_daily_projection` first, and uses only the additional typed reads needed
-for the answer. The response separates typed planned artifacts, current Coach
-proposals, and owning-domain facts that are actually completed, then presents
-one clear next step plus bounded nutrition, training, and recovery proposals.
+uses `get_daily_assessment` as the decision authority when the current catalog
+contains it. An already open conversation can receive the exact same current
+assessment through fresh model-facing content of its stable
+`get_daily_projection` read without changing that tool's structured contract.
+The response preserves the API-returned status and one action rather than
+adding prompt-owned nutrition, training, or recovery proposals.
 Missing tools, MCP/OAuth authority, or typed read-back stop the workflow without
 another data source or chat-history fallback. A failed, unavailable,
 incomplete, or inconsistent required typed read leaves the affected field
@@ -352,15 +353,21 @@ A direct relevant user report authorizes one routine low-risk idempotent create
 or correction through an existing typed Person-scoped tool without a duplicate
 confirmation question. The Coach performs the unambiguous operation instead of
 offering to record, correct, or estimate it later. The Coach follows every
-successful mutation with an owning-domain typed read-back. Unknown optional values remain partial/null;
+successful mutation with an owning-domain typed result. That result may be a
+separate read or a canonical snapshot returned from the committed command.
+Unknown optional values remain partial/null;
 later precise input appends a correction. Irreducible target/date/domain
 ambiguity and destructive, credential, administrative, or material goal and
 program changes remain confirmation-gated. ChatGPT native permission behavior
 changes only during the separately approved connector cutover.
-Routine creates do not require a pre-read. Meal read-back calls `list_meals`
-with the exact `localDate` input only; the tool does not accept a redundant
-timezone or write-command fields. This keeps the strict typed contract while
-preventing an unrelated pre-read argument error from becoming a write gate.
+Routine creates do not require a pre-read. A Meal create is followed by
+`list_meals` with the exact `localDate` input only. A Meal correction first uses
+that same read to select the current complete Meal, overlays the user's
+clarification, and submits one append-only full replacement. The canonical Meal
+returned by a successful correction is sufficient verification, so an optional
+later day/totals read cannot retract or replay it. Invalid or stale corrections
+return typed recovery states that direct a bounded re-read/rebuild/retry flow;
+an unpersisted clarification never becomes current authority.
 
 The single staging connector has completed the deployed 23-tool discovery and
 all 14 required synthetic writer/lifecycle canaries with read-back. TASK-0065
