@@ -188,16 +188,28 @@ describe("MCP HTTP adapter", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().result.instructions).toBe(MCP_OPERATIONAL_INSTRUCTIONS);
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "MUST call get_daily_assessment first"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Never reconstruct or alter that decision from get_daily_projection"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
       "call get_daily_projection first"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Planned, Proposed now, and Actually completed separately"
+      "Outside a full Daily Coach assessment, present Planned, Proposed now, and Actually completed separately"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "an accepted recommendation is not executed"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "one clear Next step"
+      "Outside a full Daily Coach assessment, give one clear Next step"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
+      "Give one clear Next step plus"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "state missing evidence instead of inventing a plan"
@@ -212,7 +224,7 @@ describe("MCP HTTP adapter", () => {
       "only status absent proves that no active program exists"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Before training or recovery advice, read the composed training context"
+      "Outside a full Daily Coach assessment, before focused training or recovery advice"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "without asking the user to send a screenshot"
@@ -281,6 +293,8 @@ describe("MCP HTTP adapter", () => {
       "Always use the user's language"
     );
     const priorityInstructions = MCP_OPERATIONAL_INSTRUCTIONS.slice(0, 512);
+    expect(priorityInstructions).toContain("call get_daily_assessment");
+    expect(priorityInstructions).toContain("sole decision authority");
     expect(priorityInstructions).toContain(
       "Keep internal mechanics invisible in user-facing replies"
     );
@@ -418,7 +432,8 @@ describe("MCP HTTP adapter", () => {
       annotations: { readOnlyHint: true, destructiveHint: false },
       securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
     });
-    expect(dailyAssessmentTool.description).toContain("do not recreate the policy in prompts");
+    expect(dailyAssessmentTool.description).toContain("mandatory and sole decision authority");
+    expect(dailyAssessmentTool.description).toContain("do not recreate or embellish the policy in prompts");
     const dailyAssessmentAjv = new Ajv({ strict: false });
     const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
     installFormats(dailyAssessmentAjv);
@@ -1458,6 +1473,9 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.content[0].text, name).toContain(
             "Do not recalculate, replace, or embellish the policy decision"
           );
+          expect(toolResult.content[0].text, name).toContain(
+            "Do not add a duration, intensity, workout, medical rationale, trend, or substitute action"
+          );
         } else if (name === "get_active_training_program") {
           expect(toolResult.structuredContent, name).toMatchObject({
             status: "active",
@@ -1863,7 +1881,16 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(dailyProjectionResult.content[0].text).toContain(
-        "one clear Next step plus bounded nutrition, training, and recovery guidance"
+        "only as a factual view of recorded owning-domain data"
+      );
+      expect(dailyProjectionResult.content[0].text).toContain(
+        "call get_daily_assessment and preserve that result as the sole decision authority"
+      );
+      expect(dailyProjectionResult.content[0].text).toContain(
+        "stop without reconstructing a decision"
+      );
+      expect(dailyProjectionResult.content[0].text).not.toContain(
+        "give one clear Next step plus bounded nutrition, training, and recovery guidance"
       );
       expect(dailyProjectionResult.content[0].text).toContain(MCP_COACH_REPLY_POLICY);
       expect((await call(10, "record_meal", {
