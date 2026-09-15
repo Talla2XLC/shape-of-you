@@ -27,6 +27,14 @@ intentionally deferred.
 The system should answer: what happened, what the evidence may mean, what
 action is safe today, why it is recommended, and what still needs confirmation.
 
+The API now owns the first deterministic daily assessment. For the same current
+facts, Person-local day, and policy version, every approved client receives the
+same safe status and one explainable next action. Missing sleep, HRV, resting
+heart rate, Body Battery, Training, active program, Weight, or Nutrition evidence
+is shown explicitly instead of being replaced by a guessed conclusion. ChatGPT
+remains the conversation and presentation layer: it explains the result but
+does not invent the underlying decision.
+
 The authenticated Web entry point is `/progress`. It shows factual trends for
 the trailing week, month, or year, preserves missing data as gaps, and links
 only dates with current facts to the exact dated record.
@@ -59,6 +67,8 @@ Safety position:
 - A focused progress overview precedes any customizable dashboard surface.
 - Profile data readiness is explainable per direction rather than combined into
   one score.
+- Daily decisions are deterministic API-owned policy snapshots; the LLM is not
+  the decision engine.
 
 ## Open questions
 
@@ -71,3 +81,4 @@ Safety position:
 - [Scope](scope.md)
 - [Domain overview](../domain/overview.md)
 - [Architecture drivers](../architecture/drivers.md)
+- [Coaching and decision support](../domain/coaching-and-decision-support.md)

@@ -78,7 +78,10 @@ manual fallback, not the normal ingestion path for the supported metrics.
 Connection erasure uses an API-owned durable request.
 Fresh passkey authentication quarantines the connection immediately, while an
 idempotent worker removes connection-derived observations, assessments, and
-Coaching outputs, plus linked Training facts. The worker cannot claim the
+Coaching outputs, including daily assessment snapshots that contain relational
+links to erased Recovery observations, plus linked Training facts. The worker
+deletes those derived daily recommendations in the same transaction before it
+removes the observation graph. The worker cannot claim the
 request until its accepted intent has been sealed into the independent journal
 and acknowledged in PostgreSQL.
 Exact `retainUntil` expiry uses the same path. Manual observations without a
@@ -128,6 +131,8 @@ not physiological readiness or medical quality.
 
 - Recovery schema/contracts/integration tests.
 - `TASK-0110` independent Quality and Architecture Review acceptance.
+- `TASK-0112` Recovery correction, withdrawal, and derived-snapshot erasure
+  integration tests.
 
 ## Decisions
 
@@ -139,6 +144,7 @@ not physiological readiness or medical quality.
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
 - [Typed Intervals wellness import](../../adr/20260912-import-supported-intervals-wellness-as-typed-recovery.md).
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md).
+- [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 
 ## Open questions
 

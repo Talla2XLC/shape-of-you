@@ -15,8 +15,8 @@ tags:
 ## Summary
 
 Implemented Coaching separates immutable recommendations, user decisions, and
-executed domain facts. The first slice supports typed training adjustment and
-never applies it automatically.
+executed domain facts. It supports typed training adjustments and an API-owned,
+explainable daily assessment; neither is applied automatically.
 
 ## Content
 
@@ -34,6 +34,25 @@ TrainingProgramVersion/assignment, and optional sessions. It may hold the
 assignment, propose target weight, or propose a repetition range, changing at
 most one parameter. It creates no program/session change.
 
+The `daily_next_action` recommendation is a lazily materialized immutable
+snapshot for the current Person-local date. The API gathers current typed
+Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile
+coverage, and applies the code-owned `daily-assessment-v1` policy. The result
+contains a safe day status, used facts, important missing data, typed reasons,
+one recommended action, bounded alternatives, limitations, confidence, policy
+version, and evidence checksum. Identical evidence reuses the snapshot; a late
+or corrected fact or active TrainingProgramVersion changes the checksum and
+selects a new snapshot. Historical snapshots remain audit evidence unless
+Recovery erasure removes a snapshot derived from the erased observations.
+
+Recovery still owns physiological evidence, load-risk assessments, hard stops,
+and erasure. Training still owns active programs, sessions, and connected
+activity facts. Coaching may recommend recovery first, collecting one missing
+check-in, following the active program without progression, completing a
+nutrition record, or confirming a program. It cannot invent a workout,
+exercise, set, load, schedule, diagnosis, or completed fact. Hard stops dominate
+Training signals, and sparse evidence cannot produce a new prescription.
+
 The Daily Coach presentation preserves the same boundary across existing MCP
 tools. `Planned` contains only typed plan artifacts, currently the active
 TrainingProgramVersion and prescriptions. `Proposed now` contains bounded,
@@ -42,7 +61,16 @@ completed` contains only current owning-domain facts verified through typed
 reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
 chat message never proves execution.
 
-The exact-date starting point is the always-live `get_daily_projection` read.
+The exact-date factual view remains the always-live `get_daily_projection`
+read. A full Daily Coach decision starts with `get_daily_assessment`; ChatGPT
+explains the returned status, reasons, missing evidence, confidence, and action
+without recalculating them in the prompt. The tool has empty input, uses the
+existing `person:read` scope, and is read-only. Snapshot materialization is an
+internal idempotent API responsibility and does not grant MCP write authority.
+The Person-owned IANA timezone determines the local date. Until it is stored
+through the authenticated first-party HTTP boundary, the read returns
+`timezone_required` rather than guessing from chat, browser, or provider data.
+
 A direct relevant user report authorizes one routine low-risk idempotent write
 through the owning typed tool without a duplicate confirmation question. The
 Coach performs typed read-back before declaring success. Unknown optional
@@ -108,6 +136,8 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 
 - Coaching schema/contracts/integration tests.
 - TASK-0086 accepted MCP photo-estimation and read-back fixture.
+- TASK-0112 accepted daily policy, MCP, migration, correction, timezone,
+  Person-isolation, and Recovery-erasure tests.
 
 ## Decisions
 
@@ -119,11 +149,12 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
+- [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 
 ## Open questions
 
-- Production policy activation, difficulty/exercise replacement, other
-  recommendation kinds, and explicit execution linkage.
+- Production activation, difficulty/exercise replacement, future daily policy
+  versions, and explicit execution linkage.
 
 ## Related material
 

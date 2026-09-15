@@ -1313,6 +1313,20 @@ export class RecoveryRepository implements RecoveryStore {
       ));
 
     await transaction.execute(sql`
+      delete from coaching_recommendations
+       where person_id = ${personId}
+         and id in (
+           select evidence.recommendation_id
+             from coaching_daily_assessment_recovery_evidence evidence
+            where evidence.person_id = ${personId}
+              and evidence.observation_id in (
+                select id from recovery_observations
+                 where person_id = ${personId} and connection_id = ${connectionId}
+              )
+         )
+    `);
+
+    await transaction.execute(sql`
       delete from coaching_recommendation_decisions
        where recommendation_id in (
          select evidence.recommendation_id

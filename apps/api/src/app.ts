@@ -70,6 +70,7 @@ import { TrainingService } from "./training/training.service.js";
 import { RecoveryService } from "./recovery/recovery.service.js";
 import { DailyContextNoteService } from "./daily-context-notes/daily-context-note.service.js";
 import { DailyProjectionService } from "./daily-projections/daily-projection.service.js";
+import { DailyAssessmentService } from "./coaching/daily-assessment.service.js";
 import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
 import { McpAuthorizer } from "./mcp/oauth.js";
 import { registerMcpRoutes } from "./mcp/server.js";
@@ -78,6 +79,11 @@ import {
   ChatAssistantConversationBindingRepository,
   type ChatAssistantConversationBindingStore
 } from "./storage/chat-assistant-conversation-binding-repository.js";
+import {
+  DailyAssessmentRepository,
+  InMemoryDailyAssessmentStore,
+  type DailyAssessmentStore
+} from "./storage/daily-assessment-repository.js";
 
 /** Explicit dependencies and validated configuration used to build the API. */
 export interface BuildAppOptions {
@@ -103,6 +109,8 @@ export interface BuildAppOptions {
   readonly recoveryErasureWorkerEnabled?: boolean;
   /** Optional Coaching persistence used for isolated application tests. */
   readonly coachingStore?: CoachingStore;
+  /** Optional daily assessment persistence used for isolated application tests. */
+  readonly dailyAssessmentStore?: DailyAssessmentStore;
   /** Optional Intake persistence used for isolated application tests. */
   readonly intakeStore?: IntakeStore;
   /** Optional DailyContextNote persistence used for isolated application tests. */
@@ -172,6 +180,9 @@ export async function buildApp(
   const coachingStore =
     options.coachingStore ??
     (database ? new CoachingRepository(database) : undefined);
+  const dailyAssessmentStore =
+    options.dailyAssessmentStore ??
+    (database ? new DailyAssessmentRepository(database) : new InMemoryDailyAssessmentStore());
   const intakeStore =
     options.intakeStore ??
     (database ? new IntakeRepository(database) : undefined);
@@ -290,6 +301,7 @@ export async function buildApp(
       recoveryErasureWorkerEnabled:
         options.recoveryErasureWorkerEnabled ?? options.config.NODE_ENV !== "test",
       coachingStore,
+      dailyAssessmentStore,
       intakeStore,
       dailyContextNoteStore,
       chatAssistantConversationBindingStore,
@@ -332,7 +344,8 @@ export async function buildApp(
         training: app.get(TrainingService),
         recovery: app.get(RecoveryService),
         dailyContextNotes: app.get(DailyContextNoteService),
-        dailyProjection: app.get(DailyProjectionService)
+        dailyProjection: app.get(DailyProjectionService),
+        dailyAssessment: app.get(DailyAssessmentService)
       }
     });
   }

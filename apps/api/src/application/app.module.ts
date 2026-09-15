@@ -12,6 +12,7 @@ import type { NutritionStore } from "../storage/nutrition-repository.js";
 import type { TrainingStore } from "../storage/training-repository.js";
 import type { RecoveryStore } from "../storage/recovery-repository.js";
 import type { CoachingStore } from "../storage/coaching-repository.js";
+import type { DailyAssessmentStore } from "../storage/daily-assessment-repository.js";
 import type { IntakeStore } from "../storage/intake-repository.js";
 import type { IntakeParser } from "../domain/intake.js";
 import type { DailyContextNoteStore } from "../storage/daily-context-note-repository.js";
@@ -41,6 +42,7 @@ import {
   RECOVERY_STORE,
   RECOVERY_ERASURE_WORKER_ENABLED,
   COACHING_STORE,
+  DAILY_ASSESSMENT_STORE,
   INTAKE_PARSER,
   INTAKE_STORE,
   READINESS_PROBE,
@@ -73,6 +75,8 @@ export interface AppModuleOptions {
   readonly recoveryErasureWorkerEnabled: boolean;
   /** Persistence boundary used by the Coaching module. */
   readonly coachingStore: CoachingStore;
+  /** Persistence boundary for Person timezone and daily assessment snapshots. */
+  readonly dailyAssessmentStore: DailyAssessmentStore;
   /** Persistence boundary used by durable Intake orchestration. */
   readonly intakeStore: IntakeStore;
   /** Optional provider adapter; null leaves queued work durable but unclaimed. */
@@ -141,6 +145,10 @@ class RuntimeDependenciesModule {
           useValue: options.coachingStore
         },
         {
+          provide: DAILY_ASSESSMENT_STORE,
+          useValue: options.dailyAssessmentStore
+        },
+        {
           provide: INTAKE_STORE,
           useValue: options.intakeStore
         },
@@ -181,6 +189,7 @@ class RuntimeDependenciesModule {
         RECOVERY_STORE,
         RECOVERY_ERASURE_WORKER_ENABLED,
         COACHING_STORE,
+        DAILY_ASSESSMENT_STORE,
         INTAKE_STORE,
         INTAKE_PARSER,
         DAILY_CONTEXT_NOTE_STORE,

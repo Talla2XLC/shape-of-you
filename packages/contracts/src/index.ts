@@ -2,6 +2,7 @@ export * from "./common.js";
 export * from "./chat-assistant.js";
 export * from "./daily-context-note.js";
 export * from "./daily-projection.js";
+export * from "./daily-assessment.js";
 export * from "./coaching.js";
 export * from "./body-measurement-session.js";
 export * from "./intake.js";

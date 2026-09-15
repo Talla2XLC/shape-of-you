@@ -32,6 +32,9 @@ export const RECOVERY_ERASURE_WORKER_ENABLED = Symbol(
 /** Injection token for Coaching recommendations and decisions. */
 export const COACHING_STORE = Symbol("COACHING_STORE");
 
+/** Injection token for Person preferences and immutable daily assessment snapshots. */
+export const DAILY_ASSESSMENT_STORE = Symbol("DAILY_ASSESSMENT_STORE");
+
 /** Injection token for durable Intake orchestration persistence. */
 export const INTAKE_STORE = Symbol("INTAKE_STORE");
 

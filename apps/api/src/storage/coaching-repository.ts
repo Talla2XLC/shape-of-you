@@ -369,6 +369,7 @@ export class CoachingRepository implements CoachingStore {
         .where(and(
           eq(coachingRecommendations.id, recommendationId),
           eq(coachingRecommendations.personId, personId),
+          eq(coachingRecommendations.kind, "training_adjustment"),
           this.visibleRecommendation(transaction)
         ))
         .limit(1);
@@ -422,6 +423,7 @@ export class CoachingRepository implements CoachingStore {
       const rows = await transaction.select().from(coachingRecommendations).where(and(
         eq(coachingRecommendations.id, id),
         eq(coachingRecommendations.personId, personId),
+        eq(coachingRecommendations.kind, "training_adjustment"),
         this.visibleRecommendation(transaction)
       )).limit(1);
       return rows[0]
@@ -440,6 +442,7 @@ export class CoachingRepository implements CoachingStore {
         .from(coachingRecommendations)
         .where(and(
           eq(coachingRecommendations.personId, personId),
+          eq(coachingRecommendations.kind, "training_adjustment"),
           this.visibleRecommendation(transaction)
         ))
         .orderBy(desc(coachingRecommendations.asOf), desc(coachingRecommendations.id));
@@ -465,6 +468,7 @@ export class CoachingRepository implements CoachingStore {
         .from(coachingRecommendations)
         .where(and(
           eq(coachingRecommendations.personId, personId),
+          eq(coachingRecommendations.kind, "training_adjustment"),
           this.visibleRecommendation(transaction)
         ))
         .orderBy(desc(coachingRecommendations.asOf), desc(coachingRecommendations.id));
@@ -489,6 +493,7 @@ export class CoachingRepository implements CoachingStore {
         .from(coachingRecommendations)
         .where(and(
           eq(coachingRecommendations.personId, personId),
+          eq(coachingRecommendations.kind, "training_adjustment"),
           this.visibleRecommendation(transaction),
           sql<boolean>`(${coachingRecommendations.asOf} at time zone ${timezone})::date >= ${from}::date`,
           sql<boolean>`(${coachingRecommendations.asOf} at time zone ${timezone})::date <= ${to}::date`
@@ -657,7 +662,7 @@ export class CoachingRepository implements CoachingStore {
     return {
       id: row.id,
       personId: row.personId,
-      kind: row.kind,
+      kind: "training_adjustment",
       policyVersionId: row.policyVersionId,
       state: deriveCoachingRecommendationState(row.expiresAt, decision, now),
       asOf: row.asOf.toISOString(),

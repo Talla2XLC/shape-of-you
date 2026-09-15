@@ -17,6 +17,7 @@ import {
   CreateWeightMeasurementSchema,
   CreateWorkoutSessionSchema,
   DailyContextNoteListSchema,
+  DailyAssessmentResultSchema,
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
   ListDailyContextNotesQuerySchema,
@@ -74,6 +75,7 @@ import type { TrainingService } from "../training/training.service.js";
 import type { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
 import type { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
 import type { DailyProjectionService } from "../daily-projections/daily-projection.service.js";
+import type { DailyAssessmentService } from "../coaching/daily-assessment.service.js";
 import { NotFoundError } from "../domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
@@ -104,6 +106,7 @@ interface McpServices {
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
+  readonly dailyAssessment?: Pick<DailyAssessmentService, "read">;
 }
 
 /** Dependencies required by the API-owned stateless MCP transport adapter. */
@@ -222,6 +225,11 @@ const activeTrainingProgramResultContent = coachResultContent(
 
 const trainingContextResultContent = coachResultContent(
   "Use an active program as planned authority. Keep detailed completed sessions separate from connected activity summaries. A connected summary confirms the activity and load shown but never supplies exercises or sets. When the program is absent, historical evidence is proposal input only and must never be presented as an existing plan."
+);
+
+const dailyAssessmentResultContent = coachResultContent(
+  "Treat this API-owned daily assessment as the decision authority: explain its exact status, reasons, missing data, confidence, and single recommended next action. Do not recalculate, replace, or embellish the policy decision. If timezone is required, ask the user to configure it through the first-party API; this read-only MCP tool cannot write preferences.",
+  dailyCoachReplyShape
 );
 
 const confirmedTrainingProgramWriteResultContent = coachResultContent(
@@ -675,6 +683,16 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       true,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       async (input) => (await services.dailyContextNotes.correct(input.id as string, input as unknown as CorrectDailyContextNote)).note
+    ),
+    defineTool(
+      "get_daily_assessment",
+      "Read the deterministic API-owned assessment and explainable next action for the authorized Person's current local day. Use it as the primary Daily Coach decision; do not recreate the policy in prompts.",
+      emptyObjectSchema("GetDailyAssessmentInput"),
+      DailyAssessmentResultSchema,
+      false,
+      MCP_READ_SCOPE,
+      () => services.dailyAssessment?.read() ?? Promise.reject(new Error("Daily assessment service is unavailable")),
+      () => dailyAssessmentResultContent
     ),
     defineTool(
       "get_daily_projection",

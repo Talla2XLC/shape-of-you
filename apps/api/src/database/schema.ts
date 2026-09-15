@@ -10,6 +10,7 @@ import {
   numeric,
   pgEnum,
   pgTable,
+  primaryKey,
   smallint,
   text,
   timestamp,
@@ -19,6 +20,7 @@ import {
   varchar,
   type AnyPgColumn
 } from "drizzle-orm/pg-core";
+import type { DailyAssessmentUsedFacts, DailyNextAction } from "@shape-of-you/contracts";
 
 export const personKind = pgEnum("person_kind", ["real", "synthetic"]);
 export const personStatus = pgEnum("person_status", ["active", "archived"]);
@@ -258,8 +260,11 @@ export const integrationInboxStatus = pgEnum("integration_inbox_status", [
 ]);
 export const coachingRecommendationKind = pgEnum(
   "coaching_recommendation_kind",
-  ["training_adjustment"]
+  ["training_adjustment", "daily_next_action"]
 );
+export const dailyAssessmentStatus = pgEnum("daily_assessment_status", [
+  "ready", "caution", "recovery_priority", "insufficient_data"
+]);
 export const coachingTrainingAdjustmentAction = pgEnum(
   "coaching_training_adjustment_action",
   ["hold", "target_weight", "repetition_range"]
@@ -374,6 +379,7 @@ export const persons = pgTable("persons", {
   id: uuid("id").defaultRandom().primaryKey(),
   kind: personKind("kind").default("real").notNull(),
   status: personStatus("status").default("active").notNull(),
+  timezone: varchar("timezone", { length: 64 }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
     .defaultNow()
     .notNull(),
@@ -3421,6 +3427,61 @@ export const coachingRecommendations = pgTable(
       table.evidenceChecksum
     ),
     check("coaching_recommendations_expiry", sql`${table.expiresAt} > ${table.asOf}`)
+  ]
+);
+
+/** Typed immutable detail for the API-owned daily recommendation snapshot. */
+export const coachingDailyAssessmentDetails = pgTable(
+  "coaching_daily_assessment_details",
+  {
+    recommendationId: uuid("recommendation_id").primaryKey(),
+    personId: uuid("person_id").notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    status: dailyAssessmentStatus("status").notNull(),
+    confidence: numeric("confidence", { precision: 4, scale: 3 }).notNull(),
+    policyVersion: varchar("policy_version", { length: 128 }).notNull(),
+    usedFacts: jsonb("used_facts").$type<DailyAssessmentUsedFacts>().notNull(),
+    missingImportantData: text("missing_important_data").array().notNull(),
+    reasons: text("reasons").array().notNull(),
+    recommendedAction: jsonb("recommended_action").$type<DailyNextAction>().notNull(),
+    alternatives: jsonb("alternatives").$type<DailyNextAction[]>().notNull(),
+    limitations: text("limitations").array().notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coaching_daily_assessment_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    index("coaching_daily_assessment_person_date_idx").on(table.personId, table.localDate),
+    check("coaching_daily_assessment_confidence", sql`${table.confidence} BETWEEN 0 AND 1`)
+  ]
+);
+
+/** Relational evidence needed to erase snapshots derived from Recovery facts. */
+export const coachingDailyAssessmentRecoveryEvidence = pgTable(
+  "coaching_daily_assessment_recovery_evidence",
+  {
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    observationId: uuid("observation_id").notNull()
+  },
+  (table) => [
+    primaryKey({
+      name: "coach_daily_recovery_evidence_pk",
+      columns: [table.recommendationId, table.observationId]
+    }),
+    foreignKey({
+      name: "coach_daily_recovery_evidence_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coach_daily_recovery_evidence_observation_fk",
+      columns: [table.observationId, table.personId],
+      foreignColumns: [recoveryObservations.id, recoveryObservations.personId]
+    }).onDelete("cascade")
   ]
 );
 

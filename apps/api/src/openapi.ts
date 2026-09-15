@@ -106,6 +106,9 @@ import {
   IntakeRequestSchema,
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
+  DailyAssessmentResultSchema,
+  PersonPreferencesSchema,
+  UpdatePersonPreferencesSchema,
   ProgressOverviewQuerySchema,
   ProgressOverviewSchema,
   ProgressDataCoverageQuerySchema,
@@ -1193,6 +1196,31 @@ function dailyProjectionPaths(): Record<string, object> {
   };
 }
 
+function dailyAssessmentPaths(): Record<string, object> {
+  return {
+    "/v1/daily-assessment": {
+      get: {
+        tags: ["daily-assessment"],
+        summary: "Read the current API-owned daily assessment and next action",
+        responses: { "200": { description: "Current deterministic assessment", content: { "application/json": { schema: DailyAssessmentResultSchema } } } }
+      }
+    },
+    "/v1/daily-assessment/preferences": {
+      get: {
+        tags: ["daily-assessment"],
+        summary: "Read Person-owned daily assessment preferences",
+        responses: { "200": { description: "Person preferences", content: { "application/json": { schema: PersonPreferencesSchema } } } }
+      },
+      put: {
+        tags: ["daily-assessment"],
+        summary: "Replace the Person-owned local timezone",
+        requestBody: { required: true, content: { "application/json": { schema: UpdatePersonPreferencesSchema } } },
+        responses: { "200": { description: "Updated Person preferences", content: { "application/json": { schema: PersonPreferencesSchema } } } }
+      }
+    }
+  };
+}
+
 function dailyContextNotePaths(): Record<string, object> {
   const idParameter = schemaParameter(
     "id",
@@ -1590,6 +1618,7 @@ export function createOpenApiDocument(): object {
       ...coachingPaths(),
       ...dailyContextNotePaths(),
       ...dailyProjectionPaths(),
+      ...dailyAssessmentPaths(),
       ...progressOverviewPaths(),
       ...intakePaths(),
       ...integrationPaths()

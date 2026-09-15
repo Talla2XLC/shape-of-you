@@ -236,7 +236,7 @@ the API deployable. Its internal endpoint is `/mcp`; staging exposes it as
 protected-resource metadata, advertises per-tool security schemes, and returns
 standards-complete OAuth challenges.
 
-The repository allowlist contains 20 tools covering reads, typed writes,
+The repository allowlist contains 23 tools covering reads, typed writes,
 append-only corrections, active Training references, and the always-live daily
 projection for Weight, Body, Meal, WorkoutSession, RecoveryObservation, and
 DailyContextNote. Reads require `person:read`; each write uses its
@@ -251,6 +251,14 @@ read, so an isolated invalid fact does not suppress the remaining valid facts.
 Tools delegate to existing application contracts, so validation, idempotency,
 provenance, correction policy, and audit remain domain responsibilities rather
 than MCP-specific logic.
+
+`get_daily_assessment` is a mutation-free `person:read` tool for the current
+Person-local day. It returns the API-owned deterministic status, evidence,
+missing-data reasons, confidence, policy version, alternatives, and exactly one
+next action. Its presentation contract tells ChatGPT to explain that result
+without recalculating or replacing the decision. Person timezone changes remain
+on the authenticated first-party HTTP boundary; MCP receives no additional
+write scope.
 
 An existing MCP tool name is also a compatibility identity. Its published
 input schema evolves additively: new fields are optional, old fields remain,
@@ -291,6 +299,9 @@ PostgreSQL-authority, no-Google-Sheets-fallback, and fail-closed guidance.
 This metadata guides ChatGPT behavior; hard enforcement remains Person-scoped
 OAuth authorization plus PostgreSQL-backed API/domain services with no Sheets
 writer or fallback dependency.
+
+Repository acceptance of the new daily read does not change the deployed MCP
+catalog until a separately approved migration and coordinated deployment.
 
 Authenticated Web exposes one `Chat with your AI Coach` action on Progress.
 The link opens the server-owned launcher in a new top-level browsing context

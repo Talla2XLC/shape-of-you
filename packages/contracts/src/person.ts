@@ -27,6 +27,31 @@ export const PersonSchema = {
 /** Domain identity of a person whose fitness data is managed. */
 export type Person = FromSchema<typeof PersonSchema>;
 
+export const PersonPreferencesSchema = {
+  $id: "PersonPreferences",
+  type: "object",
+  additionalProperties: false,
+  required: ["timezone", "updatedAt"],
+  properties: {
+    timezone: { anyOf: [{ type: "string", minLength: 1, maxLength: 64 }, { type: "null" }] },
+    updatedAt: { type: "string", format: "date-time" }
+  }
+} as const;
+
+/** Person-owned preferences required by cross-client local-day decisions. */
+export type PersonPreferences = FromSchema<typeof PersonPreferencesSchema>;
+
+export const UpdatePersonPreferencesSchema = {
+  $id: "UpdatePersonPreferences",
+  type: "object",
+  additionalProperties: false,
+  required: ["timezone"],
+  properties: { timezone: { type: "string", minLength: 1, maxLength: 64 } }
+} as const;
+
+/** Authenticated command replacing the Person-owned local timezone. */
+export type UpdatePersonPreferences = FromSchema<typeof UpdatePersonPreferencesSchema>;
+
 export const PersonAccessRoleSchema = {
   type: "string",
   enum: ["owner", "editor", "viewer", "coach"]

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
 import {
   createLocalJWKSet,
   exportJWK,
@@ -363,7 +364,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(22);
+    expect(body.result.tools).toHaveLength(23);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -402,11 +403,28 @@ describe("MCP HTTP adapter", () => {
       list_daily_context_notes: MCP_READ_SCOPE,
       record_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       correct_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+      get_daily_assessment: MCP_READ_SCOPE,
       get_daily_projection: MCP_READ_SCOPE
     });
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
     )?.description).toContain("follow with typed read-back");
+    const dailyAssessmentTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "get_daily_assessment"
+    );
+    expect(dailyAssessmentTool).toMatchObject({
+      inputSchema: { $id: "GetDailyAssessmentInput", additionalProperties: false },
+      outputSchema: { $id: "DailyAssessmentResult", oneOf: expect.any(Array) },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+      securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
+    });
+    expect(dailyAssessmentTool.description).toContain("do not recreate the policy in prompts");
+    const dailyAssessmentAjv = new Ajv({ strict: false });
+    const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
+    installFormats(dailyAssessmentAjv);
+    const validateDailyAssessment = dailyAssessmentAjv.compile(dailyAssessmentTool.outputSchema);
+    expect(validateDailyAssessment({ state: "timezone_required", timezone: null })).toBe(true);
+    expect(validateDailyAssessment({ state: "timezone_required", timezone: "UTC" })).toBe(false);
     for (const toolName of [
       "record_weight_measurement",
       "correct_weight_measurement"
@@ -1250,6 +1268,10 @@ describe("MCP HTTP adapter", () => {
     const createWeight = vi.fn().mockResolvedValue(
       created("measurement", "record_weight_measurement")
     );
+    const readDailyAssessment = vi.fn().mockResolvedValue({
+      state: "timezone_required" as const,
+      timezone: null
+    });
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1303,6 +1325,9 @@ describe("MCP HTTP adapter", () => {
         },
         dailyProjection: {
           projection: async () => result("get_daily_projection")
+        },
+        dailyAssessment: {
+          read: readDailyAssessment
         }
       } as unknown as Parameters<typeof registerMcpRoutes>[0]["services"]
     });
@@ -1393,6 +1418,7 @@ describe("MCP HTTP adapter", () => {
       ["list_daily_context_notes", { localDate: "2026-09-02" }, "list_daily_context_notes"],
       ["record_daily_context_note", note, "record_daily_context_note"],
       ["correct_daily_context_note", { id, ...note, dedupeKey: "coach-policy-note-correction", reason: "Correction" }, "correct_daily_context_note"],
+      ["get_daily_assessment", {}, "timezone_required"],
       ["get_daily_projection", { localDate: "2026-09-02", timezone: "Europe/Moscow" }, "get_daily_projection"]
     ] as const;
 
@@ -1424,7 +1450,15 @@ describe("MCP HTTP adapter", () => {
         expect(toolResult.content[0].text, name).toMatch(
           /MANDATORY FINAL REPLY:[\s\S]*never silently omit the next step\.$/u
         );
-        if (name === "get_active_training_program") {
+        if (name === "get_daily_assessment") {
+          expect(toolResult.structuredContent, name).toEqual({
+            state: "timezone_required",
+            timezone: null
+          });
+          expect(toolResult.content[0].text, name).toContain(
+            "Do not recalculate, replace, or embellish the policy decision"
+          );
+        } else if (name === "get_active_training_program") {
           expect(toolResult.structuredContent, name).toMatchObject({
             status: "active",
             program: { marker }
@@ -1445,9 +1479,30 @@ describe("MCP HTTP adapter", () => {
         );
       }
       expect(createWeight).toHaveBeenCalledWith(weight);
+      expect(readDailyAssessment).toHaveBeenCalledOnce();
       expect(successfulContent.get("record_weight_measurement")).toContain(
         "owning-domain read-back"
       );
+      readDailyAssessment.mockRejectedValueOnce(new Error("assessment unavailable"));
+      const failedDailyAssessment = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "daily-assessment-failure",
+          method: "tools/call",
+          params: { name: "get_daily_assessment", arguments: {} }
+        }
+      });
+      expect(failedDailyAssessment.json().result).toMatchObject({
+        isError: true,
+        content: [{ text: expect.stringContaining("could not be retrieved") }]
+      });
+      expect(failedDailyAssessment.json().result.structuredContent).toBeUndefined();
       for (const weightKg of ["77.1", 77.1234, 0.499, 700.001]) {
         const invalidResponse = await authorizedFastify.inject({
           method: "POST",
