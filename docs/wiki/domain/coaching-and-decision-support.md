@@ -45,6 +45,26 @@ or corrected fact or active TrainingProgramVersion changes the checksum and
 selects a new snapshot. Historical snapshots remain audit evidence unless
 Recovery erasure removes a snapshot derived from the erased observations.
 
+Personal-baseline support currently exists only as a read-only retrospective
+calibration path; `daily-assessment-v1` remains the production authority. Its
+analytics keep two independent modes. `stored_v1` starts from an immutable v1
+snapshot and is the only exact record of a historical or displayed decision.
+`counterfactual_current_facts_v1` runs the same v1 evaluator over current,
+corrected daily projections but does not reconstruct the exact historical
+input, full reasons, missing-data list, confidence, alternatives, or what the
+user saw. Because historical TrainingProgram activation is unavailable, it
+evaluates `program_absent` and `program_present`; a differing status or action
+type makes the day `ambiguous_program_state`. Ambiguous and unavailable days
+break counterfactual continuity, and stored and counterfactual distributions,
+transitions, and reversals never mix. A mode-labelled sensitivity ranking is
+emitted only with at least 30 comparable days and is not activation evidence.
+Candidate baselines use bounded provider-neutral owner reads, robust daily
+samples, absolute safety guardrails, and a warm-up interval outside the reported
+range. The command creates no assessment or recommendation and emits only a
+fixed aggregate report without dates, values, Person identifiers, provider
+identities, or daily rows. Real-history execution requires separate environment
+and Person authorization. Production `daily-assessment-v2` is not activated.
+
 Recovery still owns physiological evidence, load-risk assessments, hard stops,
 and erasure. Training still owns active programs, sessions, and connected
 activity facts. Coaching may recommend recovery first, collecting one missing
@@ -162,11 +182,14 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).
+- [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
+- [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 
 ## Open questions
 
-- Production activation, difficulty/exercise replacement, future daily policy
-  versions, and explicit execution linkage.
+- Personal-baseline candidate calibration, typed Training load-basis
+  compatibility, production activation, difficulty/exercise replacement,
+  future daily policy versions, and explicit execution linkage.
 
 ## Related material
 

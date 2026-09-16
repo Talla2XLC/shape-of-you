@@ -49,6 +49,14 @@ export const sourceChannel = pgEnum("source_channel", [
   "device",
   "account"
 ]);
+export const dailyContextKind = pgEnum("daily_context_kind", [
+  "general",
+  "travel"
+]);
+export const baselineEligibility = pgEnum("baseline_eligibility", [
+  "include",
+  "exclude"
+]);
 export const evidencePurpose = pgEnum("evidence_purpose", [
   "person_context",
   "operational_verification"
@@ -604,6 +612,10 @@ export const dailyContextNotes = pgTable(
     localDate: date("local_date", { mode: "string" }).notNull(),
     timezone: varchar("timezone", { length: 64 }).notNull(),
     text: text("text").notNull(),
+    contextKind: dailyContextKind("context_kind").default("general").notNull(),
+    baselineEligibility: baselineEligibility("baseline_eligibility")
+      .default("include")
+      .notNull(),
     source: sourceChannel("source").notNull(),
     sourceReferenceId: uuid("source_reference_id").notNull(),
     dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
@@ -643,6 +655,10 @@ export const dailyContextNotes = pgTable(
       table.createdAt
     ),
     check("daily_context_notes_text_nonempty", sql`length(${table.text}) > 0`),
+    check(
+      "daily_context_notes_baseline_eligibility",
+      sql`(${table.contextKind} = 'travel' AND ${table.baselineEligibility} = 'exclude') OR (${table.contextKind} = 'general' AND ${table.baselineEligibility} = 'include')`
+    ),
     check(
       "daily_context_notes_confidence_range",
       sql`${table.confidence} IS NULL OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`

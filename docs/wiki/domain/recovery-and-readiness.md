@@ -127,6 +127,23 @@ Body Battery needs either a direct point or both daily minimum and maximum to
 make that date usable. These coverage statuses describe evidence sufficiency,
 not physiological readiness or medical quality.
 
+The personal-baseline shadow path uses a separate Recovery-owned bounded
+history reader. It admits only current, non-withdrawn `person_context` evidence
+with usable quality, keeps metric and unit semantics separate, and excludes
+facts hidden by a pending erasure request. Subjective acute-illness and injury
+concern observations remain available to the safety stream even when they are
+not baseline samples. A stored daily assessment is comparable only while its
+complete Recovery evidence set still resolves to current observations for the
+same Person and no linked consent or connection is being erased. Corrections,
+withdrawals, supersession, late imports, and erasure therefore fail closed
+instead of silently reusing stale evidence.
+
+For counterfactual calibration, Recovery supplies provider-neutral daily
+representatives plus current valid assessment, risk, and hard-stop evidence.
+Corrections, withdrawals, supersession, late imports, and erasure change the
+next replay. Daily consolidation is a current projection and is not an exact
+reconstruction of the observation ordering used by a historical live v1 read.
+
 ## Evidence
 
 - Recovery schema/contracts/integration tests.
@@ -145,6 +162,8 @@ not physiological readiness or medical quality.
 - [Typed Intervals wellness import](../../adr/20260912-import-supported-intervals-wellness-as-typed-recovery.md).
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
+- [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
+- [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 
 ## Open questions
 

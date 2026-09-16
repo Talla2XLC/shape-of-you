@@ -32,7 +32,8 @@
     "identity-access:revoke": "tsx src/commands/change-identity-access.ts --action revoke",
     "chat-assistant:binding": "tsx src/commands/manage-chat-assistant-binding.ts",
     "recovery-erasure:manifest": "tsx src/commands/manage-recovery-erasure-manifest.ts",
-    "recovery-erasure:journal": "tsx src/commands/manage-recovery-erasure-journal.ts"
+    "recovery-erasure:journal": "tsx src/commands/manage-recovery-erasure-journal.ts",
+    "daily-assessment:retrospective": "tsx src/commands/run-daily-assessment-retrospective.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",

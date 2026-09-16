@@ -18,6 +18,8 @@ const noteInputProperties = {
   localDate: localDateSchema,
   timezone: { type: "string", minLength: 1, maxLength: 64 },
   text: { type: "string", minLength: 1, maxLength: 4_000 },
+  contextKind: { type: "string", enum: ["general", "travel"] },
+  baselineEligibility: { type: "string", enum: ["include", "exclude"] },
   sourceReference: SourceReferenceInputSchema,
   dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
   confidence: nullableConfidenceSchema
@@ -33,6 +35,8 @@ export const DailyContextNoteSchema = {
     "localDate",
     "timezone",
     "text",
+    "contextKind",
+    "baselineEligibility",
     "sourceReference",
     "dedupeKey",
     "confidence",

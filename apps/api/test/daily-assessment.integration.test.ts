@@ -9,6 +9,8 @@ import { createDatabase, type DatabaseContext } from "../src/database/context.js
 import { runMigrations } from "../src/database/migrate.js";
 import { DailyAssessmentRepository } from "../src/storage/daily-assessment-repository.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
+import { readRecoveryBaselineDays } from "../src/recovery/personal-baseline-history.js";
+import { loadRetrospectiveEvidence } from "../src/commands/run-daily-assessment-retrospective.js";
 
 const personId = "00000000-0000-4000-8000-000000000001";
 const otherPersonId = "00000000-0000-4000-8000-000000000002";
@@ -51,6 +53,66 @@ afterAll(async () => {
 });
 
 describe("API-owned daily assessment", () => {
+  it("ignores operational travel notes in retrospective baseline exclusions", async () => {
+    const sourceRows = await database.pool.query<{ id: string; evidence_purpose: string }>(
+      `insert into source_references
+         (person_id, channel, evidence_purpose, contains_sensitive_data)
+       values ($1, 'manual', 'operational_verification', false),
+              ($1, 'manual', 'person_context', false)
+       returning id, evidence_purpose::text`,
+      [personId]
+    );
+    const operationalSource = sourceRows.rows.find(
+      (row) => row.evidence_purpose === "operational_verification"
+    )!;
+    const personSource = sourceRows.rows.find(
+      (row) => row.evidence_purpose === "person_context"
+    )!;
+    await database.pool.query(
+      `insert into daily_context_notes
+         (person_id, local_date, timezone, text, context_kind,
+          baseline_eligibility, source, source_reference_id, dedupe_key)
+       values ($1, '2026-09-01', 'UTC', 'synthetic travel', 'travel',
+               'exclude', 'manual', $2, 'operational-travel'),
+              ($1, '2026-09-02', 'UTC', 'travel', 'travel',
+               'exclude', 'manual', $3, 'person-travel')`,
+      [personId, operationalSource.id, personSource.id]
+    );
+    const client = await database.pool.connect();
+    try {
+      const evidence = await loadRetrospectiveEvidence(
+        client, personId, "2026-09-01", "2026-09-02"
+      );
+      expect(evidence).toHaveLength(2);
+      expect(evidence.find((day) => day.localDate === "2026-09-01"))
+        .toMatchObject({ baselineExcluded: false });
+      expect(evidence.find((day) => day.localDate === "2026-09-02"))
+        .toMatchObject({ baselineExcluded: true });
+    } finally {
+      client.release();
+    }
+  });
+
+  it("performs no Coaching writes during counterfactual replay", async () => {
+    const before = await database.pool.query<{ recommendations: string; details: string }>(
+      `select
+         (select count(*) from coaching_recommendations)::text as recommendations,
+         (select count(*) from coaching_daily_assessment_details)::text as details`
+    );
+    const client = await database.pool.connect();
+    try {
+      await loadRetrospectiveEvidence(client, otherPersonId, "2026-08-01", "2026-08-03");
+    } finally {
+      client.release();
+    }
+    const after = await database.pool.query<{ recommendations: string; details: string }>(
+      `select
+         (select count(*) from coaching_recommendations)::text as recommendations,
+         (select count(*) from coaching_daily_assessment_details)::text as details`
+    );
+    expect(after.rows).toEqual(before.rows);
+  });
+
   it("requires Person timezone and versions snapshots when typed evidence changes", async () => {
     const fastify = getFastifyInstance(app);
     const unset = await fastify.inject({ method: "GET", url: "/v1/daily-assessment" });
@@ -187,6 +249,20 @@ describe("API-owned daily assessment", () => {
       "retention_expired",
       null
     );
+    const pendingClient = await database.pool.connect();
+    try {
+      const pendingEvidence = await loadRetrospectiveEvidence(
+        pendingClient,
+        personId,
+        withRecovery.json().localDate,
+        withRecovery.json().localDate
+      );
+      expect(pendingEvidence.find(
+        (day) => day.localDate === withRecovery.json().localDate
+      )?.v1Status).toBeUndefined();
+    } finally {
+      pendingClient.release();
+    }
     await database.pool.query(
       "update recovery_erasure_requests set journal_accepted_at = now() where id = $1",
       [request.id]
@@ -230,6 +306,17 @@ describe("API-owned daily assessment", () => {
       detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" }
     })).observation;
     const versionA = await fastify.inject({ method: "GET", url: "/v1/daily-assessment" });
+    const ownerClient = await database.pool.connect();
+    try {
+      expect(await readRecoveryBaselineDays(
+        ownerClient, personId, original.localDate, original.localDate
+      )).toEqual([expect.objectContaining({ hrvRmssd: 48 })]);
+      expect(await readRecoveryBaselineDays(
+        ownerClient, otherPersonId, original.localDate, original.localDate
+      )).toEqual([]);
+    } finally {
+      ownerClient.release();
+    }
 
     const corrected = (await recovery.correctObservation(personId, original.id, {
       ...base,
@@ -241,6 +328,14 @@ describe("API-owned daily assessment", () => {
     expect(versionB.json().snapshotId).not.toBe(versionA.json().snapshotId);
     expect(versionB.json().usedFacts.recoveryObservationIds).toContain(corrected.id);
     expect(versionB.json().usedFacts.recoveryObservationIds).not.toContain(original.id);
+    const correctedClient = await database.pool.connect();
+    try {
+      expect(await readRecoveryBaselineDays(
+        correctedClient, personId, corrected.localDate, corrected.localDate
+      )).toEqual([expect.objectContaining({ hrvRmssd: 52 })]);
+    } finally {
+      correctedClient.release();
+    }
 
     await recovery.withdrawObservation(
       personId,
@@ -251,5 +346,13 @@ describe("API-owned daily assessment", () => {
     const withdrawn = await fastify.inject({ method: "GET", url: "/v1/daily-assessment" });
     expect(withdrawn.json().snapshotId).not.toBe(versionB.json().snapshotId);
     expect(withdrawn.json().usedFacts.recoveryObservationIds).not.toContain(corrected.id);
+    const withdrawnClient = await database.pool.connect();
+    try {
+      expect(await readRecoveryBaselineDays(
+        withdrawnClient, personId, corrected.localDate, corrected.localDate
+      )).toEqual([]);
+    } finally {
+      withdrawnClient.release();
+    }
   });
 });

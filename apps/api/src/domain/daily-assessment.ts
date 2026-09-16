@@ -6,6 +6,16 @@ import type {
   DailyNextAction
 } from "@shape-of-you/contracts";
 
+/** Canonical v1 absolute metric guardrails reused by conservative overlays. */
+export function isDailyAssessmentAbsoluteMetricConcern(
+  metric: "sleep_minutes" | "body_battery" | "training_load",
+  value: number
+): boolean {
+  if (metric === "sleep_minutes") return value < 360;
+  if (metric === "body_battery") return value <= 35;
+  return value >= 100;
+}
+
 export const DAILY_ASSESSMENT_POLICY_VERSION = "daily-assessment-v1" as const;
 
 export interface DailyAssessmentEvaluation {
@@ -45,11 +55,16 @@ export function evaluateDailyAssessment(facts: DailyAssessmentUsedFacts): DailyA
   ].filter((value) => value !== null).length;
   const recoveryAssessment = facts.recoveryAssessmentIds.length > 0 || recoverySignalCount >= 2;
   const hardStop = summary.recoveryHardStop || summary.recoveryRiskLevel === "blocked";
-  const shortSleep = summary.sleepMinutes !== null && summary.sleepMinutes < 360;
+  const shortSleep = summary.sleepMinutes !== null &&
+    isDailyAssessmentAbsoluteMetricConcern("sleep_minutes", summary.sleepMinutes);
   const lowHrv = summary.hrvMs !== null && summary.hrvBaselineMs !== null && summary.hrvMs < summary.hrvBaselineMs * 0.8;
   const highRhr = summary.restingHeartRateBpm !== null && summary.restingHeartRateBaselineBpm !== null && summary.restingHeartRateBpm > summary.restingHeartRateBaselineBpm * 1.1;
-  const lowBattery = (summary.bodyBattery ?? summary.bodyBatteryMax) !== null && (summary.bodyBattery ?? summary.bodyBatteryMax)! <= 35;
-  const highLoad = (summary.recentTrainingLoad ?? 0) >= 100 || summary.recentWorkoutCount >= 2;
+  const battery = summary.bodyBattery ?? summary.bodyBatteryMax;
+  const lowBattery = battery !== null &&
+    isDailyAssessmentAbsoluteMetricConcern("body_battery", battery);
+  const highLoad = isDailyAssessmentAbsoluteMetricConcern(
+    "training_load", summary.recentTrainingLoad ?? 0
+  ) || summary.recentWorkoutCount >= 2;
   if (hardStop) reasons.push("recovery_hard_stop");
   if (shortSleep) reasons.push("short_sleep");
   if (lowHrv) reasons.push("hrv_below_baseline");

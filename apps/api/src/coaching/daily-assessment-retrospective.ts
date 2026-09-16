@@ -1,0 +1,646 @@
+import {
+  compareWithPersonalBaseline,
+  isPersistentDeviation,
+  personalBaselineCenter,
+  personalBaselineCandidates,
+  personalBaselineMetrics,
+  type PersonalBaselineMetric,
+  type PersonalBaselinePolicy,
+  type PersonalBaselineSample
+} from "../domain/personal-baseline.js";
+import { isDailyAssessmentAbsoluteMetricConcern } from "../domain/daily-assessment.js";
+
+/** Provider-neutral evidence for one Person-local day in a shadow evaluation. */
+export interface RetrospectiveDailyEvidence {
+  readonly localDate: string;
+  readonly values: Readonly<Partial<Record<PersonalBaselineMetric, number>>>;
+  readonly acuteIllness: boolean;
+  readonly injuryConcern: boolean;
+  readonly recoveryAssessmentPresent: boolean;
+  readonly recoveryHardStop: boolean;
+  readonly baselineExcluded: boolean;
+  readonly trainingLoadIncompatible: boolean;
+  readonly trainingLoadSeriesKey: string | null;
+  readonly workoutSessionCount: number;
+  readonly externalActivityCount?: number;
+  readonly recoveryRiskLevel?: "low" | "moderate" | "high" | "blocked" | null;
+  readonly v1Status?: "ready" | "caution" | "recovery_priority" | "insufficient_data";
+  readonly v1Action?: "recovery_first" | "record_recovery_check_in" |
+    "follow_active_program" | "complete_nutrition_record" | "record_weight" |
+    "confirm_training_program";
+  readonly v1AbsoluteGuardrail?: boolean;
+  readonly counterfactualV1?: {
+    readonly outcome: "comparable" | "ambiguous_program_state";
+    readonly status?: "ready" | "caution" | "recovery_priority" | "insufficient_data";
+    readonly action?: ShadowAction;
+    readonly absoluteGuardrail?: boolean;
+  };
+  readonly contextEligibilityAvailable?: boolean;
+}
+
+type ShadowStatus = "ready" | "caution" | "recovery_priority" | "insufficient_data";
+type ShadowAction = NonNullable<RetrospectiveDailyEvidence["v1Action"]>;
+type V1Status = NonNullable<RetrospectiveDailyEvidence["v1Status"]>;
+type V1Transition = `${V1Status}->${ShadowStatus}`;
+
+/** Aggregate-only result for one candidate; no dates or raw facts are exposed. */
+export interface RetrospectiveCandidateReport {
+  readonly candidate: PersonalBaselinePolicy["key"];
+  readonly evaluatedDayCount: number;
+  readonly baselineAvailableDayCounts: Readonly<Record<PersonalBaselineMetric, number>>;
+  readonly insufficientHistoryDayCounts: Readonly<Record<PersonalBaselineMetric, number>>;
+  readonly belowUsualCounts: Readonly<Record<PersonalBaselineMetric, number>>;
+  readonly aboveUsualCounts: Readonly<Record<PersonalBaselineMetric, number>>;
+  readonly markedDeviationCount: number;
+  readonly severeSingleDayJumpCount: number;
+  readonly statusCounts: Readonly<Record<ShadowStatus, number>>;
+  readonly actionCounts: Readonly<Record<ShadowAction, number>>;
+  readonly v1ComparableDayCount: number;
+  readonly storedV1ComparableDayCount: number;
+  readonly counterfactualComparableDayCount: number;
+  readonly counterfactualAmbiguousProgramStateDayCount: number;
+  readonly counterfactualUnavailableDayCount: number;
+  readonly missingV1SnapshotDayCount: number;
+  readonly v1ToHybridTransitionCounts: Readonly<Record<V1Transition, number>>;
+  readonly statusTransitionCount: number;
+  readonly abruptReversalCount: number;
+  readonly absoluteGuardrailDayCount: number;
+  readonly persistentTrendDecisionCount: number;
+  readonly excludedBaselineDayCount: number;
+  readonly unstableBaselineDayCount: number;
+  readonly chronicAdverseBaselineWarningCount: number;
+  readonly missingCurrentValueCounts: Readonly<Record<PersonalBaselineMetric, number>>;
+  readonly exclusionReasonCounts: {
+    readonly explicit_context: number;
+    readonly recovery_hard_stop: number;
+    readonly recovery_buffer: number;
+    readonly unstable_multi_signal_shift: number;
+    readonly incompatible_training_load: number;
+    readonly training_source_series_change: number;
+    readonly context_eligibility_unavailable: number;
+  };
+  readonly invariantViolationCounts: {
+    readonly readyBehindAbsoluteGuardrail: number;
+    readonly recoveryWithoutSupportingSignal: number;
+  };
+  readonly counterfactualStatusCounts: Readonly<Record<ShadowStatus, number>>;
+  readonly counterfactualActionCounts: Readonly<Record<ShadowAction, number>>;
+  readonly counterfactualV1ToHybridTransitionCounts: Readonly<Record<V1Transition, number>>;
+  readonly counterfactualStatusTransitionCount: number;
+  readonly counterfactualAbruptReversalCount: number;
+  readonly counterfactualAbsoluteGuardrailDayCount: number;
+  readonly counterfactualPersistentTrendDecisionCount: number;
+  readonly counterfactualInvariantViolationCounts: {
+    readonly readyBehindAbsoluteGuardrail: number;
+    readonly recoveryWithoutSupportingSignal: number;
+  };
+}
+
+/** Privacy-preserving report emitted by the retrospective shadow evaluator. */
+export interface DailyAssessmentRetrospectiveReport {
+  readonly reportVersion: 2;
+  readonly mode: "read_only_shadow";
+  readonly policyVersion: "personal-baseline-shadow-v1";
+  readonly comparisonModes: readonly ["stored_v1", "counterfactual_current_facts_v1"];
+  readonly evaluatedDayCount: number;
+  readonly candidates: readonly RetrospectiveCandidateReport[];
+  readonly sensitivityRankingMode: "stored_v1" | "counterfactual_current_facts_v1" | "insufficient_evidence";
+  readonly sensitivityRanking: readonly PersonalBaselinePolicy["key"][];
+  readonly privacy: {
+    readonly containsDates: false;
+    readonly containsRawValues: false;
+    readonly containsFactIdentifiers: false;
+  };
+  readonly effects: {
+    readonly recommendationsChanged: false;
+    readonly writesPerformed: false;
+  };
+}
+
+function zeroMetrics(): Record<PersonalBaselineMetric, number> {
+  return Object.fromEntries(
+    personalBaselineMetrics.map((metric) => [metric, 0])
+  ) as Record<PersonalBaselineMetric, number>;
+}
+
+function zeroStatuses(): Record<ShadowStatus, number> {
+  return { ready: 0, caution: 0, recovery_priority: 0, insufficient_data: 0 };
+}
+
+function zeroActions(): Record<ShadowAction, number> {
+  return {
+    recovery_first: 0,
+    record_recovery_check_in: 0,
+    follow_active_program: 0,
+    complete_nutrition_record: 0,
+    record_weight: 0,
+    confirm_training_program: 0
+  };
+}
+
+function zeroInvariantViolations(): {
+  readyBehindAbsoluteGuardrail: number;
+  recoveryWithoutSupportingSignal: number;
+} {
+  return { readyBehindAbsoluteGuardrail: 0, recoveryWithoutSupportingSignal: 0 };
+}
+
+function addCalendarDays(localDate: string, days: number): string {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function zeroV1Transitions(): Record<V1Transition, number> {
+  const result = {} as Record<V1Transition, number>;
+  for (const from of ["ready", "caution", "recovery_priority", "insufficient_data"] as const) {
+    for (const to of ["ready", "caution", "recovery_priority", "insufficient_data"] as const) {
+      result[`${from}->${to}`] = 0;
+    }
+  }
+  return result;
+}
+
+function adverseDirection(metric: PersonalBaselineMetric): "below" | "above" {
+  return metric === "resting_heart_rate" || metric === "training_load"
+    ? "above"
+    : "below";
+}
+
+function hasAdverseCenter(
+  metric: PersonalBaselineMetric,
+  currentLocalDate: string,
+  samples: readonly PersonalBaselineSample[],
+  policy: PersonalBaselinePolicy
+): boolean {
+  const center = personalBaselineCenter(
+    currentLocalDate,
+    samples,
+    policy,
+    metric === "training_load"
+      ? { minimumCalendarSpanDays: policy.minimumTrainingCalendarSpanDays }
+      : undefined
+  );
+  if (center === null) return false;
+  if (metric === "sleep_minutes") {
+    return isDailyAssessmentAbsoluteMetricConcern("sleep_minutes", center);
+  }
+  if (metric === "body_battery" || metric === "body_battery_max") {
+    return isDailyAssessmentAbsoluteMetricConcern("body_battery", center);
+  }
+  if (metric === "training_load") {
+    return isDailyAssessmentAbsoluteMetricConcern("training_load", center);
+  }
+  return false;
+}
+
+function evaluateCandidate(
+  days: readonly RetrospectiveDailyEvidence[],
+  policy: PersonalBaselinePolicy,
+  reportFrom: string
+): RetrospectiveCandidateReport {
+  const baselineAvailableDayCounts = zeroMetrics();
+  const insufficientHistoryDayCounts = zeroMetrics();
+  const belowUsualCounts = zeroMetrics();
+  const aboveUsualCounts = zeroMetrics();
+  const histories = {} as Record<PersonalBaselineMetric, PersonalBaselineSample[]>;
+  const adverseHistory = {} as Record<PersonalBaselineMetric, boolean[]>;
+  const trainingHistories = new Map<string, PersonalBaselineSample[]>();
+  const trainingAdverseHistories = new Map<string, boolean[]>();
+  for (const metric of personalBaselineMetrics) {
+    histories[metric] = [];
+    adverseHistory[metric] = [];
+  }
+  const statusCounts = zeroStatuses();
+  const actionCounts = zeroActions();
+  const v1ToHybridTransitionCounts = zeroV1Transitions();
+  const counterfactualStatusCounts = zeroStatuses();
+  const counterfactualActionCounts = zeroActions();
+  const counterfactualV1ToHybridTransitionCounts = zeroV1Transitions();
+  let v1ComparableDayCount = 0;
+  let storedV1ComparableDayCount = 0;
+  let counterfactualComparableDayCount = 0;
+  let counterfactualAmbiguousProgramStateDayCount = 0;
+  let counterfactualUnavailableDayCount = 0;
+  let missingV1SnapshotDayCount = 0;
+  let markedDeviationCount = 0;
+  let severeSingleDayJumpCount = 0;
+  let statusTransitionCount = 0;
+  let abruptReversalCount = 0;
+  let chronicAdverseBaselineWarningCount = 0;
+  let absoluteGuardrailDayCount = 0;
+  let persistentTrendDecisionCount = 0;
+  let counterfactualStatusTransitionCount = 0;
+  let counterfactualAbruptReversalCount = 0;
+  let counterfactualAbsoluteGuardrailDayCount = 0;
+  let counterfactualPersistentTrendDecisionCount = 0;
+  let excludedBaselineDayCount = 0;
+  let unstableBaselineDayCount = 0;
+  const missingCurrentValueCounts = zeroMetrics();
+  const exclusionReasonCounts = {
+    explicit_context: 0,
+    recovery_hard_stop: 0,
+    recovery_buffer: 0,
+    unstable_multi_signal_shift: 0,
+    incompatible_training_load: 0,
+    training_source_series_change: 0,
+    context_eligibility_unavailable: 0
+  };
+  const invariantViolationCounts = zeroInvariantViolations();
+  const counterfactualInvariantViolationCounts = zeroInvariantViolations();
+  let recoveryBufferThrough: string | null = null;
+  let previousStatus: ShadowStatus | null = null;
+  let previousPreviousStatus: ShadowStatus | null = null;
+  let previousCounterfactualStatus: ShadowStatus | null = null;
+  let previousPreviousCounterfactualStatus: ShadowStatus | null = null;
+  let previousTrainingSeriesKey: string | null = null;
+
+  for (const day of days) {
+    const inReport = day.localDate >= reportFrom;
+    const hardStop = day.acuteIllness || day.injuryConcern || day.recoveryHardStop;
+    const buffered = recoveryBufferThrough !== null && day.localDate <= recoveryBufferThrough;
+    const eligibleBeforeStability = !day.baselineExcluded && !hardStop && !buffered;
+    let adversePersonalSignalCount = 0;
+    let persistentPersonalSignalCount = 0;
+    let markedPersonalSignalCount = 0;
+    let adverseCenterPresent = false;
+    const adverseByMetric = new Map<PersonalBaselineMetric, boolean>();
+    for (const metric of personalBaselineMetrics) {
+      const currentValue = day.values[metric];
+      if (currentValue == null || !Number.isFinite(currentValue)) {
+        if (inReport) missingCurrentValueCounts[metric] += 1;
+        continue;
+      }
+      const seriesKey = day.trainingLoadSeriesKey;
+      const metricHistory = metric === "training_load"
+        ? seriesKey === null
+          ? []
+          : (trainingHistories.get(seriesKey) ?? [])
+        : histories[metric];
+      const comparison = compareWithPersonalBaseline(
+        day.localDate,
+        currentValue,
+        metricHistory,
+        policy,
+        metric === "training_load"
+          ? { minimumCalendarSpanDays: policy.minimumTrainingCalendarSpanDays }
+          : undefined
+      );
+      if (comparison.availability === "available") {
+        if (inReport) {
+          baselineAvailableDayCounts[metric] += 1;
+          if (comparison.position === "below_usual") belowUsualCounts[metric] += 1;
+          if (comparison.position === "above_usual") aboveUsualCounts[metric] += 1;
+        }
+        const adverse =
+          comparison.position ===
+          (adverseDirection(metric) === "below" ? "below_usual" : "above_usual");
+        adverseByMetric.set(metric, adverse);
+        if (adverse && comparison.severity === "marked") {
+          markedPersonalSignalCount += 1;
+        }
+        if (hasAdverseCenter(metric, day.localDate, metricHistory, policy)) {
+          adverseCenterPresent = true;
+          if (inReport) chronicAdverseBaselineWarningCount += 1;
+        }
+      } else if (inReport) {
+        insufficientHistoryDayCounts[metric] += 1;
+      }
+    }
+
+    const unstable =
+      eligibleBeforeStability &&
+      markedPersonalSignalCount >= policy.multiSignalFreezeThreshold;
+    const eligible = eligibleBeforeStability && !unstable;
+    if (inReport && eligibleBeforeStability) {
+      markedDeviationCount += markedPersonalSignalCount;
+      if (markedPersonalSignalCount > 0) severeSingleDayJumpCount += 1;
+    }
+    if (eligible) {
+      for (const [metric, adverse] of adverseByMetric) {
+        const seriesKey = day.trainingLoadSeriesKey;
+        const metricAdverseHistory = metric === "training_load" && seriesKey !== null
+          ? (trainingAdverseHistories.get(seriesKey) ?? [])
+          : adverseHistory[metric];
+        metricAdverseHistory.push(adverse);
+        if (metric === "training_load" && seriesKey !== null) {
+          trainingAdverseHistories.set(seriesKey, metricAdverseHistory);
+        }
+        if (adverse) adversePersonalSignalCount += 1;
+        if (adverse && isPersistentDeviation(metricAdverseHistory, policy)) {
+          persistentPersonalSignalCount += 1;
+        }
+      }
+    }
+    const overlayStatus = (baseStatus: ShadowStatus): ShadowStatus => {
+      if (baseStatus !== "insufficient_data") {
+        if (hardStop || (eligibleBeforeStability && markedPersonalSignalCount >= 2)) {
+          return "recovery_priority";
+        }
+        if (
+          baseStatus === "ready" &&
+          (adverseCenterPresent || persistentPersonalSignalCount > 0 || adversePersonalSignalCount >= 2)
+        ) return "caution";
+      } else if (hardStop) return "recovery_priority";
+      return baseStatus;
+    };
+
+    const hasStoredV1 = day.v1Status !== undefined && day.v1Action !== undefined;
+    if (inReport && hasStoredV1) {
+      const baseStatus = day.v1Status!;
+      const status = overlayStatus(baseStatus);
+      const absoluteGuardrail = day.v1AbsoluteGuardrail === true;
+      v1ComparableDayCount += 1;
+      storedV1ComparableDayCount += 1;
+      statusCounts[status] += 1;
+      actionCounts[status === baseStatus ? day.v1Action! : "recovery_first"] += 1;
+      v1ToHybridTransitionCounts[`${baseStatus}->${status}`] += 1;
+      if (hardStop || absoluteGuardrail) absoluteGuardrailDayCount += 1;
+      if (persistentPersonalSignalCount > 0 && baseStatus === "ready") {
+        persistentTrendDecisionCount += 1;
+      }
+      if (status === "ready" && (hardStop || absoluteGuardrail)) {
+        invariantViolationCounts.readyBehindAbsoluteGuardrail += 1;
+      }
+      if (
+        status === "recovery_priority" && status !== baseStatus &&
+        !hardStop && (!eligibleBeforeStability || markedPersonalSignalCount < 2)
+      ) invariantViolationCounts.recoveryWithoutSupportingSignal += 1;
+      if (previousStatus !== null && previousStatus !== status) statusTransitionCount += 1;
+      if (
+        previousPreviousStatus !== null && previousPreviousStatus === status &&
+        previousStatus !== status
+      ) abruptReversalCount += 1;
+      previousPreviousStatus = previousStatus;
+      previousStatus = status;
+    } else if (inReport) {
+      missingV1SnapshotDayCount += 1;
+      previousStatus = null;
+      previousPreviousStatus = null;
+    }
+
+    const counterfactual = day.counterfactualV1;
+    const hasCounterfactualV1 = counterfactual?.outcome === "comparable" &&
+      counterfactual.status !== undefined && counterfactual.action !== undefined;
+    if (inReport && hasCounterfactualV1) {
+      const baseStatus = counterfactual.status!;
+      const status = overlayStatus(baseStatus);
+      const absoluteGuardrail = counterfactual.absoluteGuardrail === true;
+      counterfactualComparableDayCount += 1;
+      counterfactualStatusCounts[status] += 1;
+      counterfactualActionCounts[
+        status === baseStatus ? counterfactual.action! : "recovery_first"
+      ] += 1;
+      counterfactualV1ToHybridTransitionCounts[`${baseStatus}->${status}`] += 1;
+      if (hardStop || absoluteGuardrail) counterfactualAbsoluteGuardrailDayCount += 1;
+      if (persistentPersonalSignalCount > 0 && baseStatus === "ready") {
+        counterfactualPersistentTrendDecisionCount += 1;
+      }
+      if (status === "ready" && (hardStop || absoluteGuardrail)) {
+        counterfactualInvariantViolationCounts.readyBehindAbsoluteGuardrail += 1;
+      }
+      if (
+        status === "recovery_priority" && status !== baseStatus &&
+        !hardStop && (!eligibleBeforeStability || markedPersonalSignalCount < 2)
+      ) counterfactualInvariantViolationCounts.recoveryWithoutSupportingSignal += 1;
+      if (
+        previousCounterfactualStatus !== null &&
+        previousCounterfactualStatus !== status
+      ) counterfactualStatusTransitionCount += 1;
+      if (
+        previousPreviousCounterfactualStatus !== null &&
+        previousPreviousCounterfactualStatus === status &&
+        previousCounterfactualStatus !== status
+      ) counterfactualAbruptReversalCount += 1;
+      previousPreviousCounterfactualStatus = previousCounterfactualStatus;
+      previousCounterfactualStatus = status;
+    } else if (inReport) {
+      if (counterfactual?.outcome === "ambiguous_program_state") {
+        counterfactualAmbiguousProgramStateDayCount += 1;
+      } else counterfactualUnavailableDayCount += 1;
+      previousCounterfactualStatus = null;
+      previousPreviousCounterfactualStatus = null;
+    }
+
+    if (inReport && unstable) unstableBaselineDayCount += 1;
+    if (inReport && day.baselineExcluded) exclusionReasonCounts.explicit_context += 1;
+    if (inReport && hardStop) exclusionReasonCounts.recovery_hard_stop += 1;
+    if (inReport && buffered) exclusionReasonCounts.recovery_buffer += 1;
+    if (inReport && unstable) exclusionReasonCounts.unstable_multi_signal_shift += 1;
+    if (inReport && day.trainingLoadIncompatible) {
+      exclusionReasonCounts.incompatible_training_load += 1;
+    }
+    if (inReport && day.contextEligibilityAvailable === false) {
+      exclusionReasonCounts.context_eligibility_unavailable += 1;
+    }
+    if (inReport &&
+      day.trainingLoadSeriesKey !== null &&
+      previousTrainingSeriesKey !== null &&
+      day.trainingLoadSeriesKey !== previousTrainingSeriesKey
+    ) {
+      exclusionReasonCounts.training_source_series_change += 1;
+    }
+    if (day.trainingLoadSeriesKey !== null) {
+      previousTrainingSeriesKey = day.trainingLoadSeriesKey;
+    }
+    if (inReport && !eligible) excludedBaselineDayCount += 1;
+    for (const metric of personalBaselineMetrics) {
+      const value = day.values[metric];
+      if (value != null && Number.isFinite(value)) {
+        const sample = { localDate: day.localDate, value, eligible };
+        if (metric === "training_load") {
+          const seriesKey = day.trainingLoadSeriesKey;
+          if (seriesKey !== null) {
+            const history = trainingHistories.get(seriesKey) ?? [];
+            history.push(sample);
+            trainingHistories.set(seriesKey, history);
+          }
+        } else {
+          histories[metric].push(sample);
+        }
+      }
+    }
+    if (hardStop) {
+      recoveryBufferThrough = addCalendarDays(day.localDate, policy.recoveryBufferDays);
+    }
+  }
+
+  return {
+    candidate: policy.key,
+    evaluatedDayCount: days.filter((day) => day.localDate >= reportFrom).length,
+    baselineAvailableDayCounts,
+    insufficientHistoryDayCounts,
+    belowUsualCounts,
+    aboveUsualCounts,
+    markedDeviationCount,
+    severeSingleDayJumpCount,
+    statusCounts,
+    actionCounts,
+    v1ComparableDayCount,
+    storedV1ComparableDayCount,
+    counterfactualComparableDayCount,
+    counterfactualAmbiguousProgramStateDayCount,
+    counterfactualUnavailableDayCount,
+    missingV1SnapshotDayCount,
+    v1ToHybridTransitionCounts,
+    statusTransitionCount,
+    abruptReversalCount,
+    absoluteGuardrailDayCount,
+    persistentTrendDecisionCount,
+    excludedBaselineDayCount,
+    unstableBaselineDayCount,
+    chronicAdverseBaselineWarningCount,
+    missingCurrentValueCounts,
+    exclusionReasonCounts,
+    invariantViolationCounts,
+    counterfactualStatusCounts,
+    counterfactualActionCounts,
+    counterfactualV1ToHybridTransitionCounts,
+    counterfactualStatusTransitionCount,
+    counterfactualAbruptReversalCount,
+    counterfactualAbsoluteGuardrailDayCount,
+    counterfactualPersistentTrendDecisionCount,
+    counterfactualInvariantViolationCounts
+  };
+}
+
+/**
+ * Runs candidate policies over normalized history and returns aggregates only.
+ * It neither mutates source facts nor creates Coaching recommendations.
+ */
+export function runDailyAssessmentRetrospective(
+  inputDays: readonly RetrospectiveDailyEvidence[],
+  reportFrom?: string
+): DailyAssessmentRetrospectiveReport {
+  const days = [...inputDays].sort((left, right) =>
+    left.localDate.localeCompare(right.localDate)
+  );
+  const effectiveReportFrom = reportFrom ?? days[0]?.localDate ?? "9999-12-31";
+  const candidates = personalBaselineCandidates.map((policy) =>
+    evaluateCandidate(days, policy, effectiveReportFrom)
+  );
+  const firstCandidate = candidates[0];
+  const sensitivityRankingMode = (firstCandidate?.storedV1ComparableDayCount ?? 0) >= 30
+    ? "stored_v1" as const
+    : (firstCandidate?.counterfactualComparableDayCount ?? 0) >= 30
+      ? "counterfactual_current_facts_v1" as const
+      : "insufficient_evidence" as const;
+  const ranking = sensitivityRankingMode === "insufficient_evidence" ? [] : [...candidates]
+    .sort((left, right) => {
+      const counterfactual = sensitivityRankingMode === "counterfactual_current_facts_v1";
+      const leftReversals = counterfactual
+        ? left.counterfactualAbruptReversalCount : left.abruptReversalCount;
+      const rightReversals = counterfactual
+        ? right.counterfactualAbruptReversalCount : right.abruptReversalCount;
+      const leftTransitions = counterfactual
+        ? left.counterfactualStatusTransitionCount : left.statusTransitionCount;
+      const rightTransitions = counterfactual
+        ? right.counterfactualStatusTransitionCount : right.statusTransitionCount;
+      const leftPersistent = counterfactual
+        ? left.counterfactualPersistentTrendDecisionCount : left.persistentTrendDecisionCount;
+      const rightPersistent = counterfactual
+        ? right.counterfactualPersistentTrendDecisionCount : right.persistentTrendDecisionCount;
+      return leftReversals - rightReversals || leftTransitions - rightTransitions ||
+        rightPersistent - leftPersistent || left.candidate.localeCompare(right.candidate);
+    })
+    .map((candidate) => candidate.candidate);
+  return {
+    reportVersion: 2,
+    mode: "read_only_shadow",
+    policyVersion: "personal-baseline-shadow-v1",
+    comparisonModes: ["stored_v1", "counterfactual_current_facts_v1"],
+    evaluatedDayCount: days.filter((day) => day.localDate >= effectiveReportFrom).length,
+    candidates,
+    sensitivityRankingMode,
+    sensitivityRanking: ranking,
+    privacy: {
+      containsDates: false,
+      containsRawValues: false,
+      containsFactIdentifiers: false
+    },
+    effects: {
+      recommendationsChanged: false,
+      writesPerformed: false
+    }
+  };
+}
+
+const safeStringValues = new Set([
+  "read_only_shadow",
+  "personal-baseline-shadow-v1",
+  "stored_v1",
+  "counterfactual_current_facts_v1",
+  "insufficient_evidence",
+  "responsive",
+  "balanced",
+  "stable"
+]);
+const safeKeys = new Set([
+  "reportVersion", "mode", "policyVersion", "evaluatedDayCount", "candidates",
+  "comparisonModes",
+  "sensitivityRankingMode",
+  "sensitivityRanking", "privacy", "containsDates", "containsRawValues",
+  "containsFactIdentifiers", "effects", "recommendationsChanged", "writesPerformed",
+  "candidate", "baselineAvailableDayCounts", "insufficientHistoryDayCounts",
+  "belowUsualCounts", "aboveUsualCounts", "markedDeviationCount",
+  "severeSingleDayJumpCount", "statusCounts", "actionCounts",
+  "v1ComparableDayCount", "missingV1SnapshotDayCount", "v1ToHybridTransitionCounts",
+  "storedV1ComparableDayCount", "counterfactualComparableDayCount",
+  "counterfactualAmbiguousProgramStateDayCount", "counterfactualUnavailableDayCount",
+  "statusTransitionCount", "abruptReversalCount", "absoluteGuardrailDayCount",
+  "persistentTrendDecisionCount", "excludedBaselineDayCount", "unstableBaselineDayCount",
+  "chronicAdverseBaselineWarningCount", "missingCurrentValueCounts",
+  "exclusionReasonCounts", "invariantViolationCounts", "explicit_context",
+  "recovery_hard_stop", "recovery_buffer", "unstable_multi_signal_shift",
+  "incompatible_training_load", "training_source_series_change",
+  "context_eligibility_unavailable",
+  "counterfactualStatusCounts", "counterfactualActionCounts",
+  "counterfactualV1ToHybridTransitionCounts", "counterfactualStatusTransitionCount",
+  "counterfactualAbruptReversalCount", "counterfactualAbsoluteGuardrailDayCount",
+  "counterfactualPersistentTrendDecisionCount", "counterfactualInvariantViolationCounts",
+  "readyBehindAbsoluteGuardrail", "recoveryWithoutSupportingSignal",
+  "ready", "caution", "recovery_priority", "insufficient_data",
+  "recovery_first", "record_recovery_check_in", "follow_active_program",
+  "complete_nutrition_record", "record_weight", "confirm_training_program",
+  ...personalBaselineMetrics
+]);
+for (const from of ["ready", "caution", "recovery_priority", "insufficient_data"]) {
+  for (const to of ["ready", "caution", "recovery_priority", "insufficient_data"]) {
+    safeKeys.add(`${from}->${to}`);
+  }
+}
+
+function assertAggregateSafe(value: unknown): void {
+  if (typeof value === "number") {
+    if (!Number.isSafeInteger(value) || value < 0) throw new Error("Unsafe report number");
+    return;
+  }
+  if (typeof value === "boolean") {
+    if (value) throw new Error("Unsafe report flag");
+    return;
+  }
+  if (typeof value === "string") {
+    if (!safeStringValues.has(value)) throw new Error("Unsafe report string");
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertAggregateSafe(item);
+    return;
+  }
+  if (value !== null && typeof value === "object") {
+    for (const [key, nested] of Object.entries(value)) {
+      if (!safeKeys.has(key)) throw new Error("Unsafe report field");
+      assertAggregateSafe(nested);
+    }
+    return;
+  }
+  throw new Error("Unsafe report value");
+}
+
+/** Serializes only the fixed aggregate report vocabulary and fails closed. */
+export function serializeDailyAssessmentRetrospectiveReport(
+  report: DailyAssessmentRetrospectiveReport
+): string {
+  assertAggregateSafe(report);
+  return JSON.stringify(report, null, 2);
+}

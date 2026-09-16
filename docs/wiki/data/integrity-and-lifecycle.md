@@ -40,6 +40,28 @@ duplicate confirmation question. Every successful write is followed by typed
 read-back. Unknown optional values remain `null` or partial; a later precise
 statement appends a correction that supersedes the prior fact.
 
+`DailyContextNote` has typed `contextKind` and `baselineEligibility` fields for
+explicit context such as user-declared travel. Baseline policy does not infer
+travel or eligibility from free text, a provider, timezone changes, or an LLM.
+The current implementation uses these fields only in the read-only
+personal-baseline retrospective path.
+
+That retrospective path derives baselines on read from current owning-domain
+facts rather than maintaining a mutable baseline record. Its bounded history
+selection is deterministic, excludes the assessed day, and preserves equal
+weight per eligible local date. Late imports, corrections, withdrawals,
+supersession, deletion, and privacy erasure change the current evidence set and
+invalidate stale comparisons fail closed. Historical production assessments
+are not rewritten, and the shadow command performs no domain writes.
+
+The bounded retrospective range materializes every calendar day; a day without
+decision evidence is counted as unavailable rather than disappearing from the
+denominator. Schema feature detection marks context eligibility unavailable
+when typed DailyContextNote columns are absent and never interprets free text.
+Stored-snapshot and counterfactual analytics keep separate distributions and
+continuity. Counterfactual calculations remain read-only and process-local and
+never rewrite historical assessments.
+
 Legacy `Daily_Log.DayStatus` is not imported into PostgreSQL and has no runtime
 meaning. Google Sheets remains a non-authoritative read-only historical source
 without write or fallback authority.
@@ -54,6 +76,10 @@ without write or fallback authority.
 
 - Keep fact lifecycle inside owning modules and daily state as an always-live
   read composition; do not create a coordinating day aggregate.
+- [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md)
+  define the shadow projection, explicit context, and recalculation boundary.
+- [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md)
+  defines the current-facts replay, ambiguity envelope, and separated analytics.
 
 ## Open questions
 

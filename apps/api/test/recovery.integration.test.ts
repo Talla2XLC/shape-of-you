@@ -18,6 +18,10 @@ import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 import { IntegrationRepository } from "../src/storage/integration-repository.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
 import { TrainingService } from "../src/training/training.service.js";
+import { readTrainingBaselineDays } from "../src/training/personal-baseline-history.js";
+import { readRecoveryBaselineDays } from "../src/recovery/personal-baseline-history.js";
+import { DailyAssessmentRepository } from "../src/storage/daily-assessment-repository.js";
+import { loadRetrospectiveEvidence } from "../src/commands/run-daily-assessment-retrospective.js";
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
 import type { ProviderReconciliation } from "../src/integrations/provider.js";
@@ -185,6 +189,14 @@ describe("Recovery PostgreSQL vertical", () => {
     expect(await integrations.status(personD)).toMatchObject({ lifecycle: "disconnected", failureCode: null });
     const erasure = await repository.requestErasure(personD, recoveryConnectionId, "person-d-erasure", "retention_expired", null);
     expect(erasure.status).toBe("pending");
+    const pendingRecoveryClient = await database.pool.connect();
+    try {
+      expect(await readRecoveryBaselineDays(
+        pendingRecoveryClient, personD, "2026-09-06", "2026-09-06"
+      )).toEqual([]);
+    } finally {
+      pendingRecoveryClient.release();
+    }
     await expect(integrations.activate({ id, recoveryConnectionId, consentId: "00000000-0000-4000-8000-000000000124", personId: personD, externalUserId: "athlete-d", credential, authorizationStartedAt: new Date() }))
       .rejects.toThrow("erasure must complete");
     await acknowledgeAcceptedErasure(erasure.id);
@@ -260,6 +272,79 @@ describe("Recovery PostgreSQL vertical", () => {
       { providerIdentity: "activity-c-2" },
       { providerIdentity: "activity-c", durationSeconds: 3600 }
     ]);
+    const baselineClient = await database.pool.connect();
+    try {
+      expect(await readTrainingBaselineDays(
+        baselineClient, personC, "2026-09-07", "2026-09-08"
+      )).toEqual([
+        { localDate: "2026-09-07", trainingLoad: 80, loadSeriesKey: id, workoutSessionCount: 0, externalActivityCount: 1, incompatibleLoadSources: false },
+        { localDate: "2026-09-08", trainingLoad: 80, loadSeriesKey: id, workoutSessionCount: 0, externalActivityCount: 1, incompatibleLoadSources: false }
+      ]);
+      expect(await readTrainingBaselineDays(
+        baselineClient, personB, "2026-09-07", "2026-09-08"
+      )).toEqual([]);
+    } finally {
+      baselineClient.release();
+    }
+    const semanticsModel = await repository.registerDeviceModel({
+      providerKey: "second-load-semantics",
+      providerName: "Second load semantics",
+      modelKey: "second-load-source",
+      version: 1,
+      name: "Second load source",
+      capabilities: ["metric"]
+    });
+    const semanticsRecoveryConnection = await repository.createConnection(personC, {
+      deviceModelVersionId: semanticsModel.id,
+      label: null,
+      dedupeKey: "second-load-semantics:recovery"
+    });
+    const semanticsConsent = await repository.grantConsent(
+      personC,
+      semanticsRecoveryConnection.id,
+      {
+        purpose: "Cross-day load semantics test",
+        allowedKinds: ["metric"],
+        retentionMode: "indefinite",
+        retainUntil: null
+      }
+    );
+    const semanticsIntegrationId = "00000000-0000-4000-8000-000000000115";
+    await database.pool.query(
+      `insert into integration_connections
+         (id, person_id, recovery_connection_id, consent_id, provider_key, external_user_id)
+       values ($1, $2, $3, $4, 'second_load_semantics', 'test-athlete')`,
+      [semanticsIntegrationId, personC, semanticsRecoveryConnection.id, semanticsConsent.id]
+    );
+    await database.pool.query(
+      `insert into integration_activity_facts
+         (connection_id, person_id, provider_identity, normalized_checksum,
+          occurred_at, local_date, timezone, name, duration_seconds,
+          training_load, source_provider, garmin_attributed)
+       values ($1, $2, 'second-semantics-day', $3,
+               '2026-09-09T06:00:00.000Z', '2026-09-09', 'UTC',
+               'Second semantics activity', 1800, 35, 'second_load_semantics', false)`,
+      [semanticsIntegrationId, personC, "f".repeat(64)]
+    );
+    const semanticsClient = await database.pool.connect();
+    try {
+      expect(await readTrainingBaselineDays(
+        semanticsClient, personC, "2026-09-07", "2026-09-09"
+      )).toEqual([
+        expect.objectContaining({ localDate: "2026-09-07", loadSeriesKey: id }),
+        expect.objectContaining({ localDate: "2026-09-08", loadSeriesKey: id }),
+        expect.objectContaining({
+          localDate: "2026-09-09",
+          loadSeriesKey: semanticsIntegrationId
+        })
+      ]);
+    } finally {
+      semanticsClient.release();
+    }
+    await database.pool.query(
+      "delete from integration_connections where id = $1",
+      [semanticsIntegrationId]
+    );
     const trainingCoverage = await training.getDataCoverage(
       personC,
       "2026-06-10",
@@ -274,6 +359,64 @@ describe("Recovery PostgreSQL vertical", () => {
       { localDate: "2026-09-07", usable: true },
       { localDate: "2026-09-08", usable: true }
     ]);
+    const retainedActivity = (await training.listExternalActivities(personC, 1))[0]!;
+    const dailyAssessments = new DailyAssessmentRepository(database);
+    const activitySnapshot = {
+      localDate: "2026-09-08",
+      timezone: "UTC",
+      status: "caution",
+      usedFacts: {
+        recoveryObservationIds: [], recoveryAssessmentIds: [], workoutSessionIds: [],
+        externalActivityIds: [retainedActivity.id], mealIds: [], weightMeasurementIds: [],
+        activeTrainingProgramVersionId: null,
+        coveragePolicyVersion: "profile-data-coverage-v1",
+        coverageReadiness: {
+          sleep: "sparse", hrv: "sparse", restingHeartRate: "sparse",
+          bodyBattery: "sparse", training: "good", weight: "sparse", nutrition: "sparse"
+        },
+        summary: {
+          recoveryRiskLevel: null, recoveryHardStop: false, sleepMinutes: null,
+          hrvMs: null, hrvBaselineMs: null, restingHeartRateBpm: null,
+          restingHeartRateBaselineBpm: null, bodyBattery: null,
+          bodyBatteryMin: null, bodyBatteryMax: null, recentWorkoutCount: 0,
+          recentExternalActivityCount: 1, recentTrainingLoad: 80,
+          nutritionCompleteness: "partial", mealCount: 0, caloriesKcal: null,
+          proteinG: null, latestWeightKg: null
+        }
+      },
+      missingImportantData: [
+        "sleep", "hrv", "resting_heart_rate", "body_battery", "training_program",
+        "weight", "nutrition"
+      ],
+      reasons: ["recent_training_load", "no_active_training_program"],
+      recommendedAction: {
+        type: "recovery_first", text: "Keep the load conservative.",
+        trainingProgramVersionId: null
+      },
+      alternatives: [],
+      limitations: ["not_medical_advice"],
+      confidence: 0.7,
+      policyVersion: "daily-assessment-v1",
+      evidenceChecksum: "9".repeat(64)
+    } as const;
+    await dailyAssessments.createOrGet(personC, activitySnapshot);
+    await dailyAssessments.createOrGet(personB, {
+      ...activitySnapshot,
+      evidenceChecksum: "8".repeat(64)
+    });
+    const crossPersonSnapshotClient = await database.pool.connect();
+    try {
+      const crossPersonEvidence = await loadRetrospectiveEvidence(
+        crossPersonSnapshotClient, personB, "2026-09-08", "2026-09-08"
+      );
+      expect(crossPersonEvidence).toEqual([expect.objectContaining({
+        localDate: "2026-09-08", values: {}, contextEligibilityAvailable: true
+      })]);
+      expect(crossPersonEvidence[0]?.v1Status).toBeUndefined();
+      expect(crossPersonEvidence[0]?.counterfactualV1).toBeUndefined();
+    } finally {
+      crossPersonSnapshotClient.release();
+    }
 
     const disconnect = await integrations.beginDisconnect(personC, "test disconnect");
     expect(disconnect?.id).toBe(id);
@@ -284,10 +427,31 @@ describe("Recovery PostgreSQL vertical", () => {
     expect((await database.pool.query("select 1 from integration_activity_facts where connection_id = $1", [id])).rowCount).toBe(4);
     await integrations.completeRemoteDisconnect(id);
     const erasure = await repository.requestErasure(personC, recoveryConnectionId, "activity-erasure", "retention_expired", null);
+    const pendingTrainingClient = await database.pool.connect();
+    try {
+      expect(await readTrainingBaselineDays(
+        pendingTrainingClient, personC, "2026-09-07", "2026-09-08"
+      )).toEqual([]);
+    } finally {
+      pendingTrainingClient.release();
+    }
     await acknowledgeAcceptedErasure(erasure.id);
     const job = await repository.claimErasure("activity-erasure-worker", 30_000);
     await repository.completeErasure(job!);
     expect(await training.listExternalActivities(personC, 10)).toHaveLength(0);
+    const erasedActivitySnapshotClient = await database.pool.connect();
+    try {
+      const erasedEvidence = await loadRetrospectiveEvidence(
+        erasedActivitySnapshotClient, personC, "2026-09-08", "2026-09-08"
+      );
+      expect(erasedEvidence).toEqual([expect.objectContaining({
+        localDate: "2026-09-08", values: {}, contextEligibilityAvailable: true
+      })]);
+      expect(erasedEvidence[0]?.v1Status).toBeUndefined();
+      expect(erasedEvidence[0]?.counterfactualV1).toBeUndefined();
+    } finally {
+      erasedActivitySnapshotClient.release();
+    }
   });
 
   it("starts historical import explicitly and resumes from the durable bounded cursor", async () => {
@@ -1386,5 +1550,71 @@ describe("Recovery PostgreSQL vertical", () => {
          (select count(*)::text from recovery_consents) as consents`
     );
     expect(afterAssessment.rows[0]).toEqual(beforeAssessment.rows[0]);
+    const baselineClient = await database.pool.connect();
+    try {
+      expect(await readRecoveryBaselineDays(
+        baselineClient, personA, created.localDate, created.localDate
+      )).toEqual([expect.objectContaining({ assessmentPresent: true, hardStop: true })]);
+      expect(await readTrainingBaselineDays(
+        baselineClient,
+        personA,
+        sessionResponse.json().localDate,
+        sessionResponse.json().localDate
+      )).toEqual([expect.objectContaining({ workoutSessionCount: 1 })]);
+    } finally {
+      baselineClient.release();
+    }
+    await repository.createObservation(personA, {
+      kind: "metric",
+      observedFrom: "2026-10-25T07:30:00.000Z",
+      observedUntil: "2026-10-25T07:30:00.000Z",
+      timezone: "Europe/Berlin",
+      quality: "reliable",
+      connectionId: null,
+      consentId: null,
+      dedupeKey: "manual:late:assessment-window",
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-10-25T07:30:00.000Z"
+      },
+      detail: {
+        type: "metric",
+        metric: "resting_heart_rate",
+        value: 55,
+        unit: "bpm"
+      }
+    });
+    const lateEvidenceClient = await database.pool.connect();
+    try {
+      expect(await readRecoveryBaselineDays(
+        lateEvidenceClient, personA, created.localDate, created.localDate
+      )).toEqual([expect.objectContaining({
+        assessmentPresent: false,
+        hardStop: false,
+        acuteIllness: true
+      })]);
+    } finally {
+      lateEvidenceClient.release();
+    }
+    await repository.withdrawObservation(
+      personA,
+      observation.id,
+      "manual:subjective:hard-stop:withdrawn",
+      "Corrected hard-stop evidence"
+    );
+    const correctedBaselineClient = await database.pool.connect();
+    try {
+      expect(await readRecoveryBaselineDays(
+        correctedBaselineClient, personA, created.localDate, created.localDate
+      )).toEqual([expect.objectContaining({
+        assessmentPresent: false,
+        hardStop: false,
+        acuteIllness: false
+      })]);
+    } finally {
+      correctedBaselineClient.release();
+    }
   });
 });

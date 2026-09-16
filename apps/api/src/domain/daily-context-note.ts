@@ -10,6 +10,7 @@ import type {
   SourceReferenceRow
 } from "../database/schema.js";
 import { assertIanaTimezone, assertLocalDate } from "./date-context.js";
+import { DomainValidationError } from "./errors.js";
 import { toSourceReference } from "./source-reference.js";
 
 /** Converts a validated command into an insertable DailyContextNote row. */
@@ -21,11 +22,24 @@ export function toNewDailyContextNote(
 ): NewDailyContextNoteRow {
   assertLocalDate(input.localDate);
   assertIanaTimezone(input.timezone);
+  const contextKind = input.contextKind ?? "general";
+  const baselineEligibility =
+    input.baselineEligibility ?? (contextKind === "travel" ? "exclude" : "include");
+  if (
+    (contextKind === "travel" && baselineEligibility !== "exclude") ||
+    (contextKind === "general" && baselineEligibility !== "include")
+  ) {
+    throw new DomainValidationError(
+      "DailyContextNote baseline eligibility is incompatible with context kind"
+    );
+  }
   return {
     personId,
     localDate: input.localDate,
     timezone: input.timezone,
     text: input.text,
+    contextKind,
+    baselineEligibility,
     source: input.sourceReference.channel,
     sourceReferenceId,
     dedupeKey: input.dedupeKey,
@@ -46,6 +60,8 @@ export function toDailyContextNote(
     localDate: row.localDate,
     timezone: row.timezone,
     text: row.text,
+    contextKind: row.contextKind,
+    baselineEligibility: row.baselineEligibility,
     sourceReference: toSourceReference(sourceReference),
     dedupeKey: row.dedupeKey,
     confidence: row.confidence === null ? null : Number(row.confidence),
