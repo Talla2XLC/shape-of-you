@@ -33,9 +33,10 @@ printf '%s\n' \
   > "$TEST_ROOT/deploy/releases/$IDENTITY_RELEASE_ID/release.env"
 
 FAKE_DOCKER_LOG="$TEST_ROOT/docker.log"
+FAKE_TIMEOUT_LOG="$TEST_ROOT/timeout.log"
 FAKE_WAIT_MARKER="$TEST_ROOT/edge-ready"
 FAKE_SMOKE_LOG="$TEST_ROOT/smoke.log"
-export FAKE_DOCKER_LOG FAKE_WAIT_MARKER FAKE_SMOKE_LOG
+export FAKE_DOCKER_LOG FAKE_TIMEOUT_LOG FAKE_WAIT_MARKER FAKE_SMOKE_LOG
 
 printf '%s\n' \
   '#!/bin/sh' \
@@ -45,7 +46,7 @@ printf '%s\n' \
   '  case "$*" in' \
   '    *-migration*)' \
   '      case "$*" in' \
-  '        *--format*) printf "%s\\n" "Migration container state: running"; exit 0 ;;' \
+  '        *--format*) printf "%s\\n" false; exit 0 ;;' \
   '        *) exit 1 ;;' \
   '      esac' \
   '      ;;' \
@@ -181,7 +182,13 @@ run_automatic_rollback_case true false true false
 
 printf '%s\n' \
   '#!/bin/sh' \
-  'exit 124' \
+  'set -eu' \
+  'printf "%s\\n" "$*" >> "$FAKE_TIMEOUT_LOG"' \
+  'case "$*" in' \
+  '  *" migrate") exit 124 ;;' \
+  'esac' \
+  'shift 3' \
+  'exec "$@"' \
   > "$TEST_ROOT/fake-bin/timeout"
 chmod 0755 "$TEST_ROOT/fake-bin/timeout"
 timeout_log="$TEST_ROOT/migration-timeout.log"
@@ -196,9 +203,10 @@ if PATH="$TEST_ROOT/fake-bin:$PATH" \
 fi
 grep -F -- 'API migration timed out after 300 seconds (exit status 124).' \
   "$timeout_log" >/dev/null
-grep -F -- 'Compose status after API migration failure:' \
+grep -F -- 'Migration container is stopped; bounded diagnostics may proceed.' \
   "$timeout_log" >/dev/null
-grep -F -- 'Migration container state: running' "$timeout_log" >/dev/null
+grep -F -- 'Migration log tail omitted because this runner has no secret-safe log contract.' \
+  "$timeout_log" >/dev/null
 grep -F -- 'rm --force shape-of-you-staging-migrate-migration' \
   "$FAKE_DOCKER_LOG" >/dev/null
 grep -F -- 'Migration container shape-of-you-staging-migrate-migration is no longer present.' \
@@ -230,7 +238,15 @@ grep -F -- 'Identity migration timed out after 300 seconds (exit status 124).' \
 grep -F -- 'rm --force shape-of-you-staging-identity-migrate-migration' \
   "$FAKE_DOCKER_LOG" >/dev/null
 
-printf '%s\n' '#!/bin/sh' 'exit 137' > "$TEST_ROOT/fake-bin/timeout"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'case "$*" in' \
+  '  *" migrate") exit 137 ;;' \
+  'esac' \
+  'shift 3' \
+  'exec "$@"' \
+  > "$TEST_ROOT/fake-bin/timeout"
 chmod 0755 "$TEST_ROOT/fake-bin/timeout"
 sigkill_log="$TEST_ROOT/migration-sigkill.log"
 if PATH="$TEST_ROOT/fake-bin:$PATH" \
@@ -249,7 +265,15 @@ if grep -F -- 'API migration timed out' "$sigkill_log" >/dev/null; then
   exit 1
 fi
 
-printf '%s\n' '#!/bin/sh' 'exit 42' > "$TEST_ROOT/fake-bin/timeout"
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'case "$*" in' \
+  '  *" migrate") exit 42 ;;' \
+  'esac' \
+  'shift 3' \
+  'exec "$@"' \
+  > "$TEST_ROOT/fake-bin/timeout"
 chmod 0755 "$TEST_ROOT/fake-bin/timeout"
 failure_log="$TEST_ROOT/migration-failure.log"
 if PATH="$TEST_ROOT/fake-bin:$PATH" \
@@ -262,5 +286,68 @@ if PATH="$TEST_ROOT/fake-bin:$PATH" \
   exit 1
 fi
 grep -F -- 'API migration failed (exit status 42).' "$failure_log" >/dev/null
+
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'printf "%s\\n" "$*" >> "$FAKE_TIMEOUT_LOG"' \
+  'case "$*" in' \
+  '  *" identity-migrate") exit 42 ;;' \
+  '  *" docker logs "*) exit 124 ;;' \
+  'esac' \
+  'shift 3' \
+  'exec "$@"' \
+  > "$TEST_ROOT/fake-bin/timeout"
+chmod 0755 "$TEST_ROOT/fake-bin/timeout"
+diagnostic_timeout_log="$TEST_ROOT/migration-diagnostic-timeout.log"
+: > "$FAKE_TIMEOUT_LOG"
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$GATE_DEPLOY_ROOT" \
+  COMPOSE_FILE="$GATE_PACKAGE/compose.yaml" \
+  IDENTITY_COMPOSE_FILE="$GATE_PACKAGE/compose.identity.yaml" \
+  sh "$GATE_PACKAGE/scripts/deploy.sh" "$gate_release_env" \
+  >"$diagnostic_timeout_log" 2>&1; then
+  printf '%s\n' 'A diagnostic-timeout migration unexpectedly succeeded.' >&2
+  exit 1
+fi
+grep -F -- 'Identity migration failed (exit status 42).' \
+  "$diagnostic_timeout_log" >/dev/null
+grep -F -- 'Migration container is stopped; bounded diagnostics may proceed.' \
+  "$diagnostic_timeout_log" >/dev/null
+grep -F -- 'Migration container logs were unavailable within their diagnostic bound.' \
+  "$diagnostic_timeout_log" >/dev/null
+grep -F -- 'Migration container shape-of-you-staging-identity-migrate-migration is no longer present.' \
+  "$diagnostic_timeout_log" >/dev/null
+stop_line=$(grep -n -F -- \
+  'stop --time 5 shape-of-you-staging-identity-migrate-migration' \
+  "$FAKE_TIMEOUT_LOG" | tail -1 | cut -d: -f1)
+log_line=$(grep -n -F -- \
+  'logs --tail 80 shape-of-you-staging-identity-migrate-migration' \
+  "$FAKE_TIMEOUT_LOG" | tail -1 | cut -d: -f1)
+test "$stop_line" -lt "$log_line"
+
+printf '%s\n' \
+  '#!/bin/sh' \
+  'set -eu' \
+  'case "$*" in' \
+  '  *" migrate") exit 42 ;;' \
+  '  *" docker container ls "*) exit 124 ;;' \
+  'esac' \
+  'shift 3' \
+  'exec "$@"' \
+  > "$TEST_ROOT/fake-bin/timeout"
+chmod 0755 "$TEST_ROOT/fake-bin/timeout"
+cleanup_failure_log="$TEST_ROOT/migration-cleanup-failure.log"
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$GATE_DEPLOY_ROOT" \
+  COMPOSE_FILE="$GATE_PACKAGE/compose.yaml" \
+  IDENTITY_COMPOSE_FILE="$GATE_PACKAGE/compose.identity.yaml" \
+  sh "$GATE_PACKAGE/scripts/deploy.sh" "$gate_release_env" \
+  >"$cleanup_failure_log" 2>&1; then
+  printf '%s\n' 'A cleanup-unverified migration unexpectedly succeeded.' >&2
+  exit 1
+fi
+grep -F -- 'Could not verify cleanup of migration container shape-of-you-staging-migrate-migration within its bound.' \
+  "$cleanup_failure_log" >/dev/null
 
 printf '%s\n' 'rollback readiness regression test passed.'

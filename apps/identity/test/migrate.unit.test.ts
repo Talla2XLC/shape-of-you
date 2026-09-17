@@ -1,9 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  assessIdentityMigrationJournal,
   describeIdentityMigrationError,
   waitForIdentityDatabaseReadiness
 } from "../src/database/migrate.js";
+
+const firstMigration = {
+  createdAt: "1754000000000",
+  hash: "a".repeat(64)
+};
+const secondMigration = {
+  createdAt: "1754000000001",
+  hash: "b".repeat(64)
+};
 
 describe("Identity migration startup", () => {
   it("retries only the readiness probe until it succeeds", async () => {
@@ -69,18 +79,79 @@ describe("Identity migration startup", () => {
     expect(diagnostics).toEqual([
       {
         name: "Error",
-        message: "Failed query: CREATE SCHEMA"
+        message: "Identity migration operation failed"
       },
       {
         name: "Error",
-        message:
-          "connect postgresql://identity:[redacted]@db.example.test/identity",
+        message: "Identity migration operation failed",
         code: "ECONNREFUSED",
-        severity: "ERROR",
-        detail: "password=[redacted]",
-        hint: "retry later"
+        severity: "ERROR"
       }
     ]);
     expect(JSON.stringify(diagnostics)).not.toContain("super-secret");
+    expect(JSON.stringify(diagnostics)).not.toContain("CREATE SCHEMA");
+  });
+
+  it("recognizes an exact current journal and an exact pending prefix", () => {
+    expect(
+      assessIdentityMigrationJournal(
+        [firstMigration, secondMigration],
+        [firstMigration, secondMigration]
+      )
+    ).toBe("current");
+    expect(
+      assessIdentityMigrationJournal(
+        [firstMigration, secondMigration],
+        [firstMigration]
+      )
+    ).toBe("pending");
+    expect(
+      assessIdentityMigrationJournal([firstMigration, secondMigration], [])
+    ).toBe("pending");
+  });
+
+  it("fails closed when the database journal is ahead or divergent", () => {
+    expect(() =>
+      assessIdentityMigrationJournal(
+        [firstMigration],
+        [firstMigration, secondMigration]
+      )
+    ).toThrow("ahead");
+    expect(() =>
+      assessIdentityMigrationJournal(
+        [firstMigration, secondMigration],
+        [firstMigration, { ...secondMigration, hash: "c".repeat(64) }]
+      )
+    ).toThrow("diverges at entry 1");
+    expect(() =>
+      assessIdentityMigrationJournal(
+        [firstMigration, secondMigration],
+        [firstMigration, { ...secondMigration, createdAt: "1754000000999" }]
+      )
+    ).toThrow("diverges at entry 1");
+  });
+
+  it("fails closed on malformed migration journal metadata", () => {
+    expect(() => assessIdentityMigrationJournal([], [])).toThrow(
+      "local migration journal is empty"
+    );
+    expect(() =>
+      assessIdentityMigrationJournal(
+        [firstMigration],
+        [{ createdAt: "not-a-timestamp", hash: "a".repeat(64) }]
+      )
+    ).toThrow("malformed created_at");
+    expect(() =>
+      assessIdentityMigrationJournal(
+        [firstMigration],
+        [{ createdAt: firstMigration.createdAt, hash: "not-a-hash" }]
+      )
+    ).toThrow("malformed hash");
+    expect(() =>
+      assessIdentityMigrationJournal(
+        [firstMigration, secondMigration],
+        [secondMigration, firstMigration]
+      )
+    ).toThrow("not strictly ordered");
   });
 });

@@ -30,12 +30,24 @@ The API image contains the migration runner, but the normal API process never
 runs migrations. Local Compose and staging use a one-shot migration service
 from the same image digest. Drizzle journal applies only pending SQL files.
 Staging independently limits the API and Identity one-shot commands to 300
-seconds with a 30-second termination grace period. Timeout behavior belongs to
-the versioned deployment script rather than PostgreSQL or runtime environment
-configuration, and failure diagnostics identify the owning migration without
-printing database URLs. Deterministic one-shot container names allow the script
-to force-remove a failed migration and fail closed unless its absence can be
-verified.
+seconds with a 30-second termination grace period, and both services use an
+init process for signal forwarding. The Identity runner additionally owns fixed
+session-local `lock_timeout=30s` and `statement_timeout=240s` settings; these do
+not alter PostgreSQL server configuration or the deployment environment
+contract.
+
+Before Identity invokes Drizzle, it compares every committed migration
+`created_at` and SHA-256 with the complete ordered database journal. An exact
+match is a no-op before DDL. A missing journal or exact older prefix follows the
+normal Drizzle path. An empty local journal, malformed metadata, an ahead
+database journal, or any timestamp/hash divergence fails closed. This check is
+coupled intentionally to the current Drizzle journal format and must be reviewed
+with a Drizzle upgrade.
+
+Failure output contains phase names plus allowlisted error code/severity only;
+it never forwards raw PostgreSQL messages, SQL, detail, hint, URLs, stack traces,
+or user values. Deterministic one-shot container names let deployment stop and
+remove only the failed migration and fail closed unless absence is verified.
 
 Migration sequence:
 
@@ -96,6 +108,7 @@ Never modify an accepted applied migration; generate a new file.
 - `drizzle-kit push` is not a delivery path.
 - Root migration commands must name the owning deployable; a generic command
   that could target the wrong database is forbidden.
+- [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
 
 ## Open questions
 

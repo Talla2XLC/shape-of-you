@@ -20,6 +20,21 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-17 — End-to-end staging migration bounds
+
+- Added an exact full-journal Identity preflight: current metadata returns
+  before DDL, an exact older prefix uses Drizzle, and malformed, ahead, or
+  divergent metadata fails closed.
+- Added fixed Identity session lock/statement limits and privacy-safe phase and
+  error diagnostics without raw PostgreSQL messages, SQL, URLs, or user values.
+- Made both migration services init-aware and bounded every migration failure
+  operation: stop and stopped-state confirmation precede optional safe Identity
+  logs, then force-remove and absence verification complete fail closed.
+- Kept the atomic four-image release, mandatory Identity migration and OAuth
+  reconciliation, existing ownership boundaries, and deployment environment
+  contract unchanged. No staging/production operation, commit, push, or deploy
+  was performed as part of this repository change.
+
 ### 2026-09-17 — Personal baselines activated in daily assessment v2
 
 - Activated the balanced hybrid policy in the authoritative API daily

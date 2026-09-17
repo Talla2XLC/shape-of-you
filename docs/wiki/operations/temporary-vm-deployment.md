@@ -146,12 +146,21 @@ Compose, scripts, paths, or arbitrary shell. Successful release updates
 The Actions SSH client sends a keepalive every 30 seconds and fails only after
 six unanswered probes; `BatchMode`, the dedicated key, and strict known-host
 verification remain mandatory. API and Identity migrations each have a fixed
-300-second limit with a 30-second `TERM`-to-`KILL` grace period. A failure names
-the migration and exit status; a timeout also reports the limit and safe
-Compose/container status. Each one-shot migration uses a deterministic name;
-failure force-removes only that container and verifies its absence. Status
-`137` is reported as ambiguous `SIGKILL` or timeout escalation. No runtime
-environment value configures these limits.
+300-second limit with a 30-second `TERM`-to-`KILL` grace period, and both
+one-shot services use an init process. Identity additionally sets session-local
+30-second lock and 240-second statement limits and returns before DDL when its
+full local/database journal metadata matches exactly. Journal drift fails
+closed.
+
+A failure names the migration and exit status. The controller uses bounded
+Docker calls to stop the deterministic named container and confirm
+`State.Running=false` before optional diagnostics. Only secret-safe Identity
+phase/error output may be tailed; API logs are omitted. If stopped state cannot
+be confirmed, the log tail is skipped. The controller then force-removes only
+that container with a separate bound and fails closed unless its absence is
+verified. It never calls unbounded `compose ps` on this path. Status `137` is
+reported as ambiguous `SIGKILL` or timeout escalation. No runtime environment
+value configures these limits.
 
 For the control-tree fetch only, the bootstrap initializes the local Git
 repository before network access and runs the fixed-origin fetch over Git
@@ -287,6 +296,7 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Dedicated identity ADR](../../adr/20260729-use-dedicated-staging-deployment-identity.md)
 - [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
 - [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
+- [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 

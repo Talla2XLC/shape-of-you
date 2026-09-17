@@ -19,6 +19,9 @@ identity_enabled=false
 rollback_schema_compatible=false
 rollback_client_compatible=false
 active_migration_container=
+DOCKER_DIAGNOSTIC_TIMEOUT_SECONDS=15
+DOCKER_CLEANUP_TIMEOUT_SECONDS=30
+MIGRATION_LOG_TAIL_LINES=80
 
 if [ -z "$RELEASE_ENV_INPUT" ] || [ ! -f "$RELEASE_ENV_INPUT" ]; then
   printf '%s\n' "Usage: deploy.sh <release-env-file>" >&2
@@ -124,14 +127,25 @@ compose() {
   fi
 }
 
+bounded_docker() {
+  operation_timeout=$1
+  shift
+  timeout --signal=TERM --kill-after=5s "$operation_timeout" docker "$@"
+}
+
 remove_migration_container() {
   container_name=$1
 
-  docker rm --force "$container_name" >/dev/null 2>&1 || true
-  if ! remaining_container=$(docker container ls --all --quiet \
+  if ! bounded_docker "$DOCKER_CLEANUP_TIMEOUT_SECONDS" \
+    rm --force "$container_name" >/dev/null 2>&1; then
+    printf '%s\n' \
+      "Forced cleanup of migration container $container_name did not complete successfully within its bound." >&2
+  fi
+  if ! remaining_container=$(bounded_docker "$DOCKER_DIAGNOSTIC_TIMEOUT_SECONDS" \
+    container ls --all --quiet \
     --filter "name=^/${container_name}$"); then
     printf '%s\n' \
-      "Could not verify cleanup of migration container $container_name." >&2
+      "Could not verify cleanup of migration container $container_name within its bound." >&2
     return 1
   fi
   if [ -n "$remaining_container" ]; then
@@ -140,6 +154,28 @@ remove_migration_container() {
     return 1
   fi
   printf '%s\n' "Migration container $container_name is no longer present." >&2
+}
+
+stop_migration_container_for_diagnostics() {
+  container_name=$1
+
+  if ! bounded_docker "$DOCKER_CLEANUP_TIMEOUT_SECONDS" \
+    stop --time 5 "$container_name" >/dev/null 2>&1; then
+    printf '%s\n' \
+      "Migration container stop did not complete successfully within its bound." >&2
+  fi
+  if ! container_running=$(bounded_docker "$DOCKER_DIAGNOSTIC_TIMEOUT_SECONDS" \
+    inspect --format '{{.State.Running}}' "$container_name"); then
+    printf '%s\n' \
+      "Migration container stopped-state could not be confirmed within its bound." >&2
+    return 1
+  fi
+  if [ "$container_running" != false ]; then
+    printf '%s\n' \
+      "Migration container is still running after bounded stop." >&2
+    return 1
+  fi
+  printf '%s\n' "Migration container is stopped; bounded diagnostics may proceed." >&2
 }
 
 run_migration() {
@@ -193,14 +229,23 @@ run_migration() {
     printf '%s\n' \
       "$migration_name failed (exit status $migration_status)." >&2
   fi
-  printf '%s\n' "Compose status after $migration_name failure:" >&2
-  compose ps --all "$migration_service" >&2 || true
-  if ! docker inspect --format 'Migration container state: {{.State.Status}}' \
-    "$migration_container" >&2; then
-    printf '%s\n' "Migration container state: not present." >&2
+  diagnostics_ready=false
+  if stop_migration_container_for_diagnostics "$migration_container"; then
+    diagnostics_ready=true
+  fi
+  if [ "$diagnostics_ready" = true ] && \
+    [ "$migration_service" = identity-migrate ]; then
+    printf '%s\n' "Bounded secret-safe Identity migration log tail:" >&2
+    if ! bounded_docker "$DOCKER_DIAGNOSTIC_TIMEOUT_SECONDS" \
+      logs --tail "$MIGRATION_LOG_TAIL_LINES" "$migration_container" >&2; then
+      printf '%s\n' \
+        "Migration container logs were unavailable within their diagnostic bound." >&2
+    fi
+  elif [ "$diagnostics_ready" = true ]; then
+    printf '%s\n' \
+      "Migration log tail omitted because this runner has no secret-safe log contract." >&2
   fi
   if ! remove_migration_container "$migration_container"; then
-    active_migration_container=
     return 1
   fi
   active_migration_container=

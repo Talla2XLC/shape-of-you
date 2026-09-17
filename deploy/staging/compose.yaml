@@ -188,6 +188,7 @@ services:
     profiles:
       - operations
     restart: "no"
+    init: true
     read_only: true
     tmpfs:
       - /tmp

@@ -127,6 +127,27 @@ describe("Identity migration chain", () => {
     }
   });
 
+  it("enforces process-owned PostgreSQL session limits", async () => {
+    const database = createIdentityDatabase(container.getConnectionUri(), 1, {
+      lockTimeoutMs: 75,
+      statementTimeoutMs: 25
+    });
+
+    try {
+      await expect(
+        database.pool.query("show lock_timeout")
+      ).resolves.toMatchObject({ rows: [{ lock_timeout: "75ms" }] });
+      await expect(
+        database.pool.query("show statement_timeout")
+      ).resolves.toMatchObject({ rows: [{ statement_timeout: "25ms" }] });
+      await expect(
+        database.pool.query("select pg_sleep(0.1)")
+      ).rejects.toMatchObject({ code: "57014" });
+    } finally {
+      await database.pool.end();
+    }
+  });
+
   it("keeps every generated PostgreSQL identifier within 63 bytes", async () => {
     const overlongIdentifiers: string[] = [];
 
@@ -145,9 +166,24 @@ describe("Identity migration chain", () => {
 
   it("applies the generated journal cleanly and idempotently", async () => {
     const expected = await expectedMigrations();
+    const phases: string[] = [];
 
     await runIdentityMigrations(container.getConnectionUri());
-    await runIdentityMigrations(container.getConnectionUri());
+    await expect(
+      runIdentityMigrations(container.getConnectionUri(), {
+        onPhase: (phase) => phases.push(phase)
+      })
+    ).resolves.toBe("current");
+
+    expect(phases).toEqual([
+      "readiness_started",
+      "readiness_completed",
+      "journal_check_started",
+      "journal_current",
+      "pool_close_started",
+      "pool_close_completed"
+    ]);
+    expect(phases).not.toContain("migration_apply_started");
 
     const pool = new Pool({ connectionString: container.getConnectionUri() });
     try {

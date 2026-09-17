@@ -125,12 +125,22 @@ network. Both containers reach host port `5431` through
 database exposure is a throwaway-staging limitation; developer access should
 use SSH tunneling.
 
-Staging bounds each API and Identity one-shot migration to 300 seconds, allows
-30 seconds from `TERM` to `KILL`, and reports the failed stage plus safe Compose
-status. Each one-shot container has a deterministic name; after failure the
-script force-removes only that container and verifies its absence. Exit status
-`137` is reported as ambiguous `SIGKILL` or timeout escalation. These limits
-are versioned deployment behavior, not environment or PostgreSQL configuration.
+Staging runs both API and Identity one-shot migration services with an init
+process. Each command has a 300-second outer limit and 30 seconds from `TERM`
+to `KILL`. Identity also uses process-owned PostgreSQL session limits of 30
+seconds for lock acquisition and 240 seconds per statement. An exact match
+between the complete committed Identity migration journal and database journal
+returns a no-op before Drizzle DDL; an absent or exact older prefix uses the
+normal migrator, while malformed, ahead, or divergent metadata fails closed.
+
+Each one-shot container has a deterministic name. After failure, the controller
+uses independently bounded Docker operations to stop it and confirm it is no
+longer running before optional diagnostics. Only the Identity runner has a
+secret-safe bounded log-tail contract; API logs are omitted. The controller
+then force-removes only that container and fails unless its absence is verified.
+There is no unbounded Compose status call. Exit status `137` remains ambiguous
+`SIGKILL` or timeout escalation. These limits are versioned process behavior,
+not environment-controlled or server-wide PostgreSQL configuration.
 
 ### Security and portability
 
@@ -201,6 +211,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Temporary shared-VM deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
 - [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
+- [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)
