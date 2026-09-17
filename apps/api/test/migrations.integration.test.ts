@@ -23,6 +23,7 @@ import {
   IdentityAccessProvisioningRepository
 } from "../src/storage/identity-access-provisioning-repository.js";
 import { IdentitySubjectMappingRepository } from "../src/storage/identity-subject-mapping-repository.js";
+import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 
 interface MigrationJournalEntry {
   readonly idx: number;
@@ -595,6 +596,222 @@ describe("API migration chain", () => {
       }
     } finally {
       await adminPool.end();
+    }
+  }, 120_000);
+
+  it("backfills v1 daily evidence before Recovery erasure removes the legacy snapshot", async () => {
+    const databaseName = "shape_of_you_daily_evidence_upgrade";
+    const adminPool = new Pool({ connectionString: container.getConnectionUri() });
+    await adminPool.query(`create database ${databaseName}`);
+    await adminPool.end();
+    const url = databaseUrl(databaseName);
+    const prefixFolder = await mkdtemp(path.join(tmpdir(), "shape-of-you-daily-evidence-prefix-"));
+    await mkdir(path.join(prefixFolder, "meta"));
+    try {
+      const migrationIndex = journal.entries.findIndex(
+        ({ tag }) => tag === "20260917090235_bored_malice"
+      );
+      expect(migrationIndex).toBeGreaterThan(0);
+      const prefixEntries = journal.entries.slice(0, migrationIndex);
+      for (const entry of prefixEntries) {
+        await cp(
+          new URL(`${entry.tag}.sql`, migrationsFolder),
+          path.join(prefixFolder, `${entry.tag}.sql`)
+        );
+      }
+      await writeFile(
+        path.join(prefixFolder, "meta", "_journal.json"),
+        JSON.stringify({ ...journal, entries: prefixEntries })
+      );
+
+      const database = createDatabase(databaseConfig(url));
+      await migrate(database.db, { migrationsFolder: prefixFolder });
+      const personId = "00000000-0000-4000-8000-000000000711";
+      const providerId = "00000000-0000-4000-8000-000000000712";
+      const connectionId = "00000000-0000-4000-8000-000000000713";
+      const consentId = "00000000-0000-4000-8000-000000000714";
+      const integrationId = "00000000-0000-4000-8000-000000000715";
+      const activityId = "00000000-0000-4000-8000-000000000716";
+      const sourceId = "00000000-0000-4000-8000-000000000717";
+      const observationId = "00000000-0000-4000-8000-000000000718";
+      const assessmentPolicyId = "00000000-0000-4000-8000-000000000719";
+      const assessmentPolicyVersionId = "00000000-0000-4000-8000-000000000720";
+      const assessmentId = "00000000-0000-4000-8000-000000000721";
+      const coachingPolicyId = "00000000-0000-4000-8000-000000000722";
+      const coachingPolicyVersionId = "00000000-0000-4000-8000-000000000723";
+      const recommendationId = "00000000-0000-4000-8000-000000000724";
+      try {
+        await database.pool.query("insert into persons (id) values ($1)", [personId]);
+        await database.pool.query(
+          "insert into recovery_providers (id, key, name) values ($1, 'legacy-upgrade', 'Legacy upgrade')",
+          [providerId]
+        );
+        await database.pool.query(
+          `insert into recovery_connections (id, person_id, provider_id, dedupe_key)
+           values ($1, $2, $3, 'legacy-upgrade')`,
+          [connectionId, personId, providerId]
+        );
+        await database.pool.query(
+          `insert into recovery_consents
+             (id, person_id, connection_id, purpose, retention_mode)
+           values ($1, $2, $3, 'Legacy upgrade regression', 'indefinite')`,
+          [consentId, personId, connectionId]
+        );
+        await database.pool.query(
+          `insert into integration_connections
+             (id, person_id, recovery_connection_id, consent_id, provider_key,
+              external_user_id)
+           values ($1, $2, $3, $4, 'intervals_icu', 'legacy-athlete')`,
+          [integrationId, personId, connectionId, consentId]
+        );
+        await database.pool.query(
+          `insert into integration_activity_facts
+             (id, connection_id, person_id, provider_identity, normalized_checksum,
+              occurred_at, local_date, timezone, name, duration_seconds,
+              training_load, source_provider, garmin_attributed)
+           values ($1, $2, $3, 'legacy-activity', $4, '2026-09-16T06:00:00Z',
+              '2026-09-16', 'UTC', 'Legacy activity', 3600, 80,
+              'intervals_icu', true)`,
+          [activityId, integrationId, personId, "1".repeat(64)]
+        );
+        await database.pool.query(
+          `insert into source_references
+             (id, person_id, channel, contains_sensitive_data)
+           values ($1, $2, 'account', true)`,
+          [sourceId, personId]
+        );
+        await database.pool.query(
+          `insert into recovery_observations
+             (id, person_id, kind, observed_from, observed_until, local_date,
+              timezone, quality, source, source_reference_id, connection_id,
+              consent_id, dedupe_key)
+           values ($1, $2, 'metric', '2026-09-16T05:00:00Z',
+              '2026-09-16T05:00:00Z', '2026-09-16', 'UTC', 'reliable', 'account',
+              $3, $4, $5, 'legacy-observation')`,
+          [observationId, personId, sourceId, connectionId, consentId]
+        );
+        await database.pool.query(
+          `insert into recovery_assessment_policies (id, key, name)
+           values ($1, 'legacy-upgrade', 'Legacy upgrade')`,
+          [assessmentPolicyId]
+        );
+        await database.pool.query(
+          `insert into recovery_assessment_policy_versions
+             (id, policy_id, version, effective_from, analysis_window_days,
+              minimum_observations, sufficient_observations,
+              insufficient_confidence_cap, poor_quality_confidence_cap,
+              target_sleep_minutes, fatigue_weight, soreness_weight, stress_weight,
+              low_energy_weight, low_sleep_quality_weight, sleep_deficit_weight,
+              external_set_weight, bodyweight_set_weight, assisted_set_weight,
+              moderate_risk_threshold, high_risk_threshold)
+           values ($1, $2, 1, '2026-01-01T00:00:00Z', 7, 1, 2,
+              0.5, 0.5, 480, 1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 4)`,
+          [assessmentPolicyVersionId, assessmentPolicyId]
+        );
+        await database.pool.query(
+          `insert into recovery_assessments
+             (id, person_id, policy_version_id, as_of, window_start, window_end,
+              local_date, timezone, readiness_score, risk_level, confidence,
+              data_quality, hard_stop, evidence_checksum, calculation_snapshot,
+              dedupe_key)
+           values ($1, $2, $3, '2026-09-16T08:00:00Z', '2026-09-09T08:00:00Z',
+              '2026-09-16T08:00:00Z', '2026-09-16', 'UTC', 70, 'low', 0.8,
+              'sufficient', false, $4, '{}'::jsonb, 'legacy-assessment')`,
+          [assessmentId, personId, assessmentPolicyVersionId, "2".repeat(64)]
+        );
+        await database.pool.query(
+          `insert into recovery_assessment_observation_evidence
+             (assessment_id, observation_id, person_id)
+           values ($1, $2, $3)`,
+          [assessmentId, observationId, personId]
+        );
+        await database.pool.query(
+          `insert into coaching_policies (id, key, name)
+           values ($1, 'daily-assessment', 'Daily assessment')`,
+          [coachingPolicyId]
+        );
+        await database.pool.query(
+          `insert into coaching_policy_versions
+             (id, policy_id, version, effective_from, recommendation_ttl_minutes,
+              minimum_confidence, high_risk_load_factor, repetition_reduction)
+           values ($1, $2, 1, '2026-09-14T00:00:00Z', 1440, 0.5, 0.8, 1)`,
+          [coachingPolicyVersionId, coachingPolicyId]
+        );
+        await database.pool.query(
+          `insert into coaching_recommendations
+             (id, person_id, kind, policy_version_id, as_of, expires_at,
+              evidence_checksum, explanation, dedupe_key)
+           values ($1, $2, 'daily_next_action', $3, '2026-09-16T08:00:00Z',
+              '2026-09-17T08:00:00Z', $4, 'Legacy snapshot', 'legacy-daily')`,
+          [recommendationId, personId, coachingPolicyVersionId, "3".repeat(64)]
+        );
+        await database.pool.query(
+          `insert into coaching_daily_assessment_details
+             (recommendation_id, person_id, local_date, timezone, status,
+              confidence, policy_version, used_facts, missing_important_data,
+              reasons, recommended_action, alternatives, limitations)
+           values ($1, $2, '2026-09-16', 'UTC', 'caution', 0.7,
+              'daily-assessment-v1', $3::jsonb, '{}'::text[], '{}'::text[],
+              $4::jsonb, '[]'::jsonb, ARRAY['not_medical_advice'])`,
+          [
+            recommendationId,
+            personId,
+            JSON.stringify({
+              recoveryObservationIds: [],
+              recoveryAssessmentIds: [assessmentId],
+              workoutSessionIds: [],
+              externalActivityIds: [activityId],
+              mealIds: [],
+              weightMeasurementIds: [],
+              activeTrainingProgramVersionId: null,
+              coveragePolicyVersion: "profile-data-coverage-v1",
+              coverageReadiness: {},
+              summary: {}
+            }),
+            JSON.stringify({
+              type: "recovery_first",
+              text: "Keep the load conservative.",
+              trainingProgramVersionId: null
+            })
+          ]
+        );
+      } finally {
+        await database.pool.end();
+      }
+
+      await runMigrations(url);
+      const upgraded = createDatabase(databaseConfig(url));
+      try {
+        const links = await upgraded.pool.query<{
+          assessment_count: string;
+          training_count: string;
+        }>(
+          `select
+             (select count(*)::text from coaching_daily_assessment_assessment_evidence
+               where recommendation_id = $1) as assessment_count,
+             (select count(*)::text from coaching_daily_assessment_training_evidence
+               where recommendation_id = $1) as training_count`,
+          [recommendationId]
+        );
+        expect(links.rows[0]).toEqual({ assessment_count: "1", training_count: "1" });
+
+        await new RecoveryRepository(upgraded).replayErasureMarker({
+          id: "00000000-0000-4000-8000-000000000725",
+          personId,
+          connectionId,
+          reason: "retention_expired",
+          requestedAt: "2026-09-17T00:00:00.000Z"
+        });
+        const remaining = await upgraded.pool.query<{ count: string }>(
+          "select count(*)::text as count from coaching_recommendations where id = $1",
+          [recommendationId]
+        );
+        expect(remaining.rows[0]?.count).toBe("0");
+      } finally {
+        await upgraded.pool.end();
+      }
+    } finally {
+      await rm(prefixFolder, { force: true, recursive: true });
     }
   }, 120_000);
 

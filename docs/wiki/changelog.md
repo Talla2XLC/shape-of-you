@@ -20,6 +20,21 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-17 — Personal baselines activated in daily assessment v2
+
+- Activated the balanced hybrid policy in the authoritative API daily
+  assessment: absolute safety guardrails remain dominant and personal evidence
+  may only preserve or strengthen the v1 result.
+- Added robust bounded Recovery and Training baselines, typed load-basis
+  compatibility, explicit context exclusions, qualitative explanations, and
+  one shared deterministic evaluator for live and retrospective paths.
+- Added immutable v2 calculation snapshots, owner-safe evidence backfills,
+  privacy-erasure links, and an atomic Person-scoped preference/revision fence
+  shared by all assessment-relevant writers.
+- Kept retrospective execution read-only and aggregate-only. No staging or
+  production data was read, and no deployment, migration, commit, or push was
+  performed as part of this repository change.
+
 ### 2026-08-30 — Transactional predefined OAuth scope retirement
 
 - Made predefined-client scope contraction revoke only authorization state

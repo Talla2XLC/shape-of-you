@@ -40,7 +40,10 @@ import {
   type CoachingPolicyParameters
 } from "../domain/coaching.js";
 import { ConflictError, DomainValidationError, NotFoundError } from "../domain/errors.js";
-import type { DatabaseTransaction } from "./source-reference-repository.js";
+import {
+  lockPersonEvidenceMutation,
+  type DatabaseTransaction
+} from "./source-reference-repository.js";
 
 /** Typed definition used only by trusted composition and test setup. */
 export interface RegisterCoachingPolicyVersion extends CoachingPolicyParameters {
@@ -91,7 +94,7 @@ async function lockPerson(
   transaction: DatabaseTransaction,
   personId: string
 ): Promise<void> {
-  await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${personId}))`);
+  await lockPersonEvidenceMutation(transaction, personId);
 }
 
 type RecommendationRow = typeof coachingRecommendations.$inferSelect;

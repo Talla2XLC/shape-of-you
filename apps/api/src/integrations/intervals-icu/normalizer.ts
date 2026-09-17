@@ -55,6 +55,7 @@ export function normalizeIntervalsActivity(value: unknown): ProviderActivityReco
     ? localDateCandidate
     : occurredAt.slice(0, 10);
   const deviceName = optionalString(record, "device_name", 256);
+  const trainingLoad = optionalNumber(record, "icu_training_load", 0, 100_000);
   return {
     identity,
     occurredAt: instant.toISOString(),
@@ -64,7 +65,11 @@ export function normalizeIntervalsActivity(value: unknown): ProviderActivityReco
     durationSeconds: optionalNumber(record, "moving_time", 0, 604_800)
       ?? requiredNumber(record, "elapsed_time", 0, 604_800),
     distanceMeters: optionalNumber(record, "distance", 0, 10_000_000),
-    trainingLoad: optionalNumber(record, "icu_training_load", 0, 100_000),
+    trainingLoad,
+    trainingLoadBasis: trainingLoad === null ? null : "relative_training_stress",
+    trainingLoadBasisVersion: trainingLoad === null
+      ? null
+      : "intervals-icu-icu-training-load-v1",
     averageHeartRate: optionalNumber(record, "average_heartrate", 0, 300),
     maximumHeartRate: optionalNumber(record, "max_heartrate", 0, 300),
     deviceName,

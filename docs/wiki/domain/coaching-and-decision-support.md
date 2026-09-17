@@ -37,18 +37,24 @@ most one parameter. It creates no program/session change.
 The `daily_next_action` recommendation is a lazily materialized immutable
 snapshot for the current Person-local date. The API gathers current typed
 Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile
-coverage, and applies the code-owned `daily-assessment-v1` policy. The result
+coverage, and applies the code-owned `daily-assessment-v2` policy. Version 2
+first evaluates the unchanged absolute v1 safety rules, then applies a
+conservative balanced personal-baseline overlay that may preserve or strengthen
+the result but never weaken it. The result
 contains a safe day status, used facts, important missing data, typed reasons,
 one recommended action, bounded alternatives, limitations, confidence, policy
-version, and evidence checksum. Identical evidence reuses the snapshot; a late
-or corrected fact or active TrainingProgramVersion changes the checksum and
-selects a new snapshot. Historical snapshots remain audit evidence unless
-Recovery erasure removes a snapshot derived from the erased observations.
+version, qualitative personal comparisons, and evidence checksum. Its private
+immutable calculation preserves the exact policy bundle, selected evidence,
+eligibility trace, comparisons, signal groups, and chosen result. Identical
+evidence reuses the snapshot; a late or corrected fact, context exclusion, or
+active TrainingProgramVersion changes the checksum and selects a new snapshot.
+Historical snapshots remain readable audit evidence unless privacy erasure
+removes one derived from erased evidence. Legacy v1 snapshots remain readable.
 
-Personal-baseline support currently exists only as a read-only retrospective
-calibration path; `daily-assessment-v1` remains the production authority. Its
+The read-only retrospective calibration path calls the same parameterized pure
+personal-policy evaluator as live v2 and adds only aggregate reporting. Its
 analytics keep two independent modes. `stored_v1` starts from an immutable v1
-snapshot and is the only exact record of a historical or displayed decision.
+snapshot and is the only exact record of the historical v1 decision.
 `counterfactual_current_facts_v1` runs the same v1 evaluator over current,
 corrected daily projections but does not reconstruct the exact historical
 input, full reasons, missing-data list, confidence, alternatives, or what the
@@ -63,7 +69,7 @@ samples, absolute safety guardrails, and a warm-up interval outside the reported
 range. The command creates no assessment or recommendation and emits only a
 fixed aggregate report without dates, values, Person identifiers, provider
 identities, or daily rows. Real-history execution requires separate environment
-and Person authorization. Production `daily-assessment-v2` is not activated.
+and Person authorization. It never changes current recommendations.
 
 Recovery still owns physiological evidence, load-risk assessments, hard stops,
 and erasure. Training still owns active programs, sessions, and connected
@@ -184,12 +190,12 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
+- [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 
 ## Open questions
 
-- Personal-baseline candidate calibration, typed Training load-basis
-  compatibility, production activation, difficulty/exercise replacement,
-  future daily policy versions, and explicit execution linkage.
+- Measured post-deployment baseline-policy stability, difficulty/exercise
+  replacement, future daily policy versions, and explicit execution linkage.
 
 ## Related material
 

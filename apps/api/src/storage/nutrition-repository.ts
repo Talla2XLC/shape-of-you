@@ -80,6 +80,7 @@ import {
   discardUnusedSourceReference,
   ensureSourceReference,
   isPersonContextEvidence,
+  lockPersonEvidenceMutation,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 
@@ -1122,6 +1123,7 @@ export class NutritionRepository implements NutritionStore {
     input: CreateMeal
   ): Promise<CreateMealResult> {
     return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
       await this.assertMealFoodVersionsAccessible(
         transaction,
         personId,
@@ -1163,6 +1165,7 @@ export class NutritionRepository implements NutritionStore {
     input: CorrectMeal
   ): Promise<CreateMealResult> {
     return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
       await transaction.execute(
         sql`select id from ${meals}
             where ${meals.id} = ${id}

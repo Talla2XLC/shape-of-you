@@ -234,6 +234,8 @@ describe("Recovery PostgreSQL vertical", () => {
     const activity = {
       identity: "activity-c", occurredAt: "2026-09-07T06:00:00.000Z", localDate: "2026-09-07", timezone: "UTC",
       name: "Run", durationSeconds: 3600, distanceMeters: 10_000, trainingLoad: 80,
+      trainingLoadBasis: "relative_training_stress" as const,
+      trainingLoadBasisVersion: "intervals-icu-icu-training-load-v1",
       averageHeartRate: 145, maximumHeartRate: 175, deviceName: "Garmin Test", garminAttributed: true
     };
     const trainingInput = (value: typeof activity, checksum: string) => ({
@@ -241,7 +243,9 @@ describe("Recovery PostgreSQL vertical", () => {
       providerIdentity: value.identity,
       normalizedChecksum: checksum, occurredAt: value.occurredAt, localDate: value.localDate, timezone: value.timezone,
       name: value.name, durationSeconds: value.durationSeconds, distanceMeters: value.distanceMeters,
-      trainingLoad: value.trainingLoad, averageHeartRate: value.averageHeartRate, maximumHeartRate: value.maximumHeartRate,
+      trainingLoad: value.trainingLoad, trainingLoadBasis: value.trainingLoadBasis,
+      trainingLoadBasisVersion: value.trainingLoadBasisVersion,
+      averageHeartRate: value.averageHeartRate, maximumHeartRate: value.maximumHeartRate,
       deviceName: value.deviceName, sourceProvider: "intervals_icu", garminAttributed: value.garminAttributed
     });
     expect(await training.importExternalActivity(trainingInput(activity, "b".repeat(64)))).toBe("created");
@@ -277,8 +281,8 @@ describe("Recovery PostgreSQL vertical", () => {
       expect(await readTrainingBaselineDays(
         baselineClient, personC, "2026-09-07", "2026-09-08"
       )).toEqual([
-        { localDate: "2026-09-07", trainingLoad: 80, loadSeriesKey: id, workoutSessionCount: 0, externalActivityCount: 1, incompatibleLoadSources: false },
-        { localDate: "2026-09-08", trainingLoad: 80, loadSeriesKey: id, workoutSessionCount: 0, externalActivityCount: 1, incompatibleLoadSources: false }
+        expect.objectContaining({ localDate: "2026-09-07", trainingLoad: 80, loadSeriesKey: "relative_training_stress:intervals-icu-icu-training-load-v1", loadBasis: "relative_training_stress", loadBasisVersion: "intervals-icu-icu-training-load-v1", workoutSessionCount: 0, externalActivityCount: 1, incompatibleLoadSources: false }),
+        expect.objectContaining({ localDate: "2026-09-08", trainingLoad: 80, loadSeriesKey: "relative_training_stress:intervals-icu-icu-training-load-v1", loadBasis: "relative_training_stress", loadBasisVersion: "intervals-icu-icu-training-load-v1", workoutSessionCount: 0, externalActivityCount: 1, incompatibleLoadSources: false })
       ]);
       expect(await readTrainingBaselineDays(
         baselineClient, personB, "2026-09-07", "2026-09-08"
@@ -331,11 +335,21 @@ describe("Recovery PostgreSQL vertical", () => {
       expect(await readTrainingBaselineDays(
         semanticsClient, personC, "2026-09-07", "2026-09-09"
       )).toEqual([
-        expect.objectContaining({ localDate: "2026-09-07", loadSeriesKey: id }),
-        expect.objectContaining({ localDate: "2026-09-08", loadSeriesKey: id }),
+        expect.objectContaining({
+          localDate: "2026-09-07",
+          loadSeriesKey: "relative_training_stress:intervals-icu-icu-training-load-v1",
+          incompatibleLoadSources: false
+        }),
+        expect.objectContaining({
+          localDate: "2026-09-08",
+          loadSeriesKey: "relative_training_stress:intervals-icu-icu-training-load-v1",
+          incompatibleLoadSources: false
+        }),
         expect.objectContaining({
           localDate: "2026-09-09",
-          loadSeriesKey: semanticsIntegrationId
+          loadSeriesKey: null,
+          trainingLoad: null,
+          incompatibleLoadSources: true
         })
       ]);
     } finally {
@@ -399,11 +413,13 @@ describe("Recovery PostgreSQL vertical", () => {
       policyVersion: "daily-assessment-v1",
       evidenceChecksum: "9".repeat(64)
     } as const;
-    await dailyAssessments.createOrGet(personC, activitySnapshot);
-    await dailyAssessments.createOrGet(personB, {
+    const legacySnapshot = await dailyAssessments.createOrGet(personC, activitySnapshot);
+    expect(legacySnapshot.policyVersion).toBe("daily-assessment-v1");
+    expect(legacySnapshot).not.toHaveProperty("personalBaseline");
+    await expect(dailyAssessments.createOrGet(personB, {
       ...activitySnapshot,
       evidenceChecksum: "8".repeat(64)
-    });
+    })).rejects.toThrow();
     const crossPersonSnapshotClient = await database.pool.connect();
     try {
       const crossPersonEvidence = await loadRetrospectiveEvidence(
@@ -482,6 +498,8 @@ describe("Recovery PostgreSQL vertical", () => {
         durationSeconds: 2_700,
         distanceMeters: 7_000,
         trainingLoad: 62,
+        trainingLoadBasis: "relative_training_stress",
+        trainingLoadBasisVersion: "intervals-icu-icu-training-load-v1",
         averageHeartRate: 146,
         maximumHeartRate: 172,
         deviceName: "Garmin Test",
@@ -733,6 +751,8 @@ describe("Recovery PostgreSQL vertical", () => {
         durationSeconds: 3_600,
         distanceMeters: 10_000,
         trainingLoad: 75,
+        trainingLoadBasis: "relative_training_stress",
+        trainingLoadBasisVersion: "intervals-icu-icu-training-load-v1",
         averageHeartRate: 145,
         maximumHeartRate: 175,
         deviceName: "Garmin Test",

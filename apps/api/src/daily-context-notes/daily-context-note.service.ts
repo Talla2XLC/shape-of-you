@@ -52,6 +52,11 @@ export class DailyContextNoteService {
     return this.store.listForLocalDate(this.personContext.getPersonId(), localDate);
   }
 
+  /** Lists current typed context across a bounded local-date range. */
+  public listForLocalDateRange(from: string, to: string): Promise<DailyContextNoteList> {
+    return this.store.listForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
   /** Returns the complete correction chain containing a note. */
   public async history(id: string): Promise<DailyContextNoteHistory> {
     const history = await this.store.history(this.personContext.getPersonId(), id);

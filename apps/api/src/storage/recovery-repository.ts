@@ -37,6 +37,10 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
+import {
+  readRecoveryBaselineDays,
+  type RecoveryBaselineDay
+} from "../recovery/personal-baseline-history.js";
 import type { DataCoverageEvidence, RecoveryDataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   performedExercises,
@@ -80,6 +84,7 @@ import {
   discardUnusedSourceReference,
   ensureSourceReference,
   isPersonContextEvidence,
+  lockPersonEvidenceMutation,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 
@@ -143,6 +148,8 @@ export interface RecoveryStore {
   /** Reads every current observation for one exact Person-local calendar date. */
   listObservationsForLocalDate(personId: string, localDate: string): Promise<readonly RecoveryObservation[]>;
   listObservationsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly RecoveryObservation[]>;
+  /** Reads bounded owner-consolidated days for personal assessment. */
+  listPersonalBaselineDays(personId: string, from: string, to: string): Promise<readonly RecoveryBaselineDay[]>;
   /** Reads provider-neutral current Recovery bounds and recent evidence without hydration. */
   getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<RecoveryDataCoverageEvidence>;
   observationHistory(personId: string, id: string): Promise<RecoveryObservationHistory | null>;
@@ -169,12 +176,20 @@ export interface RecoveryStore {
 }
 
 async function lockPerson(transaction: DatabaseTransaction, personId: string): Promise<void> {
-  await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${personId}))`);
+  await lockPersonEvidenceMutation(transaction, personId);
 }
 
 /** PostgreSQL implementation of the Recovery persistence boundary. */
 export class RecoveryRepository implements RecoveryStore {
   public constructor(private readonly database: DatabaseContext) {}
+
+  public listPersonalBaselineDays(
+    personId: string,
+    from: string,
+    to: string
+  ): Promise<readonly RecoveryBaselineDay[]> {
+    return readRecoveryBaselineDays(this.database.pool, personId, from, to);
+  }
 
   public registerDeviceModel(input: RegisterRecoveryDeviceModel): Promise<RecoveryDeviceModelVersion> {
     return this.database.db.transaction(async (transaction) => {
@@ -1311,6 +1326,40 @@ export class RecoveryRepository implements RecoveryStore {
         eq(recoveryObservations.personId, personId),
         eq(recoveryObservations.connectionId, connectionId)
       ));
+
+    await transaction.execute(sql`
+      delete from coaching_recommendations
+       where person_id = ${personId}
+         and id in (
+           select evidence.recommendation_id
+             from coaching_daily_assessment_training_evidence evidence
+             join integration_activity_facts activity
+               on activity.id = evidence.activity_id
+              and activity.person_id = evidence.person_id
+             join integration_connections integration_connection
+               on integration_connection.id = activity.connection_id
+              and integration_connection.person_id = activity.person_id
+            where evidence.person_id = ${personId}
+              and integration_connection.recovery_connection_id = ${connectionId}
+         )
+    `);
+
+    await transaction.execute(sql`
+      delete from coaching_recommendations
+       where person_id = ${personId}
+         and id in (
+           select daily_evidence.recommendation_id
+             from coaching_daily_assessment_assessment_evidence daily_evidence
+             join recovery_assessment_observation_evidence assessment_evidence
+               on assessment_evidence.assessment_id = daily_evidence.assessment_id
+              and assessment_evidence.person_id = daily_evidence.person_id
+             join recovery_observations observation
+               on observation.id = assessment_evidence.observation_id
+              and observation.person_id = assessment_evidence.person_id
+            where daily_evidence.person_id = ${personId}
+              and observation.connection_id = ${connectionId}
+         )
+    `);
 
     await transaction.execute(sql`
       delete from coaching_recommendations

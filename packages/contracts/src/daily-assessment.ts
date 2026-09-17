@@ -13,7 +13,11 @@ export const DailyAssessmentReasonSchema = {
     "recovery_hard_stop", "short_sleep", "hrv_below_baseline",
     "resting_heart_rate_above_baseline", "low_body_battery",
     "recent_training_load", "active_training_program", "partial_nutrition",
-    "sparse_recovery_data", "no_active_training_program"
+    "sparse_recovery_data", "no_active_training_program",
+    "sleep_below_usual", "hrv_below_usual",
+    "resting_heart_rate_above_usual", "body_battery_below_usual",
+    "training_load_above_usual", "personal_trend_persistent",
+    "personal_baseline_unstable"
   ]
 } as const;
 
@@ -76,6 +80,7 @@ export const DailyAssessmentUsedFactsSchema = {
     mealIds: { type: "array", items: uuid, uniqueItems: true },
     weightMeasurementIds: { type: "array", items: uuid, uniqueItems: true },
     activeTrainingProgramVersionId: { anyOf: [uuid, { type: "null" }] },
+    dailyContextNoteIds: { type: "array", items: uuid, uniqueItems: true },
     coveragePolicyVersion: { const: "profile-data-coverage-v1" },
     coverageReadiness: {
       type: "object",
@@ -95,6 +100,61 @@ export const DailyAssessmentUsedFactsSchema = {
   }
 } as const;
 
+export const DailyAssessmentV2UsedFactsSchema = {
+  ...DailyAssessmentUsedFactsSchema,
+  required: [
+    ...DailyAssessmentUsedFactsSchema.required,
+    "dailyContextNoteIds"
+  ]
+} as const;
+
+export const DailyAssessmentPersonalComparisonSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["metric", "availability", "position", "severity", "eligibleDayCount", "method"],
+  properties: {
+    metric: {
+      enum: [
+        "sleep_minutes", "hrv_rmssd", "resting_heart_rate",
+        "body_battery", "body_battery_min", "body_battery_max",
+        "training_load"
+      ]
+    },
+    availability: { enum: ["available", "insufficient_history", "unstable", "incompatible"] },
+    position: {
+      anyOf: [
+        { enum: ["below_usual", "within_usual", "above_usual"] },
+        { type: "null" }
+      ]
+    },
+    severity: {
+      anyOf: [{ enum: ["usual", "notable", "marked"] }, { type: "null" }]
+    },
+    eligibleDayCount: { type: "integer", minimum: 0 },
+    method: {
+      anyOf: [{ enum: ["median_mad", "median_percentiles"] }, { type: "null" }]
+    }
+  }
+} as const;
+
+export const DailyAssessmentPersonalBaselineSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["policyKey", "policyVersion", "status", "summary", "comparisons"],
+  properties: {
+    policyKey: { const: "balanced" },
+    policyVersion: { const: "personal-baseline-v1" },
+    status: { enum: ["available", "partial", "unavailable", "unstable"] },
+    summary: { type: "string", minLength: 1, maxLength: 512 },
+    comparisons: {
+      type: "array",
+      items: DailyAssessmentPersonalComparisonSchema,
+      minItems: 7,
+      maxItems: 7
+    }
+  }
+} as const;
+
 const readyProperties = {
   snapshotId: uuid,
   localDate,
@@ -105,9 +165,8 @@ const readyProperties = {
   reasons: { type: "array", uniqueItems: true, items: DailyAssessmentReasonSchema },
   recommendedAction: DailyNextActionSchema,
   alternatives: { type: "array", maxItems: 3, items: DailyNextActionSchema },
-  limitations: { type: "array", uniqueItems: true, items: { type: "string", enum: ["not_medical_advice", "confidence_limited_by_missing_data", "body_battery_daily_range_not_current", "nutrition_records_may_be_incomplete", "training_schedule_not_inferred"] } },
+  limitations: { type: "array", uniqueItems: true, items: { type: "string", enum: ["not_medical_advice", "confidence_limited_by_missing_data", "body_battery_daily_range_not_current", "nutrition_records_may_be_incomplete", "training_schedule_not_inferred", "training_load_baseline_unavailable"] } },
   confidence: { type: "number", minimum: 0, maximum: 1 },
-  policyVersion: { const: "daily-assessment-v1" },
   evidenceChecksum: { type: "string", minLength: 64, maxLength: 64 },
   createdAt: { type: "string", format: "date-time" }
 } as const;
@@ -122,8 +181,25 @@ export const DailyAssessmentResultSchema = {
     },
     {
       type: "object", additionalProperties: false,
-      required: ["state", ...Object.keys(readyProperties)],
-      properties: { state: { const: "available" }, ...readyProperties }
+      required: ["state", ...Object.keys(readyProperties), "policyVersion"],
+      properties: {
+        state: { const: "available" },
+        ...readyProperties,
+        policyVersion: { const: "daily-assessment-v1" }
+      }
+    },
+    {
+      type: "object", additionalProperties: false,
+      required: [
+        "state", ...Object.keys(readyProperties), "policyVersion", "personalBaseline"
+      ],
+      properties: {
+        state: { const: "available" },
+        ...readyProperties,
+        usedFacts: DailyAssessmentV2UsedFactsSchema,
+        policyVersion: { const: "daily-assessment-v2" },
+        personalBaseline: DailyAssessmentPersonalBaselineSchema
+      }
     }
   ]
 } as const;
@@ -133,14 +209,18 @@ export type DailyAssessmentReason =
   | "recovery_hard_stop" | "short_sleep" | "hrv_below_baseline"
   | "resting_heart_rate_above_baseline" | "low_body_battery"
   | "recent_training_load" | "active_training_program" | "partial_nutrition"
-  | "sparse_recovery_data" | "no_active_training_program";
+  | "sparse_recovery_data" | "no_active_training_program"
+  | "sleep_below_usual" | "hrv_below_usual"
+  | "resting_heart_rate_above_usual" | "body_battery_below_usual"
+  | "training_load_above_usual" | "personal_trend_persistent"
+  | "personal_baseline_unstable";
 export type DailyAssessmentMissingData =
   | "sleep" | "hrv" | "resting_heart_rate" | "body_battery"
   | "training" | "training_program" | "weight" | "nutrition";
 export type DailyAssessmentLimitation =
   | "not_medical_advice" | "confidence_limited_by_missing_data"
   | "body_battery_daily_range_not_current" | "nutrition_records_may_be_incomplete"
-  | "training_schedule_not_inferred";
+  | "training_schedule_not_inferred" | "training_load_baseline_unavailable";
 export type DailyNextActionType =
   | "recovery_first" | "record_recovery_check_in" | "follow_active_program"
   | "complete_nutrition_record" | "record_weight" | "confirm_training_program";
@@ -161,6 +241,7 @@ export interface DailyAssessmentUsedFacts {
   readonly mealIds: readonly string[];
   readonly weightMeasurementIds: readonly string[];
   readonly activeTrainingProgramVersionId: string | null;
+  readonly dailyContextNoteIds?: readonly string[];
   readonly coveragePolicyVersion: "profile-data-coverage-v1";
   readonly coverageReadiness: {
     readonly sleep: "good" | "partial" | "sparse";
@@ -193,8 +274,37 @@ export interface DailyAssessmentUsedFacts {
   };
 }
 
+/** V2 evidence always identifies the typed context notes used for exclusions. */
+export interface DailyAssessmentV2UsedFacts extends DailyAssessmentUsedFacts {
+  readonly dailyContextNoteIds: readonly string[];
+}
+
+export type DailyAssessmentPersonalMetric =
+  | "sleep_minutes" | "hrv_rmssd" | "resting_heart_rate"
+  | "body_battery" | "body_battery_min" | "body_battery_max"
+  | "training_load";
+
+/** One qualitative comparison with the Person's recent usual range. */
+export interface DailyAssessmentPersonalComparison {
+  readonly metric: DailyAssessmentPersonalMetric;
+  readonly availability: "available" | "insufficient_history" | "unstable" | "incompatible";
+  readonly position: "below_usual" | "within_usual" | "above_usual" | null;
+  readonly severity: "usual" | "notable" | "marked" | null;
+  readonly eligibleDayCount: number;
+  readonly method: "median_mad" | "median_percentiles" | null;
+}
+
+/** Public non-medical explanation of the active personal-baseline policy. */
+export interface DailyAssessmentPersonalBaseline {
+  readonly policyKey: "balanced";
+  readonly policyVersion: "personal-baseline-v1";
+  readonly status: "available" | "partial" | "unavailable" | "unstable";
+  readonly summary: string;
+  readonly comparisons: readonly DailyAssessmentPersonalComparison[];
+}
+
 /** Stored deterministic decision for one Person-local date and evidence version. */
-export interface DailyAssessmentAvailable {
+interface DailyAssessmentAvailableBase {
   readonly state: "available";
   readonly snapshotId: string;
   readonly localDate: string;
@@ -207,10 +317,25 @@ export interface DailyAssessmentAvailable {
   readonly alternatives: readonly DailyNextAction[];
   readonly limitations: readonly DailyAssessmentLimitation[];
   readonly confidence: number;
-  readonly policyVersion: "daily-assessment-v1";
   readonly evidenceChecksum: string;
   readonly createdAt: string;
 }
+
+/** Legacy absolute-policy snapshot retained as an immutable readable result. */
+export interface DailyAssessmentAvailableV1 extends DailyAssessmentAvailableBase {
+  readonly policyVersion: "daily-assessment-v1";
+}
+
+/** Active hybrid snapshot with a required versioned personal explanation. */
+export interface DailyAssessmentAvailableV2 extends Omit<DailyAssessmentAvailableBase, "usedFacts"> {
+  readonly policyVersion: "daily-assessment-v2";
+  readonly usedFacts: DailyAssessmentV2UsedFacts;
+  readonly personalBaseline: DailyAssessmentPersonalBaseline;
+}
+
+export type DailyAssessmentAvailable =
+  | DailyAssessmentAvailableV1
+  | DailyAssessmentAvailableV2;
 
 /** Read result that fails explicitly when Person timezone has not been configured. */
 export type DailyAssessmentResult =

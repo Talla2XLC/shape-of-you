@@ -8,10 +8,17 @@ import { NutritionModule } from "../nutrition/nutrition.module.js";
 import { RecoveryModule } from "../recovery/recovery.module.js";
 import { TrainingModule } from "../training/training.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
+import { DailyContextNoteModule } from "../daily-context-notes/daily-context-note.module.js";
 
 /** Coaching recommendation and decision module. */
 @Module({
-  imports: [RecoveryModule, TrainingModule, NutritionModule, WeightMeasurementModule],
+  imports: [
+    RecoveryModule,
+    TrainingModule,
+    NutritionModule,
+    WeightMeasurementModule,
+    DailyContextNoteModule
+  ],
   controllers: [CoachingController, DailyAssessmentController],
   providers: [CoachingService, DailyAssessmentService],
   exports: [CoachingService, DailyAssessmentService]

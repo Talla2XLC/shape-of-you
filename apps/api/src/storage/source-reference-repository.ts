@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import type {
   RecoverySourceReferenceInput,
@@ -14,6 +14,16 @@ import {
 export type DatabaseTransaction = Parameters<
   Parameters<DatabaseContext["db"]["transaction"]>[0]
 >[0];
+
+/** Serializes Person-owned fact mutations with consistent daily snapshot creation. */
+export async function lockPersonEvidenceMutation(
+  transaction: DatabaseTransaction,
+  personId: string
+): Promise<void> {
+  await transaction.execute(
+    sql`select pg_advisory_xact_lock(hashtext(${personId}))`
+  );
+}
 
 /** SourceReference row plus whether the current transaction inserted it. */
 export interface EnsuredSourceReference {

@@ -45,6 +45,7 @@ import {
   discardUnusedSourceReference,
   ensureSourceReference,
   isPersonContextEvidence,
+  lockPersonEvidenceMutation,
   type DatabaseTransaction,
   type EnsuredSourceReference
 } from "./source-reference-repository.js";
@@ -244,9 +245,10 @@ export class WeightMeasurementRepository
     personId: string,
     input: CreateWeightMeasurement
   ): Promise<CreateWeightMeasurementResult> {
-    return this.database.db.transaction((transaction) =>
-      createWeightMeasurementInTransaction(transaction, personId, input)
-    );
+    return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
+      return createWeightMeasurementInTransaction(transaction, personId, input);
+    });
   }
 
   /** {@inheritDoc WeightMeasurementStore.correct} */
@@ -256,6 +258,7 @@ export class WeightMeasurementRepository
     input: CorrectWeightMeasurement
   ): Promise<CreateWeightMeasurementResult> {
     return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
       await transaction.execute(
         sql`select id from ${weightMeasurements}
             where ${weightMeasurements.id} = ${id}

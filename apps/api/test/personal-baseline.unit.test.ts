@@ -226,6 +226,45 @@ describe("personal baseline policy", () => {
     expect(candidate.actionCounts.recovery_first).toBe(1);
   });
 
+  it("evaluates an adverse center with each candidate's own window and coverage", () => {
+    const targetDate = "2026-09-15";
+    const shifted = (days: number) => {
+      const value = new Date(`${targetDate}T00:00:00.000Z`);
+      value.setUTCDate(value.getUTCDate() + days);
+      return value.toISOString().slice(0, 10);
+    };
+    const evidence = [...Array.from({ length: 9 }, (_, index) => -110 + index * 2),
+      -10, -8, -6, -4, -2].map((offset) => ({
+      localDate: shifted(offset),
+      values: { sleep_minutes: 300 },
+      acuteIllness: false,
+      injuryConcern: false,
+      baselineExcluded: false,
+      trainingLoadIncompatible: false,
+      recoveryAssessmentPresent: false,
+      recoveryHardStop: false,
+      trainingLoadSeriesKey: null,
+      workoutSessionCount: 0
+    }));
+    const report = runDailyAssessmentRetrospective([...evidence, {
+      ...evidence.at(-1)!,
+      localDate: targetDate,
+      v1Status: "ready" as const,
+      v1Action: "follow_active_program" as const,
+      v1AbsoluteGuardrail: false
+    }], targetDate);
+    const byCandidate = new Map(report.candidates.map((candidate) => [
+      candidate.candidate,
+      candidate
+    ]));
+
+    expect(byCandidate.get("responsive")!.baselineAvailableDayCounts.sleep_minutes).toBe(0);
+    expect(byCandidate.get("balanced")!.baselineAvailableDayCounts.sleep_minutes).toBe(0);
+    expect(byCandidate.get("stable")!.baselineAvailableDayCounts.sleep_minutes).toBe(1);
+    expect(byCandidate.get("balanced")!.v1ToHybridTransitionCounts["ready->ready"]).toBe(1);
+    expect(byCandidate.get("stable")!.v1ToHybridTransitionCounts["ready->caution"]).toBe(1);
+  });
+
   it("uses the canonical eligible set and even-sample median for adverse centers", () => {
     const days: RetrospectiveDailyEvidence[] = Array.from({ length: 23 }, (_, index) => ({
       localDate: date(index + 1),

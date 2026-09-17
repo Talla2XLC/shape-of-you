@@ -46,6 +46,7 @@ import { toSourceReference } from "../domain/source-reference.js";
 import {
   discardUnusedSourceReference,
   ensureSourceReference,
+  lockPersonEvidenceMutation,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 import { createWeightMeasurementInTransaction } from "./weight-measurement-repository.js";
@@ -750,6 +751,7 @@ export class IntakeRepository implements IntakeStore {
     }
     const itemId = job.itemId;
     await this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, job.personId);
       await this.requireLease(transaction, job);
       const rows = await transaction
         .select({

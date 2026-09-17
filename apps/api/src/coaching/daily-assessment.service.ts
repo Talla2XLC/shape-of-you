@@ -1,17 +1,46 @@
 import { Inject, Injectable } from "@nestjs/common";
 
-import type { DailyAssessmentResult, DailyAssessmentUsedFacts, PersonPreferences, RecoveryObservation, UpdatePersonPreferences } from "@shape-of-you/contracts";
+import type { DailyAssessmentResult, DailyAssessmentV2UsedFacts, PersonPreferences, RecoveryObservation, UpdatePersonPreferences } from "@shape-of-you/contracts";
 
 import type { PersonContext } from "../application/person-context.js";
 import { DAILY_ASSESSMENT_STORE, PERSON_CONTEXT } from "../application/tokens.js";
 import { assertIanaTimezone } from "../domain/date-context.js";
-import { DAILY_ASSESSMENT_POLICY_VERSION, dailyAssessmentChecksum, evaluateDailyAssessment } from "../domain/daily-assessment.js";
+import {
+  DAILY_ASSESSMENT_V2_POLICY_VERSION,
+  dailyAssessmentV2Checksum,
+  evaluateDailyAssessment
+} from "../domain/daily-assessment.js";
+import { applyConservativePersonalOverlay } from "../domain/daily-assessment-personal-overlay.js";
+import {
+  evaluatePersonalizedDailyAssessment,
+  type PersonalAssessmentEvidenceDay
+} from "../domain/personalized-daily-assessment.js";
+import { activePersonalBaselinePolicy } from "../domain/personal-baseline.js";
 import { buildCoverageDirection, shiftLocalDate } from "../progress-overview/progress-data-coverage.policy.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
 import { RecoveryService } from "../recovery/recovery.service.js";
 import type { DailyAssessmentStore } from "../storage/daily-assessment-repository.js";
 import { TrainingService } from "../training/training.service.js";
 import { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
+import { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
+import { DailyAssessmentEvidenceChangedError } from "../domain/errors.js";
+
+/** Retries a composition when its evidence revision changes, then fails closed. */
+export async function withDailyAssessmentConsistency<T>(
+  operation: () => Promise<T>,
+  maximumAttempts = 3
+): Promise<T> {
+  for (let attempt = 1; attempt <= maximumAttempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      if (!(error instanceof DailyAssessmentEvidenceChangedError) || attempt === maximumAttempts) {
+        throw error;
+      }
+    }
+  }
+  throw new DailyAssessmentEvidenceChangedError();
+}
 
 /** Derives the calendar date used by the daily policy in the Person-owned timezone. */
 export function derivePersonLocalDate(timezone: string, now = new Date()): string {
@@ -39,7 +68,8 @@ export class DailyAssessmentService {
     @Inject(RecoveryService) private readonly recovery: RecoveryService,
     @Inject(TrainingService) private readonly training: TrainingService,
     @Inject(NutritionService) private readonly nutrition: NutritionService,
-    @Inject(WeightMeasurementService) private readonly weights: WeightMeasurementService
+    @Inject(WeightMeasurementService) private readonly weights: WeightMeasurementService,
+    @Inject(DailyContextNoteService) private readonly contextNotes: DailyContextNoteService
   ) {}
 
   public preferences(): Promise<PersonPreferences> { return this.store.getPreferences(this.personContext.getPersonId()); }
@@ -49,7 +79,11 @@ export class DailyAssessmentService {
     return this.store.setTimezone(this.personContext.getPersonId(), input.timezone);
   }
 
-  public async read(): Promise<DailyAssessmentResult> {
+  public read(): Promise<DailyAssessmentResult> {
+    return withDailyAssessmentConsistency(() => this.readConsistent());
+  }
+
+  private async readConsistent(): Promise<DailyAssessmentResult> {
     const personId = this.personContext.getPersonId();
     const preferences = await this.store.getPreferences(personId);
     if (preferences.timezone === null) return { state: "timezone_required", timezone: null };
@@ -57,8 +91,31 @@ export class DailyAssessmentService {
     const timezone = preferences.timezone;
     const localDate = derivePersonLocalDate(timezone);
     const from = shiftLocalDate(localDate, -28);
+    const baselineFrom = shiftLocalDate(
+      localDate,
+      -activePersonalBaselinePolicy.maximumLookbackDays
+    );
     const coverageFrom = shiftLocalDate(localDate, -90);
-    const [observations, assessments, training, meals, totals, weights, recoveryCoverage, trainingCoverage, nutritionCoverage, weightCoverage] = await Promise.all([
+    const evidenceRevisionBefore = await this.store.getEvidenceRevision(
+      personId,
+      coverageFrom,
+      localDate
+    );
+    const [
+      observations,
+      assessments,
+      training,
+      meals,
+      totals,
+      weights,
+      recoveryCoverage,
+      trainingCoverage,
+      nutritionCoverage,
+      weightCoverage,
+      recoveryBaselineDays,
+      trainingBaselineDays,
+      contextNotes
+    ] = await Promise.all([
       this.recovery.listObservationsForLocalDateRange(from, localDate),
       this.recovery.listAssessmentsForLocalDate(localDate),
       this.training.getTrainingContext({ historyLimit: 20 }),
@@ -68,8 +125,19 @@ export class DailyAssessmentService {
       this.recovery.getDataCoverage(coverageFrom, localDate, localDate),
       this.training.getDataCoverage(coverageFrom, localDate, localDate),
       this.nutrition.getDataCoverage(coverageFrom, localDate, localDate),
-      this.weights.getDataCoverage(coverageFrom, localDate, localDate)
+      this.weights.getDataCoverage(coverageFrom, localDate, localDate),
+      this.recovery.listPersonalBaselineDays(baselineFrom, localDate),
+      this.training.listPersonalBaselineDays(baselineFrom, localDate),
+      this.contextNotes.listForLocalDateRange(baselineFrom, localDate)
     ]);
+    const evidenceRevisionAfter = await this.store.getEvidenceRevision(
+      personId,
+      coverageFrom,
+      localDate
+    );
+    if (evidenceRevisionBefore !== evidenceRevisionAfter) {
+      throw new DailyAssessmentEvidenceChangedError();
+    }
     const sortedObservations = [...observations].sort((a, b) =>
       b.localDate.localeCompare(a.localDate) ||
       (b.observedFrom ?? "").localeCompare(a.observedFrom ?? "") ||
@@ -85,14 +153,32 @@ export class DailyAssessmentService {
     const recentExternal = training.recentExternalActivities.filter((item) => item.localDate >= recentFrom && item.localDate <= localDate);
     const assessment = assessments[0] ?? null;
     const subjectiveHardStop = currentRecovery.some((item) => item.detail.type === "subjective" && (item.detail.acuteIllness || item.detail.injuryConcern));
-    const facts: DailyAssessmentUsedFacts = {
-      recoveryObservationIds: sortedObservations.map((item) => item.id).sort(),
-      recoveryAssessmentIds: assessments.map((item) => item.id).sort(),
-      workoutSessionIds: training.recentSessions.items.map((item) => item.id).sort(),
-      externalActivityIds: training.recentExternalActivities.map((item) => item.id).sort(),
+    const baselineRecoveryObservationIds = recoveryBaselineDays.flatMap((day) => day.observationIds);
+    const baselineRecoveryAssessmentIds = recoveryBaselineDays.flatMap((day) => day.assessmentIds);
+    const baselineWorkoutSessionIds = trainingBaselineDays.flatMap((day) => day.workoutSessionIds);
+    const baselineExternalActivityIds = trainingBaselineDays.flatMap((day) => day.externalActivityIds);
+    const unique = (values: readonly string[]) => [...new Set(values)].sort();
+    const facts: DailyAssessmentV2UsedFacts = {
+      recoveryObservationIds: unique([
+        ...sortedObservations.map((item) => item.id),
+        ...baselineRecoveryObservationIds
+      ]),
+      recoveryAssessmentIds: unique([
+        ...assessments.map((item) => item.id),
+        ...baselineRecoveryAssessmentIds
+      ]),
+      workoutSessionIds: unique([
+        ...training.recentSessions.items.map((item) => item.id),
+        ...baselineWorkoutSessionIds
+      ]),
+      externalActivityIds: unique([
+        ...training.recentExternalActivities.map((item) => item.id),
+        ...baselineExternalActivityIds
+      ]),
       mealIds: meals.map((item) => item.id).sort(),
       weightMeasurementIds: weights.map((item) => item.id).sort(),
       activeTrainingProgramVersionId: activeVersionId,
+      dailyContextNoteIds: unique(contextNotes.items.map((item) => item.id)),
       coveragePolicyVersion: "profile-data-coverage-v1",
       coverageReadiness: {
         sleep: buildCoverageDirection("sleep", localDate, recoveryCoverage.sleep).status,
@@ -124,12 +210,84 @@ export class DailyAssessmentService {
         latestWeightKg: weights[0]?.weightKg ?? null
       }
     };
-    const evaluation = evaluateDailyAssessment(facts);
-    const evidenceChecksum = dailyAssessmentChecksum(localDate, timezone, facts);
+    const baseEvaluation = evaluateDailyAssessment(facts);
+    const recoveryByDate = new Map(recoveryBaselineDays.map((day) => [day.localDate, day]));
+    const trainingByDate = new Map(trainingBaselineDays.map((day) => [day.localDate, day]));
+    const excludedDates = new Set(
+      contextNotes.items
+        .filter((note) => note.baselineEligibility === "exclude")
+        .map((note) => note.localDate)
+    );
+    const evidenceDates = new Set([
+      ...recoveryBaselineDays.map((day) => day.localDate),
+      ...trainingBaselineDays.map((day) => day.localDate),
+      ...contextNotes.items.map((note) => note.localDate),
+      localDate
+    ]);
+    const personalDays: PersonalAssessmentEvidenceDay[] = [...evidenceDates]
+      .sort()
+      .map((date) => {
+        const recovery = recoveryByDate.get(date);
+        const trainingDay = trainingByDate.get(date);
+        const values: PersonalAssessmentEvidenceDay["values"] = {
+          ...(recovery?.sleepMinutes == null ? {} : { sleep_minutes: recovery.sleepMinutes }),
+          ...(recovery?.hrvRmssd == null ? {} : { hrv_rmssd: recovery.hrvRmssd }),
+          ...(recovery?.restingHeartRate == null ? {} : { resting_heart_rate: recovery.restingHeartRate }),
+          ...(recovery?.bodyBattery == null ? {} : { body_battery: recovery.bodyBattery }),
+          ...(recovery?.bodyBatteryMin == null ? {} : { body_battery_min: recovery.bodyBatteryMin }),
+          ...(recovery?.bodyBatteryMax == null ? {} : { body_battery_max: recovery.bodyBatteryMax }),
+          ...(trainingDay?.trainingLoad == null ? {} : { training_load: trainingDay.trainingLoad })
+        };
+        return {
+          localDate: date,
+          values,
+          baselineExcluded: excludedDates.has(date),
+          recoveryHardStop: recovery?.hardStop === true ||
+            recovery?.acuteIllness === true || recovery?.injuryConcern === true,
+          trainingLoadIncompatible: trainingDay?.incompatibleLoadSources ?? false,
+          trainingLoadSeriesKey: trainingDay?.loadSeriesKey ?? null,
+          recoveryObservationIds: recovery?.observationIds ?? [],
+          recoveryAssessmentIds: recovery?.assessmentIds ?? [],
+          externalActivityIds: trainingDay?.externalActivityIds ?? []
+        };
+      });
+    const personal = evaluatePersonalizedDailyAssessment(localDate, personalDays);
+    const overlay = applyConservativePersonalOverlay(
+      baseEvaluation.status,
+      baseEvaluation.recommendedAction,
+      personal.signals
+    );
+    const limitations = [...baseEvaluation.limitations];
+    if (
+      personal.publicBaseline.comparisons.find((item) => item.metric === "training_load")
+        ?.availability === "incompatible"
+    ) limitations.push("training_load_baseline_unavailable");
+    const evaluation = {
+      ...baseEvaluation,
+      status: overlay.status,
+      recommendedAction: overlay.action,
+      reasons: [...new Set([...baseEvaluation.reasons, ...personal.reasons])],
+      limitations: [...new Set(limitations)]
+    };
+    const evidenceChecksum = dailyAssessmentV2Checksum(
+      localDate,
+      timezone,
+      facts,
+      personal.calculation,
+      { ...evaluation, personalBaseline: personal.publicBaseline }
+    );
     return this.store.createOrGet(personId, {
       localDate, timezone, ...evaluation, usedFacts: facts,
-      policyVersion: DAILY_ASSESSMENT_POLICY_VERSION,
-      evidenceChecksum
+      policyVersion: DAILY_ASSESSMENT_V2_POLICY_VERSION,
+      evidenceChecksum,
+      personalBaseline: personal.publicBaseline,
+      personalBaselineCalculation: personal.calculation
+    }, {
+      expectedRevision: evidenceRevisionAfter,
+      expectedTimezone: timezone,
+      expectedPreferencesUpdatedAt: preferences.updatedAt,
+      from: coverageFrom,
+      to: localDate
     });
   }
 }

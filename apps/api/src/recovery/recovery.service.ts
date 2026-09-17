@@ -28,6 +28,7 @@ import type {
   CreatedRecoveryObservation,
   RecoveryStore
 } from "../storage/recovery-repository.js";
+import type { RecoveryBaselineDay } from "./personal-baseline-history.js";
 
 /** Application boundary for Recovery observations, consent and assessments. */
 @Injectable()
@@ -79,6 +80,11 @@ export class RecoveryService {
   /** Reads current recovery observations across an inclusive Person-local date range. */
   public listObservationsForLocalDateRange(from: string, to: string): Promise<readonly RecoveryObservation[]> {
     return this.store.listObservationsForLocalDateRange(this.personContext.getPersonId(), from, to);
+  }
+
+  /** Reads bounded owner-consolidated Recovery history for Coaching. */
+  public listPersonalBaselineDays(from: string, to: string): Promise<readonly RecoveryBaselineDay[]> {
+    return this.store.listPersonalBaselineDays(this.personContext.getPersonId(), from, to);
   }
 
   /** Reads lean provider-neutral Recovery coverage summaries for Progress. */

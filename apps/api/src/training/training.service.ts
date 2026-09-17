@@ -35,6 +35,7 @@ import type {
   ExternalActivityFact,
   TrainingStore
 } from "../storage/training-repository.js";
+import type { TrainingBaselineDay } from "./personal-baseline-history.js";
 
 function toExternalActivitySummary(
   activity: ExternalActivityFact
@@ -64,6 +65,11 @@ export class TrainingService {
     @Inject(PERSON_CONTEXT)
     private readonly personContext: PersonContext
   ) {}
+
+  /** Reads bounded owner-consolidated Training history for Coaching. */
+  public listPersonalBaselineDays(from: string, to: string): Promise<readonly TrainingBaselineDay[]> {
+    return this.store.listPersonalBaselineDays(this.personContext.getPersonId(), from, to);
+  }
 
   /** Creates a shared or Person-private Exercise with its first revision. */
   public createExercise(input: CreateExercise): Promise<Exercise> {

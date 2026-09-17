@@ -34,6 +34,10 @@ import type {
 } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
+import {
+  readTrainingBaselineDays,
+  type TrainingBaselineDay
+} from "../training/personal-baseline-history.js";
 import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   performedExercises,
@@ -75,6 +79,7 @@ import {
   discardUnusedSourceReference,
   ensureSourceReference,
   isPersonContextEvidence,
+  lockPersonEvidenceMutation,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 
@@ -120,6 +125,8 @@ export interface ImportExternalActivity {
   readonly durationSeconds: number;
   readonly distanceMeters: number | null;
   readonly trainingLoad: number | null;
+  readonly trainingLoadBasis: "relative_training_stress" | null;
+  readonly trainingLoadBasisVersion: string | null;
   readonly averageHeartRate: number | null;
   readonly maximumHeartRate: number | null;
   readonly deviceName: string | null;
@@ -138,6 +145,8 @@ export interface TrainingStore {
   importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped">;
   /** Lists newest current external-activity revisions for one Person with a SQL-applied bound. */
   listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]>;
+  /** Reads bounded owner-consolidated Training days for personal assessment. */
+  listPersonalBaselineDays(personId: string, from: string, to: string): Promise<readonly TrainingBaselineDay[]>;
   createExercise(personId: string, input: CreateExercise): Promise<Exercise>;
   appendExerciseVersion(
     personId: string,
@@ -266,14 +275,20 @@ async function lockPerson(
   transaction: DatabaseTransaction,
   personId: string
 ): Promise<void> {
-  await transaction.execute(
-    sql`select pg_advisory_xact_lock(hashtext(${personId}))`
-  );
+  await lockPersonEvidenceMutation(transaction, personId);
 }
 
 /** PostgreSQL implementation of the Training persistence boundary. */
 export class TrainingRepository implements TrainingStore {
   public constructor(private readonly database: DatabaseContext) {}
+
+  public listPersonalBaselineDays(
+    personId: string,
+    from: string,
+    to: string
+  ): Promise<readonly TrainingBaselineDay[]> {
+    return readTrainingBaselineDays(this.database.pool, personId, from, to);
+  }
 
   public importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped"> {
     return this.database.db.transaction(async (transaction) => {
@@ -296,6 +311,8 @@ export class TrainingRepository implements TrainingStore {
         normalizedChecksum: input.normalizedChecksum, occurredAt: new Date(input.occurredAt), localDate: input.localDate,
         timezone: input.timezone, name: input.name, durationSeconds: input.durationSeconds,
         distanceMeters: input.distanceMeters?.toFixed(3), trainingLoad: input.trainingLoad?.toFixed(3),
+        trainingLoadBasis: input.trainingLoadBasis,
+        trainingLoadBasisVersion: input.trainingLoadBasisVersion,
         averageHeartRate: input.averageHeartRate?.toFixed(3), maximumHeartRate: input.maximumHeartRate?.toFixed(3),
         deviceName: input.deviceName, sourceProvider: input.sourceProvider, garminAttributed: input.garminAttributed,
         supersedesId: current?.id ?? null, correctionReason: current ? "provider_record_changed" : null
@@ -320,6 +337,8 @@ export class TrainingRepository implements TrainingStore {
       occurredAt: row.occurredAt.toISOString(), localDate: row.localDate, timezone: row.timezone,
       name: row.name, durationSeconds: row.durationSeconds, distanceMeters: numberOrNull(row.distanceMeters),
       trainingLoad: numberOrNull(row.trainingLoad), averageHeartRate: numberOrNull(row.averageHeartRate),
+      trainingLoadBasis: row.trainingLoadBasis as "relative_training_stress" | null,
+      trainingLoadBasisVersion: row.trainingLoadBasisVersion,
       maximumHeartRate: numberOrNull(row.maximumHeartRate), deviceName: row.deviceName,
       sourceProvider: row.sourceProvider, garminAttributed: row.garminAttributed, supersedesId: row.supersedesId
     }));

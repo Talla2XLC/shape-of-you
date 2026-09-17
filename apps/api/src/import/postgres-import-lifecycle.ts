@@ -44,6 +44,9 @@ export class PostgresImportLifecycle {
     const client = await this.pool.connect();
     try {
       await client.query("begin");
+      await client.query("select pg_advisory_xact_lock(hashtext($1))", [
+        input.personId
+      ]);
       await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
         `${input.sourceSystem}:${input.adapter.domain}:${input.personId}`
       ]);

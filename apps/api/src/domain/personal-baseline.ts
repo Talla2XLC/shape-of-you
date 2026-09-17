@@ -22,7 +22,7 @@ export interface PersonalBaselineSample {
 /** Immutable parameters of one shadow baseline candidate. */
 export interface PersonalBaselinePolicy {
   readonly key: "responsive" | "balanced" | "stable";
-  readonly policyVersion: "personal-baseline-shadow-v1";
+  readonly policyVersion: "personal-baseline-shadow-v1" | "personal-baseline-v1";
   readonly minimumEligibleDays: 14;
   readonly minimumTrainingCalendarSpanDays: 21;
   readonly targetEligibleDays: number;
@@ -101,6 +101,12 @@ export const personalBaselineCandidates: readonly PersonalBaselinePolicy[] = [
     multiSignalFreezeThreshold: 3
   }
 ] as const;
+
+/** Immutable balanced policy selected for the authoritative v2 assessment. */
+export const activePersonalBaselinePolicy: PersonalBaselinePolicy = {
+  ...personalBaselineCandidates[1]!,
+  policyVersion: "personal-baseline-v1"
+};
 
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((left, right) => left - right);

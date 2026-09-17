@@ -38,6 +38,8 @@ export interface ProviderActivityRecord {
   readonly durationSeconds: number;
   readonly distanceMeters: number | null;
   readonly trainingLoad: number | null;
+  readonly trainingLoadBasis: "relative_training_stress" | null;
+  readonly trainingLoadBasisVersion: string | null;
   readonly averageHeartRate: number | null;
   readonly maximumHeartRate: number | null;
   readonly deviceName: string | null;

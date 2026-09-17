@@ -127,16 +127,26 @@ Body Battery needs either a direct point or both daily minimum and maximum to
 make that date usable. These coverage statuses describe evidence sufficiency,
 not physiological readiness or medical quality.
 
-The personal-baseline shadow path uses a separate Recovery-owned bounded
-history reader. It admits only current, non-withdrawn `person_context` evidence
+The live personal-baseline path uses a Recovery-owned bounded history reader.
+It admits only current, non-withdrawn `person_context` evidence
 with usable quality, keeps metric and unit semantics separate, and excludes
 facts hidden by a pending erasure request. Subjective acute-illness and injury
 concern observations remain available to the safety stream even when they are
-not baseline samples. A stored daily assessment is comparable only while its
+not baseline samples. Recovery supplies one owner-consolidated representative
+per metric and local date plus exact observation and RecoveryAssessment IDs.
+Direct, minimum, and maximum Body Battery retain separate comparisons but form
+one physiological signal for daily escalation. A stored daily assessment is
+comparable only while its
 complete Recovery evidence set still resolves to current observations for the
 same Person and no linked consent or connection is being erased. Corrections,
 withdrawals, supersession, late imports, and erasure therefore fail closed
 instead of silently reusing stale evidence.
+
+Daily snapshots retain relational links to both Recovery observations and
+RecoveryAssessments. Connection erasure removes recommendations linked through
+either path before deleting the underlying graph. Additive migrations backfill
+those links for readable legacy v1 snapshots and fail closed on missing or
+cross-owner identifiers.
 
 For counterfactual calibration, Recovery supplies provider-neutral daily
 representatives plus current valid assessment, risk, and hard-stop evidence.
@@ -164,6 +174,7 @@ reconstruction of the observation ordering used by a historical live v1 read.
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
+- [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 
 ## Open questions
 

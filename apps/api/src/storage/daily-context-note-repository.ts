@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray, notExists, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, notExists, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 
 import type {
@@ -24,6 +24,7 @@ import {
 import {
   discardUnusedSourceReference,
   ensureSourceReference,
+  lockPersonEvidenceMutation,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
 
@@ -52,6 +53,11 @@ export interface DailyContextNoteStore {
   listForLocalDate(
     personId: string,
     localDate: string
+  ): Promise<DailyContextNoteList>;
+  listForLocalDateRange(
+    personId: string,
+    from: string,
+    to: string
   ): Promise<DailyContextNoteList>;
   history(
     personId: string,
@@ -123,9 +129,10 @@ export class DailyContextNoteRepository implements DailyContextNoteStore {
     personId: string,
     input: CreateDailyContextNote
   ): Promise<CreateDailyContextNoteResult> {
-    return this.database.db.transaction((transaction) =>
-      createInTransaction(transaction, personId, input)
-    );
+    return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
+      return createInTransaction(transaction, personId, input);
+    });
   }
 
   /** {@inheritDoc DailyContextNoteStore.correct} */
@@ -135,6 +142,7 @@ export class DailyContextNoteRepository implements DailyContextNoteStore {
     input: CorrectDailyContextNote
   ): Promise<CreateDailyContextNoteResult> {
     return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
       await transaction.execute(
         sql`select id from ${dailyContextNotes}
             where ${dailyContextNotes.id} = ${id}
@@ -206,6 +214,37 @@ export class DailyContextNoteRepository implements DailyContextNoteStore {
         )
       )
       .orderBy(asc(dailyContextNotes.createdAt), asc(dailyContextNotes.id));
+    return { items: rows.map(serialize) };
+  }
+
+  /** {@inheritDoc DailyContextNoteStore.listForLocalDateRange} */
+  public async listForLocalDateRange(
+    personId: string,
+    from: string,
+    to: string
+  ): Promise<DailyContextNoteList> {
+    const superseder = alias(dailyContextNotes, "daily_context_note_range_current");
+    const rows = await this.database.db
+      .select({ note: dailyContextNotes, sourceReference: sourceReferences })
+      .from(dailyContextNotes)
+      .innerJoin(sourceReferences, eq(dailyContextNotes.sourceReferenceId, sourceReferences.id))
+      .where(and(
+        eq(dailyContextNotes.personId, personId),
+        eq(sourceReferences.evidencePurpose, "person_context"),
+        gte(dailyContextNotes.localDate, from),
+        lte(dailyContextNotes.localDate, to),
+        notExists(
+          this.database.db.select({ id: superseder.id }).from(superseder).where(and(
+            eq(superseder.personId, personId),
+            eq(superseder.supersedesId, dailyContextNotes.id)
+          ))
+        )
+      ))
+      .orderBy(
+        asc(dailyContextNotes.localDate),
+        asc(dailyContextNotes.createdAt),
+        asc(dailyContextNotes.id)
+      );
     return { items: rows.map(serialize) };
   }
 

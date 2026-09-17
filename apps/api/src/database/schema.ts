@@ -20,7 +20,12 @@ import {
   varchar,
   type AnyPgColumn
 } from "drizzle-orm/pg-core";
-import type { DailyAssessmentUsedFacts, DailyNextAction } from "@shape-of-you/contracts";
+import type {
+  DailyAssessmentPersonalBaseline,
+  DailyAssessmentUsedFacts,
+  DailyNextAction
+} from "@shape-of-you/contracts";
+import type { DailyAssessmentPersonalCalculation } from "../domain/personalized-daily-assessment.js";
 
 export const personKind = pgEnum("person_kind", ["real", "synthetic"]);
 export const personStatus = pgEnum("person_status", ["active", "archived"]);
@@ -3145,6 +3150,8 @@ export const integrationActivityFacts = pgTable(
     durationSeconds: integer("duration_seconds").notNull(),
     distanceMeters: numeric("distance_meters", { precision: 12, scale: 3 }),
     trainingLoad: numeric("training_load", { precision: 12, scale: 3 }),
+    trainingLoadBasis: varchar("training_load_basis", { length: 64 }),
+    trainingLoadBasisVersion: varchar("training_load_basis_version", { length: 128 }),
     averageHeartRate: numeric("average_heart_rate", { precision: 8, scale: 3 }),
     maximumHeartRate: numeric("maximum_heart_rate", { precision: 8, scale: 3 }),
     deviceName: varchar("device_name", { length: 256 }),
@@ -3171,8 +3178,14 @@ export const integrationActivityFacts = pgTable(
       foreignColumns: [table.id]
     }),
     uniqueIndex("integration_activity_supersedes_uq").on(table.supersedesId).where(sql`${table.supersedesId} IS NOT NULL`),
+    unique("integration_activity_id_person_uq").on(table.id, table.personId),
     index("integration_activity_person_date_idx").on(table.personId, table.localDate),
     check("integration_activity_duration_nonnegative", sql`${table.durationSeconds} >= 0`),
+    check(
+      "integration_activity_load_semantics_shape",
+      sql`(${table.trainingLoadBasis} IS NULL AND ${table.trainingLoadBasisVersion} IS NULL)
+        OR (${table.trainingLoadBasis} IS NOT NULL AND ${table.trainingLoadBasisVersion} IS NOT NULL)`
+    ),
     check(
       "integration_activity_correction_shape",
       sql`(${table.supersedesId} IS NULL AND ${table.correctionReason} IS NULL)
@@ -3462,7 +3475,9 @@ export const coachingDailyAssessmentDetails = pgTable(
     reasons: text("reasons").array().notNull(),
     recommendedAction: jsonb("recommended_action").$type<DailyNextAction>().notNull(),
     alternatives: jsonb("alternatives").$type<DailyNextAction[]>().notNull(),
-    limitations: text("limitations").array().notNull()
+    limitations: text("limitations").array().notNull(),
+    personalBaseline: jsonb("personal_baseline").$type<DailyAssessmentPersonalBaseline>(),
+    personalBaselineCalculation: jsonb("personal_baseline_calculation").$type<DailyAssessmentPersonalCalculation>()
   },
   (table) => [
     foreignKey({
@@ -3471,7 +3486,16 @@ export const coachingDailyAssessmentDetails = pgTable(
       foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
     }).onDelete("cascade"),
     index("coaching_daily_assessment_person_date_idx").on(table.personId, table.localDate),
-    check("coaching_daily_assessment_confidence", sql`${table.confidence} BETWEEN 0 AND 1`)
+    check("coaching_daily_assessment_confidence", sql`${table.confidence} BETWEEN 0 AND 1`),
+    check(
+      "coaching_daily_assessment_policy_payload",
+      sql`(${table.policyVersion} = 'daily-assessment-v1'
+            AND ${table.personalBaseline} IS NULL
+            AND ${table.personalBaselineCalculation} IS NULL)
+        OR (${table.policyVersion} = 'daily-assessment-v2'
+            AND ${table.personalBaseline} IS NOT NULL
+            AND ${table.personalBaselineCalculation} IS NOT NULL)`
+    )
   ]
 );
 
@@ -3497,6 +3521,58 @@ export const coachingDailyAssessmentRecoveryEvidence = pgTable(
       name: "coach_daily_recovery_evidence_observation_fk",
       columns: [table.observationId, table.personId],
       foreignColumns: [recoveryObservations.id, recoveryObservations.personId]
+    }).onDelete("cascade")
+  ]
+);
+
+/** Relational assessment evidence needed for ownership and privacy erasure. */
+export const coachingDailyAssessmentAssessmentEvidence = pgTable(
+  "coaching_daily_assessment_assessment_evidence",
+  {
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    assessmentId: uuid("assessment_id").notNull()
+  },
+  (table) => [
+    primaryKey({
+      name: "coach_daily_assessment_evidence_pk",
+      columns: [table.recommendationId, table.assessmentId]
+    }),
+    foreignKey({
+      name: "coach_daily_assessment_evidence_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coach_daily_assessment_evidence_assessment_fk",
+      columns: [table.assessmentId, table.personId],
+      foreignColumns: [recoveryAssessments.id, recoveryAssessments.personId]
+    }).onDelete("cascade")
+  ]
+);
+
+/** Relational activity evidence needed to erase personal-baseline snapshots. */
+export const coachingDailyAssessmentTrainingEvidence = pgTable(
+  "coaching_daily_assessment_training_evidence",
+  {
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    activityId: uuid("activity_id").notNull()
+  },
+  (table) => [
+    primaryKey({
+      name: "coach_daily_training_evidence_pk",
+      columns: [table.recommendationId, table.activityId]
+    }),
+    foreignKey({
+      name: "coach_daily_training_evidence_recommendation_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coach_daily_training_evidence_activity_fk",
+      columns: [table.activityId, table.personId],
+      foreignColumns: [integrationActivityFacts.id, integrationActivityFacts.personId]
     }).onDelete("cascade")
   ]
 );

@@ -23,6 +23,7 @@ import type {
 } from "../integrations/integration-store.js";
 import type { IntegrationFailureCode } from "../integrations/provider.js";
 import { ConflictError } from "../domain/errors.js";
+import { lockPersonEvidenceMutation } from "./source-reference-repository.js";
 
 const providerKey = "intervals_icu";
 
@@ -67,7 +68,7 @@ export class IntegrationRepository implements IntegrationStore {
     readonly authorizationStartedAt: Date;
   }): Promise<void> {
     await this.database.db.transaction(async (transaction) => {
-      await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${input.personId}))`);
+      await lockPersonEvidenceMutation(transaction, input.personId);
       const providers = await transaction.insert(recoveryProviders)
         .values({ key: providerKey, name: "Intervals.icu" })
         .onConflictDoNothing().returning();
@@ -241,7 +242,7 @@ export class IntegrationRepository implements IntegrationStore {
 
   public async beginDisconnect(personId: string, reason: string): Promise<ActiveIntegrationConnection | null> {
     return this.database.db.transaction(async (transaction) => {
-      await transaction.execute(sql`select pg_advisory_xact_lock(hashtext(${personId}))`);
+      await lockPersonEvidenceMutation(transaction, personId);
       const row = await transaction.query.integrationConnections.findFirst({
         where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, providerKey))
       });

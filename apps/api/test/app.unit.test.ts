@@ -209,6 +209,7 @@ const nutritionStore: NutritionStore = {
 const trainingStore: TrainingStore = {
   importExternalActivity: unreachable,
   listExternalActivities: unreachable,
+  listPersonalBaselineDays: unreachable,
   createExercise: unreachable,
   appendExerciseVersion: unreachable,
   findExercise: unreachable,
@@ -246,6 +247,7 @@ const recoveryStore: RecoveryStore = {
   listObservations: unreachable,
   listObservationsForLocalDate: unreachable,
   listObservationsForLocalDateRange: unreachable,
+  listPersonalBaselineDays: unreachable,
   getDataCoverage: unreachable,
   observationHistory: unreachable,
   registerPolicyVersion: unreachable,
@@ -292,6 +294,7 @@ const dailyContextNoteStore: DailyContextNoteStore = {
   create: unreachable,
   correct: unreachable,
   listForLocalDate: async () => ({ items: [] }),
+  listForLocalDateRange: async () => ({ items: [] }),
   history: unreachable
 };
 

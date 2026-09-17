@@ -1320,6 +1320,7 @@ describe("MCP HTTP adapter", () => {
         mealIds: [],
         weightMeasurementIds: [],
         activeTrainingProgramVersionId: null,
+        dailyContextNoteIds: [],
         coveragePolicyVersion: "profile-data-coverage-v1",
         coverageReadiness: {
           sleep: "partial",
@@ -1361,7 +1362,22 @@ describe("MCP HTTP adapter", () => {
       alternatives: [],
       limitations: ["not_medical_advice", "nutrition_records_may_be_incomplete"],
       confidence: 0.72,
-      policyVersion: "daily-assessment-v1",
+      policyVersion: "daily-assessment-v2",
+      personalBaseline: {
+        policyKey: "balanced",
+        policyVersion: "personal-baseline-v1",
+        status: "partial",
+        summary: "HRV is below the recent personal range.",
+        comparisons: [
+          { metric: "sleep_minutes", availability: "insufficient_history", position: null, severity: null, eligibleDayCount: 0, method: null },
+          { metric: "hrv_rmssd", availability: "available", position: "below_usual", severity: "notable", eligibleDayCount: 14, method: "median_mad" },
+          { metric: "resting_heart_rate", availability: "available", position: "within_usual", severity: "usual", eligibleDayCount: 14, method: "median_mad" },
+          { metric: "body_battery", availability: "insufficient_history", position: null, severity: null, eligibleDayCount: 0, method: null },
+          { metric: "body_battery_min", availability: "insufficient_history", position: null, severity: null, eligibleDayCount: 0, method: null },
+          { metric: "body_battery_max", availability: "insufficient_history", position: null, severity: null, eligibleDayCount: 0, method: null },
+          { metric: "training_load", availability: "incompatible", position: null, severity: null, eligibleDayCount: 0, method: null }
+        ]
+      },
       evidenceChecksum: "a".repeat(64),
       createdAt: "2026-09-02T09:00:00.000Z"
     };
@@ -1701,6 +1717,28 @@ describe("MCP HTTP adapter", () => {
       );
       expect(retryableCorrection.content[0].text).toContain(
         "never claim it was saved or promise to use the unpersisted value"
+      );
+
+      readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
+      const directDailyAssessment = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "direct-daily-assessment-v2",
+          method: "tools/call",
+          params: { name: "get_daily_assessment", arguments: {} }
+        }
+      });
+      expect(directDailyAssessment.json().result.structuredContent).toEqual(
+        availableDailyAssessment
+      );
+      expect(directDailyAssessment.json().result.content[0].text).toContain(
+        "Do not recalculate, replace, or embellish the policy decision"
       );
 
       readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);

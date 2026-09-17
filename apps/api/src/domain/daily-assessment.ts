@@ -17,6 +17,7 @@ export function isDailyAssessmentAbsoluteMetricConcern(
 }
 
 export const DAILY_ASSESSMENT_POLICY_VERSION = "daily-assessment-v1" as const;
+export const DAILY_ASSESSMENT_V2_POLICY_VERSION = "daily-assessment-v2" as const;
 
 export interface DailyAssessmentEvaluation {
   readonly status: DailyAssessmentAvailable["status"];
@@ -127,4 +128,22 @@ export function evaluateDailyAssessment(facts: DailyAssessmentUsedFacts): DailyA
 /** Stable checksum over policy, Person-local context, and sorted typed evidence. */
 export function dailyAssessmentChecksum(localDate: string, timezone: string, facts: DailyAssessmentUsedFacts): string {
   return createHash("sha256").update(JSON.stringify({ policyVersion: DAILY_ASSESSMENT_POLICY_VERSION, localDate, timezone, facts })).digest("hex");
+}
+
+/** Stable checksum for v2 facts plus the exact private personal calculation. */
+export function dailyAssessmentV2Checksum(
+  localDate: string,
+  timezone: string,
+  facts: DailyAssessmentUsedFacts,
+  personalCalculation: unknown,
+  selectedDecision: unknown
+): string {
+  return createHash("sha256").update(JSON.stringify({
+    policyVersion: DAILY_ASSESSMENT_V2_POLICY_VERSION,
+    localDate,
+    timezone,
+    facts,
+    personalCalculation,
+    selectedDecision
+  })).digest("hex");
 }

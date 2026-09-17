@@ -1,4 +1,4 @@
-import type { PoolClient } from "pg";
+import type { Pool, PoolClient } from "pg";
 
 /** One Recovery-owned, provider-neutral daily representative for shadow analysis. */
 export interface RecoveryBaselineDay {
@@ -14,6 +14,8 @@ export interface RecoveryBaselineDay {
   readonly assessmentPresent: boolean;
   readonly hardStop: boolean;
   readonly riskLevel: "low" | "moderate" | "high" | "blocked" | null;
+  readonly observationIds: readonly string[];
+  readonly assessmentIds: readonly string[];
 }
 
 interface RecoveryBaselineRow {
@@ -29,6 +31,8 @@ interface RecoveryBaselineRow {
   readonly assessment_present: boolean;
   readonly hard_stop: boolean;
   readonly risk_level: "low" | "moderate" | "high" | "blocked" | null;
+  readonly observation_ids: readonly string[];
+  readonly assessment_ids: readonly string[];
 }
 
 function numberOrNull(value: string | null): number | null {
@@ -43,7 +47,7 @@ function numberOrNull(value: string | null): number | null {
  * readings use a median without inspecting provider identity.
  */
 export async function readRecoveryBaselineDays(
-  client: PoolClient,
+  client: Pool | PoolClient,
   personId: string,
   from: string,
   to: string
@@ -190,9 +194,17 @@ export async function readRecoveryBaselineDays(
              )
          )
      ), latest_assessment as (
-       select distinct on (local_date) local_date, hard_stop, risk_level
+       select distinct on (local_date) id, local_date, hard_stop, risk_level
        from valid_assessment
        order by local_date, as_of desc, id desc
+     ), evidence_observation as (
+       select id, local_date from current_recovery
+       union
+       select id, local_date from current_safety_subjective
+     ), observation_daily as (
+       select local_date, array_agg(id::text order by id) as observation_ids
+       from evidence_observation
+       group by local_date
      ), dates as (
        select distinct local_date from current_recovery
        union
@@ -245,12 +257,16 @@ export async function readRecoveryBaselineDays(
             coalesce(subjective.injury_concern, false) as injury_concern,
             assessment.local_date is not null as assessment_present,
             coalesce(assessment.hard_stop, false) as hard_stop
-            ,assessment.risk_level::text as risk_level
+            ,assessment.risk_level::text as risk_level,
+            coalesce(observation.observation_ids, array[]::text[]) as observation_ids,
+            case when assessment.id is null then array[]::text[]
+                 else array[assessment.id::text] end as assessment_ids
      from dates
      left join sleep_daily sleep using (local_date)
      left join metric_daily metric using (local_date)
      left join subjective_daily subjective using (local_date)
      left join latest_assessment assessment using (local_date)
+     left join observation_daily observation using (local_date)
      order by dates.local_date`,
     [personId, from, to]
   );
@@ -266,6 +282,8 @@ export async function readRecoveryBaselineDays(
     injuryConcern: row.injury_concern,
     assessmentPresent: row.assessment_present,
     hardStop: row.hard_stop,
-    riskLevel: row.risk_level
+    riskLevel: row.risk_level,
+    observationIds: row.observation_ids,
+    assessmentIds: row.assessment_ids
   }));
 }

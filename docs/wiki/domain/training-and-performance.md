@@ -37,17 +37,18 @@ automatically.
 - Profile coverage unions current WorkoutSession and external activity dates.
   One Person-local date is counted once regardless of source, and a date without
   a workout is not described as a missed training day.
-- The personal-baseline shadow reader exposes current Person-owned training-load
+- The live personal-baseline reader exposes current Person-owned training-load
   history, current session counts, and external activity counts without
   zero-filling missing dates. Internal WorkoutSessions and connection-backed
-  activity facts remain distinct evidence streams. A connection-backed stream
-  is only an opaque conservative partition: it does not prove that load basis
-  or unit semantics are compatible across sources. Coaching does not guess the
+  activity facts remain distinct evidence streams. External load carries a
+  provider-neutral typed `loadBasis` and `loadBasisVersion`; personal comparison
+  is available only when every selected fact has the exact same pair and the
+  history spans the required calendar interval. Missing or incompatible
+  semantics make the comparison unavailable while absolute safeguards remain.
+  No domain rule branches on provider identity. Coaching does not guess the
   historical active TrainingProgram; it evaluates `program_absent` and
   `program_present` branches. The branch sentinel is process-local and never
-  becomes a domain fact or identifier. Training load cannot influence a
-  production personal-baseline decision until a typed load-basis/version
-  contract establishes compatibility.
+  becomes a domain fact or identifier.
 - `PersonalRecord` is a projection over current sets: highest weight, then more
   repetitions on ties.
 - Progression candidates are projections. Acceptance creates a new inactive
@@ -64,12 +65,13 @@ automatically.
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md).
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
+- [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 
 ## Open questions
 
-- Production progression policy, typed compatible training-load basis,
-  richer exercise substitutions, external catalog source/moderation, and live
-  Intervals.icu activity-contract validation.
+- Production progression policy, richer exercise substitutions, external
+  catalog source/moderation, and live Intervals.icu activity-contract
+  validation.
 
 ## Related material
 

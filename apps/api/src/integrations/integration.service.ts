@@ -213,7 +213,10 @@ export class IntegrationService {
         providerIdentity: activity.identity, normalizedChecksum: checksum,
         occurredAt: activity.occurredAt, localDate: activity.localDate, timezone: activity.timezone,
         name: activity.name, durationSeconds: activity.durationSeconds, distanceMeters: activity.distanceMeters,
-        trainingLoad: activity.trainingLoad, averageHeartRate: activity.averageHeartRate,
+        trainingLoad: activity.trainingLoad,
+        trainingLoadBasis: activity.trainingLoadBasis,
+        trainingLoadBasisVersion: activity.trainingLoadBasisVersion,
+        averageHeartRate: activity.averageHeartRate,
         maximumHeartRate: activity.maximumHeartRate, deviceName: activity.deviceName,
         sourceProvider: "intervals_icu", garminAttributed: activity.garminAttributed
       });

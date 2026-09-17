@@ -1,14 +1,14 @@
 import {
-  compareWithPersonalBaseline,
-  isPersistentDeviation,
-  personalBaselineCenter,
   personalBaselineCandidates,
   personalBaselineMetrics,
   type PersonalBaselineMetric,
-  type PersonalBaselinePolicy,
-  type PersonalBaselineSample
+  type PersonalBaselinePolicy
 } from "../domain/personal-baseline.js";
-import { isDailyAssessmentAbsoluteMetricConcern } from "../domain/daily-assessment.js";
+import { applyConservativePersonalOverlay } from "../domain/daily-assessment-personal-overlay.js";
+import {
+  evaluatePersonalizedDailyAssessmentWithPolicy,
+  type PersonalAssessmentEvidenceDay
+} from "../domain/personalized-daily-assessment.js";
 
 /** Provider-neutral evidence for one Person-local day in a shadow evaluation. */
 export interface RetrospectiveDailyEvidence {
@@ -145,12 +145,6 @@ function zeroInvariantViolations(): {
   return { readyBehindAbsoluteGuardrail: 0, recoveryWithoutSupportingSignal: 0 };
 }
 
-function addCalendarDays(localDate: string, days: number): string {
-  const date = new Date(`${localDate}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
 function zeroV1Transitions(): Record<V1Transition, number> {
   const result = {} as Record<V1Transition, number>;
   for (const from of ["ready", "caution", "recovery_priority", "insufficient_data"] as const) {
@@ -159,39 +153,6 @@ function zeroV1Transitions(): Record<V1Transition, number> {
     }
   }
   return result;
-}
-
-function adverseDirection(metric: PersonalBaselineMetric): "below" | "above" {
-  return metric === "resting_heart_rate" || metric === "training_load"
-    ? "above"
-    : "below";
-}
-
-function hasAdverseCenter(
-  metric: PersonalBaselineMetric,
-  currentLocalDate: string,
-  samples: readonly PersonalBaselineSample[],
-  policy: PersonalBaselinePolicy
-): boolean {
-  const center = personalBaselineCenter(
-    currentLocalDate,
-    samples,
-    policy,
-    metric === "training_load"
-      ? { minimumCalendarSpanDays: policy.minimumTrainingCalendarSpanDays }
-      : undefined
-  );
-  if (center === null) return false;
-  if (metric === "sleep_minutes") {
-    return isDailyAssessmentAbsoluteMetricConcern("sleep_minutes", center);
-  }
-  if (metric === "body_battery" || metric === "body_battery_max") {
-    return isDailyAssessmentAbsoluteMetricConcern("body_battery", center);
-  }
-  if (metric === "training_load") {
-    return isDailyAssessmentAbsoluteMetricConcern("training_load", center);
-  }
-  return false;
 }
 
 function evaluateCandidate(
@@ -203,14 +164,17 @@ function evaluateCandidate(
   const insufficientHistoryDayCounts = zeroMetrics();
   const belowUsualCounts = zeroMetrics();
   const aboveUsualCounts = zeroMetrics();
-  const histories = {} as Record<PersonalBaselineMetric, PersonalBaselineSample[]>;
-  const adverseHistory = {} as Record<PersonalBaselineMetric, boolean[]>;
-  const trainingHistories = new Map<string, PersonalBaselineSample[]>();
-  const trainingAdverseHistories = new Map<string, boolean[]>();
-  for (const metric of personalBaselineMetrics) {
-    histories[metric] = [];
-    adverseHistory[metric] = [];
-  }
+  const policyEvidenceDays: readonly PersonalAssessmentEvidenceDay[] = days.map((day) => ({
+    localDate: day.localDate,
+    values: day.values,
+    baselineExcluded: day.baselineExcluded,
+    recoveryHardStop: day.acuteIllness || day.injuryConcern || day.recoveryHardStop,
+    trainingLoadIncompatible: day.trainingLoadIncompatible,
+    trainingLoadSeriesKey: day.trainingLoadSeriesKey,
+    recoveryObservationIds: [],
+    recoveryAssessmentIds: [],
+    externalActivityIds: []
+  }));
   const statusCounts = zeroStatuses();
   const actionCounts = zeroActions();
   const v1ToHybridTransitionCounts = zeroV1Transitions();
@@ -248,102 +212,60 @@ function evaluateCandidate(
   };
   const invariantViolationCounts = zeroInvariantViolations();
   const counterfactualInvariantViolationCounts = zeroInvariantViolations();
-  let recoveryBufferThrough: string | null = null;
   let previousStatus: ShadowStatus | null = null;
   let previousPreviousStatus: ShadowStatus | null = null;
   let previousCounterfactualStatus: ShadowStatus | null = null;
   let previousPreviousCounterfactualStatus: ShadowStatus | null = null;
   let previousTrainingSeriesKey: string | null = null;
 
-  for (const day of days) {
+  for (const [dayIndex, day] of days.entries()) {
     const inReport = day.localDate >= reportFrom;
-    const hardStop = day.acuteIllness || day.injuryConcern || day.recoveryHardStop;
-    const buffered = recoveryBufferThrough !== null && day.localDate <= recoveryBufferThrough;
-    const eligibleBeforeStability = !day.baselineExcluded && !hardStop && !buffered;
-    let adversePersonalSignalCount = 0;
-    let persistentPersonalSignalCount = 0;
-    let markedPersonalSignalCount = 0;
-    let adverseCenterPresent = false;
-    const adverseByMetric = new Map<PersonalBaselineMetric, boolean>();
-    for (const metric of personalBaselineMetrics) {
-      const currentValue = day.values[metric];
-      if (currentValue == null || !Number.isFinite(currentValue)) {
-        if (inReport) missingCurrentValueCounts[metric] += 1;
-        continue;
+    const personal = evaluatePersonalizedDailyAssessmentWithPolicy(
+      day.localDate,
+      policyEvidenceDays.slice(0, dayIndex + 1),
+      policy
+    );
+    const {
+      hardStop,
+      recoveryBuffered: buffered,
+      unstable,
+      eligibleBeforeStability,
+      eligible
+    } = personal.calculation.targetEligibility;
+    const {
+      markedPersonalSignalCount,
+      persistentPersonalSignalCount,
+      adverseCenterPresent
+    } = personal.signals;
+    if (inReport) {
+      for (const comparison of personal.baseline.comparisons) {
+        const currentValue = day.values[comparison.metric];
+        if (currentValue == null || !Number.isFinite(currentValue)) {
+          missingCurrentValueCounts[comparison.metric] += 1;
+        } else if (comparison.availability === "available") {
+          baselineAvailableDayCounts[comparison.metric] += 1;
+          if (comparison.position === "below_usual") {
+            belowUsualCounts[comparison.metric] += 1;
+          }
+          if (comparison.position === "above_usual") {
+            aboveUsualCounts[comparison.metric] += 1;
+          }
+        } else {
+          insufficientHistoryDayCounts[comparison.metric] += 1;
+        }
       }
-      const seriesKey = day.trainingLoadSeriesKey;
-      const metricHistory = metric === "training_load"
-        ? seriesKey === null
-          ? []
-          : (trainingHistories.get(seriesKey) ?? [])
-        : histories[metric];
-      const comparison = compareWithPersonalBaseline(
-        day.localDate,
-        currentValue,
-        metricHistory,
-        policy,
-        metric === "training_load"
-          ? { minimumCalendarSpanDays: policy.minimumTrainingCalendarSpanDays }
-          : undefined
-      );
-      if (comparison.availability === "available") {
-        if (inReport) {
-          baselineAvailableDayCounts[metric] += 1;
-          if (comparison.position === "below_usual") belowUsualCounts[metric] += 1;
-          if (comparison.position === "above_usual") aboveUsualCounts[metric] += 1;
-        }
-        const adverse =
-          comparison.position ===
-          (adverseDirection(metric) === "below" ? "below_usual" : "above_usual");
-        adverseByMetric.set(metric, adverse);
-        if (adverse && comparison.severity === "marked") {
-          markedPersonalSignalCount += 1;
-        }
-        if (hasAdverseCenter(metric, day.localDate, metricHistory, policy)) {
-          adverseCenterPresent = true;
-          if (inReport) chronicAdverseBaselineWarningCount += 1;
-        }
-      } else if (inReport) {
-        insufficientHistoryDayCounts[metric] += 1;
-      }
+      if (adverseCenterPresent) chronicAdverseBaselineWarningCount += 1;
     }
-
-    const unstable =
-      eligibleBeforeStability &&
-      markedPersonalSignalCount >= policy.multiSignalFreezeThreshold;
-    const eligible = eligibleBeforeStability && !unstable;
     if (inReport && eligibleBeforeStability) {
       markedDeviationCount += markedPersonalSignalCount;
       if (markedPersonalSignalCount > 0) severeSingleDayJumpCount += 1;
     }
-    if (eligible) {
-      for (const [metric, adverse] of adverseByMetric) {
-        const seriesKey = day.trainingLoadSeriesKey;
-        const metricAdverseHistory = metric === "training_load" && seriesKey !== null
-          ? (trainingAdverseHistories.get(seriesKey) ?? [])
-          : adverseHistory[metric];
-        metricAdverseHistory.push(adverse);
-        if (metric === "training_load" && seriesKey !== null) {
-          trainingAdverseHistories.set(seriesKey, metricAdverseHistory);
-        }
-        if (adverse) adversePersonalSignalCount += 1;
-        if (adverse && isPersistentDeviation(metricAdverseHistory, policy)) {
-          persistentPersonalSignalCount += 1;
-        }
-      }
-    }
-    const overlayStatus = (baseStatus: ShadowStatus): ShadowStatus => {
-      if (baseStatus !== "insufficient_data") {
-        if (hardStop || (eligibleBeforeStability && markedPersonalSignalCount >= 2)) {
-          return "recovery_priority";
-        }
-        if (
-          baseStatus === "ready" &&
-          (adverseCenterPresent || persistentPersonalSignalCount > 0 || adversePersonalSignalCount >= 2)
-        ) return "caution";
-      } else if (hardStop) return "recovery_priority";
-      return baseStatus;
-    };
+    const overlayStatus = (baseStatus: ShadowStatus): ShadowStatus =>
+      applyConservativePersonalOverlay(
+        baseStatus,
+        { type: "record_recovery_check_in", text: "shadow", trainingProgramVersionId: null },
+        personal.signals
+      ).status;
 
     const hasStoredV1 = day.v1Status !== undefined && day.v1Action !== undefined;
     if (inReport && hasStoredV1) {
@@ -444,25 +366,6 @@ function evaluateCandidate(
       previousTrainingSeriesKey = day.trainingLoadSeriesKey;
     }
     if (inReport && !eligible) excludedBaselineDayCount += 1;
-    for (const metric of personalBaselineMetrics) {
-      const value = day.values[metric];
-      if (value != null && Number.isFinite(value)) {
-        const sample = { localDate: day.localDate, value, eligible };
-        if (metric === "training_load") {
-          const seriesKey = day.trainingLoadSeriesKey;
-          if (seriesKey !== null) {
-            const history = trainingHistories.get(seriesKey) ?? [];
-            history.push(sample);
-            trainingHistories.set(seriesKey, history);
-          }
-        } else {
-          histories[metric].push(sample);
-        }
-      }
-    }
-    if (hardStop) {
-      recoveryBufferThrough = addCalendarDays(day.localDate, policy.recoveryBufferDays);
-    }
   }
 
   return {

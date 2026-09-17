@@ -4,9 +4,14 @@ import type { DailyAssessmentUsedFacts } from "@shape-of-you/contracts";
 
 import {
   dailyAssessmentChecksum,
+  dailyAssessmentV2Checksum,
   evaluateDailyAssessment
 } from "../src/domain/daily-assessment.js";
-import { derivePersonLocalDate } from "../src/coaching/daily-assessment.service.js";
+import {
+  derivePersonLocalDate,
+  withDailyAssessmentConsistency
+} from "../src/coaching/daily-assessment.service.js";
+import { DailyAssessmentEvidenceChangedError } from "../src/domain/errors.js";
 
 const programVersionId = "00000000-0000-4000-8000-000000000101";
 
@@ -122,6 +127,37 @@ describe("daily assessment policy", () => {
       .not.toBe(dailyAssessmentChecksum("2026-09-14", "Europe/Moscow", versionA));
     expect(dailyAssessmentChecksum("2026-09-14", "Europe/Moscow", restoredA))
       .toBe(dailyAssessmentChecksum("2026-09-14", "Europe/Moscow", versionA));
+  });
+
+  it("versions v2 when the selected result changes even with identical evidence", () => {
+    const evidence = facts();
+    const calculation = { policy: "personal-baseline-v1", comparisons: [] };
+    const ready = { status: "ready", recommendedAction: { type: "follow_active_program" } };
+    const caution = { status: "caution", recommendedAction: { type: "recovery_first" } };
+
+    expect(dailyAssessmentV2Checksum(
+      "2026-09-14", "Europe/Moscow", evidence, calculation, ready
+    )).toBe(dailyAssessmentV2Checksum(
+      "2026-09-14", "Europe/Moscow", evidence, calculation, ready
+    ));
+    expect(dailyAssessmentV2Checksum(
+      "2026-09-14", "Europe/Moscow", evidence, calculation, ready
+    )).not.toBe(dailyAssessmentV2Checksum(
+      "2026-09-14", "Europe/Moscow", evidence, calculation, caution
+    ));
+  });
+
+  it("retries evidence changes exactly three times and then fails closed", async () => {
+    let attempts = 0;
+    const operation = async () => {
+      attempts += 1;
+      throw new DailyAssessmentEvidenceChangedError();
+    };
+
+    await expect(withDailyAssessmentConsistency(operation)).rejects.toBeInstanceOf(
+      DailyAssessmentEvidenceChangedError
+    );
+    expect(attempts).toBe(3);
   });
 
   it("derives the Person-local day across DST without using the server timezone", () => {

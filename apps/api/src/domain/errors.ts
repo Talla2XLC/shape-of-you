@@ -33,3 +33,11 @@ export class ConflictError extends ApplicationError {
     this.name = "ConflictError";
   }
 }
+
+/** Indicates that source facts changed before an immutable assessment snapshot was stored. */
+export class DailyAssessmentEvidenceChangedError extends Error {
+  public constructor() {
+    super("Daily assessment evidence changed during composition");
+    this.name = "DailyAssessmentEvidenceChangedError";
+  }
+}
