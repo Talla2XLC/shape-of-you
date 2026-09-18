@@ -294,6 +294,103 @@ describe("Identity WebAuthn HTTP flow", () => {
     });
   });
 
+  it("rebinds pending consent to a refreshed session for the same account", async () => {
+    const credentialId = randomBytes(32);
+    const bootstrap = await authentication.bootstrapAccount("Reconnect operator");
+    const registrationOptions = await post("/v1/webauthn/registration/options", {
+      headers: { authorization: `Bearer ${bootstrap.enrollmentToken}` }
+    });
+    const registration = (await registrationOptions.json()) as {
+      challengeId: string;
+      options: { challenge: string };
+    };
+    const registered = await post("/v1/webauthn/registration/verify", {
+      headers: { authorization: `Bearer ${bootstrap.enrollmentToken}` },
+      body: JSON.stringify({
+        challengeId: registration.challengeId,
+        response: {
+          id: credentialId.toString("base64url"),
+          challenge: registration.options.challenge
+        }
+      })
+    });
+    expect(registered.status).toBe(201);
+
+    const authenticate = async () => {
+      const optionsResponse = await post("/v1/webauthn/authentication/options");
+      const options = (await optionsResponse.json()) as {
+        challengeId: string;
+        options: { challenge: string };
+      };
+      const verified = await post("/v1/webauthn/authentication/verify", {
+        body: JSON.stringify({
+          challengeId: options.challengeId,
+          response: {
+            id: credentialId.toString("base64url"),
+            challenge: options.options.challenge
+          }
+        })
+      });
+      expect(verified.status).toBe(200);
+      return {
+        cookie: verified.headers.get("set-cookie")!,
+        body: (await verified.json()) as { csrfToken: string }
+      };
+    };
+
+    const previousLogin = await authenticate();
+    const previousSession = await authentication.getOAuthBrowserSession({
+      cookie: previousLogin.cookie
+    });
+    const interactionCredential = "R".repeat(43);
+    const clientId = `reconnect-client-${randomUUID()}`;
+    await pool.query(
+      `insert into oauth_clients (id, display_name)
+       values ($1, 'Reconnect client')`,
+      [clientId]
+    );
+    await pool.query(
+      `insert into oauth_client_redirect_uris (id, client_id, redirect_uri)
+       values ($1, $2, 'https://chatgpt.com/connector_platform_oauth_redirect')`,
+      [randomUUID(), clientId]
+    );
+    await pool.query(
+      `insert into oauth_interactions
+         (id, credential_hash, client_id, account_id, session_id,
+          prompt, status, provider_cid, provider_return_to, redirect_uri,
+          code_challenge, code_challenge_method, created_at, expires_at)
+       values ($1, $2, $3, $4, $5, 'consent', 'pending', $6, $7, $8,
+               $9, 'S256', now(), now() + interval '10 minutes')`,
+      [
+        randomUUID(),
+        hashBearerValue(interactionCredential),
+        clientId,
+        bootstrap.accountId,
+        previousSession.sessionId,
+        "P".repeat(43),
+        `${publicOrigin}/oauth/authorize/${interactionCredential}`,
+        "https://chatgpt.com/connector_platform_oauth_redirect",
+        "C".repeat(43)
+      ]
+    );
+
+    const refreshedLogin = await authenticate();
+    const rebound = await authentication.bindOAuthInteractionSession(
+      {
+        cookie: refreshedLogin.cookie,
+        csrfToken: refreshedLogin.body.csrfToken
+      },
+      interactionCredential
+    );
+    expect(rebound.accountId).toBe(bootstrap.accountId);
+    expect(rebound.sessionId).not.toBe(previousSession.sessionId);
+    const persisted = await pool.query<{ session_id: string }>(
+      `select session_id from oauth_interactions where credential_hash = $1`,
+      [hashBearerValue(interactionCredential)]
+    );
+    expect(persisted.rows[0]?.session_id).toBe(rebound.sessionId);
+  });
+
   it("manages passkeys and completes TOTP replacement recovery", async () => {
     const primaryCredentialId = randomBytes(32);
     const replacementCredentialId = randomBytes(32);

@@ -663,7 +663,12 @@ export class IdentityAuthenticationService {
   }
 
   /**
-   * Binds an OAuth interaction to the exact CSRF-authorized passkey session.
+   * Binds an OAuth interaction to the current CSRF-authorized passkey session.
+   *
+   * A pending consent interaction may still reference an older provider-backed
+   * session after the browser application session expires. Reauthentication may
+   * rotate that session binding only for the already-bound account; switching
+   * the interaction to another account remains forbidden.
    *
    * @param authority - Cookie and session-bound CSRF authority from the page.
    * @param interactionCredential - Opaque provider interaction identifier.
@@ -681,7 +686,6 @@ export class IdentityAuthenticationService {
         where credential_hash = $1
           and status = 'pending' and expires_at >= now()
           and (account_id is null or account_id = $2)
-          and (session_id is null or session_id = $3)
       returning id`,
       [hashBearerValue(interactionCredential), session.account.id, session.sessionId]
     );

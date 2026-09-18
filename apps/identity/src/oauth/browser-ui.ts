@@ -82,9 +82,6 @@ export class OAuthBrowserUi {
     if (promptName !== "login" && promptName !== "consent") {
       throw new Error("OAuth interaction prompt is unsupported");
     }
-    if (promptName === "consent" && (!session || !csrfToken)) {
-      throw new IdentityAuthenticationError(401, "authentication_required", "Authentication required");
-    }
     const requiresFreshPasskey =
       promptName === "login" &&
       typeof details.params.prompt === "string" &&
@@ -232,12 +229,12 @@ function renderPage(input: {
 <style nonce="${input.nonce}">body{font:16px system-ui,sans-serif;background:#f4f5f7;color:#17191c;margin:0;display:grid;min-height:100vh;place-items:center}.card{background:#fff;border:1px solid #dfe3e8;border-radius:16px;box-shadow:0 12px 36px #10182818;max-width:440px;padding:32px;width:calc(100% - 48px)}h1{margin:0 0 12px;font-size:26px}p{line-height:1.5;color:#475467}ul{padding-left:22px;line-height:1.7}button{background:#111827;color:#fff;border:0;border-radius:10px;cursor:pointer;font:inherit;font-weight:650;margin:8px 8px 0 0;padding:12px 18px}.secondary{background:#e5e7eb;color:#111827}.error{color:#b42318;min-height:24px}</style></head>
 <body><main class="card"><h1>${title}</h1><p>${description}</p>${scopeItems}<p id="error" class="error" role="alert"></p>${authenticatedAction}</main>
 <script nonce="${input.nonce}">
-const interaction=${JSON.stringify(input.interactionCredential)};let csrf=${JSON.stringify(input.csrfToken)};
+const interaction=${JSON.stringify(input.interactionCredential)};const prompt=${JSON.stringify(input.prompt)};let csrf=${JSON.stringify(input.csrfToken)};
 const from64=v=>Uint8Array.from(atob(v.replace(/-/g,'+').replace(/_/g,'/').padEnd(Math.ceil(v.length/4)*4,'=')),c=>c.charCodeAt(0));
 const to64=v=>btoa(String.fromCharCode(...new Uint8Array(v))).replace(/\\+/g,'-').replace(/\\//g,'_').replace(/=+$/,'');
 const fail=e=>{document.getElementById('error').textContent=e instanceof Error?e.message:'Request failed'};
 async function submit(route,action){const r=await fetch('/oauth/interaction/'+interaction+'/'+route,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({csrfToken:csrf,action}),redirect:'follow'});if(r.redirected){location.assign(r.url);return}if(!r.ok)throw new Error('Authorization request failed')}
-async function passkey(){const o=await fetch('/v1/webauthn/authentication/options',{method:'POST'}).then(r=>r.json());const p=o.options;p.challenge=from64(p.challenge);if(p.allowCredentials)p.allowCredentials=p.allowCredentials.map(x=>({...x,id:from64(x.id)}));const c=await navigator.credentials.get({publicKey:p});const response={id:c.id,rawId:to64(c.rawId),type:c.type,response:{authenticatorData:to64(c.response.authenticatorData),clientDataJSON:to64(c.response.clientDataJSON),signature:to64(c.response.signature),userHandle:c.response.userHandle?to64(c.response.userHandle):undefined},clientExtensionResults:c.getClientExtensionResults(),authenticatorAttachment:c.authenticatorAttachment};const r=await fetch('/v1/webauthn/authentication/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({challengeId:o.challengeId,response})});const body=await r.json();if(!r.ok)throw new Error(body.message||'Passkey sign-in failed');csrf=body.csrfToken;await submit('login')}
+async function passkey(){const o=await fetch('/v1/webauthn/authentication/options',{method:'POST'}).then(r=>r.json());const p=o.options;p.challenge=from64(p.challenge);if(p.allowCredentials)p.allowCredentials=p.allowCredentials.map(x=>({...x,id:from64(x.id)}));const c=await navigator.credentials.get({publicKey:p});const response={id:c.id,rawId:to64(c.rawId),type:c.type,response:{authenticatorData:to64(c.response.authenticatorData),clientDataJSON:to64(c.response.clientDataJSON),signature:to64(c.response.signature),userHandle:c.response.userHandle?to64(c.response.userHandle):undefined},clientExtensionResults:c.getClientExtensionResults(),authenticatorAttachment:c.authenticatorAttachment};const r=await fetch('/v1/webauthn/authentication/verify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({challengeId:o.challengeId,response})});const body=await r.json();if(!r.ok)throw new Error(body.message||'Passkey sign-in failed');csrf=body.csrfToken;if(prompt==='consent'){location.reload();return}await submit('login')}
 document.getElementById('passkey')?.addEventListener('click',()=>passkey().catch(fail));document.getElementById('continue')?.addEventListener('click',()=>submit('login').catch(fail));
 let consentPending=false;document.getElementById('consent')?.addEventListener('submit',event=>{if(consentPending){event.preventDefault();return}consentPending=true});
 </script></body></html>`;

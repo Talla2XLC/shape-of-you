@@ -50,7 +50,10 @@ function close(server: Server): Promise<void> {
   return new Promise((resolve) => server.close(() => resolve()));
 }
 
-async function startBrowserFixture(forceFreshPasskey = false): Promise<BrowserFixture> {
+async function startBrowserFixture(
+  forceFreshPasskey = false,
+  hasApplicationSession = true
+): Promise<BrowserFixture> {
   const callbackReferers: string[] = [];
   const callbackServer = createServer((request, response) => {
     callbackReferers.push(request.headers.referer ?? "");
@@ -66,12 +69,33 @@ async function startBrowserFixture(forceFreshPasskey = false): Promise<BrowserFi
   const fixtureState: { browserUi?: OAuthBrowserUi } = {};
   let decision: "allow" | "deny" | null = null;
   let origin = "";
+  let applicationSessionAvailable = hasApplicationSession;
   let submissionCount = 0;
   const submissionOrigins: string[] = [];
   const identityServer = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", origin || "http://localhost");
       if (request.method === "POST") submissionOrigins.push(request.headers.origin ?? "");
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/webauthn/authentication/options"
+      ) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({
+          challengeId: "00000000-0000-4000-8000-000000000010",
+          options: { challenge: "Y2hhbGxlbmdl", allowCredentials: [] }
+        }));
+        return;
+      }
+      if (
+        request.method === "POST" &&
+        url.pathname === "/v1/webauthn/authentication/verify"
+      ) {
+        applicationSessionAvailable = true;
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ csrfToken }));
+        return;
+      }
       if (await fixtureState.browserUi?.handle(request, response, url.pathname)) return;
       response.writeHead(404);
       response.end();
@@ -87,7 +111,16 @@ async function startBrowserFixture(forceFreshPasskey = false): Promise<BrowserFi
   await listen(identityServer);
   origin = `http://localhost:${(identityServer.address() as AddressInfo).port}`;
   const authentication = {
-    getOAuthBrowserSession: async () => session,
+    getOAuthBrowserSession: async () => {
+      if (!applicationSessionAvailable) {
+        throw new IdentityAuthenticationError(
+          401,
+          "authentication_required",
+          "Authentication required"
+        );
+      }
+      return session;
+    },
     bindOAuthInteractionSession: async (input: { readonly csrfToken?: string }) => {
       submissionCount += 1;
       if (input.csrfToken !== csrfToken) {
@@ -212,6 +245,45 @@ test("prompt=login and max_age=0 ignores an existing session and requires a pass
     await openConsent(page, fixture.origin);
     await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toBeVisible();
     await expect(page.getByRole("button", { name: /Continue as/u })).toHaveCount(0);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("consent without an application session offers passkey sign-in instead of returning JSON", async ({
+  page
+}) => {
+  const fixture = await startBrowserFixture(false, false);
+  try {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, "credentials", {
+        configurable: true,
+        value: {
+          get: async () => ({
+            id: "credential",
+            rawId: new Uint8Array([1]).buffer,
+            type: "public-key",
+            response: {
+              authenticatorData: new Uint8Array([2]).buffer,
+              clientDataJSON: new Uint8Array([3]).buffer,
+              signature: new Uint8Array([4]).buffer,
+              userHandle: null
+            },
+            getClientExtensionResults: () => ({}),
+            authenticatorAttachment: "platform"
+          })
+        }
+      });
+    });
+    await openConsent(page, fixture.origin);
+    await expect(page.getByRole("heading", { name: "Authorize access" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Sign in with a passkey" })).toBeVisible();
+    await expect(page.locator("body")).not.toContainText("Authentication required");
+    await page.getByRole("button", { name: "Sign in with a passkey" }).click();
+    await expect(page.getByRole("button", { name: "Allow" })).toBeVisible();
+    await page.getByRole("button", { name: "Allow" }).click();
+    await expect(page.getByRole("heading", { name: "Client callback" })).toBeVisible();
+    expect(fixture.decision()).toBe("allow");
   } finally {
     await fixture.close();
   }
