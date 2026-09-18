@@ -224,6 +224,17 @@ that one session row. Rotating the provider cookie replaces only its hash and
 does not revoke the passkey session; explicit session revocation remains the
 shared lifecycle boundary.
 
+When a pending consent interaction still has an active provider session but
+the browser credential is missing or expired, successful passkey verification
+recovers that exact session aggregate instead of creating or rebinding a
+parallel session. Identity rotates only the browser credential, CSRF hash,
+passkey binding, activity, and sliding expiry before resuming consent. The
+session ID, provider identity, grant ownership, authorization state, and
+refresh-token families retain their existing lifecycle; stale browser and CSRF
+credentials fail closed. This recovery accepts only the exact unexpired
+pending consent interaction for the verified account. See
+[the stable consent-session ADR](../../adr/20260918-preserve-stable-oauth-session-during-consent-reauthentication.md).
+
 The initial protocol scopes are `openid` and `offline_access`. Resource scopes
 are `person:read`, `weight:write`, `body-measurement:write`, `meal:write`,
 `workout:write`, `recovery:write`, `daily-context-note:write`,

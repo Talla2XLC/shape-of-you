@@ -90,6 +90,7 @@ const registrationVerificationSchema = challengeSchema.extend({
   response: z.object({ id: z.string().min(1) }).passthrough()
 });
 const authenticationVerificationSchema = challengeSchema.extend({
+  oauthInteractionCredential: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional(),
   response: z.object({ id: z.string().min(1) }).passthrough()
 });
 const passkeyRenameSchema = z.object({ label: z.string().trim().min(1).max(200) });
@@ -178,6 +179,7 @@ async function handleAuthenticationRequest(
     const body = authenticationVerificationSchema.parse(await readJson(request));
     const result = await dependencies.authentication.verifyAuthentication({
       challengeId: body.challengeId,
+      oauthInteractionCredential: body.oauthInteractionCredential,
       response: body.response as unknown as AuthenticationResponseJSON
     });
     response.setHeader("set-cookie", [result.cookie, result.csrfCookie]);

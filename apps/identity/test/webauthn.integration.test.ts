@@ -294,7 +294,7 @@ describe("Identity WebAuthn HTTP flow", () => {
     });
   });
 
-  it("rebinds pending consent to a refreshed session for the same account", async () => {
+  it("recovers the stable session for a pending consent interaction", async () => {
     const credentialId = randomBytes(32);
     const bootstrap = await authentication.bootstrapAccount("Reconnect operator");
     const registrationOptions = await post("/v1/webauthn/registration/options", {
@@ -316,7 +316,7 @@ describe("Identity WebAuthn HTTP flow", () => {
     });
     expect(registered.status).toBe(201);
 
-    const authenticate = async () => {
+    const authenticate = async (oauthInteractionCredential?: string) => {
       const optionsResponse = await post("/v1/webauthn/authentication/options");
       const options = (await optionsResponse.json()) as {
         challengeId: string;
@@ -325,6 +325,7 @@ describe("Identity WebAuthn HTTP flow", () => {
       const verified = await post("/v1/webauthn/authentication/verify", {
         body: JSON.stringify({
           challengeId: options.challengeId,
+          ...(oauthInteractionCredential ? { oauthInteractionCredential } : {}),
           response: {
             id: credentialId.toString("base64url"),
             challenge: options.options.challenge
@@ -342,6 +343,13 @@ describe("Identity WebAuthn HTTP flow", () => {
     const previousSession = await authentication.getOAuthBrowserSession({
       cookie: previousLogin.cookie
     });
+    const providerCredentialHash = randomBytes(32);
+    await pool.query(
+      `update oauth_sessions
+          set provider_credential_hash = $2
+        where id = $1`,
+      [previousSession.sessionId, providerCredentialHash]
+    );
     const interactionCredential = "R".repeat(43);
     const clientId = `reconnect-client-${randomUUID()}`;
     await pool.query(
@@ -374,21 +382,189 @@ describe("Identity WebAuthn HTTP flow", () => {
       ]
     );
 
-    const refreshedLogin = await authenticate();
-    const rebound = await authentication.bindOAuthInteractionSession(
-      {
-        cookie: refreshedLogin.cookie,
-        csrfToken: refreshedLogin.body.csrfToken
-      },
-      interactionCredential
+    const before = await pool.query<{
+      provider_uid: string;
+      provider_credential_hash: Buffer;
+      session_count: string;
+    }>(
+      `select provider_uid, provider_credential_hash,
+              (select count(*)::text from oauth_sessions) as session_count
+         from oauth_sessions
+        where id = $1`,
+      [previousSession.sessionId]
     );
-    expect(rebound.accountId).toBe(bootstrap.accountId);
-    expect(rebound.sessionId).not.toBe(previousSession.sessionId);
-    const persisted = await pool.query<{ session_id: string }>(
+
+    const recoveredLogin = await authenticate(interactionCredential);
+    const recovered = await authentication.getOAuthBrowserSession({
+      cookie: recoveredLogin.cookie
+    });
+    expect(recovered.accountId).toBe(bootstrap.accountId);
+    expect(recovered.sessionId).toBe(previousSession.sessionId);
+    await expect(
+      authentication.getOAuthBrowserSession({ cookie: previousLogin.cookie })
+    ).rejects.toMatchObject({ code: "authentication_required" });
+
+    const persisted = await pool.query<{
+      interaction_session_id: string;
+      provider_uid: string;
+      provider_credential_hash: Buffer;
+      session_count: string;
+    }>(
+      `select i.session_id as interaction_session_id,
+              s.provider_uid, s.provider_credential_hash,
+              (select count(*)::text from oauth_sessions) as session_count
+         from oauth_interactions i
+         join oauth_sessions s on s.id = i.session_id
+        where i.credential_hash = $1`,
+      [hashBearerValue(interactionCredential)]
+    );
+    expect(persisted.rows[0]).toMatchObject({
+      interaction_session_id: previousSession.sessionId,
+      provider_uid: before.rows[0]?.provider_uid,
+      session_count: before.rows[0]?.session_count
+    });
+    expect(persisted.rows[0]?.provider_credential_hash).toEqual(
+      before.rows[0]?.provider_credential_hash
+    );
+
+    const unrelatedLogin = await authenticate();
+    await expect(
+      authentication.bindOAuthInteractionSession(
+        {
+          cookie: unrelatedLogin.cookie,
+          csrfToken: unrelatedLogin.body.csrfToken
+        },
+        interactionCredential
+      )
+    ).rejects.toMatchObject({ code: "invalid_oauth_interaction" });
+    const unchangedInteraction = await pool.query<{ session_id: string }>(
       `select session_id from oauth_interactions where credential_hash = $1`,
       [hashBearerValue(interactionCredential)]
     );
-    expect(persisted.rows[0]?.session_id).toBe(rebound.sessionId);
+    expect(unchangedInteraction.rows[0]?.session_id).toBe(previousSession.sessionId);
+
+    const attemptRecovery = async (
+      attemptedCredentialId: Buffer,
+      attemptedInteractionCredential: string
+    ): Promise<Response> => {
+      const optionsResponse = await post("/v1/webauthn/authentication/options");
+      const options = (await optionsResponse.json()) as {
+        challengeId: string;
+        options: { challenge: string };
+      };
+      return post("/v1/webauthn/authentication/verify", {
+        body: JSON.stringify({
+          challengeId: options.challengeId,
+          oauthInteractionCredential: attemptedInteractionCredential,
+          response: {
+            id: attemptedCredentialId.toString("base64url"),
+            challenge: options.options.challenge
+          }
+        })
+      });
+    };
+    const stableState = async () => (await pool.query<{
+      credential_hash: Buffer;
+      provider_credential_hash: Buffer;
+      provider_uid: string;
+      session_count: string;
+    }>(
+      `select credential_hash, provider_credential_hash, provider_uid,
+              (select count(*)::text from oauth_sessions) as session_count
+         from oauth_sessions
+        where id = $1`,
+      [previousSession.sessionId]
+    )).rows[0];
+
+    const beforeInvalidAttempts = await stableState();
+    expect((await attemptRecovery(credentialId, "U".repeat(43))).status).toBe(400);
+    await pool.query(
+      `update oauth_interactions set prompt = 'login'
+        where credential_hash = $1`,
+      [hashBearerValue(interactionCredential)]
+    );
+    expect((await attemptRecovery(credentialId, interactionCredential)).status).toBe(400);
+    await pool.query(
+      `update oauth_interactions
+          set prompt = 'consent', expires_at = created_at + interval '1 millisecond'
+        where credential_hash = $1`,
+      [hashBearerValue(interactionCredential)]
+    );
+    expect((await attemptRecovery(credentialId, interactionCredential)).status).toBe(400);
+    await pool.query(
+      `update oauth_interactions
+          set expires_at = now() + interval '10 minutes',
+              status = 'completed', completed_at = now()
+        where credential_hash = $1`,
+      [hashBearerValue(interactionCredential)]
+    );
+    expect((await attemptRecovery(credentialId, interactionCredential)).status).toBe(400);
+    await pool.query(
+      `update oauth_interactions
+          set status = 'abandoned', completed_at = null, abandoned_at = now()
+        where credential_hash = $1`,
+      [hashBearerValue(interactionCredential)]
+    );
+    expect((await attemptRecovery(credentialId, interactionCredential)).status).toBe(400);
+
+    const otherAccountId = randomUUID();
+    const otherCredentialRowId = randomUUID();
+    const otherCredentialId = randomBytes(32);
+    await pool.query(
+      `insert into identity_accounts
+         (id, subject, webauthn_user_handle, display_name)
+       values ($1, $2, $3, 'Other reconnect account')`,
+      [otherAccountId, randomUUID(), randomBytes(32)]
+    );
+    await pool.query(
+      `insert into webauthn_credentials
+         (id, account_id, credential_id, public_key, device_type, backed_up,
+          transports)
+       values ($1, $2, $3, $4, 'multi_device', true, ARRAY['internal']::webauthn_transport[])`,
+      [otherCredentialRowId, otherAccountId, otherCredentialId, randomBytes(64)]
+    );
+    await pool.query(
+      `update oauth_interactions
+          set status = 'pending', abandoned_at = null,
+              expires_at = now() + interval '10 minutes'
+        where credential_hash = $1`,
+      [hashBearerValue(interactionCredential)]
+    );
+    expect((await attemptRecovery(otherCredentialId, interactionCredential)).status).toBe(400);
+    expect(await stableState()).toEqual(beforeInvalidAttempts);
+
+    const concurrentOptionsResponse = await post(
+      "/v1/webauthn/authentication/options"
+    );
+    const concurrentOptions = (await concurrentOptionsResponse.json()) as {
+      challengeId: string;
+      options: { challenge: string };
+    };
+    const concurrentBody = JSON.stringify({
+      challengeId: concurrentOptions.challengeId,
+      oauthInteractionCredential: interactionCredential,
+      response: {
+        id: credentialId.toString("base64url"),
+        challenge: concurrentOptions.options.challenge
+      }
+    });
+    const concurrentResponses = await Promise.all([
+      post("/v1/webauthn/authentication/verify", { body: concurrentBody }),
+      post("/v1/webauthn/authentication/verify", { body: concurrentBody })
+    ]);
+    expect(concurrentResponses.map((response) => response.status).sort()).toEqual([
+      200,
+      400
+    ]);
+    expect((await post("/v1/webauthn/authentication/verify", {
+      body: concurrentBody
+    })).status).toBe(400);
+    const afterConcurrentRecovery = await stableState();
+    expect(afterConcurrentRecovery).toMatchObject({
+      provider_credential_hash: beforeInvalidAttempts?.provider_credential_hash,
+      provider_uid: beforeInvalidAttempts?.provider_uid,
+      session_count: beforeInvalidAttempts?.session_count
+    });
   });
 
   it("manages passkeys and completes TOTP replacement recovery", async () => {

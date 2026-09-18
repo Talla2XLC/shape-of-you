@@ -13,6 +13,11 @@ import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
+import type {
+  AuthenticationResponseJSON,
+  PublicKeyCredentialCreationOptionsJSON,
+  PublicKeyCredentialRequestOptionsJSON
+} from "@simplewebauthn/server";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import type { AdapterPayload } from "oidc-provider";
 import { Pool } from "pg";
@@ -29,7 +34,12 @@ import {
   IdentityAccountSubjectNotFoundError,
   IdentityAccountSubjectStore
 } from "../src/authentication/account-subject-store.js";
-import { SimpleWebAuthnAdapter } from "../src/authentication/webauthn-adapter.js";
+import type {
+  StoredPasskey,
+  VerifiedPasskeyAuthentication,
+  VerifiedPasskeyRegistration,
+  WebAuthnAdapter
+} from "../src/authentication/webauthn-adapter.js";
 import {
   checkIdentityDatabaseReadiness,
   createIdentityDatabase
@@ -59,6 +69,41 @@ interface AppliedMigration {
 interface MigrationSource {
   readonly contents: string;
   readonly tag: string;
+}
+
+class RuntimeFakeWebAuthnAdapter implements WebAuthnAdapter {
+  private sequence = 0;
+
+  async createRegistrationOptions(): Promise<PublicKeyCredentialCreationOptionsJSON> {
+    this.sequence += 1;
+    const options: { challenge: string } = {
+      challenge: `runtime-registration-${this.sequence}`
+    };
+    return options as PublicKeyCredentialCreationOptionsJSON;
+  }
+
+  async verifyRegistration(): Promise<VerifiedPasskeyRegistration> {
+    throw new Error("Registration is not used by the OAuth runtime fixture");
+  }
+
+  async createAuthenticationOptions(): Promise<PublicKeyCredentialRequestOptionsJSON> {
+    this.sequence += 1;
+    const options: { challenge: string } = {
+      challenge: `runtime-authentication-${this.sequence}`
+    };
+    return options as PublicKeyCredentialRequestOptionsJSON;
+  }
+
+  async verifyAuthentication(input: {
+    readonly response: AuthenticationResponseJSON;
+    readonly expectedChallenge: (challenge: string) => boolean;
+    readonly credential: StoredPasskey;
+  }): Promise<VerifiedPasskeyAuthentication> {
+    const challenge = (input.response as unknown as { challenge: string }).challenge;
+    if (!input.expectedChallenge(challenge)) throw new Error("challenge mismatch");
+    expect(input.credential.credentialId.toString("base64url")).toBe(input.response.id);
+    return { counter: input.credential.counter, backedUp: input.credential.backedUp };
+  }
 }
 
 let container: StartedPostgreSqlContainer;
@@ -1518,6 +1563,7 @@ describe("Identity migration chain", () => {
     const accountId = randomUUID();
     const subject = randomUUID();
     const credentialId = randomUUID();
+    const credentialValue = randomBytes(32);
     const sessionId = randomUUID();
     const sessionCredential = "B".repeat(43);
     const csrfToken = "D".repeat(43);
@@ -1548,7 +1594,7 @@ describe("Identity migration chain", () => {
         `insert into webauthn_credentials
            (id, account_id, credential_id, public_key, device_type)
          values ($1, $2, $3, $4, 'multi_device')`,
-        [credentialId, accountId, randomBytes(32), randomBytes(64)]
+        [credentialId, accountId, credentialValue, randomBytes(64)]
       );
       await pool.query(
         `insert into oauth_sessions
@@ -1575,7 +1621,7 @@ describe("Identity migration chain", () => {
       });
       const authentication = new IdentityAuthenticationService(
         pool,
-        new SimpleWebAuthnAdapter(),
+        new RuntimeFakeWebAuthnAdapter(),
         {
           IDENTITY_PUBLIC_ORIGIN: issuer,
           WEBAUTHN_RP_ID: "127.0.0.1",
@@ -1694,6 +1740,7 @@ describe("Identity migration chain", () => {
         [identitySessionCookieName, sessionCredential],
         [identityCsrfCookieName, csrfToken]
       ]);
+      let currentCsrfToken = csrfToken;
       const applyCookies = (response: Response): void => {
         for (const value of response.headers.getSetCookie()) {
           const [pair] = value.split(";", 1);
@@ -1711,7 +1758,8 @@ describe("Identity migration chain", () => {
         expectedScopeLabels: readonly string[] = [
           "Read your profile",
           "Keep this connection active"
-        ]
+        ],
+        consentCsrfToken = currentCsrfToken
       ): Promise<URL> => {
         expect(initialLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
         const consentPage = await fetch(new URL(initialLocation, issuer), {
@@ -1740,7 +1788,7 @@ describe("Identity migration chain", () => {
               cookie: cookieHeader(),
               ...(rejectedOrigin === undefined ? {} : { origin: rejectedOrigin })
             },
-            body: new URLSearchParams({ action, csrfToken }),
+            body: new URLSearchParams({ action, csrfToken: consentCsrfToken }),
             redirect: "manual"
           });
           expect(rejectedConsent.status, rejectedOrigin ?? "missing origin").toBe(403);
@@ -1765,7 +1813,7 @@ describe("Identity migration chain", () => {
             cookie: cookieHeader(),
             origin: issuer
           },
-          body: new URLSearchParams({ action, csrfToken }),
+          body: new URLSearchParams({ action, csrfToken: consentCsrfToken }),
           redirect: "manual"
         });
         expect(consent.status).toBe(303);
@@ -1812,7 +1860,7 @@ describe("Identity migration chain", () => {
           cookie: cookieHeader(),
           origin: issuer
         },
-        body: JSON.stringify({ csrfToken }),
+        body: JSON.stringify({ csrfToken: currentCsrfToken }),
         redirect: "manual"
       });
       expect(login.status).toBe(303);
@@ -1856,6 +1904,188 @@ describe("Identity migration chain", () => {
         )
       ).toMatchObject({ sub: accountId });
       expect(tokenBody.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+      const stableSessionBeforeRecovery = await pool.query<{
+        grant_count: string;
+        provider_credential_hash: Buffer;
+        provider_uid: string;
+        refresh_family_count: string;
+        session_count: string;
+      }>(
+        `select s.provider_uid, s.provider_credential_hash,
+                (select count(*)::text from oauth_sessions) as session_count,
+                (select count(*)::text from oauth_grants
+                  where account_id = $2 and client_id = 'chatgpt-runtime') as grant_count,
+                (select count(*)::text from oauth_refresh_token_families
+                  where account_id = $2 and client_id = 'chatgpt-runtime') as refresh_family_count
+           from oauth_sessions s
+          where s.id = $1`,
+        [sessionId, accountId]
+      );
+      cookies.delete(identitySessionCookieName);
+      cookies.delete(identityCsrfCookieName);
+      const recoveryVerifier = "Q".repeat(43);
+      const recoveryAuthorization = await fetch(authorizationUrl({
+        code_challenge: createHash("sha256")
+          .update(recoveryVerifier)
+          .digest("base64url"),
+        prompt: "consent",
+        state: "recovery-runtime-state"
+      }), {
+        headers: { cookie: cookieHeader() },
+        redirect: "manual"
+      });
+      expect(recoveryAuthorization.status).toBe(303);
+      applyCookies(recoveryAuthorization);
+      const recoveryLocation = recoveryAuthorization.headers.get("location");
+      expect(recoveryLocation).toMatch(/^\/oauth\/interaction\/[A-Za-z0-9_-]{43}$/);
+      const recoveryInteractionCredential = recoveryLocation!.split("/").at(-1)!;
+      const recoveryPage = await fetch(new URL(recoveryLocation!, issuer), {
+        headers: { cookie: cookieHeader() }
+      });
+      expect(recoveryPage.status).toBe(200);
+      expect(await recoveryPage.text()).toContain("Sign in with a passkey");
+
+      const authenticationOptions = await fetch(
+        `${issuer}/v1/webauthn/authentication/options`,
+        { method: "POST", headers: { origin: issuer } }
+      );
+      expect(authenticationOptions.status).toBe(200);
+      const authenticationOptionsBody = await authenticationOptions.json() as {
+        challengeId: string;
+        options: { challenge: string };
+      };
+      const recoveredAuthentication = await fetch(
+        `${issuer}/v1/webauthn/authentication/verify`,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: issuer
+          },
+          body: JSON.stringify({
+            challengeId: authenticationOptionsBody.challengeId,
+            oauthInteractionCredential: recoveryInteractionCredential,
+            response: {
+              id: credentialValue.toString("base64url"),
+              challenge: authenticationOptionsBody.options.challenge
+            }
+          })
+        }
+      );
+      expect(recoveredAuthentication.status).toBe(200);
+      applyCookies(recoveredAuthentication);
+      const recoveredAuthenticationBody = await recoveredAuthentication.json() as {
+        csrfToken: string;
+      };
+      currentCsrfToken = recoveredAuthenticationBody.csrfToken;
+      const stableSessionAfterWebAuthn = await pool.query<{
+        provider_credential_hash: Buffer;
+        provider_uid: string;
+        session_count: string;
+      }>(
+        `select provider_uid, provider_credential_hash,
+                (select count(*)::text from oauth_sessions) as session_count
+           from oauth_sessions
+          where id = $1`,
+        [sessionId]
+      );
+      expect(stableSessionAfterWebAuthn.rows[0]).toEqual({
+        provider_credential_hash:
+          stableSessionBeforeRecovery.rows[0]?.provider_credential_hash,
+        provider_uid: stableSessionBeforeRecovery.rows[0]?.provider_uid,
+        session_count: stableSessionBeforeRecovery.rows[0]?.session_count
+      });
+      await expect(
+        authentication.getOAuthBrowserSession({
+          cookie: `${identitySessionCookieName}=${sessionCredential}`
+        })
+      ).rejects.toMatchObject({ code: "authentication_required" });
+
+      const staleCsrfConsent = await fetch(
+        new URL(`${recoveryLocation}/consent`, issuer),
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: cookieHeader(),
+            origin: issuer
+          },
+          body: new URLSearchParams({ action: "allow", csrfToken }),
+          redirect: "manual"
+        }
+      );
+      expect(staleCsrfConsent.status).toBe(401);
+
+      const recoveryCallback = await completeConsent(
+        recoveryLocation!,
+        "allow",
+        chatGptRedirectUri,
+        ["Read your profile", "Keep this connection active"],
+        recoveredAuthenticationBody.csrfToken
+      );
+      expect(recoveryCallback.searchParams.get("state")).toBe(
+        "recovery-runtime-state"
+      );
+      const recoveryCode = recoveryCallback.searchParams.get("code");
+      expect(recoveryCode).toMatch(/^[A-Za-z0-9_-]{43}$/);
+
+      const preRecoveryRefreshRotation = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          grant_type: "refresh_token",
+          refresh_token: tokenBody.refresh_token
+        })
+      });
+      expect(preRecoveryRefreshRotation.status).toBe(200);
+      const preRecoveryRefreshBody = await preRecoveryRefreshRotation.json() as {
+        refresh_token: string;
+      };
+      expect(preRecoveryRefreshBody.refresh_token).not.toBe(tokenBody.refresh_token);
+
+      const recoveryToken = await fetch(`${issuer}/oauth/token`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          client_id: "chatgpt-runtime",
+          code: recoveryCode!,
+          code_verifier: recoveryVerifier,
+          grant_type: "authorization_code",
+          redirect_uri: chatGptRedirectUri
+        })
+      });
+      expect(recoveryToken.status).toBe(200);
+      await expect(recoveryToken.json()).resolves.toMatchObject({
+        access_token: expect.any(String),
+        refresh_token: expect.any(String)
+      });
+      const stableSessionAfterRecovery = await pool.query<{
+        grant_count: string;
+        provider_credential_hash: Buffer;
+        provider_uid: string;
+        refresh_family_count: string;
+        session_count: string;
+      }>(
+        `select s.provider_uid, s.provider_credential_hash,
+                (select count(*)::text from oauth_sessions) as session_count,
+                (select count(*)::text from oauth_grants
+                  where account_id = $2 and client_id = 'chatgpt-runtime') as grant_count,
+                (select count(*)::text from oauth_refresh_token_families
+                  where account_id = $2 and client_id = 'chatgpt-runtime') as refresh_family_count
+           from oauth_sessions s
+          where s.id = $1`,
+        [sessionId, accountId]
+      );
+      expect(stableSessionAfterRecovery.rows[0]).toMatchObject({
+        grant_count: stableSessionBeforeRecovery.rows[0]?.grant_count,
+        provider_uid: stableSessionBeforeRecovery.rows[0]?.provider_uid,
+        session_count: stableSessionBeforeRecovery.rows[0]?.session_count
+      });
+      expect(Number(stableSessionAfterRecovery.rows[0]?.refresh_family_count)).toBe(
+        Number(stableSessionBeforeRecovery.rows[0]?.refresh_family_count) + 1
+      );
 
       const deniedVerifier = "N".repeat(43);
       const deniedChallenge = createHash("sha256")
@@ -2076,7 +2306,7 @@ describe("Identity migration chain", () => {
           cookie: cookieHeader(),
           origin: issuer
         },
-        body: JSON.stringify({ csrfToken }),
+        body: JSON.stringify({ csrfToken: currentCsrfToken }),
         redirect: "manual"
       });
       const reconnectLoginBody = reconnectLogin.status === 303
@@ -2192,8 +2422,11 @@ describe("Identity migration chain", () => {
       expect(audit.rows.map((row) => row.event_type)).toEqual([
         "oauth_authorization",
         "oauth_authorization",
+        "oauth_authorization",
         "oauth_code_exchange",
         "oauth_code_exchange",
+        "oauth_code_exchange",
+        "oauth_refresh_rotation",
         "oauth_refresh_rotation"
       ]);
       const grantBeforeRenewal = await pool.query<{ id: string }>(

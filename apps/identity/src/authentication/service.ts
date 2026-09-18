@@ -384,9 +384,10 @@ export class IdentityAuthenticationService {
     return { challengeId, options };
   }
 
-  /** Verifies a passkey assertion and creates a sliding browser session. */
+  /** Verifies a passkey assertion and creates or recovers a sliding browser session. */
   async verifyAuthentication(input: {
     readonly challengeId: string;
+    readonly oauthInteractionCredential?: string | undefined;
     readonly response: AuthenticationResponseJSON;
   }): Promise<{
     readonly body: Readonly<Record<string, unknown>>;
@@ -430,7 +431,7 @@ export class IdentityAuthenticationService {
     }
     const sessionCredential = createOpaqueToken();
     const csrfToken = createOpaqueToken();
-    const sessionId = randomUUID();
+    let sessionId: string = randomUUID();
     const now = new Date();
     const expiresAt = new Date(now.getTime() + sessionIdleLifetimeMs);
     const client = await this.pool.connect();
@@ -453,24 +454,36 @@ export class IdentityAuthenticationService {
           where id = $1 and revoked_at is null`,
         [row.credential_row_id, verified.counter, verified.backedUp, now]
       );
-      await client.query(
-        `insert into oauth_sessions
-           (id, account_id, webauthn_credential_id, credential_hash,
-            csrf_token_hash, provider_uid, authenticated_at, acr, amr,
-            created_at, last_activity_at, expires_at)
-         values ($1, $2, $3, $4, $5, $6, $7, 'urn:soy:passkey',
-                 ARRAY['passkey'], $7, $7, $8)`,
-        [
-          sessionId,
-          row.id,
-          row.credential_row_id,
-          hashBearerValue(sessionCredential),
-          hashBearerValue(csrfToken),
-          randomUUID(),
+      if (input.oauthInteractionCredential) {
+        sessionId = await this.recoverOAuthConsentSession(client, {
+          accountId: row.id,
+          csrfToken,
+          interactionCredential: input.oauthInteractionCredential,
           now,
+          sessionCredential,
+          webauthnCredentialId: row.credential_row_id,
           expiresAt
-        ]
-      );
+        });
+      } else {
+        await client.query(
+          `insert into oauth_sessions
+             (id, account_id, webauthn_credential_id, credential_hash,
+              csrf_token_hash, provider_uid, authenticated_at, acr, amr,
+              created_at, last_activity_at, expires_at)
+           values ($1, $2, $3, $4, $5, $6, $7, 'urn:soy:passkey',
+                   ARRAY['passkey'], $7, $7, $8)`,
+          [
+            sessionId,
+            row.id,
+            row.credential_row_id,
+            hashBearerValue(sessionCredential),
+            hashBearerValue(csrfToken),
+            randomUUID(),
+            now,
+            expiresAt
+          ]
+        );
+      }
       await this.insertSecurityEvent(client, {
         eventType: "passkey_authentication",
         actorKind: "account",
@@ -665,10 +678,7 @@ export class IdentityAuthenticationService {
   /**
    * Binds an OAuth interaction to the current CSRF-authorized passkey session.
    *
-   * A pending consent interaction may still reference an older provider-backed
-   * session after the browser application session expires. Reauthentication may
-   * rotate that session binding only for the already-bound account; switching
-   * the interaction to another account remains forbidden.
+   * The interaction must already be unbound or bound to this exact session.
    *
    * @param authority - Cookie and session-bound CSRF authority from the page.
    * @param interactionCredential - Opaque provider interaction identifier.
@@ -686,6 +696,7 @@ export class IdentityAuthenticationService {
         where credential_hash = $1
           and status = 'pending' and expires_at >= now()
           and (account_id is null or account_id = $2)
+          and (session_id is null or session_id = $3)
       returning id`,
       [hashBearerValue(interactionCredential), session.account.id, session.sessionId]
     );
@@ -697,6 +708,74 @@ export class IdentityAuthenticationService {
       );
     }
     return this.toOAuthBrowserSession(session);
+  }
+
+  private async recoverOAuthConsentSession(
+    client: PoolClient,
+    input: {
+      readonly accountId: string;
+      readonly csrfToken: string;
+      readonly expiresAt: Date;
+      readonly interactionCredential: string;
+      readonly now: Date;
+      readonly sessionCredential: string;
+      readonly webauthnCredentialId: string;
+    }
+  ): Promise<string> {
+    const interaction = await client.query<{ session_id: string }>(
+      `select i.session_id
+         from oauth_interactions i
+         join oauth_sessions s on s.id = i.session_id
+        where i.credential_hash = $1
+          and i.prompt = 'consent'
+          and i.status = 'pending'
+          and i.expires_at >= $2
+          and i.account_id = $3
+          and s.account_id = $3
+          and s.revoked_at is null
+          and s.expires_at >= $2
+        for update of i, s`,
+      [hashBearerValue(input.interactionCredential), input.now, input.accountId]
+    );
+    const sessionId = interaction.rows[0]?.session_id;
+    if (!sessionId || interaction.rowCount !== 1) {
+      throw new IdentityAuthenticationError(
+        400,
+        "invalid_oauth_interaction",
+        "OAuth interaction is invalid or expired"
+      );
+    }
+    const rotated = await client.query(
+      `update oauth_sessions
+          set webauthn_credential_id = $2,
+              credential_hash = $3,
+              csrf_token_hash = $4,
+              last_activity_at = $5,
+              expires_at = $6
+        where id = $1
+          and account_id = $7
+          and revoked_at is null
+          and expires_at >= $5
+      returning id`,
+      [
+        sessionId,
+        input.webauthnCredentialId,
+        hashBearerValue(input.sessionCredential),
+        hashBearerValue(input.csrfToken),
+        input.now,
+        input.expiresAt,
+        input.accountId
+      ]
+    );
+    this.requireSingleRow(
+      rotated,
+      () => new IdentityAuthenticationError(
+        400,
+        "invalid_oauth_interaction",
+        "OAuth interaction is invalid or expired"
+      )
+    );
+    return sessionId;
   }
 
   /** Starts authenticated TOTP enrollment and returns its setup URI once. */

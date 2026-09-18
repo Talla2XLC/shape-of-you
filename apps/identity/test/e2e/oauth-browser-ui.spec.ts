@@ -34,6 +34,7 @@ interface BrowserFixture {
   readonly origin: string;
   readonly submissionCount: () => number;
   readonly submissionOrigins: readonly string[];
+  readonly verificationBodies: readonly Record<string, unknown>[];
 }
 
 function listen(server: Server): Promise<void> {
@@ -72,6 +73,7 @@ async function startBrowserFixture(
   let applicationSessionAvailable = hasApplicationSession;
   let submissionCount = 0;
   const submissionOrigins: string[] = [];
+  const verificationBodies: Record<string, unknown>[] = [];
   const identityServer = createServer(async (request, response) => {
     try {
       const url = new URL(request.url ?? "/", origin || "http://localhost");
@@ -91,6 +93,13 @@ async function startBrowserFixture(
         request.method === "POST" &&
         url.pathname === "/v1/webauthn/authentication/verify"
       ) {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) {
+          chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        }
+        verificationBodies.push(
+          JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<string, unknown>
+        );
         applicationSessionAvailable = true;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ csrfToken }));
@@ -174,7 +183,8 @@ async function startBrowserFixture(
     decision: () => decision,
     origin,
     submissionCount: () => submissionCount,
-    submissionOrigins
+    submissionOrigins,
+    verificationBodies
   };
 }
 
@@ -281,6 +291,10 @@ test("consent without an application session offers passkey sign-in instead of r
     await expect(page.locator("body")).not.toContainText("Authentication required");
     await page.getByRole("button", { name: "Sign in with a passkey" }).click();
     await expect(page.getByRole("button", { name: "Allow" })).toBeVisible();
+    expect(fixture.verificationBodies).toHaveLength(1);
+    expect(fixture.verificationBodies[0]?.oauthInteractionCredential).toBe(
+      interactionCredential
+    );
     await page.getByRole("button", { name: "Allow" }).click();
     await expect(page.getByRole("heading", { name: "Client callback" })).toBeVisible();
     expect(fixture.decision()).toBe("allow");

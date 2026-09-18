@@ -20,6 +20,19 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-18 — Stable OAuth consent-session recovery
+
+- Recovered an existing provider-backed OAuth session after exact consent
+  passkey reauthentication by rotating only its browser and CSRF authority.
+- Preserved the stable session ID, provider identity, grants, authorization
+  state, and refresh-token lifecycle; stale browser credentials and cross-
+  account or non-pending recovery attempts fail closed.
+- Added real provider resume, callback, code exchange, pre-existing refresh
+  rotation, negative-state, replay, and concurrency regressions without a
+  migration, new environment setting, deployable boundary, or manual server
+  operation. Commit, push, deployment, and live reconnect verification remain
+  separate operator gates.
+
 ### 2026-09-18 — Typed feedback for daily recommendations
 
 - Added Person-owned append-only feedback for the exact immutable daily
