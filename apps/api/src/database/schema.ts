@@ -24,7 +24,8 @@ import type {
   DailyAssessmentMovement,
   DailyAssessmentPersonalBaseline,
   DailyAssessmentUsedFacts,
-  DailyNextAction
+  DailyNextAction,
+  DailyRecommendationFeedbackStatus
 } from "@shape-of-you/contracts";
 import type { DailyAssessmentPersonalCalculation } from "../domain/personalized-daily-assessment.js";
 
@@ -281,6 +282,10 @@ export const coachingRecommendationKind = pgEnum(
 export const dailyAssessmentStatus = pgEnum("daily_assessment_status", [
   "ready", "caution", "recovery_priority", "insufficient_data"
 ]);
+export const dailyRecommendationFeedbackStatus = pgEnum(
+  "daily_recommendation_feedback_status",
+  ["accepted", "completed", "skipped", "too_heavy", "unsuitable"]
+);
 export const coachingTrainingAdjustmentAction = pgEnum(
   "coaching_training_adjustment_action",
   ["hold", "target_weight", "repetition_range"]
@@ -3490,6 +3495,10 @@ export const coachingDailyAssessmentDetails = pgTable(
       columns: [table.recommendationId, table.personId],
       foreignColumns: [coachingRecommendations.id, coachingRecommendations.personId]
     }).onDelete("cascade"),
+    unique("coach_daily_assessment_id_person_uq").on(
+      table.recommendationId,
+      table.personId
+    ),
     index("coaching_daily_assessment_person_date_idx").on(table.personId, table.localDate),
     check("coaching_daily_assessment_confidence", sql`${table.confidence} BETWEEN 0 AND 1`),
     check(
@@ -3506,6 +3515,63 @@ export const coachingDailyAssessmentDetails = pgTable(
             AND ${table.personalBaseline} IS NOT NULL
             AND ${table.personalBaselineCalculation} IS NOT NULL
             AND ${table.movement} IS NOT NULL)`
+    )
+  ]
+);
+
+/** Append-only typed evidence reported about one daily recommendation snapshot. */
+export const coachingDailyRecommendationFeedback = pgTable(
+  "coaching_daily_recommendation_feedback",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    actorPersonId: uuid("actor_person_id").notNull(),
+    status: dailyRecommendationFeedbackStatus("status")
+      .$type<DailyRecommendationFeedbackStatus>()
+      .notNull(),
+    comment: varchar("comment", { length: 1000 }),
+    idempotencyKey: varchar("idempotency_key", { length: 256 }).notNull(),
+    reportedAt: timestamp("reported_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coach_daily_feedback_snapshot_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [
+        coachingDailyAssessmentDetails.recommendationId,
+        coachingDailyAssessmentDetails.personId
+      ]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coach_daily_feedback_actor_fk",
+      columns: [table.actorPersonId],
+      foreignColumns: [persons.id]
+    }),
+    unique("coach_daily_feedback_person_dedupe_uq").on(
+      table.personId,
+      table.idempotencyKey
+    ),
+    unique("coach_daily_feedback_status_uq").on(
+      table.recommendationId,
+      table.status
+    ),
+    uniqueIndex("coach_daily_feedback_disposition_uq")
+      .on(table.recommendationId)
+      .where(sql`${table.status} in ('completed', 'skipped')`),
+    index("coach_daily_feedback_person_time_idx").on(
+      table.personId,
+      table.reportedAt
+    ),
+    check(
+      "coach_daily_feedback_actor_owner",
+      sql`${table.actorPersonId} = ${table.personId}`
+    ),
+    check(
+      "coach_daily_feedback_comment_nonblank",
+      sql`${table.comment} IS NULL OR btrim(${table.comment}) <> ''`
     )
   ]
 );

@@ -226,7 +226,8 @@ shared lifecycle boundary.
 
 The initial protocol scopes are `openid` and `offline_access`. Resource scopes
 are `person:read`, `weight:write`, `body-measurement:write`, `meal:write`,
-`workout:write`, `recovery:write`, and `daily-context-note:write`.
+`workout:write`, `recovery:write`, `daily-context-note:write`,
+`person-timezone:write`, and `daily-recommendation-feedback:write`.
 
 ### ChatGPT and MCP
 
@@ -236,7 +237,7 @@ the API deployable. Its internal endpoint is `/mcp`; staging exposes it as
 protected-resource metadata, advertises per-tool security schemes, and returns
 standards-complete OAuth challenges.
 
-The repository allowlist contains 25 tools covering reads, typed writes,
+The repository allowlist contains 26 tools covering reads, typed writes,
 append-only corrections, active Training references, and the always-live daily
 projection for Weight, Body, Meal, WorkoutSession, RecoveryObservation, and
 DailyContextNote. Reads require `person:read`; each write uses its
@@ -261,7 +262,14 @@ available on the authenticated first-party HTTP boundary and through the
 narrow `set_current_timezone` MCP command with its dedicated
 `person-timezone:write` scope.
 
-`get_current_recovery_context` is the 25th tool and uses `person:read`. It has
+`record_daily_recommendation_feedback` is the dedicated idempotent writer for
+an explicit response to one exact daily-assessment snapshot. It requires
+`daily-recommendation-feedback:write`, not `person:read`, and accepts only the
+closed status set plus an optional bounded comment. Its result confirms only
+that feedback evidence was stored: it cannot create an owning-domain fact,
+alter the assessment, or change future recommendation policy automatically.
+
+`get_current_recovery_context` uses `person:read`. It has
 closed empty input, derives the target date from the stored Person timezone,
 and returns current typed Recovery observations plus independent
 provider-neutral sync freshness and direct target-date delivery evidence. It

@@ -9,7 +9,7 @@ import { createDatabase, type DatabaseContext } from "../src/database/context.js
 import { runMigrations } from "../src/database/migrate.js";
 import { evaluateDailyAssessment } from "../src/domain/daily-assessment.js";
 import { evaluatePersonalizedDailyAssessment } from "../src/domain/personalized-daily-assessment.js";
-import { DailyAssessmentEvidenceChangedError } from "../src/domain/errors.js";
+import { DailyAssessmentEvidenceChangedError, NotFoundError } from "../src/domain/errors.js";
 import { derivePersonLocalDate } from "../src/coaching/daily-assessment.service.js";
 import { DailyAssessmentRepository } from "../src/storage/daily-assessment-repository.js";
 import { DailyContextNoteRepository } from "../src/storage/daily-context-note-repository.js";
@@ -672,5 +672,216 @@ describe("API-owned daily assessment", () => {
         }
       }
     });
+  });
+
+  it("records typed feedback idempotently against the exact immutable snapshot", async () => {
+    const fastify = getFastifyInstance(app);
+    const assessmentResponse = await fastify.inject({
+      method: "GET",
+      url: "/v1/daily-assessment"
+    });
+    expect(assessmentResponse.statusCode, assessmentResponse.body).toBe(200);
+    const assessment = assessmentResponse.json();
+    const snapshotId = assessment.snapshotId as string;
+    const evidenceChecksum = assessment.evidenceChecksum as string;
+    const owningFactsBefore = await database.pool.query<{
+      workouts: string;
+      meals: string;
+      recovery: string;
+      programs: string;
+    }>(
+      `select
+         (select count(*) from workout_sessions where person_id = $1)::text as workouts,
+         (select count(*) from meals where person_id = $1)::text as meals,
+         (select count(*) from recovery_observations where person_id = $1)::text as recovery,
+         (select count(*) from training_programs where person_id = $1)::text as programs`,
+      [personId]
+    );
+
+    const missingStatus = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: { idempotencyKey: "feedback-missing-status" }
+    });
+    expect(missingStatus.statusCode, missingStatus.body).toBe(400);
+
+    const acceptedCommand = {
+      status: "accepted",
+      comment: "  Попробую сегодня  ",
+      idempotencyKey: "feedback-accepted"
+    };
+    const accepted = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: acceptedCommand
+    });
+    expect(accepted.statusCode, accepted.body).toBe(201);
+    expect(accepted.json()).toMatchObject({
+      snapshotId,
+      personId,
+      actorPersonId: personId,
+      status: "accepted",
+      comment: "Попробую сегодня",
+      idempotencyKey: "feedback-accepted"
+    });
+
+    const exactRetry = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: acceptedCommand
+    });
+    expect(exactRetry.statusCode, exactRetry.body).toBe(200);
+    expect(exactRetry.json()).toEqual(accepted.json());
+
+    const changedRetry = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: { ...acceptedCommand, status: "skipped" }
+    });
+    expect(changedRetry.statusCode, changedRetry.body).toBe(409);
+
+    const duplicateStatus = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: { status: "accepted", idempotencyKey: "feedback-accepted-again" }
+    });
+    expect(duplicateStatus.statusCode, duplicateStatus.body).toBe(409);
+
+    await database.pool.query(
+      "update coaching_recommendations set as_of = now() - interval '2 days', expires_at = now() - interval '1 day' where id = $1",
+      [snapshotId]
+    );
+    const tooHeavy = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: {
+        status: "too_heavy",
+        comment: "Слишком большая нагрузка",
+        idempotencyKey: "feedback-too-heavy"
+      }
+    });
+    expect(tooHeavy.statusCode, tooHeavy.body).toBe(201);
+
+    const completed = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: { status: "completed", idempotencyKey: "feedback-completed" }
+    });
+    expect(completed.statusCode, completed.body).toBe(201);
+
+    const skippedAfterCompleted = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: { status: "skipped", idempotencyKey: "feedback-skipped" }
+    });
+    expect(skippedAfterCompleted.statusCode, skippedAfterCompleted.body).toBe(409);
+
+    const concurrentCommand = {
+      status: "unsuitable",
+      comment: "Не подходит по контексту",
+      idempotencyKey: "feedback-unsuitable-concurrent"
+    };
+    const concurrent = await Promise.all([
+      fastify.inject({
+        method: "POST",
+        url: `/v1/daily-assessment/${snapshotId}/feedback`,
+        payload: concurrentCommand
+      }),
+      fastify.inject({
+        method: "POST",
+        url: `/v1/daily-assessment/${snapshotId}/feedback`,
+        payload: concurrentCommand
+      })
+    ]);
+    expect(concurrent.map((response) => response.statusCode).sort()).toEqual([200, 201]);
+    expect(concurrent[0].json()).toEqual(concurrent[1].json());
+
+    const history = await fastify.inject({
+      method: "GET",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`
+    });
+    expect(history.statusCode, history.body).toBe(200);
+    expect(history.json()).toMatchObject({
+      snapshotId,
+      items: [
+        { status: "accepted" },
+        { status: "too_heavy" },
+        { status: "completed" },
+        { status: "unsuitable" }
+      ]
+    });
+
+    const unchangedAssessment = await fastify.inject({
+      method: "GET",
+      url: "/v1/daily-assessment"
+    });
+    expect(unchangedAssessment.json()).toMatchObject({
+      snapshotId,
+      evidenceChecksum,
+      policyVersion: assessment.policyVersion,
+      status: assessment.status,
+      recommendedAction: assessment.recommendedAction,
+      personalBaseline: assessment.personalBaseline
+    });
+    const owningFactsAfter = await database.pool.query<{
+      workouts: string;
+      meals: string;
+      recovery: string;
+      programs: string;
+    }>(
+      `select
+         (select count(*) from workout_sessions where person_id = $1)::text as workouts,
+         (select count(*) from meals where person_id = $1)::text as meals,
+         (select count(*) from recovery_observations where person_id = $1)::text as recovery,
+         (select count(*) from training_programs where person_id = $1)::text as programs`,
+      [personId]
+    );
+    expect(owningFactsAfter.rows).toEqual(owningFactsBefore.rows);
+
+    const repository = new DailyAssessmentRepository(database);
+    await expect(repository.recordFeedback(otherPersonId, {
+      snapshotId,
+      status: "accepted",
+      idempotencyKey: "cross-person-feedback"
+    })).rejects.toBeInstanceOf(NotFoundError);
+
+    const nonDailyRecommendation = await database.pool.query<{ id: string }>(
+      `insert into coaching_recommendations
+         (person_id, kind, policy_version_id, as_of, expires_at,
+          evidence_checksum, explanation, dedupe_key)
+       select $1, 'training_adjustment', id, now(), now() + interval '1 day',
+              $2, 'Not a daily assessment', $3
+         from coaching_policy_versions
+        order by created_at asc
+        limit 1
+       returning id`,
+      [personId, "feedback-wrong-kind-evidence", "feedback-wrong-kind"]
+    );
+    await expect(repository.recordFeedback(personId, {
+      snapshotId: nonDailyRecommendation.rows[0]!.id,
+      status: "accepted",
+      idempotencyKey: "wrong-kind-feedback"
+    })).rejects.toBeInstanceOf(NotFoundError);
+    await database.pool.query(
+      "delete from coaching_recommendations where id = $1",
+      [nonDailyRecommendation.rows[0]!.id]
+    );
+
+    const otherSnapshot = await database.pool.query<{ recommendation_id: string }>(
+      "select recommendation_id from coaching_daily_assessment_details where person_id = $1 order by local_date asc limit 1",
+      [otherPersonId]
+    );
+    const deletedSnapshotId = otherSnapshot.rows[0]!.recommendation_id;
+    await repository.recordFeedback(otherPersonId, {
+      snapshotId: deletedSnapshotId,
+      status: "accepted",
+      idempotencyKey: "feedback-cascade"
+    });
+    await database.pool.query("delete from coaching_recommendations where id = $1", [deletedSnapshotId]);
+    const deletedFeedback = await database.pool.query<{ count: number }>(
+      "select count(*)::int as count from coaching_daily_recommendation_feedback where recommendation_id = $1",
+      [deletedSnapshotId]
+    );
+    expect(deletedFeedback.rows[0]?.count).toBe(0);
   });
 });

@@ -20,6 +20,20 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-18 — Typed feedback for daily recommendations
+
+- Added Person-owned append-only feedback for the exact immutable daily
+  assessment snapshot with `accepted`, `completed`, `skipped`, `too_heavy`,
+  and `unsuitable` statuses plus an optional bounded comment.
+- Added idempotent API creation and ordered history, exact snapshot ownership,
+  concurrent duplicate protection, post-expiry reporting, and privacy cascade.
+- Added `record_daily_recommendation_feedback` to Coach/MCP with the dedicated
+  `daily-recommendation-feedback:write` OAuth scope and versioned predefined
+  client reconciliation.
+- Kept feedback outside owning-domain facts, assessment evidence and checksum,
+  baseline, action selection, and policy calibration. No self-learning,
+  deployment, shared/staging/production migration, commit, or push occurred.
+
 ### 2026-09-18 — Verifiable connected Recovery freshness for Coach
 
 - Added the read-only `get_current_recovery_context` MCP tool for focused

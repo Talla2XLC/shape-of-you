@@ -93,6 +93,11 @@ describe("cutover preflight", () => {
       scope: "workout:write",
       canaryRequired: true
     });
+    expect(cutoverWriterTools).toContainEqual({
+      name: "record_daily_recommendation_feedback",
+      scope: "daily-recommendation-feedback:write",
+      canaryRequired: true
+    });
   });
 
   it("builds a deterministic zero-write post-checkpoint replay plan", () => {

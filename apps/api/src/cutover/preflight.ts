@@ -42,6 +42,7 @@ export const cutoverWriterTools: readonly CutoverWriterToolRequirement[] = [
   { name: "list_daily_context_notes", scope: "person:read", canaryRequired: false },
   { name: "record_daily_context_note", scope: "daily-context-note:write", canaryRequired: true },
   { name: "correct_daily_context_note", scope: "daily-context-note:write", canaryRequired: true },
+  { name: "record_daily_recommendation_feedback", scope: "daily-recommendation-feedback:write", canaryRequired: true },
   { name: "get_daily_projection", scope: "person:read", canaryRequired: false },
 ];
 

@@ -35,6 +35,12 @@ is shown explicitly instead of being replaced by a guessed conclusion. ChatGPT
 remains the conversation and presentation layer: it explains the result but
 does not invent the underlying decision.
 
+The user can report whether that exact recommended action was accepted,
+completed, skipped, too heavy, or unsuitable. A short comment may add context,
+but cannot replace the typed outcome. This history is retained as evidence for
+future analysis without changing the current assessment, creating a workout or
+other completed fact, or automatically training or recalibrating the policy.
+
 The authenticated Web entry point is `/progress`. It shows factual trends for
 the trailing week, month, or year, preserves missing data as gaps, and links
 only dates with current facts to the exact dated record.

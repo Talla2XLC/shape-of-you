@@ -21,6 +21,7 @@ import { ConflictError, NotFoundError } from "../src/domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+  MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
   MCP_MEAL_WRITE_SCOPE,
   MCP_PERSON_TIMEZONE_WRITE_SCOPE,
   MCP_READ_SCOPE,
@@ -393,7 +394,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(25);
+    expect(body.result.tools).toHaveLength(26);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -435,6 +436,7 @@ describe("MCP HTTP adapter", () => {
       correct_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       set_current_timezone: MCP_PERSON_TIMEZONE_WRITE_SCOPE,
       get_daily_assessment: MCP_READ_SCOPE,
+      record_daily_recommendation_feedback: MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
       get_daily_projection: MCP_READ_SCOPE
     });
     expect(body.result.tools.find((tool: { name: string }) =>
@@ -503,6 +505,24 @@ describe("MCP HTTP adapter", () => {
     });
     expect(timezoneTool.inputSchema.properties).toEqual({
       timezone: expect.objectContaining({ type: "string" })
+    });
+    const feedbackTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "record_daily_recommendation_feedback"
+    );
+    expect(feedbackTool).toMatchObject({
+      inputSchema: {
+        $id: "CreateDailyRecommendationFeedback",
+        additionalProperties: false,
+        required: ["snapshotId", "status", "idempotencyKey"],
+        properties: {
+          status: {
+            enum: ["accepted", "completed", "skipped", "too_heavy", "unsuitable"]
+          }
+        }
+      },
+      outputSchema: { $id: "DailyRecommendationFeedback" },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      securitySchemes: [{ scopes: [MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE] }]
     });
     for (const toolName of [
       "record_weight_measurement",
@@ -1339,6 +1359,7 @@ describe("MCP HTTP adapter", () => {
         MCP_WORKOUT_WRITE_SCOPE,
         MCP_RECOVERY_WRITE_SCOPE,
         MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+        MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
         MCP_PERSON_TIMEZONE_WRITE_SCOPE
       ].join(" ")
     })
@@ -1367,6 +1388,19 @@ describe("MCP HTTP adapter", () => {
     const updatePreferences = vi.fn().mockResolvedValue({
       timezone: "Europe/Belgrade",
       updatedAt: "2026-09-18T00:00:00.000Z"
+    });
+    const recordFeedback = vi.fn().mockResolvedValue({
+      created: true,
+      feedback: {
+        id: "00000000-0000-4000-8000-000000000601",
+        snapshotId: "00000000-0000-4000-8000-000000000501",
+        personId: "00000000-0000-4000-8000-000000000001",
+        actorPersonId: "00000000-0000-4000-8000-000000000001",
+        status: "completed",
+        comment: "Сделано без проблем",
+        idempotencyKey: "coach-feedback-completed",
+        reportedAt: "2026-09-02T10:00:00.000Z"
+      }
     });
     const availableDailyAssessment: DailyAssessmentResult = {
       state: "available",
@@ -1524,7 +1558,8 @@ describe("MCP HTTP adapter", () => {
         },
         dailyAssessment: {
           read: readDailyAssessment,
-          updatePreferences
+          updatePreferences,
+          recordFeedback
         }
       } as unknown as Parameters<typeof registerMcpRoutes>[0]["services"]
     });
@@ -1624,6 +1659,12 @@ describe("MCP HTTP adapter", () => {
       ["correct_daily_context_note", { id, ...note, dedupeKey: "coach-policy-note-correction", reason: "Correction" }, "correct_daily_context_note"],
       ["set_current_timezone", { timezone: "Europe/Belgrade" }, "Europe/Belgrade"],
       ["get_daily_assessment", {}, "timezone_required"],
+      ["record_daily_recommendation_feedback", {
+        snapshotId: "00000000-0000-4000-8000-000000000501",
+        status: "completed",
+        comment: "Сделано без проблем",
+        idempotencyKey: "coach-feedback-completed"
+      }, "completed"],
       ["get_daily_projection", { localDate: "2026-09-02", timezone: "Europe/Moscow" }, "get_daily_projection"]
     ] as const;
 
@@ -1679,6 +1720,11 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.content[0].text, name).toContain(
             "Do not add a duration, intensity, workout, medical rationale, trend, or substitute action"
           );
+        } else if (name === "record_daily_recommendation_feedback") {
+          expect(toolResult.structuredContent, name).toMatchObject({ status: marker });
+          expect(toolResult.content[0].text, name).toContain(
+            "feedback evidence only"
+          );
         } else if (name === "get_daily_projection") {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });
           expect(toolResult.content[0].text, name).toContain(
@@ -1706,6 +1752,12 @@ describe("MCP HTTP adapter", () => {
       }
       expect(createWeight).toHaveBeenCalledWith(weight);
       expect(updatePreferences).toHaveBeenCalledWith({ timezone: "Europe/Belgrade" });
+      expect(recordFeedback).toHaveBeenCalledWith({
+        snapshotId: "00000000-0000-4000-8000-000000000501",
+        status: "completed",
+        comment: "Сделано без проблем",
+        idempotencyKey: "coach-feedback-completed"
+      });
       const readOnlyToken = await new SignJWT({
         client_id: "chatgpt-runtime",
         scope: MCP_READ_SCOPE
@@ -1743,6 +1795,36 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(updatePreferences).toHaveBeenCalledTimes(1);
+      const deniedFeedbackWrite = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${readOnlyToken}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "feedback-read-only-denied",
+          method: "tools/call",
+          params: {
+            name: "record_daily_recommendation_feedback",
+            arguments: {
+              snapshotId: "00000000-0000-4000-8000-000000000501",
+              status: "completed",
+              idempotencyKey: "feedback-read-only-denied"
+            }
+          }
+        }
+      });
+      expect(deniedFeedbackWrite.json().result).toMatchObject({
+        isError: true,
+        _meta: {
+          "mcp/www_authenticate": [expect.stringContaining(
+            'scope="daily-recommendation-feedback:write", error="insufficient_scope"'
+          )]
+        }
+      });
+      expect(recordFeedback).toHaveBeenCalledTimes(1);
       expect(readDailyAssessment).toHaveBeenCalledTimes(2);
       expect(successfulContent.get("record_weight_measurement")).toContain(
         "owning-domain read-back"

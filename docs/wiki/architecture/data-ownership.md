@@ -103,6 +103,14 @@ reads for one Person-local date and owns only the provider-neutral presentation
 policy. It does not persist the composition, read raw provider payloads, or add
 volatile sync state to immutable DailyAssessment snapshots and checksums.
 
+Coaching also owns append-only `DailyRecommendationFeedback` evidence for an
+exact Person-owned daily-assessment snapshot. The feedback row stores its own
+status, actor, report time, idempotency key, and optional bounded comment while
+reusing the snapshot's policy, action, reasons, confidence, and evidence links
+instead of copying them. It is neither a mutable recommendation state nor an
+owning-domain completion fact. Snapshot privacy erasure cascades to feedback;
+feedback does not flow back into assessment calculation or policy selection.
+
 ## Evidence
 
 - Operator authority/boundary rules and linked ADRs.
@@ -134,4 +142,5 @@ volatile sync state to immutable DailyAssessment snapshots and checksums.
 - [Provider-neutral profile data coverage ADR](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Operational evidence isolation ADR](../../adr/20260913-separate-operational-evidence-from-person-context.md)
 - [Connected Recovery freshness for Coach ADR](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md)
+- [Typed daily-recommendation feedback ADR](../../adr/20260918-record-typed-daily-recommendation-feedback.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

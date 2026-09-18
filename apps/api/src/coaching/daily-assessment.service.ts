@@ -1,6 +1,15 @@
 import { Inject, Injectable } from "@nestjs/common";
 
-import type { DailyAssessmentMovement, DailyAssessmentResult, DailyAssessmentV2UsedFacts, PersonPreferences, RecoveryObservation, UpdatePersonPreferences } from "@shape-of-you/contracts";
+import type {
+  CreateDailyRecommendationFeedback,
+  DailyAssessmentMovement,
+  DailyAssessmentResult,
+  DailyAssessmentV2UsedFacts,
+  DailyRecommendationFeedbackList,
+  PersonPreferences,
+  RecoveryObservation,
+  UpdatePersonPreferences
+} from "@shape-of-you/contracts";
 
 import type { PersonContext } from "../application/person-context.js";
 import { DAILY_ASSESSMENT_STORE, PERSON_CONTEXT } from "../application/tokens.js";
@@ -19,7 +28,10 @@ import { activePersonalBaselinePolicy } from "../domain/personal-baseline.js";
 import { buildCoverageDirection, shiftLocalDate } from "../progress-overview/progress-data-coverage.policy.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
 import { RecoveryService } from "../recovery/recovery.service.js";
-import type { DailyAssessmentStore } from "../storage/daily-assessment-repository.js";
+import type {
+  CreatedDailyRecommendationFeedback,
+  DailyAssessmentStore
+} from "../storage/daily-assessment-repository.js";
 import { TrainingService } from "../training/training.service.js";
 import { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
 import { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
@@ -84,6 +96,18 @@ export class DailyAssessmentService {
 
   public read(): Promise<DailyAssessmentResult> {
     return withDailyAssessmentConsistency(() => this.readConsistent());
+  }
+
+  /** Records one idempotent typed event about an exact daily snapshot. */
+  public recordFeedback(
+    input: CreateDailyRecommendationFeedback
+  ): Promise<CreatedDailyRecommendationFeedback> {
+    return this.store.recordFeedback(this.personContext.getPersonId(), input);
+  }
+
+  /** Reads the ordered feedback history for one exact daily snapshot. */
+  public listFeedback(snapshotId: string): Promise<DailyRecommendationFeedbackList> {
+    return this.store.listFeedback(this.personContext.getPersonId(), snapshotId);
   }
 
   private async readConsistent(): Promise<DailyAssessmentResult> {

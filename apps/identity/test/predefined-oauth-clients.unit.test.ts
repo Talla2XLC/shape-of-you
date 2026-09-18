@@ -35,6 +35,7 @@ describe("predefined OAuth clients", () => {
           "weight:write",
           "body-measurement:write",
           "daily-context-note:write",
+          "daily-recommendation-feedback:write",
           "meal:write",
           "recovery:write",
           "workout:write"

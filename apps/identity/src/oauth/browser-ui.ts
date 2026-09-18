@@ -247,6 +247,7 @@ function scopeLabel(scope: string): string {
   return {
     "body-measurement:write": "Record body measurements",
     "daily-context-note:write": "Record daily context notes",
+    "daily-recommendation-feedback:write": "Record feedback on daily recommendations",
     "meal:write": "Record meals",
     "offline_access": "Keep this connection active",
     "openid": "Sign you in",

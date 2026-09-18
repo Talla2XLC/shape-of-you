@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 
 import type {
@@ -7,12 +7,20 @@ import type {
   DailyAssessmentPersonalBaseline,
   DailyAssessmentMovement,
   DailyAssessmentV2UsedFacts,
+  CreateDailyRecommendationFeedback,
+  DailyRecommendationFeedback,
+  DailyRecommendationFeedbackList,
   PersonPreferences
 } from "@shape-of-you/contracts";
 import type { DailyAssessmentPersonalCalculation } from "../domain/personalized-daily-assessment.js";
 
 import type { DatabaseContext } from "../database/context.js";
-import { DailyAssessmentEvidenceChangedError } from "../domain/errors.js";
+import {
+  ConflictError,
+  DailyAssessmentEvidenceChangedError,
+  DomainValidationError,
+  NotFoundError
+} from "../domain/errors.js";
 import {
   lockPersonEvidenceMutation,
   type DatabaseTransaction
@@ -22,6 +30,7 @@ import {
   coachingDailyAssessmentDetails,
   coachingDailyAssessmentRecoveryEvidence,
   coachingDailyAssessmentTrainingEvidence,
+  coachingDailyRecommendationFeedback,
   coachingPolicies,
   coachingPolicyVersions,
   coachingRecommendations,
@@ -64,6 +73,12 @@ export interface DailyAssessmentConsistencyGuard {
   readonly to: string;
 }
 
+/** Result of an idempotent daily-recommendation feedback command. */
+export interface CreatedDailyRecommendationFeedback {
+  readonly created: boolean;
+  readonly feedback: DailyRecommendationFeedback;
+}
+
 function evidenceRevisionQuery(personId: string, from: string, to: string) {
   return sql<{ revision: unknown }>`select jsonb_build_object(
     'person', (select jsonb_build_array(timezone, updated_at) from persons where id = ${personId}),
@@ -101,6 +116,14 @@ export interface DailyAssessmentStore {
   ): Promise<PersonPreferences>;
   getEvidenceRevision(personId: string, from: string, to: string): Promise<string>;
   createOrGet(personId: string, input: DailyAssessmentSnapshotInput, guard?: DailyAssessmentConsistencyGuard): Promise<DailyAssessmentAvailable>;
+  recordFeedback(
+    personId: string,
+    input: CreateDailyRecommendationFeedback
+  ): Promise<CreatedDailyRecommendationFeedback>;
+  listFeedback(
+    personId: string,
+    snapshotId: string
+  ): Promise<DailyRecommendationFeedbackList>;
 }
 
 /** PostgreSQL implementation of the daily assessment persistence boundary. */
@@ -269,6 +292,107 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
     });
   }
 
+  public recordFeedback(
+    personId: string,
+    input: CreateDailyRecommendationFeedback
+  ): Promise<CreatedDailyRecommendationFeedback> {
+    const comment = normalizeFeedbackComment(input.comment);
+    validateFeedbackIdempotencyKey(input.idempotencyKey);
+    return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
+      const snapshot = await transaction.select({
+        recommendationId: coachingDailyAssessmentDetails.recommendationId
+      }).from(coachingDailyAssessmentDetails).where(and(
+        eq(coachingDailyAssessmentDetails.recommendationId, input.snapshotId),
+        eq(coachingDailyAssessmentDetails.personId, personId)
+      )).limit(1);
+      if (!snapshot[0]) {
+        throw new NotFoundError("Daily recommendation snapshot was not found");
+      }
+
+      const existingKey = await transaction.select()
+        .from(coachingDailyRecommendationFeedback)
+        .where(and(
+          eq(coachingDailyRecommendationFeedback.personId, personId),
+          eq(coachingDailyRecommendationFeedback.idempotencyKey, input.idempotencyKey)
+        ))
+        .limit(1);
+      if (existingKey[0]) {
+        if (
+          existingKey[0].recommendationId !== input.snapshotId ||
+          existingKey[0].status !== input.status ||
+          existingKey[0].comment !== comment
+        ) {
+          throw new ConflictError("Feedback idempotency key is already used");
+        }
+        return { created: false, feedback: hydrateFeedback(existingKey[0]) };
+      }
+
+      const existingStatus = await transaction.select({
+        id: coachingDailyRecommendationFeedback.id
+      }).from(coachingDailyRecommendationFeedback).where(and(
+        eq(coachingDailyRecommendationFeedback.recommendationId, input.snapshotId),
+        eq(coachingDailyRecommendationFeedback.status, input.status)
+      )).limit(1);
+      if (existingStatus[0]) {
+        throw new ConflictError("Feedback status is already recorded for this snapshot");
+      }
+      if (input.status === "completed" || input.status === "skipped") {
+        const opposite = input.status === "completed" ? "skipped" : "completed";
+        const existingDisposition = await transaction.select({
+          id: coachingDailyRecommendationFeedback.id
+        }).from(coachingDailyRecommendationFeedback).where(and(
+          eq(coachingDailyRecommendationFeedback.recommendationId, input.snapshotId),
+          eq(coachingDailyRecommendationFeedback.status, opposite)
+        )).limit(1);
+        if (existingDisposition[0]) {
+          throw new ConflictError("Completed and skipped feedback are mutually exclusive");
+        }
+      }
+
+      const inserted = await transaction.insert(coachingDailyRecommendationFeedback)
+        .values({
+          recommendationId: input.snapshotId,
+          personId,
+          actorPersonId: personId,
+          status: input.status,
+          comment,
+          idempotencyKey: input.idempotencyKey
+        })
+        .returning();
+      if (!inserted[0]) throw new Error("Daily recommendation feedback was not stored");
+      return { created: true, feedback: hydrateFeedback(inserted[0]) };
+    });
+  }
+
+  public listFeedback(
+    personId: string,
+    snapshotId: string
+  ): Promise<DailyRecommendationFeedbackList> {
+    return this.database.db.transaction(async (transaction) => {
+      const snapshot = await transaction.select({
+        recommendationId: coachingDailyAssessmentDetails.recommendationId
+      }).from(coachingDailyAssessmentDetails).where(and(
+        eq(coachingDailyAssessmentDetails.recommendationId, snapshotId),
+        eq(coachingDailyAssessmentDetails.personId, personId)
+      )).limit(1);
+      if (!snapshot[0]) {
+        throw new NotFoundError("Daily recommendation snapshot was not found");
+      }
+      const rows = await transaction.select()
+        .from(coachingDailyRecommendationFeedback)
+        .where(and(
+          eq(coachingDailyRecommendationFeedback.recommendationId, snapshotId),
+          eq(coachingDailyRecommendationFeedback.personId, personId)
+        ))
+        .orderBy(
+          asc(coachingDailyRecommendationFeedback.reportedAt),
+          asc(coachingDailyRecommendationFeedback.id)
+        );
+      return { snapshotId, items: rows.map(hydrateFeedback) };
+    });
+  }
+
   private hydrate(recommendation: typeof coachingRecommendations.$inferSelect, detail: typeof coachingDailyAssessmentDetails.$inferSelect): DailyAssessmentAvailable {
     if (detail.policyVersion !== "daily-assessment-v1" && detail.policyVersion !== "daily-assessment-v2" && detail.policyVersion !== "daily-assessment-v3") {
       throw new Error(`Unsupported daily assessment policy version: ${detail.policyVersion}`);
@@ -336,6 +460,8 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
 export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
   private timezone: string | null = null;
   private readonly snapshots = new Map<string, DailyAssessmentAvailable>();
+  private readonly snapshotOwners = new Map<string, string>();
+  private readonly feedback = new Map<string, DailyRecommendationFeedback>();
   public async getPreferences(): Promise<PersonPreferences> { return { timezone: this.timezone, updatedAt: new Date(0).toISOString() }; }
   public async setTimezone(
     _personId: string,
@@ -346,13 +472,103 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
     return { timezone: this.timezone, updatedAt: new Date().toISOString() };
   }
   public async getEvidenceRevision(): Promise<string> { return "in-memory-evidence-revision"; }
-  public async createOrGet(_personId: string, input: DailyAssessmentSnapshotInput): Promise<DailyAssessmentAvailable> {
-    const existing = this.snapshots.get(input.evidenceChecksum);
+  public async createOrGet(personId: string, input: DailyAssessmentSnapshotInput): Promise<DailyAssessmentAvailable> {
+    const key = `${personId}:${input.evidenceChecksum}`;
+    const existing = this.snapshots.get(key);
     if (existing) return existing;
     const { personalBaselineCalculation, ...publicInput } = input;
     void personalBaselineCalculation;
     const value = { state: "available", snapshotId: randomUUID(), createdAt: new Date().toISOString(), ...publicInput } as DailyAssessmentAvailable;
-    this.snapshots.set(input.evidenceChecksum, value);
+    this.snapshots.set(key, value);
+    this.snapshotOwners.set(value.snapshotId, personId);
     return value;
   }
+
+  public async recordFeedback(
+    personId: string,
+    input: CreateDailyRecommendationFeedback
+  ): Promise<CreatedDailyRecommendationFeedback> {
+    if (this.snapshotOwners.get(input.snapshotId) !== personId) {
+      throw new NotFoundError("Daily recommendation snapshot was not found");
+    }
+    const comment = normalizeFeedbackComment(input.comment);
+    validateFeedbackIdempotencyKey(input.idempotencyKey);
+    const key = `${personId}:${input.idempotencyKey}`;
+    const existing = this.feedback.get(key);
+    if (existing) {
+      if (
+        existing.snapshotId !== input.snapshotId ||
+        existing.status !== input.status ||
+        existing.comment !== comment
+      ) throw new ConflictError("Feedback idempotency key is already used");
+      return { created: false, feedback: existing };
+    }
+    const snapshotEvents = [...this.feedback.values()].filter(
+      (item) => item.personId === personId && item.snapshotId === input.snapshotId
+    );
+    if (snapshotEvents.some((item) => item.status === input.status)) {
+      throw new ConflictError("Feedback status is already recorded for this snapshot");
+    }
+    if (
+      (input.status === "completed" && snapshotEvents.some((item) => item.status === "skipped")) ||
+      (input.status === "skipped" && snapshotEvents.some((item) => item.status === "completed"))
+    ) throw new ConflictError("Completed and skipped feedback are mutually exclusive");
+    const created: DailyRecommendationFeedback = {
+      id: randomUUID(),
+      snapshotId: input.snapshotId,
+      personId,
+      actorPersonId: personId,
+      status: input.status,
+      comment,
+      idempotencyKey: input.idempotencyKey,
+      reportedAt: new Date().toISOString()
+    };
+    this.feedback.set(key, created);
+    return { created: true, feedback: created };
+  }
+
+  public async listFeedback(
+    personId: string,
+    snapshotId: string
+  ): Promise<DailyRecommendationFeedbackList> {
+    if (this.snapshotOwners.get(snapshotId) !== personId) {
+      throw new NotFoundError("Daily recommendation snapshot was not found");
+    }
+    return {
+      snapshotId,
+      items: [...this.feedback.values()]
+        .filter((item) => item.personId === personId && item.snapshotId === snapshotId)
+        .sort((left, right) => left.reportedAt.localeCompare(right.reportedAt) || left.id.localeCompare(right.id))
+    };
+  }
+}
+
+function normalizeFeedbackComment(comment: string | undefined): string | null {
+  if (comment === undefined) return null;
+  const normalized = comment.trim();
+  if (normalized.length === 0 || normalized.length > 1000) {
+    throw new DomainValidationError("Feedback comment must contain 1 to 1000 characters");
+  }
+  return normalized;
+}
+
+function validateFeedbackIdempotencyKey(idempotencyKey: string): void {
+  if (idempotencyKey.length === 0 || idempotencyKey.length > 256 || idempotencyKey.trim().length === 0) {
+    throw new DomainValidationError("Feedback idempotency key must contain 1 to 256 characters");
+  }
+}
+
+function hydrateFeedback(
+  row: typeof coachingDailyRecommendationFeedback.$inferSelect
+): DailyRecommendationFeedback {
+  return {
+    id: row.id,
+    snapshotId: row.recommendationId,
+    personId: row.personId,
+    actorPersonId: row.actorPersonId,
+    status: row.status,
+    comment: row.comment,
+    idempotencyKey: row.idempotencyKey,
+    reportedAt: row.reportedAt.toISOString()
+  };
 }

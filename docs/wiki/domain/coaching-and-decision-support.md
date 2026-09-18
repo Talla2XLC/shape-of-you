@@ -7,6 +7,7 @@ tags:
   - "coaching"
   - "decisions"
   - "domain"
+  - "feedback"
   - "recommendations"
 ---
 
@@ -15,8 +16,9 @@ tags:
 ## Summary
 
 Implemented Coaching separates immutable recommendations, user decisions, and
-executed domain facts. It supports typed training adjustments and an API-owned,
-explainable daily assessment; neither is applied automatically.
+executed domain facts. It supports typed training adjustments, an API-owned
+explainable daily assessment, and typed feedback on its recommended action;
+none is applied automatically.
 
 ## Content
 
@@ -56,6 +58,28 @@ Historical snapshots remain readable audit evidence unless privacy erasure
 removes one derived from erased evidence. Legacy v1 and v2 snapshots remain
 readable.
 
+`DailyRecommendationFeedback` is a separate Person-owned append-only event
+stream linked to the exact `daily_next_action` snapshot. Its required status is
+`accepted`, `completed`, `skipped`, `too_heavy`, or `unsuitable`; an optional
+nonblank comment only supplements that status. `accepted` may precede an
+outcome, suitability feedback may coexist with it, and `completed` and
+`skipped` are mutually exclusive. One status is recorded at most once per
+snapshot. Exact retries are idempotent in the Person boundary, while reuse of
+an idempotency key with a different snapshot, status, or comment conflicts.
+Feedback remains valid after recommendation expiry and is removed when privacy
+erasure removes the linked snapshot.
+
+The API exposes Person-scoped feedback creation and ordered history under the
+daily-assessment boundary. Coach records an explicit, unambiguous response
+through `record_daily_recommendation_feedback` using the exact `snapshotId`
+returned by the assessment and the dedicated
+`daily-recommendation-feedback:write` scope. It does not infer feedback from
+silence or unrelated behavior, guess an ambiguous snapshot, or ask for a
+duplicate confirmation. Feedback is evidence for later analysis only: it does
+not enter assessment evidence, checksum, baseline, status, action, or policy;
+does not create an owning-domain fact; and does not trigger learning or policy
+calibration.
+
 The read-only retrospective calibration path calls the same parameterized pure
 personal-policy evaluator as live V3 and adds only aggregate reporting. Its
 analytics keep two independent modes. `stored_v1` starts from an immutable v1
@@ -92,7 +116,10 @@ TrainingProgramVersion and prescriptions. `Proposed now` contains bounded,
 evidence-linked conversation advice and is not a persisted fact. `Actually
 completed` contains only current owning-domain facts verified through typed
 reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
-chat message never proves execution.
+chat message never proves execution. A `completed` feedback event records the
+user's explicit outcome report for that recommendation, but does not create a
+WorkoutSession, Meal, RecoveryObservation, TrainingProgram mutation, or other
+owning-domain fact.
 
 The exact-date factual view remains the always-live `get_daily_projection`
 read. For clients with the current tool catalog, a full Daily Coach decision
@@ -204,6 +231,9 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
   tests.
 - TASK-0118 accepted provider-neutral Recovery freshness composition, direct
   delivery evidence, consent-reset, MCP contract, and fail-closed wording tests.
+- TASK-0119 accepted typed daily-recommendation feedback contracts, exact
+  snapshot ownership, idempotency, concurrency, privacy cascade, OAuth/MCP,
+  and DailyAssessment non-interference tests.
 
 ## Decisions
 
@@ -222,11 +252,13 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
 - [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
+- [Typed feedback for daily recommendations](../../adr/20260918-record-typed-daily-recommendation-feedback.md).
 
 ## Open questions
 
-- Measured post-deployment V3 stability, difficulty/exercise replacement,
-  future daily policy versions, and explicit execution linkage.
+- Measured post-deployment V3 stability, feedback correction/supersession,
+  future evidence-based calibration, difficulty/exercise replacement, future
+  daily policy versions, and explicit owning-domain execution linkage.
 
 ## Related material
 

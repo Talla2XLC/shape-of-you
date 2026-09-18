@@ -12,6 +12,7 @@ import {
   CorrectWorkoutSessionSchema,
   CreateBodyMeasurementSessionSchema,
   CreateDailyContextNoteSchema,
+  CreateDailyRecommendationFeedbackSchema,
   CreateMealSchema,
   CreateRecoveryObservationSchema,
   CreateWeightMeasurementSchema,
@@ -19,6 +20,7 @@ import {
   CurrentRecoveryContextResultSchema,
   DailyContextNoteListSchema,
   DailyAssessmentResultSchema,
+  DailyRecommendationFeedbackSchema,
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
   ListDailyContextNotesQuerySchema,
@@ -46,6 +48,7 @@ import {
   type CorrectWorkoutSession,
   type CreateBodyMeasurementSession,
   type CreateDailyContextNote,
+  type CreateDailyRecommendationFeedback,
   type CreateMeal,
   type CreateRecoveryObservation,
   type CreateWeightMeasurement,
@@ -86,6 +89,7 @@ import { ConflictError, NotFoundError } from "../domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+  MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
   MCP_MEAL_WRITE_SCOPE,
   MCP_PERSON_TIMEZONE_WRITE_SCOPE,
   MCP_READ_SCOPE,
@@ -113,7 +117,7 @@ interface McpServices {
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
-  readonly dailyAssessment?: Pick<DailyAssessmentService, "read" | "updatePreferences">;
+  readonly dailyAssessment?: Pick<DailyAssessmentService, "read" | "updatePreferences" | "recordFeedback">;
   readonly currentRecoveryContext: Pick<CurrentRecoveryContextService, "read">;
 }
 
@@ -167,7 +171,7 @@ export const MCP_COACH_REPLY_POLICY =
   "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
   "For every meaningful nutrition, training, recovery, body, or daily-summary interaction, one useful evidence-grounded observation and one concrete next step are mandatory. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
-  "Keep planned facts, proposed guidance, and verified completed facts distinct, and never imply that a recommendation was completed.";
+  "Keep planned facts, proposed guidance, and verified completed facts distinct, and never imply that a recommendation was completed unless the exact daily-recommendation feedback result records completed; that feedback is still not an owning-domain completion fact.";
 
 /** Mandatory ending delivered last in every successful MCP result. */
 export const MCP_COACH_FINAL_RESPONSE_REQUIREMENT =
@@ -261,6 +265,10 @@ const dailyAssessmentResultContent = coachResultContent(
   dailyCoachReplyShape
 );
 
+const dailyRecommendationFeedbackResultContent = coachResultContent(
+  "The user's explicit typed response to the exact daily recommendation snapshot was recorded. A completed status is feedback evidence only: do not create or imply a WorkoutSession, Meal, RecoveryObservation, or other owning-domain fact, and do not claim that policy or future recommendations changed."
+);
+
 const timezoneWriteResultContent = coachResultContent(
   "The user's current IANA timezone was saved from their explicit context. Immediately retry the authoritative read that required it: get_daily_assessment for a Daily Coach request or get_current_recovery_context for a focused current Recovery request. Do not expose the timezone identifier unless the user asked for it, and do not claim a daily recommendation until get_daily_assessment succeeds."
 );
@@ -322,6 +330,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For a focused question about today's sleep, HRV, resting heart rate, Body Battery, or steps, call get_current_recovery_context. Treat its typed observations as value authority and its delivery state only as availability evidence. Never infer that Garmin or another provider failed from an empty observation set, never infer zero from absence, and never promise a later autonomous recheck without a real automation. " +
   "For a full Daily Coach assessment, preserve the assessment status, reasons, missing data, limitations, confidence, and single recommended action. Never reconstruct or alter that decision from get_daily_projection, other typed reads, or conversation context. Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment. For a factual day record that does not ask for a status or next action, require an exact local date and IANA timezone and use get_daily_projection without turning it into a decision. " +
+  "When the user explicitly says the displayed daily recommendation was accepted, completed, skipped, too heavy, or unsuitable, immediately call record_daily_recommendation_feedback with that exact assessment snapshotId and one typed status. A free-text comment may only supplement the status. Never infer feedback from silence or unrelated behavior, never translate completed feedback into an owning-domain fact, and never claim that feedback automatically changed policy or future recommendations. " +
   "When get_daily_assessment requires timezone, use set_current_timezone only from an explicit unambiguous statement about the user's current timezone or location, then retry the assessment in the same turn. Ask one natural clarification if the location is ambiguous. Never guess silently or expose a technical setup task. " +
   "Outside a full Daily Coach assessment, present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Outside a full Daily Coach assessment, give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
@@ -417,6 +426,7 @@ export function registerMcpRoutes(options: McpRouteOptions): void {
       MCP_WORKOUT_WRITE_SCOPE,
       MCP_RECOVERY_WRITE_SCOPE,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+      MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
       MCP_PERSON_TIMEZONE_WRITE_SCOPE
     ],
     bearer_methods_supported: ["header"]
@@ -794,6 +804,22 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       MCP_READ_SCOPE,
       () => services.dailyAssessment?.read() ?? Promise.reject(new Error("Daily assessment service is unavailable")),
       () => dailyAssessmentResultContent
+    ),
+    defineTool(
+      "record_daily_recommendation_feedback",
+      "Record one explicit typed response to the exact daily recommendation snapshot. The required status is accepted, completed, skipped, too_heavy, or unsuitable; an optional comment only supplements it. Reuse the same idempotency key only for an exact retry. This evidence does not create owning-domain facts and does not change recommendation policy.",
+      CreateDailyRecommendationFeedbackSchema,
+      DailyRecommendationFeedbackSchema,
+      true,
+      MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
+      async (input) => {
+        const service = services.dailyAssessment;
+        if (!service) throw new Error("Daily assessment service is unavailable");
+        return (await service.recordFeedback(
+          input as unknown as CreateDailyRecommendationFeedback
+        )).feedback;
+      },
+      () => dailyRecommendationFeedbackResultContent
     ),
     defineTool(
       "get_daily_projection",
