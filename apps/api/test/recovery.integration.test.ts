@@ -118,6 +118,30 @@ describe("Recovery PostgreSQL vertical", () => {
     provider.reconciliation = { wellness: [wellness], activities: [] };
     await service.reconcileConnection(connection);
     await service.reconcileConnection(connection);
+    expect(await integrations.connectedRecoveryDelivery(personD, "2026-09-06")).toMatchObject({
+      lifecycle: "active",
+      failureCode: null,
+      targetDateRecordReceived: true,
+      targetDateSupportedFactsPresent: true
+    });
+    expect(await integrations.connectedRecoveryDelivery(personD, "2026-09-07")).toMatchObject({
+      targetDateRecordReceived: false,
+      targetDateSupportedFactsPresent: false
+    });
+    await integrations.markSyncFailed(id, consentId, "provider_timeout");
+    expect(await integrations.connectedRecoveryDelivery(personD, "2026-09-07")).toMatchObject({
+      lifecycle: "degraded",
+      failureCode: "provider_timeout"
+    });
+    await integrations.markSyncSucceeded(id, consentId, false);
+    await database.pool.query(
+      "update integration_connections set last_successful_sync_at = now() - interval '16 minutes' where id = $1",
+      [id]
+    );
+    expect((await integrations.connectedRecoveryDelivery(personD, "2026-09-07"))?.lastSuccessfulSyncAt)
+      .toSatisfy((value: Date | null) => value !== null && value < new Date(Date.now() - 15 * 60_000));
+    await integrations.markSyncSucceeded(id, consentId, false);
+    expect(await integrations.connectedRecoveryDelivery(personE, "2026-09-06")).toBeNull();
     expect(
       (await repository.listObservations(personD, { limit: 50 })).items
         .filter((item) => item.detail.type === "metric")
@@ -167,6 +191,10 @@ describe("Recovery PostgreSQL vertical", () => {
       activities: []
     };
     await service.reconcileConnection(connection);
+    expect(await integrations.connectedRecoveryDelivery(personD, "2026-09-06")).toMatchObject({
+      targetDateRecordReceived: true,
+      targetDateSupportedFactsPresent: false
+    });
 
     const history = await database.pool.query<{ count: string; withdrawals: string }>(
       "select count(*)::text as count, count(withdrawn_at)::text as withdrawals from recovery_observations where person_id = $1 and connection_id = $2",
@@ -175,6 +203,10 @@ describe("Recovery PostgreSQL vertical", () => {
     expect(history.rows[0]).toEqual({ count: "32", withdrawals: "10" });
     expect((await repository.listObservations(personD, { limit: 50 })).items).toHaveLength(0);
     await integrations.beginDisconnect(personD, "test disconnect");
+    expect(await integrations.connectedRecoveryDelivery(personD, "2026-09-06")).toMatchObject({
+      lifecycle: "disconnected",
+      importEnabled: false
+    });
     provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: 500 }], activities: [] };
     await service.reconcileConnection(connection);
     expect((await database.pool.query("select 1 from recovery_observations where person_id = $1", [personD])).rowCount).toBe(32);
@@ -772,6 +804,16 @@ describe("Recovery PostgreSQL vertical", () => {
     expect(await integrations.status(personG)).toMatchObject({
       lifecycle: "active",
       historicalImport: { status: "not_requested", processedThroughDate: null }
+    });
+    expect(await integrations.connectedRecoveryDelivery(
+      personG,
+      new Date().toISOString().slice(0, 10)
+    )).toMatchObject({
+      lifecycle: "active",
+      importEnabled: true,
+      lastSuccessfulSyncAt: null,
+      targetDateRecordReceived: false,
+      targetDateSupportedFactsPresent: false
     });
   });
 

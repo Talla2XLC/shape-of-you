@@ -20,6 +20,22 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-18 — Verifiable connected Recovery freshness for Coach
+
+- Added the read-only `get_current_recovery_context` MCP tool for focused
+  current sleep, HRV, resting-heart-rate, Body Battery, and steps questions.
+- Separated provider-neutral sync freshness from direct target-date delivery
+  evidence. A normalized empty wellness record is explicit; absence remains
+  `unknown` and never becomes zero or a claim that a provider failed.
+- Kept typed Recovery observations as value authority and API-owned
+  `get_daily_assessment` as the sole Daily Coach decision authority; volatile
+  sync metadata does not enter immutable assessment snapshots or checksums.
+- Reset operational sync timestamps on new consent and prohibited provider
+  speculation, implicit refresh, diagnosis, and autonomous recheck promises.
+- Added no migration or deployable. No commit, push, deployment, or
+  staging/production data access was performed as part of this repository
+  change.
+
 ### 2026-09-18 — Zero-friction day context and optional movement-aware V3
 
 - Added atomic unset-only browser IANA timezone capture and a narrow

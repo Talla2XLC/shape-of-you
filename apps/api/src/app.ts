@@ -74,6 +74,7 @@ import { DailyAssessmentService } from "./coaching/daily-assessment.service.js";
 import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
 import { McpAuthorizer } from "./mcp/oauth.js";
 import { registerMcpRoutes } from "./mcp/server.js";
+import { CurrentRecoveryContextService } from "./coaching/current-recovery-context.service.js";
 import { BrowserAuth } from "./browser-auth/browser-auth.js";
 import {
   ChatAssistantConversationBindingRepository,
@@ -345,7 +346,8 @@ export async function buildApp(
         recovery: app.get(RecoveryService),
         dailyContextNotes: app.get(DailyContextNoteService),
         dailyProjection: app.get(DailyProjectionService),
-        dailyAssessment: app.get(DailyAssessmentService)
+        dailyAssessment: app.get(DailyAssessmentService),
+        currentRecoveryContext: app.get(CurrentRecoveryContextService)
       }
     });
   }

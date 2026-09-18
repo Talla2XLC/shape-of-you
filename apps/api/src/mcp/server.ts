@@ -16,6 +16,7 @@ import {
   CreateRecoveryObservationSchema,
   CreateWeightMeasurementSchema,
   CreateWorkoutSessionSchema,
+  CurrentRecoveryContextResultSchema,
   DailyContextNoteListSchema,
   DailyAssessmentResultSchema,
   DailyProjectionQuerySchema,
@@ -80,6 +81,7 @@ import type { WeightMeasurementService } from "../weight-measurements/weight-mea
 import type { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
 import type { DailyProjectionService } from "../daily-projections/daily-projection.service.js";
 import type { DailyAssessmentService } from "../coaching/daily-assessment.service.js";
+import type { CurrentRecoveryContextService } from "../coaching/current-recovery-context.service.js";
 import { ConflictError, NotFoundError } from "../domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
@@ -112,6 +114,7 @@ interface McpServices {
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
   readonly dailyAssessment?: Pick<DailyAssessmentService, "read" | "updatePreferences">;
+  readonly currentRecoveryContext: Pick<CurrentRecoveryContextService, "read">;
 }
 
 /** Dependencies required by the API-owned stateless MCP transport adapter. */
@@ -239,6 +242,12 @@ const recoveryReadResultContent = coachResultContent(
   "Use these recovery facts silently. Summarize and interpret the useful recovery picture, then give one concrete useful next step without inventing values."
 );
 
+const currentRecoveryContextResultContent = coachResultContent(
+  "Use the typed observations as the only authority for health values. Use syncState and targetDateDelivery only to explain availability; never compare timestamps yourself or let delivery status change a health assessment. " +
+  "For fresh_success with record_without_supported_facts, say the connected-data check succeeded but the source has not supplied supported values for today. For unknown delivery, say only that delivery for today is not established; never claim the successful request covered that date. For failed, say the latest synchronization failed and current data is unknown. For stale_success or never_checked, do not claim current freshness or absence. " +
+  "Never attribute missing values to Garmin, Intervals.icu, the watch, sleep, travel, or user action unless a typed fact proves it. Never turn an absent field into zero. Never promise to check again later unless an automation was actually created; you may say that you will check again when the user asks. If timezone is required and the user supplied an unambiguous current timezone or location, call set_current_timezone and retry get_current_recovery_context in the same turn."
+);
+
 const activeTrainingProgramResultContent = coachResultContent(
   "Use only an active result as a planned training artifact. An absent result means no active program; an error does not."
 );
@@ -253,7 +262,7 @@ const dailyAssessmentResultContent = coachResultContent(
 );
 
 const timezoneWriteResultContent = coachResultContent(
-  "The user's current IANA timezone was saved from their explicit context. Immediately retry get_daily_assessment in the same turn. Do not expose the timezone identifier unless the user asked for it, and do not claim a daily recommendation until that read succeeds."
+  "The user's current IANA timezone was saved from their explicit context. Immediately retry the authoritative read that required it: get_daily_assessment for a Daily Coach request or get_current_recovery_context for a focused current Recovery request. Do not expose the timezone identifier unless the user asked for it, and do not claim a daily recommendation until get_daily_assessment succeeds."
 );
 
 const setCurrentTimezoneInputSchema = {
@@ -311,6 +320,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
   "Saving or changing a training program is material: first show the complete proposed snapshot and obtain explicit user confirmation. Preserve exercises, order, loads, and progression exactly as confirmed. After saving, read the active program again and compare the complete snapshot before claiming success; any failed or inconsistent read-back leaves the program unverified. " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
+  "For a focused question about today's sleep, HRV, resting heart rate, Body Battery, or steps, call get_current_recovery_context. Treat its typed observations as value authority and its delivery state only as availability evidence. Never infer that Garmin or another provider failed from an empty observation set, never infer zero from absence, and never promise a later autonomous recheck without a real automation. " +
   "For a full Daily Coach assessment, preserve the assessment status, reasons, missing data, limitations, confidence, and single recommended action. Never reconstruct or alter that decision from get_daily_projection, other typed reads, or conversation context. Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment. For a factual day record that does not ask for a status or next action, require an exact local date and IANA timezone and use get_daily_projection without turning it into a decision. " +
   "When get_daily_assessment requires timezone, use set_current_timezone only from an explicit unambiguous statement about the user's current timezone or location, then retry the assessment in the same turn. Ask one natural clarification if the location is ambiguous. Never guess silently or expose a technical setup task. " +
   "Outside a full Daily Coach assessment, present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
@@ -699,6 +709,16 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       MCP_READ_SCOPE,
       (input) => services.recovery.listObservations(input as ListRecoveryObservationsQuery),
       () => recoveryReadResultContent
+    ),
+    defineTool(
+      "get_current_recovery_context",
+      "Read the authorized person's current Person-local Recovery observations together with provider-neutral connected-data freshness and target-date delivery state. Use this for focused questions about today's sleep, HRV, resting heart rate, Body Battery, or steps. Delivery state explains availability only and never changes a health decision.",
+      emptyObjectSchema("GetCurrentRecoveryContextInput"),
+      CurrentRecoveryContextResultSchema,
+      false,
+      MCP_READ_SCOPE,
+      () => services.currentRecoveryContext.read(),
+      () => currentRecoveryContextResultContent
     ),
     defineTool(
       "record_recovery_observation",

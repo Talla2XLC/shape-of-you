@@ -19,7 +19,8 @@ import type {
   HistoricalImportClaim,
   IntegrationConnectionIdentity,
   IntegrationStore,
-  RecoveryFactPointer
+  RecoveryFactPointer,
+  ConnectedRecoveryDeliveryEvidence
 } from "../integrations/integration-store.js";
 import type { IntegrationFailureCode } from "../integrations/provider.js";
 import { ConflictError } from "../domain/errors.js";
@@ -113,7 +114,8 @@ export class IntegrationRepository implements IntegrationStore {
         lifecycle: "active" as const, importEnabled: true,
         credentialKeyId: input.credential.keyId, credentialNonce: input.credential.nonce,
         credentialCiphertext: input.credential.ciphertext, credentialTag: input.credential.tag,
-        failureCode: null, disconnectedAt: null, remoteDisconnectPending: false, nextAttemptAt: new Date(), updatedAt: new Date()
+        failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, lastDataAt: null,
+        disconnectedAt: null, remoteDisconnectPending: false, nextAttemptAt: new Date(), updatedAt: new Date()
       };
       if (previous) {
         await transaction.update(integrationConnections).set(values).where(eq(integrationConnections.id, previous.id));
@@ -165,6 +167,46 @@ export class IntegrationRepository implements IntegrationStore {
         completedAt: row.historicalCompletedAt?.toISOString() ?? null,
         failureCode: row.historicalFailureCode
       }
+    };
+  }
+
+  /** Reads only safe sync and target-date delivery metadata for Recovery composition. */
+  public async connectedRecoveryDelivery(
+    personId: string,
+    localDate: string
+  ): Promise<ConnectedRecoveryDeliveryEvidence | null> {
+    const connection = await this.database.db.query.integrationConnections.findFirst({
+      where: and(
+        eq(integrationConnections.personId, personId),
+        eq(integrationConnections.providerKey, providerKey)
+      )
+    });
+    if (!connection) return null;
+    const [record, fact] = await Promise.all([
+      this.database.db.query.integrationInbox.findFirst({
+        where: and(
+          eq(integrationInbox.connectionId, connection.id),
+          eq(integrationInbox.kind, "wellness"),
+          eq(integrationInbox.providerIdentity, localDate),
+          eq(integrationInbox.status, "normalized")
+        )
+      }),
+      this.database.db.query.integrationRecoveryFacts.findFirst({
+        where: and(
+          eq(integrationRecoveryFacts.connectionId, connection.id),
+          eq(integrationRecoveryFacts.providerIdentity, localDate),
+          sql`${integrationRecoveryFacts.normalizedChecksum} <> 'removed'`
+        )
+      })
+    ]);
+    return {
+      lifecycle: connection.lifecycle,
+      importEnabled: connection.importEnabled,
+      failureCode: connection.failureCode,
+      lastAttemptAt: connection.lastAttemptAt,
+      lastSuccessfulSyncAt: connection.lastSuccessfulSyncAt,
+      targetDateRecordReceived: record !== undefined,
+      targetDateSupportedFactsPresent: fact !== undefined
     };
   }
 

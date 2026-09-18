@@ -523,6 +523,91 @@ export const RecoveryObservationListSchema = {
   properties: { items: { type: "array", items: RecoveryObservationSchema } }
 } as const;
 
+export type ConnectedRecoverySyncState =
+  | "fresh_success"
+  | "stale_success"
+  | "failed"
+  | "never_checked"
+  | "not_connected"
+  | "unavailable";
+
+export type ConnectedRecoveryTargetDateDelivery =
+  | "supported_facts_present"
+  | "record_without_supported_facts"
+  | "unknown";
+
+export const ConnectedRecoverySyncStateSchema = {
+  type: "string",
+  enum: [
+    "fresh_success",
+    "stale_success",
+    "failed",
+    "never_checked",
+    "not_connected",
+    "unavailable"
+  ]
+} as const;
+
+export const ConnectedRecoveryTargetDateDeliverySchema = {
+  type: "string",
+  enum: [
+    "supported_facts_present",
+    "record_without_supported_facts",
+    "unknown"
+  ]
+} as const;
+
+/** Provider-neutral current-day Recovery evidence and connected-data freshness. */
+export interface CurrentRecoveryContext {
+  readonly state: "available";
+  readonly policyVersion: "connected-recovery-freshness-v1";
+  readonly calculatedAt: string;
+  readonly localDate: string;
+  readonly timezone: string;
+  readonly syncState: ConnectedRecoverySyncState;
+  readonly targetDateDelivery: ConnectedRecoveryTargetDateDelivery;
+  readonly checkedAt: string | null;
+  readonly observations: RecoveryObservationList;
+}
+
+export type CurrentRecoveryContextResult =
+  | CurrentRecoveryContext
+  | { readonly state: "timezone_required"; readonly timezone: null };
+
+export const CurrentRecoveryContextResultSchema = {
+  $id: "CurrentRecoveryContextResult",
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "state", "policyVersion", "calculatedAt", "localDate", "timezone",
+        "syncState", "targetDateDelivery", "checkedAt", "observations"
+      ],
+      properties: {
+        state: { const: "available" },
+        policyVersion: { const: "connected-recovery-freshness-v1" },
+        calculatedAt: dateTime,
+        localDate,
+        timezone: { type: "string", minLength: 1, maxLength: 64 },
+        syncState: ConnectedRecoverySyncStateSchema,
+        targetDateDelivery: ConnectedRecoveryTargetDateDeliverySchema,
+        checkedAt: { anyOf: [dateTime, { type: "null" }] },
+        observations: RecoveryObservationListSchema
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "timezone"],
+      properties: {
+        state: { const: "timezone_required" },
+        timezone: { type: "null" }
+      }
+    }
+  ]
+} as const;
+
 export const RecoveryObservationHistorySchema = {
   $id: "RecoveryObservationHistory",
   type: "object",

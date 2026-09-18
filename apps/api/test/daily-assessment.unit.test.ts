@@ -5,6 +5,7 @@ import type { DailyAssessmentUsedFacts } from "@shape-of-you/contracts";
 import {
   dailyAssessmentChecksum,
   dailyAssessmentV2Checksum,
+  dailyAssessmentV3Checksum,
   evaluateDailyAssessment
 } from "../src/domain/daily-assessment.js";
 import {
@@ -62,6 +63,34 @@ describe("daily assessment policy", () => {
     expect(evaluateDailyAssessment(evidence)).toEqual(evaluateDailyAssessment(evidence));
     expect(dailyAssessmentChecksum("2026-09-14", "Europe/Moscow", evidence))
       .toBe(dailyAssessmentChecksum("2026-09-14", "Europe/Moscow", evidence));
+  });
+
+  it("keeps V1, V2 and V3 identities independent of operational sync metadata", () => {
+    const evidence = facts();
+    const calculation = { policy: "personal-baseline-v1", comparisons: [] };
+    const movement = { status: "unavailable", current: null };
+    const decision = { status: "ready", recommendedAction: { type: "follow_active_program" } };
+    const identities = (delivery: { syncState: string; checkedAt: string }) => {
+      void delivery;
+      return {
+        v1: dailyAssessmentChecksum("2026-09-14", "Europe/Moscow", evidence),
+        v2: dailyAssessmentV2Checksum(
+          "2026-09-14", "Europe/Moscow", evidence, calculation, decision
+        ),
+        v3: dailyAssessmentV3Checksum(
+          "2026-09-14", "Europe/Moscow", evidence, calculation, movement, decision
+        ),
+        decision: evaluateDailyAssessment(evidence)
+      };
+    };
+
+    expect(identities({
+      syncState: "fresh_success",
+      checkedAt: "2026-09-14T08:00:00.000Z"
+    })).toEqual(identities({
+      syncState: "failed",
+      checkedAt: "2026-09-14T08:05:00.000Z"
+    }));
   });
 
   it("lets a Recovery hard stop dominate every training signal", () => {

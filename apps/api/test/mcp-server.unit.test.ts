@@ -152,6 +152,7 @@ const unavailableServices = {
     createObservation: unreachable,
     correctObservation: unreachable
   },
+  currentRecoveryContext: { read: unreachable },
   dailyContextNotes: { list: unreachable, create: unreachable, correct: unreachable },
   dailyProjection: { projection: unreachable }
 };
@@ -203,6 +204,12 @@ describe("MCP HTTP adapter", () => {
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "an accepted recommendation is not executed"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "call get_current_recovery_context"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "never promise a later autonomous recheck"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Outside a full Daily Coach assessment, give one clear Next step"
@@ -386,7 +393,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(24);
+    expect(body.result.tools).toHaveLength(25);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -420,6 +427,7 @@ describe("MCP HTTP adapter", () => {
       record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       correct_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       list_recovery_observations: MCP_READ_SCOPE,
+      get_current_recovery_context: MCP_READ_SCOPE,
       record_recovery_observation: MCP_RECOVERY_WRITE_SCOPE,
       correct_recovery_observation: MCP_RECOVERY_WRITE_SCOPE,
       list_daily_context_notes: MCP_READ_SCOPE,
@@ -443,12 +451,47 @@ describe("MCP HTTP adapter", () => {
     });
     expect(dailyAssessmentTool.description).toContain("mandatory and sole decision authority");
     expect(dailyAssessmentTool.description).toContain("do not recreate or embellish the policy in prompts");
+    const currentRecoveryContextTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "get_current_recovery_context"
+    );
+    expect(currentRecoveryContextTool).toMatchObject({
+      inputSchema: { $id: "GetCurrentRecoveryContextInput", additionalProperties: false },
+      outputSchema: { $id: "CurrentRecoveryContextResult", oneOf: expect.any(Array) },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+      securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
+    });
     const dailyAssessmentAjv = new Ajv({ strict: false });
     const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
     installFormats(dailyAssessmentAjv);
     const validateDailyAssessment = dailyAssessmentAjv.compile(dailyAssessmentTool.outputSchema);
     expect(validateDailyAssessment({ state: "timezone_required", timezone: null })).toBe(true);
     expect(validateDailyAssessment({ state: "timezone_required", timezone: "UTC" })).toBe(false);
+    const validateCurrentRecoveryContext = dailyAssessmentAjv.compile(
+      currentRecoveryContextTool.outputSchema
+    );
+    expect(validateCurrentRecoveryContext({
+      state: "available",
+      policyVersion: "connected-recovery-freshness-v1",
+      calculatedAt: "2026-09-18T08:30:00.000Z",
+      localDate: "2026-09-18",
+      timezone: "Europe/Belgrade",
+      syncState: "fresh_success",
+      targetDateDelivery: "record_without_supported_facts",
+      checkedAt: "2026-09-18T08:29:00.000Z",
+      observations: { items: [] }
+    })).toBe(true);
+    expect(validateCurrentRecoveryContext({
+      state: "available",
+      policyVersion: "connected-recovery-freshness-v1",
+      calculatedAt: "2026-09-18T08:30:00.000Z",
+      localDate: "2026-09-18",
+      timezone: "Europe/Belgrade",
+      syncState: "fresh_success",
+      targetDateDelivery: "record_without_supported_facts",
+      checkedAt: "2026-09-18T08:29:00.000Z",
+      observations: { items: [] },
+      provider: "garmin"
+    })).toBe(false);
     const timezoneTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "set_current_timezone"
     );
@@ -1458,6 +1501,19 @@ describe("MCP HTTP adapter", () => {
           createObservation: async () => created("observation", "record_recovery_observation"),
           correctObservation: async () => created("observation", "correct_recovery_observation")
         },
+        currentRecoveryContext: {
+          read: async () => ({
+            state: "available",
+            policyVersion: "connected-recovery-freshness-v1",
+            calculatedAt: "2026-09-02T09:00:00.000Z",
+            localDate: "2026-09-02",
+            timezone: "Europe/Moscow",
+            syncState: "fresh_success",
+            targetDateDelivery: "record_without_supported_facts",
+            checkedAt: "2026-09-02T08:59:00.000Z",
+            observations: { items: [] }
+          })
+        },
         dailyContextNotes: {
           list: async () => result("list_daily_context_notes"),
           create: async () => created("note", "record_daily_context_note"),
@@ -1560,6 +1616,7 @@ describe("MCP HTTP adapter", () => {
       ["record_workout_session", workout, "record_workout_session"],
       ["correct_workout_session", { id, ...workout, dedupeKey: "coach-policy-workout-correction", correctionReason: "Correction" }, "correct_workout_session"],
       ["list_recovery_observations", { localDate: "2026-09-02" }, "list_recovery_observations"],
+      ["get_current_recovery_context", {}, "record_without_supported_facts"],
       ["record_recovery_observation", recovery, "record_recovery_observation"],
       ["correct_recovery_observation", { id, ...recovery, dedupeKey: "coach-policy-recovery-correction", reason: "Correction" }, "correct_recovery_observation"],
       ["list_daily_context_notes", { localDate: "2026-09-02" }, "list_daily_context_notes"],
@@ -1601,7 +1658,15 @@ describe("MCP HTTP adapter", () => {
         if (name === "set_current_timezone") {
           expect(toolResult.structuredContent, name).toMatchObject({ timezone: marker });
           expect(toolResult.content[0].text, name).toContain(
-            "Immediately retry get_daily_assessment"
+            "Immediately retry the authoritative read"
+          );
+        } else if (name === "get_current_recovery_context") {
+          expect(toolResult.structuredContent, name).toMatchObject({
+            syncState: "fresh_success",
+            targetDateDelivery: marker
+          });
+          expect(toolResult.content[0].text, name).toContain(
+            "Never promise to check again later unless an automation was actually created"
           );
         } else if (name === "get_daily_assessment") {
           expect(toolResult.structuredContent, name).toEqual({

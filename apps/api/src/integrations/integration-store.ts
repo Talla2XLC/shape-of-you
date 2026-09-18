@@ -28,6 +28,17 @@ export interface RecoveryFactPointer {
   readonly observationId: string;
 }
 
+/** Safe delivery metadata used by provider-neutral Recovery composition. */
+export interface ConnectedRecoveryDeliveryEvidence {
+  readonly lifecycle: "connecting" | "active" | "degraded" | "disconnected";
+  readonly importEnabled: boolean;
+  readonly failureCode: IntegrationFailureCode | null;
+  readonly lastAttemptAt: Date | null;
+  readonly lastSuccessfulSyncAt: Date | null;
+  readonly targetDateRecordReceived: boolean;
+  readonly targetDateSupportedFactsPresent: boolean;
+}
+
 /** Stable ids reused on reauthorization so imported fact history is preserved. */
 export interface IntegrationConnectionIdentity {
   readonly id: string;
@@ -55,6 +66,7 @@ export interface IntegrationStore {
     readonly authorizationStartedAt: Date;
   }): Promise<void>;
   status(personId: string): Promise<GarminIntervalsConnection | null>;
+  connectedRecoveryDelivery(personId: string, localDate: string): Promise<ConnectedRecoveryDeliveryEvidence | null>;
   findActive(personId: string): Promise<ActiveIntegrationConnection | null>;
   findForErasure(personId: string, recoveryConnectionId: string): Promise<ActiveIntegrationConnection | null>;
   claimDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null>;

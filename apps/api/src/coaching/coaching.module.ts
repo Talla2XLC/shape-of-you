@@ -9,6 +9,7 @@ import { RecoveryModule } from "../recovery/recovery.module.js";
 import { TrainingModule } from "../training/training.module.js";
 import { WeightMeasurementModule } from "../weight-measurements/weight-measurement.module.js";
 import { DailyContextNoteModule } from "../daily-context-notes/daily-context-note.module.js";
+import { CurrentRecoveryContextService } from "./current-recovery-context.service.js";
 
 /** Coaching recommendation and decision module. */
 @Module({
@@ -20,7 +21,7 @@ import { DailyContextNoteModule } from "../daily-context-notes/daily-context-not
     DailyContextNoteModule
   ],
   controllers: [CoachingController, DailyAssessmentController],
-  providers: [CoachingService, DailyAssessmentService],
-  exports: [CoachingService, DailyAssessmentService]
+  providers: [CoachingService, DailyAssessmentService, CurrentRecoveryContextService],
+  exports: [CoachingService, DailyAssessmentService, CurrentRecoveryContextService]
 })
 export class CoachingModule {}

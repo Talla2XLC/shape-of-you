@@ -79,6 +79,18 @@ The regular rolling worker and the explicit historical-import worker share the
 same normalization, deduplication, correction, consent, and erasure path.
 Unknown fields and raw Intervals JSON never become the Recovery domain model.
 
+Current focused Recovery reads compose typed observations with a separate
+provider-neutral delivery context. Observations remain the value authority.
+Integration contributes only safe lifecycle timestamps and whether the target
+date has a normalized wellness record or current fact pointer; credentials,
+connection identifiers, checksums, external user identifiers, and raw payloads
+do not cross the boundary. A normalized target-date record without supported
+fields is direct `record_without_supported_facts` evidence. A current fact
+pointer is `supported_facts_present`. Without either, target-date delivery is
+`unknown`; the system does not reconstruct a request window from a completion
+timestamp. Reauthorization resets operational sync timestamps so a previous
+consent cannot establish freshness for a new consent.
+
 Intervals can return only values it has received and exposed. Sleep stages,
 overnight minimum SpO2, Garmin readiness or stress, skin temperature, and
 Garmin nightly respiration remain unsupported until a documented Intervals
@@ -170,6 +182,8 @@ reconstruction of the observation ordering used by a historical live v1 read.
 - `TASK-0110` independent Quality and Architecture Review acceptance.
 - `TASK-0112` Recovery correction, withdrawal, and derived-snapshot erasure
   integration tests.
+- `TASK-0118` connected delivery projection, empty-record, reconnect,
+  Person-isolation, and freshness-policy tests.
 
 ## Decisions
 
@@ -186,6 +200,7 @@ reconstruction of the observation ordering used by a historical live v1 read.
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
+- [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
 
 ## Open questions
 

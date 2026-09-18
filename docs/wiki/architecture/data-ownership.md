@@ -94,6 +94,15 @@ chains, and audit provenance, but coverage and readiness projections exclude it
 independently of provider, channel, or date. This classification is internal;
 public writers cannot hide Person evidence by assigning it.
 
+The current Recovery context is another API application read model, not a new
+owner or bounded context. Integration owns connection lifecycle, safe sync
+metadata, normalized inbox delivery evidence, and links to current imported
+facts. Recovery owns typed observations and their correction, withdrawal,
+consent, retention, and erasure semantics. Coaching composes those published
+reads for one Person-local date and owns only the provider-neutral presentation
+policy. It does not persist the composition, read raw provider payloads, or add
+volatile sync state to immutable DailyAssessment snapshots and checksums.
+
 ## Evidence
 
 - Operator authority/boundary rules and linked ADRs.
@@ -124,4 +133,5 @@ public writers cannot hide Person evidence by assigning it.
 - [Progress overview API](../api/progress-overview.md)
 - [Provider-neutral profile data coverage ADR](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Operational evidence isolation ADR](../../adr/20260913-separate-operational-evidence-from-person-context.md)
+- [Connected Recovery freshness for Coach ADR](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

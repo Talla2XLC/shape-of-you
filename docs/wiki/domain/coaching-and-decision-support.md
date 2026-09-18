@@ -115,6 +115,19 @@ then retries `get_daily_assessment` in the same turn. Ambiguity requires one
 natural clarification; no path guesses silently or constructs a fallback
 recommendation from individual facts.
 
+Focused questions about today's sleep, HRV, resting heart rate, Body Battery,
+or steps use the read-only `get_current_recovery_context` composition. Typed
+Recovery observations remain the only authority for metric values. The
+provider-neutral `syncState` describes whether a connected-data attempt is
+fresh, stale, failed, absent, or unavailable; the independent
+`targetDateDelivery` reports only direct target-date evidence: supported facts,
+a normalized record without supported facts, or `unknown`. An absent record is
+always `unknown` because completion timestamps do not prove the exact provider
+request window. This context may explain availability but cannot change the
+status or action returned by `get_daily_assessment`. Coach does not infer zero,
+name a provider-side cause, diagnose a condition, initiate refresh, or promise
+an autonomous recheck without an actual automation.
+
 A direct relevant user report authorizes one routine low-risk idempotent write
 through the owning typed tool without a duplicate confirmation question. The
 Coach performs typed read-back before declaring success. Unknown optional
@@ -189,6 +202,8 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - TASK-0117 accepted atomic timezone bootstrap, optional movement-aware V3,
   legacy snapshot hydration, recalculation, and aggregate-only retrospective
   tests.
+- TASK-0118 accepted provider-neutral Recovery freshness composition, direct
+  delivery evidence, consent-reset, MCP contract, and fail-closed wording tests.
 
 ## Decisions
 
@@ -206,6 +221,7 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
+- [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
 
 ## Open questions
 

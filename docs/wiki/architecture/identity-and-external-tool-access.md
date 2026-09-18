@@ -236,7 +236,7 @@ the API deployable. Its internal endpoint is `/mcp`; staging exposes it as
 protected-resource metadata, advertises per-tool security schemes, and returns
 standards-complete OAuth challenges.
 
-The repository allowlist contains 23 tools covering reads, typed writes,
+The repository allowlist contains 25 tools covering reads, typed writes,
 append-only corrections, active Training references, and the always-live daily
 projection for Weight, Body, Meal, WorkoutSession, RecoveryObservation, and
 DailyContextNote. Reads require `person:read`; each write uses its
@@ -257,8 +257,20 @@ Person-local day. It returns the API-owned deterministic status, evidence,
 missing-data reasons, confidence, policy version, alternatives, and exactly one
 next action. Its presentation contract tells ChatGPT to explain that result
 without recalculating or replacing the decision. Person timezone changes remain
-on the authenticated first-party HTTP boundary; MCP receives no additional
-write scope.
+available on the authenticated first-party HTTP boundary and through the
+narrow `set_current_timezone` MCP command with its dedicated
+`person-timezone:write` scope.
+
+`get_current_recovery_context` is the 25th tool and uses `person:read`. It has
+closed empty input, derives the target date from the stored Person timezone,
+and returns current typed Recovery observations plus independent
+provider-neutral sync freshness and direct target-date delivery evidence. It
+never initiates a provider refresh or automation. Missing target-date records
+remain `unknown`; only normalized records or current fact pointers establish
+delivery. The presentation contract forbids provider-cause speculation,
+absence-as-zero, timestamp comparison by the model, and promises of a later
+autonomous recheck. The tool explains availability only;
+`get_daily_assessment` remains the sole Daily Coach decision authority.
 
 `get_daily_projection` is also the compatibility carrier for already open
 conversations whose cached catalog does not contain `get_daily_assessment`.
@@ -435,6 +447,9 @@ lifecycle.
   can select the existing Shape of You Staging plugin without install or OAuth
   reconnect, call `get_daily_projection` first with an exact date and timezone,
   and stop without writes or absence inference when a later typed read fails.
+- TASK-0118 accepted the 25th read-only MCP tool, its closed schema,
+  Person-local composition, provider-neutral delivery evidence, and fail-closed
+  Coach wording without a new OAuth scope.
 
 ## Decisions
 
@@ -458,6 +473,7 @@ lifecycle.
 - [Backward-compatible MCP tool schemas](../../adr/20260902-evolve-mcp-tool-schemas-backward-compatibly.md)
 - [Portable Daily Coach protocol](../../adr/20260828-keep-daily-coach-protocol-portable-across-approved-mcp-clients.md)
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md)
+- [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md)
 
 ## Open questions
 
