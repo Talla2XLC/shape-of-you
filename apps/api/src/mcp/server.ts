@@ -27,12 +27,14 @@ import {
   ListWeightMeasurementsQuerySchema,
   ListWorkoutSessionsQuerySchema,
   MealListSchema,
+  PersonPreferencesSchema,
   RecoveryObservationListSchema,
   SaveConfirmedTrainingProgramResultSchema,
   SaveConfirmedTrainingProgramSchema,
   TrainingContextQuerySchema,
   TrainingContextSchema,
   TrainingProgramSchema,
+  UpdatePersonPreferencesSchema,
   WeightMeasurementListSchema,
   WorkoutSessionListSchema,
   type CorrectBodyMeasurementSession,
@@ -55,6 +57,7 @@ import {
   type ListRecoveryObservationsQuery,
   type ListWeightMeasurementsQuery,
   type ListWorkoutSessionsQuery,
+  type UpdatePersonPreferences,
   type SaveConfirmedTrainingProgram,
   type TrainingContextQuery,
 } from "@shape-of-you/contracts";
@@ -82,6 +85,7 @@ import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
   MCP_MEAL_WRITE_SCOPE,
+  MCP_PERSON_TIMEZONE_WRITE_SCOPE,
   MCP_READ_SCOPE,
   MCP_RECOVERY_WRITE_SCOPE,
   MCP_WEIGHT_WRITE_SCOPE,
@@ -107,7 +111,7 @@ interface McpServices {
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
-  readonly dailyAssessment?: Pick<DailyAssessmentService, "read">;
+  readonly dailyAssessment?: Pick<DailyAssessmentService, "read" | "updatePreferences">;
 }
 
 /** Dependencies required by the API-owned stateless MCP transport adapter. */
@@ -244,9 +248,23 @@ const trainingContextResultContent = coachResultContent(
 );
 
 const dailyAssessmentResultContent = coachResultContent(
-  "Treat this API-owned daily assessment as the sole decision authority: preserve and explain its exact status, reasons, missing data, limitations, confidence, and single recommended next action. Do not recalculate, replace, or embellish the policy decision. Do not add a duration, intensity, workout, medical rationale, trend, or substitute action that the result did not return. If timezone is required, ask the user to configure it through the first-party API; this read-only MCP tool cannot write preferences.",
+  "Treat this API-owned daily assessment as the sole decision authority: preserve and explain its exact status, reasons, missing data, limitations, confidence, movement context, and single recommended next action. Do not recalculate, replace, or embellish the policy decision. Do not add a duration, intensity, workout, medical rationale, trend, or substitute action that the result did not return. If timezone is required and the user has explicitly provided an unambiguous current timezone or location, call set_current_timezone and retry this read in the same turn. Otherwise ask one natural location clarification. Never construct a fallback recommendation.",
   dailyCoachReplyShape
 );
+
+const timezoneWriteResultContent = coachResultContent(
+  "The user's current IANA timezone was saved from their explicit context. Immediately retry get_daily_assessment in the same turn. Do not expose the timezone identifier unless the user asked for it, and do not claim a daily recommendation until that read succeeds."
+);
+
+const setCurrentTimezoneInputSchema = {
+  $id: "SetCurrentTimezoneInput",
+  type: "object",
+  additionalProperties: false,
+  required: ["timezone"],
+  properties: {
+    timezone: UpdatePersonPreferencesSchema.properties.timezone
+  }
+} as const;
 
 const confirmedTrainingProgramWriteResultContent = coachResultContent(
   "The explicitly confirmed program was persisted. Silently read the active program again and compare the complete snapshot before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as active."
@@ -294,6 +312,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Saving or changing a training program is material: first show the complete proposed snapshot and obtain explicit user confirmation. Preserve exercises, order, loads, and progression exactly as confirmed. After saving, read the active program again and compare the complete snapshot before claiming success; any failed or inconsistent read-back leaves the program unverified. " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For a full Daily Coach assessment, preserve the assessment status, reasons, missing data, limitations, confidence, and single recommended action. Never reconstruct or alter that decision from get_daily_projection, other typed reads, or conversation context. Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment. For a factual day record that does not ask for a status or next action, require an exact local date and IANA timezone and use get_daily_projection without turning it into a decision. " +
+  "When get_daily_assessment requires timezone, use set_current_timezone only from an explicit unambiguous statement about the user's current timezone or location, then retry the assessment in the same turn. Ask one natural clarification if the location is ambiguous. Never guess silently or expose a technical setup task. " +
   "Outside a full Daily Coach assessment, present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Outside a full Daily Coach assessment, give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
@@ -387,7 +406,8 @@ export function registerMcpRoutes(options: McpRouteOptions): void {
       MCP_MEAL_WRITE_SCOPE,
       MCP_WORKOUT_WRITE_SCOPE,
       MCP_RECOVERY_WRITE_SCOPE,
-      MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE
+      MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+      MCP_PERSON_TIMEZONE_WRITE_SCOPE
     ],
     bearer_methods_supported: ["header"]
   }));
@@ -733,6 +753,17 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       true,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       async (input) => (await services.dailyContextNotes.correct(input.id as string, input as unknown as CorrectDailyContextNote)).note
+    ),
+    defineTool(
+      "set_current_timezone",
+      "Save only the authorized person's current IANA timezone after an explicit unambiguous statement about their current timezone or location, then retry the daily assessment in the same turn.",
+      setCurrentTimezoneInputSchema,
+      PersonPreferencesSchema,
+      true,
+      MCP_PERSON_TIMEZONE_WRITE_SCOPE,
+      (input) => services.dailyAssessment?.updatePreferences(input as UpdatePersonPreferences) ??
+        Promise.reject(new Error("Daily assessment service is unavailable")),
+      () => timezoneWriteResultContent
     ),
     defineTool(
       "get_daily_assessment",

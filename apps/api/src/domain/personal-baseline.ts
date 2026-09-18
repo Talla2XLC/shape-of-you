@@ -1,5 +1,5 @@
 /** Metrics whose personal norm can inform a shadow daily assessment. */
-export const personalBaselineMetrics = [
+export const personalBaselineV1Metrics = [
   "sleep_minutes",
   "hrv_rmssd",
   "resting_heart_rate",
@@ -8,6 +8,9 @@ export const personalBaselineMetrics = [
   "body_battery_max",
   "training_load"
 ] as const;
+
+/** Metrics supported by the V3 policy, including optional daily movement. */
+export const personalBaselineMetrics = [...personalBaselineV1Metrics, "steps"] as const;
 
 /** Provider-neutral metric supported by the personal-baseline policy. */
 export type PersonalBaselineMetric = (typeof personalBaselineMetrics)[number];
@@ -22,7 +25,7 @@ export interface PersonalBaselineSample {
 /** Immutable parameters of one shadow baseline candidate. */
 export interface PersonalBaselinePolicy {
   readonly key: "responsive" | "balanced" | "stable";
-  readonly policyVersion: "personal-baseline-shadow-v1" | "personal-baseline-v1";
+  readonly policyVersion: "personal-baseline-shadow-v1" | "personal-baseline-v1" | "personal-baseline-v2";
   readonly minimumEligibleDays: 14;
   readonly minimumTrainingCalendarSpanDays: 21;
   readonly targetEligibleDays: number;
@@ -107,6 +110,21 @@ export const activePersonalBaselinePolicy: PersonalBaselinePolicy = {
   ...personalBaselineCandidates[1]!,
   policyVersion: "personal-baseline-v1"
 };
+
+/** Immutable balanced policy used by authoritative daily-assessment-v3. */
+export const activePersonalBaselineV2Policy: PersonalBaselinePolicy = {
+  ...personalBaselineCandidates[1]!,
+  policyVersion: "personal-baseline-v2"
+};
+
+/** Returns the exact metric set pinned by one baseline policy version. */
+export function personalBaselineMetricsForPolicy(
+  policy: PersonalBaselinePolicy
+): readonly PersonalBaselineMetric[] {
+  return policy.policyVersion === "personal-baseline-v2"
+    ? personalBaselineMetrics
+    : personalBaselineV1Metrics;
+}
 
 function median(values: readonly number[]): number {
   const sorted = [...values].sort((left, right) => left - right);

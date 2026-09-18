@@ -38,6 +38,7 @@ describe("Garmin via Intervals.icu integration contracts", () => {
       id: "2026-09-07", sleepSecs: 27_000, sleepScore: 84,
       restingHR: 51, avgSleepingHR: 48, hrv: 63, spO2: 96.5,
       respiration: 15.2, BodyBatteryMin: 18, BodyBatteryMax: 91,
+      updated: "2026-09-07T14:30:00Z", steps: 12_345,
       bodyBattery: 77, ignoredProviderField: "ignored"
     });
     const activity = normalizeIntervalsActivity({
@@ -51,6 +52,7 @@ describe("Garmin via Intervals.icu integration contracts", () => {
       identity: "2026-09-07",
       localDate: "2026-09-07",
       timezone: "UTC",
+      updatedAt: "2026-09-07T14:30:00.000Z",
       totalSleepMinutes: 450,
       sleepScore: 84,
       restingHeartRate: 51,
@@ -59,7 +61,8 @@ describe("Garmin via Intervals.icu integration contracts", () => {
       oxygenSaturation: 96.5,
       respirationRate: 15.2,
       bodyBatteryMinimum: 18,
-      bodyBatteryMaximum: 91
+      bodyBatteryMaximum: 91,
+      steps: 12_345
     });
     expect(activity).toMatchObject({ durationSeconds: 3_300, garminAttributed: true, localDate: "2026-09-07" });
     expect(normalizedChecksum(wellness)).toBe(normalizedChecksum({ ...wellness }));
@@ -78,7 +81,9 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     { id: "2026-09-07", respiration: -1 },
     { id: "2026-09-07", BodyBatteryMin: "18" },
     { id: "2026-09-07", BodyBatteryMax: 101 },
-    { id: "2026-09-07", BodyBatteryMin: 91, BodyBatteryMax: 18 }
+    { id: "2026-09-07", BodyBatteryMin: 91, BodyBatteryMax: 18 },
+    { id: "2026-09-07", steps: 1.5 },
+    { id: "2026-09-07", updated: "not-a-time" }
   ])("rejects an invalid typed wellness value without exposing transport data", (record) => {
     expect(() => normalizeIntervalsWellness(record)).toThrowError(
       expect.objectContaining({ failureCode: "provider_response_invalid" })
@@ -150,7 +155,7 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     expect(parsedWellnessUrl.searchParams.get("oldest")).toBe("2026-09-01");
     expect(parsedWellnessUrl.searchParams.get("newest")).toBe("2026-09-11");
     expect(parsedWellnessUrl.searchParams.get("fields")).toBe(
-      "id,updated,sleepSecs,sleepScore,restingHR,avgSleepingHR,hrv,spO2,respiration,BodyBatteryMin,BodyBatteryMax"
+      "id,updated,sleepSecs,sleepScore,restingHR,avgSleepingHR,hrv,spO2,respiration,BodyBatteryMin,BodyBatteryMax,steps"
     );
     expect(parsedWellnessUrl.searchParams.has("access_token")).toBe(false);
     expect(wellnessInit.headers).toEqual(expect.objectContaining({ authorization: "Bearer opaque-test-token" }));

@@ -9,6 +9,7 @@ export interface RecoveryBaselineDay {
   readonly bodyBattery: number | null;
   readonly bodyBatteryMin: number | null;
   readonly bodyBatteryMax: number | null;
+  readonly steps: number | null;
   readonly acuteIllness: boolean;
   readonly injuryConcern: boolean;
   readonly assessmentPresent: boolean;
@@ -26,6 +27,7 @@ interface RecoveryBaselineRow {
   readonly body_battery: string | null;
   readonly body_battery_min: string | null;
   readonly body_battery_max: string | null;
+  readonly steps: string | null;
   readonly acute_illness: boolean;
   readonly injury_concern: boolean;
   readonly assessment_present: boolean;
@@ -44,7 +46,8 @@ function numberOrNull(value: string | null): number | null {
 /**
  * Reads bounded current Recovery facts and consolidates one equal-weight row
  * per Person-local day. Longest sleep avoids summing naps/duplicates; metric
- * readings use a median without inspecting provider identity.
+ * readings use a median without inspecting provider identity. Daily steps use
+ * the maximum current count so overlapping sources are not summed.
  */
 export async function readRecoveryBaselineDays(
   client: Pool | PoolClient,
@@ -222,7 +225,7 @@ export async function readRecoveryBaselineDays(
        join recovery_metric_details metric on metric.observation_id = observation.id
        where metric.metric in (
          'hrv_rmssd', 'resting_heart_rate', 'body_battery',
-         'body_battery_min', 'body_battery_max'
+         'body_battery_min', 'body_battery_max', 'steps'
        )
      ), metric_daily as (
        select local_date,
@@ -235,7 +238,8 @@ export async function readRecoveryBaselineDays(
               (percentile_cont(0.5) within group (order by value::numeric)
                 filter (where metric = 'body_battery_min'))::text as body_battery_min,
               (percentile_cont(0.5) within group (order by value::numeric)
-                filter (where metric = 'body_battery_max'))::text as body_battery_max
+                filter (where metric = 'body_battery_max'))::text as body_battery_max,
+              (max(value::numeric) filter (where metric = 'steps'))::text as steps
        from metric_values
        group by local_date
      ), subjective_daily as (
@@ -253,11 +257,12 @@ export async function readRecoveryBaselineDays(
             metric.body_battery,
             metric.body_battery_min,
             metric.body_battery_max,
+            metric.steps,
             coalesce(subjective.acute_illness, false) as acute_illness,
             coalesce(subjective.injury_concern, false) as injury_concern,
             assessment.local_date is not null as assessment_present,
-            coalesce(assessment.hard_stop, false) as hard_stop
-            ,assessment.risk_level::text as risk_level,
+            coalesce(assessment.hard_stop, false) as hard_stop,
+            assessment.risk_level::text as risk_level,
             coalesce(observation.observation_ids, array[]::text[]) as observation_ids,
             case when assessment.id is null then array[]::text[]
                  else array[assessment.id::text] end as assessment_ids
@@ -278,6 +283,7 @@ export async function readRecoveryBaselineDays(
     bodyBattery: numberOrNull(row.body_battery),
     bodyBatteryMin: numberOrNull(row.body_battery_min),
     bodyBatteryMax: numberOrNull(row.body_battery_max),
+    steps: numberOrNull(row.steps),
     acuteIllness: row.acute_illness,
     injuryConcern: row.injury_concern,
     assessmentPresent: row.assessment_present,

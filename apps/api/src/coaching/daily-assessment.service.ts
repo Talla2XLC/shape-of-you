@@ -1,18 +1,18 @@
 import { Inject, Injectable } from "@nestjs/common";
 
-import type { DailyAssessmentResult, DailyAssessmentV2UsedFacts, PersonPreferences, RecoveryObservation, UpdatePersonPreferences } from "@shape-of-you/contracts";
+import type { DailyAssessmentMovement, DailyAssessmentResult, DailyAssessmentV2UsedFacts, PersonPreferences, RecoveryObservation, UpdatePersonPreferences } from "@shape-of-you/contracts";
 
 import type { PersonContext } from "../application/person-context.js";
 import { DAILY_ASSESSMENT_STORE, PERSON_CONTEXT } from "../application/tokens.js";
 import { assertIanaTimezone } from "../domain/date-context.js";
 import {
-  DAILY_ASSESSMENT_V2_POLICY_VERSION,
-  dailyAssessmentV2Checksum,
+  DAILY_ASSESSMENT_V3_POLICY_VERSION,
+  dailyAssessmentV3Checksum,
   evaluateDailyAssessment
 } from "../domain/daily-assessment.js";
 import { applyConservativePersonalOverlay } from "../domain/daily-assessment-personal-overlay.js";
 import {
-  evaluatePersonalizedDailyAssessment,
+  evaluatePersonalizedDailyAssessmentV3,
   type PersonalAssessmentEvidenceDay
 } from "../domain/personalized-daily-assessment.js";
 import { activePersonalBaselinePolicy } from "../domain/personal-baseline.js";
@@ -76,7 +76,10 @@ export class DailyAssessmentService {
 
   public updatePreferences(input: UpdatePersonPreferences): Promise<PersonPreferences> {
     assertIanaTimezone(input.timezone);
-    return this.store.setTimezone(this.personContext.getPersonId(), input.timezone);
+    const personId = this.personContext.getPersonId();
+    return input.ifTimezoneUnset === true
+      ? this.store.setTimezone(personId, input.timezone, { ifUnset: true })
+      : this.store.setTimezone(personId, input.timezone);
   }
 
   public read(): Promise<DailyAssessmentResult> {
@@ -89,7 +92,8 @@ export class DailyAssessmentService {
     if (preferences.timezone === null) return { state: "timezone_required", timezone: null };
     assertIanaTimezone(preferences.timezone);
     const timezone = preferences.timezone;
-    const localDate = derivePersonLocalDate(timezone);
+    const calculatedAt = new Date();
+    const localDate = derivePersonLocalDate(timezone, calculatedAt);
     const from = shiftLocalDate(localDate, -28);
     const baselineFrom = shiftLocalDate(
       localDate,
@@ -144,6 +148,26 @@ export class DailyAssessmentService {
       b.createdAt.localeCompare(a.createdAt)
     );
     const currentRecovery = sortedObservations.filter((item) => item.localDate === localDate);
+    const currentStepsObservation = currentRecovery
+      .filter((item): item is RecoveryObservation & {
+        readonly detail: { readonly type: "metric"; readonly metric: "steps"; readonly value: number };
+        readonly sourceReference: RecoveryObservation["sourceReference"] & { readonly occurredAt: string };
+      } => {
+        if (
+          item.detail.type !== "metric" || item.detail.metric !== "steps" ||
+          item.quality === "poor" || item.sourceReference.occurredAt === null
+        ) return false;
+        const asOf = new Date(item.sourceReference.occurredAt);
+        return !Number.isNaN(asOf.valueOf()) &&
+          derivePersonLocalDate(timezone, asOf) === localDate &&
+          asOf.valueOf() <= calculatedAt.valueOf() + 5 * 60_000;
+      })
+      .sort((left, right) =>
+        right.detail.value - left.detail.value ||
+        right.sourceReference.occurredAt.localeCompare(left.sourceReference.occurredAt)
+      )[0];
+    const currentStepsAsOf = currentStepsObservation?.sourceReference.occurredAt ?? null;
+    const currentStepsEligible = currentStepsObservation !== undefined;
     const sleep = currentRecovery.find((item) => item.detail.type === "sleep" && item.quality !== "poor");
     const hrvValues = sortedObservations.filter((item) => item.detail.type === "metric" && item.detail.metric === "hrv_rmssd" && item.quality !== "poor").map((item) => item.detail.type === "metric" ? item.detail.value : 0);
     const rhrValues = sortedObservations.filter((item) => item.detail.type === "metric" && item.detail.metric === "resting_heart_rate" && item.quality !== "poor").map((item) => item.detail.type === "metric" ? item.detail.value : 0);
@@ -236,7 +260,12 @@ export class DailyAssessmentService {
           ...(recovery?.bodyBattery == null ? {} : { body_battery: recovery.bodyBattery }),
           ...(recovery?.bodyBatteryMin == null ? {} : { body_battery_min: recovery.bodyBatteryMin }),
           ...(recovery?.bodyBatteryMax == null ? {} : { body_battery_max: recovery.bodyBatteryMax }),
-          ...(trainingDay?.trainingLoad == null ? {} : { training_load: trainingDay.trainingLoad })
+          ...(trainingDay?.trainingLoad == null ? {} : { training_load: trainingDay.trainingLoad }),
+          ...(date === localDate
+            ? currentStepsEligible && currentStepsObservation?.detail.type === "metric"
+              ? { steps: currentStepsObservation.detail.value }
+              : {}
+            : recovery?.steps == null ? {} : { steps: recovery.steps })
         };
         return {
           localDate: date,
@@ -248,10 +277,11 @@ export class DailyAssessmentService {
           trainingLoadSeriesKey: trainingDay?.loadSeriesKey ?? null,
           recoveryObservationIds: recovery?.observationIds ?? [],
           recoveryAssessmentIds: recovery?.assessmentIds ?? [],
-          externalActivityIds: trainingDay?.externalActivityIds ?? []
+          externalActivityIds: trainingDay?.externalActivityIds ?? [],
+          partialDayMetrics: date === localDate && currentStepsEligible ? ["steps"] : []
         };
       });
-    const personal = evaluatePersonalizedDailyAssessment(localDate, personalDays);
+    const personal = evaluatePersonalizedDailyAssessmentV3(localDate, personalDays);
     const overlay = applyConservativePersonalOverlay(
       baseEvaluation.status,
       baseEvaluation.recommendedAction,
@@ -269,19 +299,46 @@ export class DailyAssessmentService {
       reasons: [...new Set([...baseEvaluation.reasons, ...personal.reasons])],
       limitations: [...new Set(limitations)]
     };
-    const evidenceChecksum = dailyAssessmentV2Checksum(
+    const stepsComparison = personal.publicBaseline.comparisons.find((item) => item.metric === "steps");
+    const movement: DailyAssessmentMovement = currentStepsEligible &&
+      currentStepsObservation?.detail.type === "metric" && currentStepsAsOf !== null
+      ? {
+          status: "available",
+          summary: stepsComparison?.availability === "available"
+            ? stepsComparison.position === "above_usual"
+              ? "Ты уже прошёл больше своего обычного полного дня."
+              : "Текущие шаги ещё не превышают твой обычный полный день."
+            : "Сегодняшние шаги доступны, но личная норма пока не накоплена.",
+          current: {
+            role: "partial_day",
+            steps: currentStepsObservation.detail.value,
+            asOf: currentStepsAsOf,
+            position: stepsComparison?.availability !== "available"
+              ? "baseline_unavailable"
+              : stepsComparison.position === "above_usual"
+                ? "above_full_day_usual"
+                : "within_or_below_full_day_usual",
+            severity: stepsComparison?.availability === "available"
+              ? stepsComparison.severity
+              : null
+          }
+        }
+      : { status: "unavailable", summary: null, current: null };
+    const evidenceChecksum = dailyAssessmentV3Checksum(
       localDate,
       timezone,
       facts,
       personal.calculation,
+      movement,
       { ...evaluation, personalBaseline: personal.publicBaseline }
     );
     return this.store.createOrGet(personId, {
       localDate, timezone, ...evaluation, usedFacts: facts,
-      policyVersion: DAILY_ASSESSMENT_V2_POLICY_VERSION,
+      policyVersion: DAILY_ASSESSMENT_V3_POLICY_VERSION,
       evidenceChecksum,
       personalBaseline: personal.publicBaseline,
-      personalBaselineCalculation: personal.calculation
+      personalBaselineCalculation: personal.calculation,
+      movement
     }, {
       expectedRevision: evidenceRevisionAfter,
       expectedTimezone: timezone,

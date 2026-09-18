@@ -121,6 +121,43 @@ describe("personal baseline policy", () => {
     expect(report.candidates[0]!.v1ComparableDayCount).toBe(24);
   });
 
+  it("compares V2 and V3 without dates or raw movement and rejects movement-only recovery", () => {
+    const days: RetrospectiveDailyEvidence[] = Array.from({ length: 16 }, (_, index) => ({
+      localDate: date(index + 1),
+      values: {
+        hrv_rmssd: 50 + index % 2,
+        steps: index === 15 ? 50_000 : 8_000 + index % 3 * 100
+      },
+      acuteIllness: false,
+      injuryConcern: false,
+      baselineExcluded: false,
+      trainingLoadIncompatible: false,
+      recoveryAssessmentPresent: false,
+      recoveryHardStop: false,
+      trainingLoadSeriesKey: null,
+      workoutSessionCount: 0,
+      counterfactualV1: {
+        outcome: "comparable",
+        status: "ready",
+        action: "follow_active_program",
+        absoluteGuardrail: false
+      }
+    }));
+
+    const report = runDailyAssessmentRetrospective(days);
+
+    expect(report.reportVersion).toBe(3);
+    expect(report.v2V3Comparison).toMatchObject({
+      mode: "completed_day_counterfactual",
+      comparableDayCount: 16,
+      movementCoverageDayCount: 16,
+      movementBaselineAvailableDayCount: 2,
+      suspiciousRecoveryFromMovementOnlyCount: 0,
+      noMovementBehaviorMismatchCount: 0
+    });
+    expect(serializeDailyAssessmentRetrospectiveReport(report)).not.toContain("50000");
+  });
+
   it("does not let illness days teach the future baseline", () => {
     const days = Array.from({ length: 20 }, (_, index) => ({
       localDate: date(index + 1),

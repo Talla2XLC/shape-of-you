@@ -112,10 +112,17 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
     body_battery: "score",
     body_battery_min: "score",
     body_battery_max: "score",
-    sleep_score: "score"
+    sleep_score: "score",
+    steps: "count"
   } as const;
   if (input.detail.type === "metric" && input.detail.unit !== expectedUnits[input.detail.metric]) {
     throw new DomainValidationError("Recovery metric unit is incompatible");
+  }
+  if (
+    input.detail.type === "metric" && input.detail.metric === "steps" &&
+    (!Number.isInteger(input.detail.value) || input.detail.value < 0 || input.detail.value > 1_000_000)
+  ) {
+    throw new DomainValidationError("Recovery steps count is invalid");
   }
 }
 

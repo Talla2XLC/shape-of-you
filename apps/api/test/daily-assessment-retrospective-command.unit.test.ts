@@ -20,7 +20,7 @@ describe("daily assessment retrospective reader", () => {
       { rows: [{
         local_date: "2026-09-01", sleep_minutes: null, hrv_rmssd: "50",
         resting_heart_rate: null, body_battery: null, body_battery_min: null,
-        body_battery_max: null,
+        body_battery_max: null, steps: "9000",
         acute_illness: false, injury_concern: false,
         assessment_present: false, hard_stop: false, risk_level: null
       }] },
@@ -65,7 +65,7 @@ describe("daily assessment retrospective reader", () => {
     expect(result).toHaveLength(30);
     expect(result[0]).toEqual({
       localDate: "2026-09-01",
-      values: { hrv_rmssd: 50, training_load: 42 },
+      values: { hrv_rmssd: 50, training_load: 42, steps: 9000 },
       acuteIllness: false,
       injuryConcern: false,
       recoveryAssessmentPresent: false,

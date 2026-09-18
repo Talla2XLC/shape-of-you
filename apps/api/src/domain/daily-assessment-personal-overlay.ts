@@ -11,6 +11,10 @@ export interface PersonalOverlaySignals {
   readonly adversePersonalSignalCount: number;
   readonly persistentPersonalSignalCount: number;
   readonly adverseCenterPresent: boolean;
+  readonly adverseNonMovementSignalCount?: number;
+  readonly markedNonMovementSignalCount?: number;
+  readonly movementAboveUsual?: boolean;
+  readonly movementMarked?: boolean;
 }
 
 /** Result of applying personal evidence without weakening the v1 decision. */
@@ -33,6 +37,10 @@ export function applyConservativePersonalOverlay(
   baseAction: DailyNextAction,
   signals: PersonalOverlaySignals
 ): PersonalOverlayResult {
+  const adverseNonMovement = signals.adverseNonMovementSignalCount ??
+    signals.adversePersonalSignalCount;
+  const markedNonMovement = signals.markedNonMovementSignalCount ??
+    signals.markedPersonalSignalCount;
   if (baseStatus === "insufficient_data") {
     if (!signals.hardStop) return { status: baseStatus, action: baseAction, changed: false };
     return {
@@ -43,7 +51,10 @@ export function applyConservativePersonalOverlay(
   }
   if (
     signals.hardStop ||
-    (signals.eligibleBeforeStability && signals.markedPersonalSignalCount >= 2)
+    (signals.eligibleBeforeStability && (
+      markedNonMovement >= 2 ||
+      (signals.movementMarked === true && markedNonMovement >= 1)
+    ))
   ) {
     if (baseStatus === "recovery_priority") {
       return { status: baseStatus, action: baseAction, changed: false };
@@ -59,7 +70,8 @@ export function applyConservativePersonalOverlay(
     (
       signals.adverseCenterPresent ||
       signals.persistentPersonalSignalCount > 0 ||
-      signals.adversePersonalSignalCount >= 2
+      adverseNonMovement >= 2 ||
+      (signals.movementAboveUsual === true && adverseNonMovement >= 1)
     )
   ) {
     return {

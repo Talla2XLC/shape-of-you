@@ -46,10 +46,13 @@ export const UpdatePersonPreferencesSchema = {
   type: "object",
   additionalProperties: false,
   required: ["timezone"],
-  properties: { timezone: { type: "string", minLength: 1, maxLength: 64 } }
+  properties: {
+    timezone: { type: "string", minLength: 1, maxLength: 64 },
+    ifTimezoneUnset: { const: true }
+  }
 } as const;
 
-/** Authenticated command replacing the Person-owned local timezone. */
+/** Authenticated timezone command; Web may request an atomic unset-only write. */
 export type UpdatePersonPreferences = FromSchema<typeof UpdatePersonPreferencesSchema>;
 
 export const PersonAccessRoleSchema = {

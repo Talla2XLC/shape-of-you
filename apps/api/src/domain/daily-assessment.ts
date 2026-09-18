@@ -18,6 +18,7 @@ export function isDailyAssessmentAbsoluteMetricConcern(
 
 export const DAILY_ASSESSMENT_POLICY_VERSION = "daily-assessment-v1" as const;
 export const DAILY_ASSESSMENT_V2_POLICY_VERSION = "daily-assessment-v2" as const;
+export const DAILY_ASSESSMENT_V3_POLICY_VERSION = "daily-assessment-v3" as const;
 
 export interface DailyAssessmentEvaluation {
   readonly status: DailyAssessmentAvailable["status"];
@@ -144,6 +145,26 @@ export function dailyAssessmentV2Checksum(
     timezone,
     facts,
     personalCalculation,
+    selectedDecision
+  })).digest("hex");
+}
+
+/** Stable checksum for V3 facts, personal calculation and movement decision. */
+export function dailyAssessmentV3Checksum(
+  localDate: string,
+  timezone: string,
+  facts: DailyAssessmentUsedFacts,
+  personalCalculation: unknown,
+  movement: unknown,
+  selectedDecision: unknown
+): string {
+  return createHash("sha256").update(JSON.stringify({
+    policyVersion: DAILY_ASSESSMENT_V3_POLICY_VERSION,
+    localDate,
+    timezone,
+    facts,
+    personalCalculation,
+    movement,
     selectedDecision
   })).digest("hex");
 }

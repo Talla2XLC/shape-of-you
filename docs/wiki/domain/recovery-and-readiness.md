@@ -55,13 +55,23 @@ collection but is not erasure. Corrections replace full observations.
 The Intervals.icu adapter imports supported wellness fields through an
 account-level source channel. Its explicit whitelist maps sleep duration, sleep
 score, resting heart rate, average sleeping heart rate, HRV rMSSD, SpO2,
-respiration rate, and daily Body Battery minimum and maximum to typed immutable
-observations. `BodyBatteryMin` and `BodyBatteryMax` remain distinct `0..100`
+respiration rate, daily Body Battery minimum and maximum, and integer daily
+steps to typed immutable observations. Steps use the provider-neutral metric
+`steps` and unit `count`; missing steps never create a zero observation.
+`BodyBatteryMin` and `BodyBatteryMax` remain distinct `0..100`
 score metrics; neither is presented as a current Body Battery reading. The same
 provider identity and normalized checksum is a no-op; changed or removed fields
 create immutable correction or withdrawal observations. Wellness provenance
 remains `intervals_icu_wellness` and may include Garmin because Intervals.icu
 does not reliably expose the original provider for each wellness field.
+
+Completed Person-local step totals are consolidated by maximum count rather
+than summed across overlapping observations and may support Coaching's robust
+full-day personal baseline. A current-day count carries the wellness `updated`
+instant as `asOf`; invalid, wrong-day, or more-than-five-minutes-future updates
+are ineligible. Current partial-day steps never train the full-day baseline.
+Correction, withdrawal, late import, disconnect retention, and connection
+erasure use the same Recovery lifecycle as other typed observations.
 
 Body Battery requires exact Intervals custom wellness codes
 `BodyBatteryMin` and `BodyBatteryMax` plus enabled Garmin wellness download.
@@ -175,6 +185,7 @@ reconstruction of the observation ordering used by a historical live v1 read.
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
+- [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
 
 ## Open questions
 

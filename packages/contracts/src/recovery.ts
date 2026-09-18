@@ -34,13 +34,14 @@ export const RecoveryMetricSchema = {
     "body_battery",
     "body_battery_min",
     "body_battery_max",
-    "sleep_score"
+    "sleep_score",
+    "steps"
   ]
 } as const;
 
 export const RecoveryMetricUnitSchema = {
   type: "string",
-  enum: ["ms", "bpm", "percent", "celsius", "breaths_per_minute", "score"]
+  enum: ["ms", "bpm", "percent", "celsius", "breaths_per_minute", "score", "count"]
 } as const;
 
 export const RecoveryRiskLevelSchema = {
@@ -66,14 +67,16 @@ export type RecoveryMetric =
   | "body_battery"
   | "body_battery_min"
   | "body_battery_max"
-  | "sleep_score";
+  | "sleep_score"
+  | "steps";
 export type RecoveryMetricUnit =
   | "ms"
   | "bpm"
   | "percent"
   | "celsius"
   | "breaths_per_minute"
-  | "score";
+  | "score"
+  | "count";
 export type RecoveryRiskLevel = "low" | "moderate" | "high" | "blocked";
 export type RecoveryAssessmentDataQuality = "insufficient" | "limited" | "sufficient";
 
@@ -366,7 +369,7 @@ export const MetricObservationDetailSchema = {
   properties: {
     type: { const: "metric" },
     metric: RecoveryMetricSchema,
-    value: { type: "number", minimum: -100, maximum: 1000 },
+    value: { type: "number", minimum: -100, maximum: 1000000 },
     unit: RecoveryMetricUnitSchema
   },
   allOf: [
@@ -375,7 +378,8 @@ export const MetricObservationDetailSchema = {
     { if: { properties: { metric: { enum: ["oxygen_saturation", "minimum_oxygen_saturation"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "percent" } } } },
     { if: { properties: { metric: { const: "temperature_deviation" } } }, then: { properties: { value: { minimum: -20, maximum: 20 }, unit: { const: "celsius" } } } },
     { if: { properties: { metric: { const: "respiration_rate" } } }, then: { properties: { value: { exclusiveMinimum: 0, maximum: 100 }, unit: { const: "breaths_per_minute" } } } },
-    { if: { properties: { metric: { enum: ["body_battery", "body_battery_min", "body_battery_max", "sleep_score"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } }
+    { if: { properties: { metric: { enum: ["body_battery", "body_battery_min", "body_battery_max", "sleep_score"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } },
+    { if: { properties: { metric: { const: "steps" } } }, then: { properties: { value: { type: "integer", minimum: 0, maximum: 1000000 }, unit: { const: "count" } } } }
   ]
 } as const;
 

@@ -37,10 +37,14 @@ most one parameter. It creates no program/session change.
 The `daily_next_action` recommendation is a lazily materialized immutable
 snapshot for the current Person-local date. The API gathers current typed
 Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile
-coverage, and applies the code-owned `daily-assessment-v2` policy. Version 2
-first evaluates the unchanged absolute v1 safety rules, then applies a
-conservative balanced personal-baseline overlay that may preserve or strengthen
-the result but never weaken it. The result
+coverage, and applies the code-owned `daily-assessment-v3` policy. Version 3
+first evaluates the unchanged absolute v1 safety rules, then applies the
+balanced personal-baseline policy to Recovery, Training, and optional daily
+movement. Completed local-day step totals can form a robust personal range;
+current-day steps remain explicit `partial_day` evidence with an exact `asOf`.
+A partial count can prove only that movement is already above the usual full-day
+range. It cannot prove low activity, request missing steps, or strengthen the
+result without corroborating adverse Recovery or Training evidence. The result
 contains a safe day status, used facts, important missing data, typed reasons,
 one recommended action, bounded alternatives, limitations, confidence, policy
 version, qualitative personal comparisons, and evidence checksum. Its private
@@ -49,10 +53,11 @@ eligibility trace, comparisons, signal groups, and chosen result. Identical
 evidence reuses the snapshot; a late or corrected fact, context exclusion, or
 active TrainingProgramVersion changes the checksum and selects a new snapshot.
 Historical snapshots remain readable audit evidence unless privacy erasure
-removes one derived from erased evidence. Legacy v1 snapshots remain readable.
+removes one derived from erased evidence. Legacy v1 and v2 snapshots remain
+readable.
 
 The read-only retrospective calibration path calls the same parameterized pure
-personal-policy evaluator as live v2 and adds only aggregate reporting. Its
+personal-policy evaluator as live V3 and adds only aggregate reporting. Its
 analytics keep two independent modes. `stored_v1` starts from an immutable v1
 snapshot and is the only exact record of the historical v1 decision.
 `counterfactual_current_facts_v1` runs the same v1 evaluator over current,
@@ -66,7 +71,9 @@ transitions, and reversals never mix. A mode-labelled sensitivity ranking is
 emitted only with at least 30 comparable days and is not activation evidence.
 Candidate baselines use bounded provider-neutral owner reads, robust daily
 samples, absolute safety guardrails, and a warm-up interval outside the reported
-range. The command creates no assessment or recommendation and emits only a
+range. The report also compares V2 and V3 on completed-day evidence, counting
+movement coverage, decision differences, transitions, reversals, and suspicious
+movement-only escalation. The command creates no assessment or recommendation and emits only a
 fixed aggregate report without dates, values, Person identifiers, provider
 identities, or daily rows. Real-history execution requires separate environment
 and Person authorization. It never changes current recommendations.
@@ -100,9 +107,13 @@ projection remains factual-only; an unavailable assessment cannot authorize a
 fact-derived action and permits only a later retry. Both reads use the existing
 `person:read` scope and are read-only. Snapshot materialization is an internal
 idempotent API responsibility and does not grant MCP write authority. The
-Person-owned IANA timezone determines the local date. Until it is stored through
-the authenticated first-party HTTP boundary, the assessment returns
-`timezone_required` rather than guessing from chat, browser, or provider data.
+Person-owned IANA timezone determines the local date. Authenticated Web stores
+the browser IANA timezone atomically only while that preference is unset. Coach
+may correct it through the narrow `set_current_timezone` tool and dedicated
+`person-timezone:write` scope only after an explicit unambiguous user statement,
+then retries `get_daily_assessment` in the same turn. Ambiguity requires one
+natural clarification; no path guesses silently or constructs a fallback
+recommendation from individual facts.
 
 A direct relevant user report authorizes one routine low-risk idempotent write
 through the owning typed tool without a duplicate confirmation question. The
@@ -175,6 +186,9 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
   Person-isolation, and Recovery-erasure tests.
 - TASK-0113 accepted stable-read delivery, frozen-schema compatibility, and
   fail-closed assessment fallback tests.
+- TASK-0117 accepted atomic timezone bootstrap, optional movement-aware V3,
+  legacy snapshot hydration, recalculation, and aggregate-only retrospective
+  tests.
 
 ## Decisions
 
@@ -191,11 +205,12 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
+- [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
 
 ## Open questions
 
-- Measured post-deployment baseline-policy stability, difficulty/exercise
-  replacement, future daily policy versions, and explicit execution linkage.
+- Measured post-deployment V3 stability, difficulty/exercise replacement,
+  future daily policy versions, and explicit execution linkage.
 
 ## Related material
 

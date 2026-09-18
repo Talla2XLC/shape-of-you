@@ -17,6 +17,7 @@ export interface ProviderWellnessRecord {
   readonly identity: string;
   readonly localDate: string;
   readonly timezone: string;
+  readonly updatedAt?: string | null;
   readonly totalSleepMinutes: number | null;
   readonly sleepScore: number | null;
   readonly restingHeartRate: number | null;
@@ -26,6 +27,7 @@ export interface ProviderWellnessRecord {
   readonly respirationRate: number | null;
   readonly bodyBatteryMinimum: number | null;
   readonly bodyBatteryMaximum: number | null;
+  readonly steps?: number | null;
 }
 
 /** Narrow provider-neutral activity summary; detailed routes/FIT remain excluded. */

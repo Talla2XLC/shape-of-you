@@ -239,7 +239,8 @@ export class IntegrationService {
       ...metric("oxygen_saturation", "percent", wellness.oxygenSaturation),
       ...metric("respiration_rate", "breaths_per_minute", wellness.respirationRate),
       ...metric("body_battery_min", "score", wellness.bodyBatteryMinimum),
-      ...metric("body_battery_max", "score", wellness.bodyBatteryMaximum)
+      ...metric("body_battery_max", "score", wellness.bodyBatteryMaximum),
+      ...metric("steps", "count", wellness.steps ?? null)
     ];
     let changed = false;
     for (const fact of facts) {
@@ -261,7 +262,7 @@ export class IntegrationService {
           channel: "account",
           externalSystem: "intervals_icu_wellness",
           externalRecordId: `${wellness.identity}:${fact.key}:${checksum}`,
-          occurredAt: null
+          occurredAt: fact.key === "steps" ? wellness.updatedAt ?? null : null
         },
         detail: fact.detail
       };
@@ -281,7 +282,8 @@ export class IntegrationService {
       "oxygen_saturation",
       "respiration_rate",
       "body_battery_min",
-      "body_battery_max"
+      "body_battery_max",
+      "steps"
     ] as const) {
       if (present.has(factKey)) continue;
       const current = await this.store!.recoveryFact(connection.id, wellness.identity, factKey);
@@ -305,8 +307,8 @@ export class IntegrationService {
 }
 
 function metric(
-  metricName: "sleep_score" | "resting_heart_rate" | "night_heart_rate" | "hrv_rmssd" | "oxygen_saturation" | "respiration_rate" | "body_battery_min" | "body_battery_max",
-  unit: "score" | "bpm" | "ms" | "percent" | "breaths_per_minute",
+  metricName: "sleep_score" | "resting_heart_rate" | "night_heart_rate" | "hrv_rmssd" | "oxygen_saturation" | "respiration_rate" | "body_battery_min" | "body_battery_max" | "steps",
+  unit: "score" | "bpm" | "ms" | "percent" | "breaths_per_minute" | "count",
   value: number | null
 ): readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] {
   return value === null ? [] : [{ key: metricName, detail: { type: "metric", metric: metricName, value, unit } }];

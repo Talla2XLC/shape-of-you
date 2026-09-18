@@ -251,6 +251,7 @@ function scopeLabel(scope: string): string {
     "offline_access": "Keep this connection active",
     "openid": "Sign you in",
     "person:read": "Read your profile",
+    "person-timezone:write": "Update your current timezone",
     "recovery:write": "Record recovery observations",
     "weight:write": "Record weight",
     "workout:write": "Record workouts"

@@ -21,6 +21,7 @@ import {
   type AnyPgColumn
 } from "drizzle-orm/pg-core";
 import type {
+  DailyAssessmentMovement,
   DailyAssessmentPersonalBaseline,
   DailyAssessmentUsedFacts,
   DailyNextAction
@@ -206,7 +207,8 @@ export const recoveryMetric = pgEnum("recovery_metric", [
   "body_battery",
   "body_battery_min",
   "body_battery_max",
-  "sleep_score"
+  "sleep_score",
+  "steps"
 ]);
 export const recoveryMetricUnit = pgEnum("recovery_metric_unit", [
   "ms",
@@ -214,7 +216,8 @@ export const recoveryMetricUnit = pgEnum("recovery_metric_unit", [
   "percent",
   "celsius",
   "breaths_per_minute",
-  "score"
+  "score",
+  "count"
 ]);
 export const recoveryConnectionStatus = pgEnum("recovery_connection_status", [
   "active",
@@ -2878,13 +2881,14 @@ export const recoveryMetricDetails = pgTable(
     }).onDelete("cascade"),
     check(
       "recovery_metric_details_shape",
-      sql`${table.value} >= -100 AND ${table.value} <= 1000
+      sql`${table.value} >= -100 AND ${table.value} <= 1000000
           AND ((${table.metric} = 'hrv_rmssd' AND ${table.value} > 0 AND ${table.unit} = 'ms')
             OR (${table.metric} IN ('resting_heart_rate', 'night_heart_rate') AND ${table.value} > 0 AND ${table.unit} = 'bpm')
             OR (${table.metric} IN ('oxygen_saturation', 'minimum_oxygen_saturation') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'percent')
             OR (${table.metric} = 'temperature_deviation' AND ${table.value} >= -20 AND ${table.value} <= 20 AND ${table.unit} = 'celsius')
             OR (${table.metric} = 'respiration_rate' AND ${table.value} > 0 AND ${table.value} <= 100 AND ${table.unit} = 'breaths_per_minute')
-            OR (${table.metric} IN ('body_battery', 'body_battery_min', 'body_battery_max', 'sleep_score') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'score'))`
+            OR (${table.metric} IN ('body_battery', 'body_battery_min', 'body_battery_max', 'sleep_score') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'score')
+            OR (${table.metric} = 'steps' AND ${table.value} >= 0 AND ${table.value} <= 1000000 AND trunc(${table.value}) = ${table.value} AND ${table.unit} = 'count'))`
     )
   ]
 );
@@ -3477,7 +3481,8 @@ export const coachingDailyAssessmentDetails = pgTable(
     alternatives: jsonb("alternatives").$type<DailyNextAction[]>().notNull(),
     limitations: text("limitations").array().notNull(),
     personalBaseline: jsonb("personal_baseline").$type<DailyAssessmentPersonalBaseline>(),
-    personalBaselineCalculation: jsonb("personal_baseline_calculation").$type<DailyAssessmentPersonalCalculation>()
+    personalBaselineCalculation: jsonb("personal_baseline_calculation").$type<DailyAssessmentPersonalCalculation>(),
+    movement: jsonb("movement").$type<DailyAssessmentMovement>()
   },
   (table) => [
     foreignKey({
@@ -3489,12 +3494,18 @@ export const coachingDailyAssessmentDetails = pgTable(
     check("coaching_daily_assessment_confidence", sql`${table.confidence} BETWEEN 0 AND 1`),
     check(
       "coaching_daily_assessment_policy_payload",
-      sql`(${table.policyVersion} = 'daily-assessment-v1'
+        sql`(${table.policyVersion} = 'daily-assessment-v1'
             AND ${table.personalBaseline} IS NULL
-            AND ${table.personalBaselineCalculation} IS NULL)
+            AND ${table.personalBaselineCalculation} IS NULL
+            AND ${table.movement} IS NULL)
         OR (${table.policyVersion} = 'daily-assessment-v2'
             AND ${table.personalBaseline} IS NOT NULL
-            AND ${table.personalBaselineCalculation} IS NOT NULL)`
+            AND ${table.personalBaselineCalculation} IS NOT NULL
+            AND ${table.movement} IS NULL)
+        OR (${table.policyVersion} = 'daily-assessment-v3'
+            AND ${table.personalBaseline} IS NOT NULL
+            AND ${table.personalBaselineCalculation} IS NOT NULL
+            AND ${table.movement} IS NOT NULL)`
     )
   ]
 );

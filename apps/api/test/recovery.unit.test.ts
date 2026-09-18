@@ -93,6 +93,22 @@ describe("Recovery domain", () => {
     }
   );
 
+  it("accepts only a bounded integer steps count with count units", () => {
+    expect(validateRecoveryObservation({
+      ...manualMetric,
+      dedupeKey: "manual:steps:2026-10-25",
+      detail: { type: "metric", metric: "steps", value: 12_345, unit: "count" }
+    })).toMatchObject({ localDate: "2026-10-25" });
+    expect(() => validateRecoveryObservation({
+      ...manualMetric,
+      detail: { type: "metric", metric: "steps", value: 12_345.5, unit: "count" }
+    })).toThrow("steps count is invalid");
+    expect(() => validateRecoveryObservation({
+      ...manualMetric,
+      detail: { type: "metric", metric: "steps", value: 12_345, unit: "score" }
+    })).toThrow("unit is incompatible");
+  });
+
   it("lets hard stops dominate readiness and caps confidence for poor evidence", () => {
     const result = evaluateRecovery(policy, [{
       id: "subjective-1",

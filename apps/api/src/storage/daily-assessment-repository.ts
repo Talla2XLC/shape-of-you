@@ -1,10 +1,11 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 
 import type {
   DailyAssessmentAvailable,
   DailyAssessmentAvailableV1,
   DailyAssessmentPersonalBaseline,
+  DailyAssessmentMovement,
   DailyAssessmentV2UsedFacts,
   PersonPreferences
 } from "@shape-of-you/contracts";
@@ -43,6 +44,15 @@ export type DailyAssessmentSnapshotInput = DailyAssessmentSnapshotBase & (
       readonly usedFacts: DailyAssessmentV2UsedFacts;
       readonly personalBaseline: DailyAssessmentPersonalBaseline;
       readonly personalBaselineCalculation: DailyAssessmentPersonalCalculation;
+    }
+  | {
+      readonly policyVersion: "daily-assessment-v3";
+      readonly usedFacts: DailyAssessmentV2UsedFacts;
+      readonly personalBaseline: DailyAssessmentPersonalBaseline & {
+        readonly policyVersion: "personal-baseline-v2";
+      };
+      readonly personalBaselineCalculation: DailyAssessmentPersonalCalculation;
+      readonly movement: DailyAssessmentMovement;
     }
 );
 
@@ -84,7 +94,11 @@ async function readEvidenceRevision(
 /** Persistence boundary for Person timezone and immutable Coaching daily snapshots. */
 export interface DailyAssessmentStore {
   getPreferences(personId: string): Promise<PersonPreferences>;
-  setTimezone(personId: string, timezone: string): Promise<PersonPreferences>;
+  setTimezone(
+    personId: string,
+    timezone: string,
+    options?: { readonly ifUnset?: boolean }
+  ): Promise<PersonPreferences>;
   getEvidenceRevision(personId: string, from: string, to: string): Promise<string>;
   createOrGet(personId: string, input: DailyAssessmentSnapshotInput, guard?: DailyAssessmentConsistencyGuard): Promise<DailyAssessmentAvailable>;
 }
@@ -99,12 +113,24 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
     return { timezone: rows[0].timezone, updatedAt: rows[0].updatedAt.toISOString() };
   }
 
-  public async setTimezone(personId: string, timezone: string): Promise<PersonPreferences> {
+  public async setTimezone(
+    personId: string,
+    timezone: string,
+    options: { readonly ifUnset?: boolean } = {}
+  ): Promise<PersonPreferences> {
     return this.database.db.transaction(async (transaction) => {
       await lockPersonEvidenceMutation(transaction, personId);
-      const rows = await transaction.update(persons).set({ timezone, updatedAt: new Date() }).where(eq(persons.id, personId)).returning({ timezone: persons.timezone, updatedAt: persons.updatedAt });
-      if (!rows[0]) throw new Error("Authorized Person was not found");
-      return { timezone: rows[0].timezone, updatedAt: rows[0].updatedAt.toISOString() };
+      const rows = await transaction.update(persons).set({ timezone, updatedAt: new Date() })
+        .where(options.ifUnset === true
+          ? and(eq(persons.id, personId), isNull(persons.timezone))
+          : eq(persons.id, personId))
+        .returning({ timezone: persons.timezone, updatedAt: persons.updatedAt });
+      const current = rows[0] ?? (await transaction.select({
+        timezone: persons.timezone,
+        updatedAt: persons.updatedAt
+      }).from(persons).where(eq(persons.id, personId)).limit(1))[0];
+      if (!current) throw new Error("Authorized Person was not found");
+      return { timezone: current.timezone, updatedAt: current.updatedAt.toISOString() };
     });
   }
 
@@ -114,12 +140,16 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
   }
 
   public createOrGet(personId: string, input: DailyAssessmentSnapshotInput, guard?: DailyAssessmentConsistencyGuard): Promise<DailyAssessmentAvailable> {
-    if (input.policyVersion === "daily-assessment-v2" &&
+    if ((input.policyVersion === "daily-assessment-v2" || input.policyVersion === "daily-assessment-v3") &&
         (input.personalBaseline === undefined || input.personalBaselineCalculation === undefined)) {
-      throw new Error("Daily assessment v2 requires its versioned personal-baseline payload");
+      throw new Error("Personalized daily assessment requires its versioned baseline payload");
+    }
+    if (input.policyVersion === "daily-assessment-v3" && input.movement === undefined) {
+      throw new Error("Daily assessment v3 requires its movement payload");
     }
     if (input.policyVersion === "daily-assessment-v1" &&
-        (input.personalBaseline !== undefined || input.personalBaselineCalculation !== undefined)) {
+        (input.personalBaseline !== undefined || input.personalBaselineCalculation !== undefined ||
+         "movement" in input)) {
       throw new Error("Daily assessment v1 cannot carry a personal-baseline payload");
     }
     return this.database.db.transaction(async (transaction) => {
@@ -154,12 +184,16 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
       const policyRows = await transaction.insert(coachingPolicies).values({ key: "daily-assessment", name: "Daily assessment" }).onConflictDoNothing().returning();
       const policy = policyRows[0] ?? (await transaction.select().from(coachingPolicies).where(eq(coachingPolicies.key, "daily-assessment")).limit(1))[0];
       if (!policy) throw new Error("Daily assessment policy could not be resolved");
-      const policyVersionNumber = input.policyVersion === "daily-assessment-v2" ? 2 : 1;
+      const policyVersionNumber = input.policyVersion === "daily-assessment-v3"
+        ? 3
+        : input.policyVersion === "daily-assessment-v2" ? 2 : 1;
       const versionRows = await transaction.insert(coachingPolicyVersions).values({
         policyId: policy.id,
         version: policyVersionNumber,
         effectiveFrom: new Date(
-          policyVersionNumber === 2
+          policyVersionNumber === 3
+            ? "2026-09-17T00:00:00.000Z"
+            : policyVersionNumber === 2
             ? "2026-09-17T00:00:00.000Z"
             : "2026-09-14T00:00:00.000Z"
         ),
@@ -199,7 +233,8 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         alternatives: [...input.alternatives],
         limitations: [...input.limitations],
         personalBaseline: input.personalBaseline ?? null,
-        personalBaselineCalculation: input.personalBaselineCalculation ?? null
+        personalBaselineCalculation: input.personalBaselineCalculation ?? null,
+        movement: "movement" in input ? input.movement : null
       }).onConflictDoNothing();
       if (input.usedFacts.recoveryObservationIds.length > 0) {
         await transaction.insert(coachingDailyAssessmentRecoveryEvidence).values(
@@ -235,15 +270,26 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
   }
 
   private hydrate(recommendation: typeof coachingRecommendations.$inferSelect, detail: typeof coachingDailyAssessmentDetails.$inferSelect): DailyAssessmentAvailable {
-    if (detail.policyVersion !== "daily-assessment-v1" && detail.policyVersion !== "daily-assessment-v2") {
+    if (detail.policyVersion !== "daily-assessment-v1" && detail.policyVersion !== "daily-assessment-v2" && detail.policyVersion !== "daily-assessment-v3") {
       throw new Error(`Unsupported daily assessment policy version: ${detail.policyVersion}`);
     }
-    if (detail.policyVersion === "daily-assessment-v2" && detail.personalBaseline === null) {
-      throw new Error("Stored daily assessment v2 is missing its personal-baseline explanation");
+    if (detail.policyVersion !== "daily-assessment-v1" && detail.personalBaseline === null) {
+      throw new Error("Stored personalized daily assessment is missing its baseline explanation");
+    }
+    if (detail.policyVersion !== "daily-assessment-v1" &&
+        !Array.isArray(detail.usedFacts.dailyContextNoteIds)) {
+      throw new Error("Stored personalized daily assessment is missing its context-note evidence IDs");
+    }
+    if (detail.policyVersion === "daily-assessment-v3" && detail.movement === null) {
+      throw new Error("Stored daily assessment v3 is missing its movement context");
+    }
+    if (detail.policyVersion === "daily-assessment-v3" &&
+        detail.personalBaseline?.policyVersion !== "personal-baseline-v2") {
+      throw new Error("Stored daily assessment v3 has the wrong baseline policy");
     }
     if (detail.policyVersion === "daily-assessment-v2" &&
-        !Array.isArray(detail.usedFacts.dailyContextNoteIds)) {
-      throw new Error("Stored daily assessment v2 is missing its context-note evidence IDs");
+        detail.personalBaseline?.policyVersion !== "personal-baseline-v1") {
+      throw new Error("Stored daily assessment v2 has the wrong baseline policy");
     }
     const base = {
       state: "available" as const,
@@ -264,15 +310,25 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
     if (detail.policyVersion === "daily-assessment-v1") {
       return { ...base, policyVersion: detail.policyVersion };
     }
-    return {
+    const personalized = {
       ...base,
-      policyVersion: detail.policyVersion,
       usedFacts: {
         ...detail.usedFacts,
         dailyContextNoteIds: detail.usedFacts.dailyContextNoteIds!
       },
       personalBaseline: detail.personalBaseline!
     };
+    if (detail.policyVersion === "daily-assessment-v3") {
+      return {
+        ...personalized,
+        policyVersion: detail.policyVersion,
+        personalBaseline: detail.personalBaseline as DailyAssessmentPersonalBaseline & {
+          readonly policyVersion: "personal-baseline-v2";
+        },
+        movement: detail.movement!
+      };
+    }
+    return { ...personalized, policyVersion: "daily-assessment-v2" };
   }
 }
 
@@ -281,7 +337,14 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
   private timezone: string | null = null;
   private readonly snapshots = new Map<string, DailyAssessmentAvailable>();
   public async getPreferences(): Promise<PersonPreferences> { return { timezone: this.timezone, updatedAt: new Date(0).toISOString() }; }
-  public async setTimezone(_personId: string, timezone: string): Promise<PersonPreferences> { this.timezone = timezone; return { timezone, updatedAt: new Date().toISOString() }; }
+  public async setTimezone(
+    _personId: string,
+    timezone: string,
+    options: { readonly ifUnset?: boolean } = {}
+  ): Promise<PersonPreferences> {
+    if (options.ifUnset !== true || this.timezone === null) this.timezone = timezone;
+    return { timezone: this.timezone, updatedAt: new Date().toISOString() };
+  }
   public async getEvidenceRevision(): Promise<string> { return "in-memory-evidence-revision"; }
   public async createOrGet(_personId: string, input: DailyAssessmentSnapshotInput): Promise<DailyAssessmentAvailable> {
     const existing = this.snapshots.get(input.evidenceChecksum);

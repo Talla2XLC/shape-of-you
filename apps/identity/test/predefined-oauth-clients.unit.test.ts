@@ -31,6 +31,7 @@ describe("predefined OAuth clients", () => {
           "openid",
           "offline_access",
           "person:read",
+          "person-timezone:write",
           "weight:write",
           "body-measurement:write",
           "daily-context-note:write",

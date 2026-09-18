@@ -1,4 +1,6 @@
 import {
+  activePersonalBaselinePolicy,
+  activePersonalBaselineV2Policy,
   personalBaselineCandidates,
   personalBaselineMetrics,
   type PersonalBaselineMetric,
@@ -98,7 +100,7 @@ export interface RetrospectiveCandidateReport {
 
 /** Privacy-preserving report emitted by the retrospective shadow evaluator. */
 export interface DailyAssessmentRetrospectiveReport {
-  readonly reportVersion: 2;
+  readonly reportVersion: 3;
   readonly mode: "read_only_shadow";
   readonly policyVersion: "personal-baseline-shadow-v1";
   readonly comparisonModes: readonly ["stored_v1", "counterfactual_current_facts_v1"];
@@ -106,6 +108,19 @@ export interface DailyAssessmentRetrospectiveReport {
   readonly candidates: readonly RetrospectiveCandidateReport[];
   readonly sensitivityRankingMode: "stored_v1" | "counterfactual_current_facts_v1" | "insufficient_evidence";
   readonly sensitivityRanking: readonly PersonalBaselinePolicy["key"][];
+  readonly v2V3Comparison: {
+    readonly mode: "completed_day_counterfactual";
+    readonly comparableDayCount: number;
+    readonly movementCoverageDayCount: number;
+    readonly movementBaselineAvailableDayCount: number;
+    readonly statusDifferenceCount: number;
+    readonly actionDifferenceCount: number;
+    readonly stricterStatusCount: number;
+    readonly v3StatusTransitionCount: number;
+    readonly v3AbruptReversalCount: number;
+    readonly suspiciousRecoveryFromMovementOnlyCount: number;
+    readonly noMovementBehaviorMismatchCount: number;
+  };
   readonly privacy: {
     readonly containsDates: false;
     readonly containsRawValues: false;
@@ -114,6 +129,133 @@ export interface DailyAssessmentRetrospectiveReport {
   readonly effects: {
     readonly recommendationsChanged: false;
     readonly writesPerformed: false;
+  };
+}
+
+function baseDecision(day: RetrospectiveDailyEvidence): {
+  status: ShadowStatus;
+  action: ShadowAction;
+} | null {
+  if (
+    day.counterfactualV1?.outcome === "comparable" &&
+    day.counterfactualV1.status !== undefined &&
+    day.counterfactualV1.action !== undefined
+  ) {
+    return {
+      status: day.counterfactualV1.status,
+      action: day.counterfactualV1.action
+    };
+  }
+  if (day.v1Status !== undefined && day.v1Action !== undefined) {
+    return { status: day.v1Status, action: day.v1Action };
+  }
+  return null;
+}
+
+function statusRank(status: ShadowStatus): number {
+  if (status === "recovery_priority") return 2;
+  if (status === "caution") return 1;
+  return 0;
+}
+
+function compareV2AndV3(
+  days: readonly RetrospectiveDailyEvidence[],
+  reportFrom: string
+): DailyAssessmentRetrospectiveReport["v2V3Comparison"] {
+  const evidenceDays: readonly PersonalAssessmentEvidenceDay[] = days.map((day) => ({
+    localDate: day.localDate,
+    values: day.values,
+    baselineExcluded: day.baselineExcluded,
+    recoveryHardStop: day.acuteIllness || day.injuryConcern || day.recoveryHardStop,
+    trainingLoadIncompatible: day.trainingLoadIncompatible,
+    trainingLoadSeriesKey: day.trainingLoadSeriesKey,
+    recoveryObservationIds: [],
+    recoveryAssessmentIds: [],
+    externalActivityIds: []
+  }));
+  let comparableDayCount = 0;
+  let movementCoverageDayCount = 0;
+  let movementBaselineAvailableDayCount = 0;
+  let statusDifferenceCount = 0;
+  let actionDifferenceCount = 0;
+  let stricterStatusCount = 0;
+  let v3StatusTransitionCount = 0;
+  let v3AbruptReversalCount = 0;
+  let suspiciousRecoveryFromMovementOnlyCount = 0;
+  let noMovementBehaviorMismatchCount = 0;
+  let previousV3Status: ShadowStatus | null = null;
+  let previousPreviousV3Status: ShadowStatus | null = null;
+
+  for (const [dayIndex, day] of days.entries()) {
+    if (day.localDate < reportFrom) continue;
+    const base = baseDecision(day);
+    if (base === null) {
+      previousV3Status = null;
+      previousPreviousV3Status = null;
+      continue;
+    }
+    const history = evidenceDays.slice(0, dayIndex + 1);
+    const v2 = evaluatePersonalizedDailyAssessmentWithPolicy(
+      day.localDate,
+      history,
+      activePersonalBaselinePolicy
+    );
+    const v3 = evaluatePersonalizedDailyAssessmentWithPolicy(
+      day.localDate,
+      history,
+      activePersonalBaselineV2Policy
+    );
+    const v2Overlay = applyConservativePersonalOverlay(base.status, {
+      type: base.action,
+      text: "shadow",
+      trainingProgramVersionId: null
+    }, v2.signals);
+    const v3Overlay = applyConservativePersonalOverlay(base.status, {
+      type: base.action,
+      text: "shadow",
+      trainingProgramVersionId: null
+    }, v3.signals);
+    const hasMovement = day.values.steps !== undefined && Number.isFinite(day.values.steps);
+    comparableDayCount += 1;
+    if (hasMovement) movementCoverageDayCount += 1;
+    if (v3.baseline.comparisons.some((comparison) =>
+      comparison.metric === "steps" && comparison.availability === "available"
+    )) movementBaselineAvailableDayCount += 1;
+    if (v2Overlay.status !== v3Overlay.status) statusDifferenceCount += 1;
+    if (v2Overlay.action.type !== v3Overlay.action.type) actionDifferenceCount += 1;
+    if (statusRank(v3Overlay.status) > statusRank(v2Overlay.status)) stricterStatusCount += 1;
+    if (!hasMovement && v2Overlay.status !== v3Overlay.status) {
+      noMovementBehaviorMismatchCount += 1;
+    }
+    if (
+      v3Overlay.status === "recovery_priority" &&
+      v2Overlay.status !== "recovery_priority" &&
+      v3.signals.markedNonMovementSignalCount === 0
+    ) suspiciousRecoveryFromMovementOnlyCount += 1;
+    if (previousV3Status !== null && previousV3Status !== v3Overlay.status) {
+      v3StatusTransitionCount += 1;
+    }
+    if (
+      previousPreviousV3Status !== null &&
+      previousPreviousV3Status === v3Overlay.status &&
+      previousV3Status !== v3Overlay.status
+    ) v3AbruptReversalCount += 1;
+    previousPreviousV3Status = previousV3Status;
+    previousV3Status = v3Overlay.status;
+  }
+
+  return {
+    mode: "completed_day_counterfactual",
+    comparableDayCount,
+    movementCoverageDayCount,
+    movementBaselineAvailableDayCount,
+    statusDifferenceCount,
+    actionDifferenceCount,
+    stricterStatusCount,
+    v3StatusTransitionCount,
+    v3AbruptReversalCount,
+    suspiciousRecoveryFromMovementOnlyCount,
+    noMovementBehaviorMismatchCount
   };
 }
 
@@ -448,7 +590,7 @@ export function runDailyAssessmentRetrospective(
     })
     .map((candidate) => candidate.candidate);
   return {
-    reportVersion: 2,
+    reportVersion: 3,
     mode: "read_only_shadow",
     policyVersion: "personal-baseline-shadow-v1",
     comparisonModes: ["stored_v1", "counterfactual_current_facts_v1"],
@@ -456,6 +598,7 @@ export function runDailyAssessmentRetrospective(
     candidates,
     sensitivityRankingMode,
     sensitivityRanking: ranking,
+    v2V3Comparison: compareV2AndV3(days, effectiveReportFrom),
     privacy: {
       containsDates: false,
       containsRawValues: false,
@@ -476,13 +619,18 @@ const safeStringValues = new Set([
   "insufficient_evidence",
   "responsive",
   "balanced",
-  "stable"
+  "stable",
+  "completed_day_counterfactual"
 ]);
 const safeKeys = new Set([
   "reportVersion", "mode", "policyVersion", "evaluatedDayCount", "candidates",
   "comparisonModes",
   "sensitivityRankingMode",
   "sensitivityRanking", "privacy", "containsDates", "containsRawValues",
+  "v2V3Comparison", "comparableDayCount", "movementCoverageDayCount",
+  "movementBaselineAvailableDayCount", "statusDifferenceCount", "actionDifferenceCount",
+  "stricterStatusCount", "v3StatusTransitionCount", "v3AbruptReversalCount",
+  "suspiciousRecoveryFromMovementOnlyCount", "noMovementBehaviorMismatchCount",
   "containsFactIdentifiers", "effects", "recommendationsChanged", "writesPerformed",
   "candidate", "baselineAvailableDayCounts", "insufficientHistoryDayCounts",
   "belowUsualCounts", "aboveUsualCounts", "markedDeviationCount",

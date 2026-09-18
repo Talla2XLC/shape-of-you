@@ -362,6 +362,7 @@ export async function loadRetrospectiveEvidence(
       if (row.bodyBattery !== null) day.values.body_battery = row.bodyBattery;
       if (row.bodyBatteryMin !== null) day.values.body_battery_min = row.bodyBatteryMin;
       if (row.bodyBatteryMax !== null) day.values.body_battery_max = row.bodyBatteryMax;
+      if (row.steps !== null) day.values.steps = row.steps;
     }
     for (const row of training) {
       const day = ensure(row.localDate);

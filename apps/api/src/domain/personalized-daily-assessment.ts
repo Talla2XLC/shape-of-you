@@ -6,10 +6,11 @@ import type {
 
 import {
   activePersonalBaselinePolicy,
+  activePersonalBaselineV2Policy,
   compareWithPersonalBaseline,
   isPersistentDeviation,
   personalBaselineCenter,
-  personalBaselineMetrics,
+  personalBaselineMetricsForPolicy,
   type PersonalBaselineMetric,
   type PersonalBaselinePolicy,
   type PersonalBaselineSample
@@ -28,6 +29,7 @@ export interface PersonalAssessmentEvidenceDay {
   readonly recoveryObservationIds: readonly string[];
   readonly recoveryAssessmentIds: readonly string[];
   readonly externalActivityIds: readonly string[];
+  readonly partialDayMetrics?: readonly PersonalBaselineMetric[];
 }
 
 /** Exact private calculation retained by the immutable v2 snapshot. */
@@ -79,7 +81,7 @@ function addDays(localDate: string, days: number): string {
 }
 
 function adverseDirection(metric: PersonalBaselineMetric): "below_usual" | "above_usual" {
-  return metric === "resting_heart_rate" || metric === "training_load"
+  return metric === "resting_heart_rate" || metric === "training_load" || metric === "steps"
     ? "above_usual"
     : "below_usual";
 }
@@ -108,6 +110,7 @@ function adverseCenter(
   if (metric === "training_load") {
     return isDailyAssessmentAbsoluteMetricConcern("training_load", center);
   }
+  if (metric === "steps") return false;
   return false;
 }
 
@@ -135,6 +138,7 @@ function summaryFor(comparisons: readonly DailyAssessmentPersonalComparison[]): 
     if (item.metric === "hrv_rmssd") return below ? "HRV ниже твоего обычного уровня" : "HRV выше твоего обычного уровня";
     if (item.metric === "resting_heart_rate") return below ? "пульс покоя ниже обычного" : "пульс покоя выше обычного";
     if (item.metric.startsWith("body_battery")) return below ? "Body Battery ниже обычного" : "Body Battery выше обычного";
+    if (item.metric === "steps") return below ? "шагов пока меньше обычного полного дня" : "ты уже прошёл больше своего обычного полного дня";
     return below ? "тренировочная нагрузка ниже твоего обычного уровня" : "тренировочная нагрузка выше твоего обычного уровня";
   });
   if (phrases.length > 0) {
@@ -151,11 +155,12 @@ function reasonFor(metric: PersonalBaselineMetric): DailyAssessmentReason {
   if (metric === "hrv_rmssd") return "hrv_below_usual";
   if (metric === "resting_heart_rate") return "resting_heart_rate_above_usual";
   if (metric === "training_load") return "training_load_above_usual";
+  if (metric === "steps") return "steps_above_usual";
   return "body_battery_below_usual";
 }
 
 type PersonalSignalGroup = "sleep" | "hrv" | "resting_heart_rate" |
-  "body_battery" | "training_load";
+  "body_battery" | "training_load" | "steps";
 
 function signalGroup(metric: PersonalBaselineMetric): PersonalSignalGroup {
   if (metric === "body_battery" || metric === "body_battery_min" ||
@@ -174,16 +179,17 @@ export function evaluatePersonalizedDailyAssessmentWithPolicy(
   const days = [...evidenceDays]
     .filter((day) => day.localDate <= targetLocalDate)
     .sort((left, right) => left.localDate.localeCompare(right.localDate));
+  const metrics = personalBaselineMetricsForPolicy(policy);
   const histories = Object.fromEntries(
-    personalBaselineMetrics.map((metric) => [metric, [] as PersonalBaselineSample[]])
+    metrics.map((metric) => [metric, [] as PersonalBaselineSample[]])
   ) as Record<PersonalBaselineMetric, PersonalBaselineSample[]>;
   const adverseHistories = Object.fromEntries(
-    personalBaselineMetrics.map((metric) => [metric, [] as boolean[]])
+    metrics.map((metric) => [metric, [] as boolean[]])
   ) as Record<PersonalBaselineMetric, boolean[]>;
   const trainingHistories = new Map<string, PersonalBaselineSample[]>();
   const trainingAdverseHistories = new Map<string, boolean[]>();
   let recoveryBufferThrough: string | null = null;
-  let targetComparisons: DailyAssessmentPersonalComparison[] = personalBaselineMetrics.map(
+  let targetComparisons: DailyAssessmentPersonalComparison[] = metrics.map(
     (metric) => emptyComparison(metric, "insufficient_history")
   );
   let targetSignals: PersonalOverlaySignals = {
@@ -192,7 +198,11 @@ export function evaluatePersonalizedDailyAssessmentWithPolicy(
     markedPersonalSignalCount: 0,
     adversePersonalSignalCount: 0,
     persistentPersonalSignalCount: 0,
-    adverseCenterPresent: false
+    adverseCenterPresent: false,
+    adverseNonMovementSignalCount: 0,
+    markedNonMovementSignalCount: 0,
+    movementAboveUsual: false,
+    movementMarked: false
   };
   let targetEligibility: PersonalBaselineTargetEligibility = {
     explicitlyExcluded: false,
@@ -212,7 +222,7 @@ export function evaluatePersonalizedDailyAssessmentWithPolicy(
     const markedSignalGroups = new Set<PersonalSignalGroup>();
     let adverseCenterPresent = false;
 
-    for (const metric of personalBaselineMetrics) {
+    for (const metric of metrics) {
       const current = day.values[metric];
       const seriesKey = day.trainingLoadSeriesKey;
       if (metric === "training_load" && (day.trainingLoadIncompatible || seriesKey === null)) {
@@ -226,7 +236,7 @@ export function evaluatePersonalizedDailyAssessmentWithPolicy(
       const history = metric === "training_load"
         ? (trainingHistories.get(seriesKey!) ?? [])
         : histories[metric];
-      const comparison = compareWithPersonalBaseline(
+      const rawComparison = compareWithPersonalBaseline(
         day.localDate,
         current,
         history,
@@ -235,6 +245,10 @@ export function evaluatePersonalizedDailyAssessmentWithPolicy(
           ? { minimumCalendarSpanDays: policy.minimumTrainingCalendarSpanDays }
           : undefined
       );
+      const comparison = metric === "steps" && day.partialDayMetrics?.includes("steps") &&
+        rawComparison.availability === "available" && rawComparison.position === "below_usual"
+        ? { ...rawComparison, position: "within_usual" as const, severity: "usual" as const }
+        : rawComparison;
       comparisons.push({ metric, ...comparison });
       if (comparison.availability === "available") {
         const adverse = comparison.position === adverseDirection(metric);
@@ -274,8 +288,13 @@ export function evaluatePersonalizedDailyAssessmentWithPolicy(
         eligibleBeforeStability,
         markedPersonalSignalCount,
         adversePersonalSignalCount: adverseSignalGroups.size,
-        persistentPersonalSignalCount: persistentSignalGroups.size,
-        adverseCenterPresent
+        persistentPersonalSignalCount: [...persistentSignalGroups]
+          .filter((group) => group !== "steps").length,
+        adverseCenterPresent,
+        adverseNonMovementSignalCount: [...adverseSignalGroups].filter((group) => group !== "steps").length,
+        markedNonMovementSignalCount: [...markedSignalGroups].filter((group) => group !== "steps").length,
+        movementAboveUsual: adverseSignalGroups.has("steps"),
+        movementMarked: markedSignalGroups.has("steps")
       };
       targetEligibility = {
         explicitlyExcluded: day.baselineExcluded,
@@ -287,9 +306,12 @@ export function evaluatePersonalizedDailyAssessmentWithPolicy(
       };
     }
 
-    for (const metric of personalBaselineMetrics) {
+    for (const metric of metrics) {
       const value = day.values[metric];
-      if (!eligible || value === undefined || !Number.isFinite(value)) continue;
+      if (
+        !eligible || value === undefined || !Number.isFinite(value) ||
+        day.partialDayMetrics?.includes(metric)
+      ) continue;
       const sample = { localDate: day.localDate, value, eligible: true };
       if (metric === "training_load") {
         const seriesKey = day.trainingLoadSeriesKey;
@@ -353,6 +375,33 @@ export function evaluatePersonalizedDailyAssessment(
     publicBaseline: {
       policyKey: "balanced",
       policyVersion: "personal-baseline-v1",
+      status: baseline.status,
+      summary: baseline.summary,
+      comparisons: baseline.comparisons
+    }
+  };
+}
+
+/** Evaluates the active V3 baseline including optional completed-day steps. */
+export function evaluatePersonalizedDailyAssessmentV3(
+  targetLocalDate: string,
+  evidenceDays: readonly PersonalAssessmentEvidenceDay[]
+): Omit<PersonalizedDailyAssessment, "publicBaseline"> & {
+  readonly publicBaseline: DailyAssessmentPersonalBaseline & {
+    readonly policyVersion: "personal-baseline-v2";
+  };
+} {
+  const evaluated = evaluatePersonalizedDailyAssessmentWithPolicy(
+    targetLocalDate,
+    evidenceDays,
+    activePersonalBaselineV2Policy
+  );
+  const { baseline, ...shared } = evaluated;
+  return {
+    ...shared,
+    publicBaseline: {
+      policyKey: "balanced",
+      policyVersion: "personal-baseline-v2",
       status: baseline.status,
       summary: baseline.summary,
       comparisons: baseline.comparisons

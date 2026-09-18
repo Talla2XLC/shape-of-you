@@ -28,7 +28,8 @@ const wellnessFields = [
   "spO2",
   "respiration",
   "BodyBatteryMin",
-  "BodyBatteryMax"
+  "BodyBatteryMax",
+  "steps"
 ] as const;
 const diagnosticHeaders = [
   "content-type",

@@ -17,7 +17,7 @@ export const DailyAssessmentReasonSchema = {
     "sleep_below_usual", "hrv_below_usual",
     "resting_heart_rate_above_usual", "body_battery_below_usual",
     "training_load_above_usual", "personal_trend_persistent",
-    "personal_baseline_unstable"
+    "personal_baseline_unstable", "steps_above_usual"
   ]
 } as const;
 
@@ -137,6 +137,20 @@ export const DailyAssessmentPersonalComparisonSchema = {
   }
 } as const;
 
+export const DailyAssessmentV3PersonalComparisonSchema = {
+  ...DailyAssessmentPersonalComparisonSchema,
+  properties: {
+    ...DailyAssessmentPersonalComparisonSchema.properties,
+    metric: {
+      enum: [
+        "sleep_minutes", "hrv_rmssd", "resting_heart_rate",
+        "body_battery", "body_battery_min", "body_battery_max",
+        "training_load", "steps"
+      ]
+    }
+  }
+} as const;
+
 export const DailyAssessmentPersonalBaselineSchema = {
   type: "object",
   additionalProperties: false,
@@ -151,6 +165,47 @@ export const DailyAssessmentPersonalBaselineSchema = {
       items: DailyAssessmentPersonalComparisonSchema,
       minItems: 7,
       maxItems: 7
+    }
+  }
+} as const;
+
+export const DailyAssessmentV3PersonalBaselineSchema = {
+  ...DailyAssessmentPersonalBaselineSchema,
+  properties: {
+    ...DailyAssessmentPersonalBaselineSchema.properties,
+    policyVersion: { const: "personal-baseline-v2" },
+    comparisons: {
+      type: "array",
+      items: DailyAssessmentV3PersonalComparisonSchema,
+      minItems: 8,
+      maxItems: 8
+    }
+  }
+} as const;
+
+export const DailyAssessmentMovementSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["status", "summary", "current"],
+  properties: {
+    status: { enum: ["available", "unavailable"] },
+    summary: { anyOf: [{ type: "string", minLength: 1, maxLength: 512 }, { type: "null" }] },
+    current: {
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: ["role", "steps", "asOf", "position", "severity"],
+          properties: {
+            role: { const: "partial_day" },
+            steps: { type: "integer", minimum: 0, maximum: 1000000 },
+            asOf: { type: "string", format: "date-time" },
+            position: { enum: ["baseline_unavailable", "within_or_below_full_day_usual", "above_full_day_usual"] },
+            severity: { anyOf: [{ enum: ["usual", "notable", "marked"] }, { type: "null" }] }
+          }
+        },
+        { type: "null" }
+      ]
     }
   }
 } as const;
@@ -200,6 +255,21 @@ export const DailyAssessmentResultSchema = {
         policyVersion: { const: "daily-assessment-v2" },
         personalBaseline: DailyAssessmentPersonalBaselineSchema
       }
+    },
+    {
+      type: "object", additionalProperties: false,
+      required: [
+        "state", ...Object.keys(readyProperties), "policyVersion",
+        "personalBaseline", "movement"
+      ],
+      properties: {
+        state: { const: "available" },
+        ...readyProperties,
+        usedFacts: DailyAssessmentV2UsedFactsSchema,
+        policyVersion: { const: "daily-assessment-v3" },
+        personalBaseline: DailyAssessmentV3PersonalBaselineSchema,
+        movement: DailyAssessmentMovementSchema
+      }
     }
   ]
 } as const;
@@ -213,7 +283,7 @@ export type DailyAssessmentReason =
   | "sleep_below_usual" | "hrv_below_usual"
   | "resting_heart_rate_above_usual" | "body_battery_below_usual"
   | "training_load_above_usual" | "personal_trend_persistent"
-  | "personal_baseline_unstable";
+  | "personal_baseline_unstable" | "steps_above_usual";
 export type DailyAssessmentMissingData =
   | "sleep" | "hrv" | "resting_heart_rate" | "body_battery"
   | "training" | "training_program" | "weight" | "nutrition";
@@ -279,10 +349,12 @@ export interface DailyAssessmentV2UsedFacts extends DailyAssessmentUsedFacts {
   readonly dailyContextNoteIds: readonly string[];
 }
 
-export type DailyAssessmentPersonalMetric =
+export type DailyAssessmentV2PersonalMetric =
   | "sleep_minutes" | "hrv_rmssd" | "resting_heart_rate"
   | "body_battery" | "body_battery_min" | "body_battery_max"
   | "training_load";
+
+export type DailyAssessmentPersonalMetric = DailyAssessmentV2PersonalMetric | "steps";
 
 /** One qualitative comparison with the Person's recent usual range. */
 export interface DailyAssessmentPersonalComparison {
@@ -297,10 +369,23 @@ export interface DailyAssessmentPersonalComparison {
 /** Public non-medical explanation of the active personal-baseline policy. */
 export interface DailyAssessmentPersonalBaseline {
   readonly policyKey: "balanced";
-  readonly policyVersion: "personal-baseline-v1";
+  readonly policyVersion: "personal-baseline-v1" | "personal-baseline-v2";
   readonly status: "available" | "partial" | "unavailable" | "unstable";
   readonly summary: string;
   readonly comparisons: readonly DailyAssessmentPersonalComparison[];
+}
+
+/** Optional current-day movement context retained by a V3 snapshot. */
+export interface DailyAssessmentMovement {
+  readonly status: "available" | "unavailable";
+  readonly summary: string | null;
+  readonly current: {
+    readonly role: "partial_day";
+    readonly steps: number;
+    readonly asOf: string;
+    readonly position: "baseline_unavailable" | "within_or_below_full_day_usual" | "above_full_day_usual";
+    readonly severity: "usual" | "notable" | "marked" | null;
+  } | null;
 }
 
 /** Stored deterministic decision for one Person-local date and evidence version. */
@@ -333,9 +418,20 @@ export interface DailyAssessmentAvailableV2 extends Omit<DailyAssessmentAvailabl
   readonly personalBaseline: DailyAssessmentPersonalBaseline;
 }
 
+/** Active V3 snapshot with optional typed partial-day movement context. */
+export interface DailyAssessmentAvailableV3 extends Omit<DailyAssessmentAvailableBase, "usedFacts"> {
+  readonly policyVersion: "daily-assessment-v3";
+  readonly usedFacts: DailyAssessmentV2UsedFacts;
+  readonly personalBaseline: DailyAssessmentPersonalBaseline & {
+    readonly policyVersion: "personal-baseline-v2";
+  };
+  readonly movement: DailyAssessmentMovement;
+}
+
 export type DailyAssessmentAvailable =
   | DailyAssessmentAvailableV1
-  | DailyAssessmentAvailableV2;
+  | DailyAssessmentAvailableV2
+  | DailyAssessmentAvailableV3;
 
 /** Read result that fails explicitly when Person timezone has not been configured. */
 export type DailyAssessmentResult =

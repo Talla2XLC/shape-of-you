@@ -23,6 +23,7 @@ export const initialOAuthResourceScopes = [
   "daily-context-note:write",
   "meal:write",
   "person:read",
+  "person-timezone:write",
   "recovery:write",
   "weight:write",
   "workout:write"

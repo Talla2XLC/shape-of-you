@@ -8,6 +8,7 @@ import { buildApp, getFastifyInstance } from "../src/app.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
 import { evaluateDailyAssessment } from "../src/domain/daily-assessment.js";
+import { evaluatePersonalizedDailyAssessment } from "../src/domain/personalized-daily-assessment.js";
 import { DailyAssessmentEvidenceChangedError } from "../src/domain/errors.js";
 import { derivePersonLocalDate } from "../src/coaching/daily-assessment.service.js";
 import { DailyAssessmentRepository } from "../src/storage/daily-assessment-repository.js";
@@ -135,6 +136,20 @@ describe("API-owned daily assessment", () => {
     expect(after.rows).toEqual(before.rows);
   });
 
+  it("does not let an unset-only browser write overwrite an explicit correction", async () => {
+    const repository = new DailyAssessmentRepository(database);
+    await repository.setTimezone(otherPersonId, "Europe/Moscow");
+
+    await expect(repository.setTimezone(
+      otherPersonId,
+      "Europe/Belgrade",
+      { ifUnset: true }
+    )).resolves.toMatchObject({ timezone: "Europe/Moscow" });
+    await expect(repository.getPreferences(otherPersonId)).resolves.toMatchObject({
+      timezone: "Europe/Moscow"
+    });
+  });
+
   it("requires Person timezone and versions snapshots when typed evidence changes", async () => {
     const fastify = getFastifyInstance(app);
     const unset = await fastify.inject({ method: "GET", url: "/v1/daily-assessment" });
@@ -155,12 +170,13 @@ describe("API-owned daily assessment", () => {
       timezone: "Europe/Moscow",
       status: "insufficient_data",
       recommendedAction: { type: "record_recovery_check_in" },
-      policyVersion: "daily-assessment-v2",
+      policyVersion: "daily-assessment-v3",
       personalBaseline: {
         policyKey: "balanced",
-        policyVersion: "personal-baseline-v1",
+        policyVersion: "personal-baseline-v2",
         status: "unavailable"
-      }
+      },
+      movement: { status: "unavailable", current: null }
     });
     expect(first.json()).not.toHaveProperty("personalBaselineCalculation");
 
@@ -194,18 +210,18 @@ describe("API-owned daily assessment", () => {
 
     const rows = await database.pool.query<{
       count: number;
-      all_v2: boolean;
+      all_v3: boolean;
       all_reproducible: boolean;
     }>(
       `select count(*)::int as count,
-              bool_and(policy_version = 'daily-assessment-v2') as all_v2,
+              bool_and(policy_version = 'daily-assessment-v3') as all_v3,
               bool_and(personal_baseline is not null
                        and personal_baseline_calculation is not null) as all_reproducible
          from coaching_daily_assessment_details
         where person_id = $1`,
       [personId]
     );
-    expect(rows.rows[0]).toEqual({ count: 2, all_v2: true, all_reproducible: true });
+    expect(rows.rows[0]).toEqual({ count: 2, all_v3: true, all_reproducible: true });
 
     const dailyRepository = new DailyAssessmentRepository(database);
     await dailyRepository.setTimezone(otherPersonId, "Europe/Moscow");
@@ -227,6 +243,22 @@ describe("API-owned daily assessment", () => {
     const otherPersonSnapshot = await dailyRepository.createOrGet(otherPersonId, sameEvidence);
     expect(otherPersonSnapshot.snapshotId).not.toBe(changed.json().snapshotId);
     expect(otherPersonSnapshot.evidenceChecksum).toBe(changed.json().evidenceChecksum);
+    const legacyPersonal = evaluatePersonalizedDailyAssessment(
+      changedBody.localDate,
+      []
+    );
+    const storedV2 = await dailyRepository.createOrGet(otherPersonId, {
+      ...sameEvidence,
+      policyVersion: "daily-assessment-v2",
+      evidenceChecksum: "5".repeat(64),
+      personalBaseline: legacyPersonal.publicBaseline,
+      personalBaselineCalculation: legacyPersonal.calculation
+    });
+    expect(storedV2).toMatchObject({
+      policyVersion: "daily-assessment-v2",
+      personalBaseline: { policyVersion: "personal-baseline-v1" }
+    });
+    expect(storedV2).not.toHaveProperty("movement");
 
     await database.pool.query(`
       create function test_hold_daily_snapshot() returns trigger language plpgsql as $$
@@ -342,14 +374,14 @@ describe("API-owned daily assessment", () => {
       quality: "reliable",
       connectionId: connection.id,
       consentId: consent.id,
-      dedupeKey: "daily-assessment:erasure:hrv",
+      dedupeKey: "daily-assessment:erasure:steps",
       sourceReference: {
         channel: "device",
         externalSystem: "daily-assessment-test",
-        externalRecordId: "daily-assessment-hrv-1",
+        externalRecordId: "daily-assessment-steps-1",
         occurredAt: now.toISOString()
       },
-      detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" }
+      detail: { type: "metric", metric: "steps", value: 4_800, unit: "count" }
     })).observation;
     const policyVersionId = await recovery.registerPolicyVersion({
       policyKey: "daily-assessment-erasure-policy",
@@ -386,6 +418,10 @@ describe("API-owned daily assessment", () => {
     expect(withRecovery.statusCode, withRecovery.body).toBe(200);
     expect(withRecovery.json().usedFacts.recoveryObservationIds).toContain(observation.id);
     expect(withRecovery.json().usedFacts.recoveryAssessmentIds).toContain(recoveryAssessment.id);
+    expect(withRecovery.json().movement).toMatchObject({
+      status: "available",
+      current: { role: "partial_day", steps: 4_800 }
+    });
     const retained = await database.pool.query(
       "select 1 from coaching_daily_assessment_recovery_evidence where recommendation_id = $1 and observation_id = $2",
       [withRecovery.json().snapshotId, observation.id]
@@ -434,6 +470,11 @@ describe("API-owned daily assessment", () => {
     expect(afterErasure.statusCode, afterErasure.body).toBe(200);
     expect(afterErasure.json().snapshotId).not.toBe(withRecovery.json().snapshotId);
     expect(afterErasure.json().usedFacts.recoveryObservationIds).not.toContain(observation.id);
+    expect(afterErasure.json().movement).toEqual({
+      status: "unavailable",
+      summary: null,
+      current: null
+    });
   });
 
   it("versions current evidence after a Recovery correction and withdrawal", async () => {
@@ -457,15 +498,15 @@ describe("API-owned daily assessment", () => {
     };
     const original = (await recovery.createObservation(personId, {
       ...base,
-      dedupeKey: "daily-assessment:correction:hrv:a",
-      detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" }
+      dedupeKey: "daily-assessment:correction:steps:a",
+      detail: { type: "metric", metric: "steps", value: 4_800, unit: "count" }
     })).observation;
     const versionA = await fastify.inject({ method: "GET", url: "/v1/daily-assessment" });
     const ownerClient = await database.pool.connect();
     try {
       expect(await readRecoveryBaselineDays(
         ownerClient, personId, original.localDate, original.localDate
-      )).toEqual([expect.objectContaining({ hrvRmssd: 48 })]);
+      )).toEqual([expect.objectContaining({ steps: 4_800 })]);
       expect(await readRecoveryBaselineDays(
         ownerClient, otherPersonId, original.localDate, original.localDate
       )).toEqual([]);
@@ -475,19 +516,20 @@ describe("API-owned daily assessment", () => {
 
     const corrected = (await recovery.correctObservation(personId, original.id, {
       ...base,
-      dedupeKey: "daily-assessment:correction:hrv:b",
-      detail: { type: "metric", metric: "hrv_rmssd", value: 52, unit: "ms" },
+      dedupeKey: "daily-assessment:correction:steps:b",
+      detail: { type: "metric", metric: "steps", value: 5_200, unit: "count" },
       reason: "Corrected wearable reading"
     })).observation;
     const versionB = await fastify.inject({ method: "GET", url: "/v1/daily-assessment" });
     expect(versionB.json().snapshotId).not.toBe(versionA.json().snapshotId);
     expect(versionB.json().usedFacts.recoveryObservationIds).toContain(corrected.id);
     expect(versionB.json().usedFacts.recoveryObservationIds).not.toContain(original.id);
+    expect(versionB.json().movement.current.steps).toBe(5_200);
     const correctedClient = await database.pool.connect();
     try {
       expect(await readRecoveryBaselineDays(
         correctedClient, personId, corrected.localDate, corrected.localDate
-      )).toEqual([expect.objectContaining({ hrvRmssd: 52 })]);
+      )).toEqual([expect.objectContaining({ steps: 5_200 })]);
     } finally {
       correctedClient.release();
     }
@@ -495,12 +537,17 @@ describe("API-owned daily assessment", () => {
     await recovery.withdrawObservation(
       personId,
       corrected.id,
-      "daily-assessment:correction:hrv:withdrawn",
+      "daily-assessment:correction:steps:withdrawn",
       "Provider removed the field"
     );
     const withdrawn = await fastify.inject({ method: "GET", url: "/v1/daily-assessment" });
     expect(withdrawn.json().snapshotId).not.toBe(versionB.json().snapshotId);
     expect(withdrawn.json().usedFacts.recoveryObservationIds).not.toContain(corrected.id);
+    expect(withdrawn.json().movement).toEqual({
+      status: "unavailable",
+      summary: null,
+      current: null
+    });
     const withdrawnClient = await database.pool.connect();
     try {
       expect(await readRecoveryBaselineDays(
@@ -566,16 +613,64 @@ describe("API-owned daily assessment", () => {
     const body = response.json();
     expect(evaluateDailyAssessment(body.usedFacts).status).toBe("caution");
     expect(body).toMatchObject({
-      policyVersion: "daily-assessment-v2",
+      policyVersion: "daily-assessment-v3",
       status: "recovery_priority",
       personalBaseline: {
         policyKey: "balanced",
-        policyVersion: "personal-baseline-v1",
+        policyVersion: "personal-baseline-v2",
         status: "partial"
       }
     });
     expect(body.personalBaseline.summary).toContain("HRV ниже твоего обычного уровня");
     expect(body.personalBaseline.summary).toContain("пульс покоя выше обычного");
     expect(body.usedFacts.dailyContextNoteIds).toEqual(expect.any(Array));
+  });
+
+  it("uses the greatest eligible current-day step count and rejects a future update", async () => {
+    const repository = new RecoveryRepository(database);
+    const timezone = "Europe/Moscow";
+    const localDate = derivePersonLocalDate(timezone);
+    const now = new Date();
+    const record = (value: number, occurredAt: string, suffix: string) =>
+      repository.createObservation(personId, {
+        kind: "metric" as const,
+        observedFrom: null,
+        observedUntil: null,
+        temporalPrecision: "local_date" as const,
+        localDate,
+        timezone,
+        quality: "reliable" as const,
+        connectionId: null,
+        consentId: null,
+        dedupeKey: `daily-v3-current-steps:${suffix}`,
+        sourceReference: {
+          channel: "manual" as const,
+          externalSystem: null,
+          externalRecordId: null,
+          occurredAt
+        },
+        detail: { type: "metric" as const, metric: "steps" as const, value, unit: "count" as const }
+      });
+    await record(1_000, new Date(now.valueOf() - 60_000).toISOString(), "lower");
+    await record(2_000, now.toISOString(), "higher");
+    await record(999_999, new Date(now.valueOf() + 10 * 60_000).toISOString(), "future");
+
+    const response = await getFastifyInstance(app).inject({
+      method: "GET",
+      url: "/v1/daily-assessment"
+    });
+
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({
+      policyVersion: "daily-assessment-v3",
+      movement: {
+        status: "available",
+        current: {
+          role: "partial_day",
+          steps: 2_000,
+          position: "baseline_unavailable"
+        }
+      }
+    });
   });
 });

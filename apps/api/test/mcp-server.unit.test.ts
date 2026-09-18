@@ -22,6 +22,7 @@ import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
   MCP_MEAL_WRITE_SCOPE,
+  MCP_PERSON_TIMEZONE_WRITE_SCOPE,
   MCP_READ_SCOPE,
   MCP_RECOVERY_WRITE_SCOPE,
   MCP_WEIGHT_WRITE_SCOPE,
@@ -385,7 +386,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(23);
+    expect(body.result.tools).toHaveLength(24);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -424,6 +425,7 @@ describe("MCP HTTP adapter", () => {
       list_daily_context_notes: MCP_READ_SCOPE,
       record_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       correct_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+      set_current_timezone: MCP_PERSON_TIMEZONE_WRITE_SCOPE,
       get_daily_assessment: MCP_READ_SCOPE,
       get_daily_projection: MCP_READ_SCOPE
     });
@@ -447,6 +449,18 @@ describe("MCP HTTP adapter", () => {
     const validateDailyAssessment = dailyAssessmentAjv.compile(dailyAssessmentTool.outputSchema);
     expect(validateDailyAssessment({ state: "timezone_required", timezone: null })).toBe(true);
     expect(validateDailyAssessment({ state: "timezone_required", timezone: "UTC" })).toBe(false);
+    const timezoneTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "set_current_timezone"
+    );
+    expect(timezoneTool).toMatchObject({
+      inputSchema: { $id: "SetCurrentTimezoneInput", additionalProperties: false },
+      outputSchema: { $id: "PersonPreferences" },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true },
+      securitySchemes: [{ scopes: [MCP_PERSON_TIMEZONE_WRITE_SCOPE] }]
+    });
+    expect(timezoneTool.inputSchema.properties).toEqual({
+      timezone: expect.objectContaining({ type: "string" })
+    });
     for (const toolName of [
       "record_weight_measurement",
       "correct_weight_measurement"
@@ -1281,7 +1295,8 @@ describe("MCP HTTP adapter", () => {
         MCP_MEAL_WRITE_SCOPE,
         MCP_WORKOUT_WRITE_SCOPE,
         MCP_RECOVERY_WRITE_SCOPE,
-        MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE
+        MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
+        MCP_PERSON_TIMEZONE_WRITE_SCOPE
       ].join(" ")
     })
       .setProtectedHeader({ alg: "ES256", kid: "coach-policy-v1" })
@@ -1305,6 +1320,10 @@ describe("MCP HTTP adapter", () => {
     const readDailyAssessment = vi.fn<() => Promise<DailyAssessmentResult>>().mockResolvedValue({
       state: "timezone_required" as const,
       timezone: null
+    });
+    const updatePreferences = vi.fn().mockResolvedValue({
+      timezone: "Europe/Belgrade",
+      updatedAt: "2026-09-18T00:00:00.000Z"
     });
     const availableDailyAssessment: DailyAssessmentResult = {
       state: "available",
@@ -1362,10 +1381,10 @@ describe("MCP HTTP adapter", () => {
       alternatives: [],
       limitations: ["not_medical_advice", "nutrition_records_may_be_incomplete"],
       confidence: 0.72,
-      policyVersion: "daily-assessment-v2",
+      policyVersion: "daily-assessment-v3",
       personalBaseline: {
         policyKey: "balanced",
-        policyVersion: "personal-baseline-v1",
+        policyVersion: "personal-baseline-v2",
         status: "partial",
         summary: "HRV is below the recent personal range.",
         comparisons: [
@@ -1375,8 +1394,20 @@ describe("MCP HTTP adapter", () => {
           { metric: "body_battery", availability: "insufficient_history", position: null, severity: null, eligibleDayCount: 0, method: null },
           { metric: "body_battery_min", availability: "insufficient_history", position: null, severity: null, eligibleDayCount: 0, method: null },
           { metric: "body_battery_max", availability: "insufficient_history", position: null, severity: null, eligibleDayCount: 0, method: null },
-          { metric: "training_load", availability: "incompatible", position: null, severity: null, eligibleDayCount: 0, method: null }
+          { metric: "training_load", availability: "incompatible", position: null, severity: null, eligibleDayCount: 0, method: null },
+          { metric: "steps", availability: "available", position: "above_usual", severity: "notable", eligibleDayCount: 18, method: "median_mad" }
         ]
+      },
+      movement: {
+        status: "available",
+        summary: "Ты уже прошёл больше своего обычного полного дня.",
+        current: {
+          role: "partial_day",
+          steps: 12_345,
+          asOf: "2026-09-02T09:15:00.000Z",
+          position: "above_full_day_usual",
+          severity: "notable"
+        }
       },
       evidenceChecksum: "a".repeat(64),
       createdAt: "2026-09-02T09:00:00.000Z"
@@ -1436,7 +1467,8 @@ describe("MCP HTTP adapter", () => {
           projection: async () => result("get_daily_projection")
         },
         dailyAssessment: {
-          read: readDailyAssessment
+          read: readDailyAssessment,
+          updatePreferences
         }
       } as unknown as Parameters<typeof registerMcpRoutes>[0]["services"]
     });
@@ -1533,6 +1565,7 @@ describe("MCP HTTP adapter", () => {
       ["list_daily_context_notes", { localDate: "2026-09-02" }, "list_daily_context_notes"],
       ["record_daily_context_note", note, "record_daily_context_note"],
       ["correct_daily_context_note", { id, ...note, dedupeKey: "coach-policy-note-correction", reason: "Correction" }, "correct_daily_context_note"],
+      ["set_current_timezone", { timezone: "Europe/Belgrade" }, "Europe/Belgrade"],
       ["get_daily_assessment", {}, "timezone_required"],
       ["get_daily_projection", { localDate: "2026-09-02", timezone: "Europe/Moscow" }, "get_daily_projection"]
     ] as const;
@@ -1565,7 +1598,12 @@ describe("MCP HTTP adapter", () => {
         expect(toolResult.content[0].text, name).toMatch(
           /MANDATORY FINAL REPLY:[\s\S]*never silently omit the next step\.$/u
         );
-        if (name === "get_daily_assessment") {
+        if (name === "set_current_timezone") {
+          expect(toolResult.structuredContent, name).toMatchObject({ timezone: marker });
+          expect(toolResult.content[0].text, name).toContain(
+            "Immediately retry get_daily_assessment"
+          );
+        } else if (name === "get_daily_assessment") {
           expect(toolResult.structuredContent, name).toEqual({
             state: "timezone_required",
             timezone: null
@@ -1602,6 +1640,44 @@ describe("MCP HTTP adapter", () => {
         );
       }
       expect(createWeight).toHaveBeenCalledWith(weight);
+      expect(updatePreferences).toHaveBeenCalledWith({ timezone: "Europe/Belgrade" });
+      const readOnlyToken = await new SignJWT({
+        client_id: "chatgpt-runtime",
+        scope: MCP_READ_SCOPE
+      })
+        .setProtectedHeader({ alg: "ES256", kid: "coach-policy-v1" })
+        .setIssuer("https://identity.example.test")
+        .setSubject("identity-account-1")
+        .setAudience("https://api.example.test/api/mcp")
+        .setIssuedAt()
+        .setExpirationTime("10m")
+        .sign(pair.privateKey);
+      const deniedTimezoneWrite = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${readOnlyToken}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "timezone-read-only-denied",
+          method: "tools/call",
+          params: {
+            name: "set_current_timezone",
+            arguments: { timezone: "Europe/Belgrade" }
+          }
+        }
+      });
+      expect(deniedTimezoneWrite.json().result).toMatchObject({
+        isError: true,
+        _meta: {
+          "mcp/www_authenticate": [expect.stringContaining(
+            'scope="person-timezone:write", error="insufficient_scope"'
+          )]
+        }
+      });
+      expect(updatePreferences).toHaveBeenCalledTimes(1);
       expect(readDailyAssessment).toHaveBeenCalledTimes(2);
       expect(successfulContent.get("record_weight_measurement")).toContain(
         "owning-domain read-back"
@@ -1729,7 +1805,7 @@ describe("MCP HTTP adapter", () => {
         },
         payload: {
           jsonrpc: "2.0",
-          id: "direct-daily-assessment-v2",
+          id: "direct-daily-assessment-v3",
           method: "tools/call",
           params: { name: "get_daily_assessment", arguments: {} }
         }
@@ -1737,6 +1813,8 @@ describe("MCP HTTP adapter", () => {
       expect(directDailyAssessment.json().result.structuredContent).toEqual(
         availableDailyAssessment
       );
+      expect(directDailyAssessment.json().result.structuredContent.movement.current)
+        .toMatchObject({ role: "partial_day", steps: 12_345 });
       expect(directDailyAssessment.json().result.content[0].text).toContain(
         "Do not recalculate, replace, or embellish the policy decision"
       );

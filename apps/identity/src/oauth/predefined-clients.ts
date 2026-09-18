@@ -20,7 +20,7 @@ export interface PredefinedOAuthClientManifest {
 
 /** Predefined client manifest owned by the Identity release. */
 export const predefinedOAuthClientManifest: PredefinedOAuthClientManifest = {
-  version: 4,
+  version: 5,
   clients: [
     {
       clientId: "shape-of-you-web-staging",
@@ -35,6 +35,7 @@ export const predefinedOAuthClientManifest: PredefinedOAuthClientManifest = {
         "openid",
         "offline_access",
         "person:read",
+        "person-timezone:write",
         "weight:write",
         "body-measurement:write",
         "daily-context-note:write",
@@ -92,7 +93,7 @@ export function resolvePredefinedOAuthClients(
   webRedirectUri: string | undefined,
   manifest: PredefinedOAuthClientManifest = predefinedOAuthClientManifest
 ): readonly OAuthPublicClientInput[] {
-  if (manifest.version !== 4) {
+  if (manifest.version !== 5) {
     throw new Error("Predefined OAuth client manifest version is unsupported");
   }
   const chatGptUri = parseChatGptRedirectUri(chatGptRedirectUri);

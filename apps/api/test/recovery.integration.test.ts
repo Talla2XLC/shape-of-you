@@ -102,6 +102,8 @@ describe("Recovery PostgreSQL vertical", () => {
       identity: "2026-09-06",
       localDate: "2026-09-06",
       timezone: "UTC",
+      updatedAt: "2026-09-06T20:15:00.000Z",
+      steps: 12_345,
       totalSleepMinutes: 400,
       sleepScore: 82,
       restingHeartRate: 52,
@@ -129,7 +131,8 @@ describe("Recovery PostgreSQL vertical", () => {
       "oxygen_saturation",
       "respiration_rate",
       "resting_heart_rate",
-      "sleep_score"
+      "sleep_score",
+      "steps"
     ]);
     provider.reconciliation = {
       wellness: [{
@@ -158,7 +161,8 @@ describe("Recovery PostgreSQL vertical", () => {
         oxygenSaturation: null,
         respirationRate: null,
         bodyBatteryMinimum: null,
-        bodyBatteryMaximum: null
+        bodyBatteryMaximum: null,
+        steps: null
       }],
       activities: []
     };
@@ -168,12 +172,12 @@ describe("Recovery PostgreSQL vertical", () => {
       "select count(*)::text as count, count(withdrawn_at)::text as withdrawals from recovery_observations where person_id = $1 and connection_id = $2",
       [personD, recoveryConnectionId]
     );
-    expect(history.rows[0]).toEqual({ count: "30", withdrawals: "9" });
+    expect(history.rows[0]).toEqual({ count: "32", withdrawals: "10" });
     expect((await repository.listObservations(personD, { limit: 50 })).items).toHaveLength(0);
     await integrations.beginDisconnect(personD, "test disconnect");
     provider.reconciliation = { wellness: [{ ...wellness, totalSleepMinutes: 500 }], activities: [] };
     await service.reconcileConnection(connection);
-    expect((await database.pool.query("select 1 from recovery_observations where person_id = $1", [personD])).rowCount).toBe(30);
+    expect((await database.pool.query("select 1 from recovery_observations where person_id = $1", [personD])).rowCount).toBe(32);
 
     await database.pool.query("update integration_connections set next_attempt_at = now() - interval '1 second' where id = $1", [id]);
     const firstRetry = await integrations.claimRemoteDisconnectDue("worker-timeout", 30_000);

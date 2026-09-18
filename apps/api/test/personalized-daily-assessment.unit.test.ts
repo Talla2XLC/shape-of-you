@@ -5,6 +5,7 @@ import type { DailyNextAction } from "@shape-of-you/contracts";
 import { applyConservativePersonalOverlay } from "../src/domain/daily-assessment-personal-overlay.js";
 import {
   evaluatePersonalizedDailyAssessment,
+  evaluatePersonalizedDailyAssessmentV3,
   type PersonalAssessmentEvidenceDay
 } from "../src/domain/personalized-daily-assessment.js";
 
@@ -173,5 +174,53 @@ describe("authoritative personal daily assessment", () => {
     });
 
     expect(unchanged.status).toBe("insufficient_data");
+  });
+
+  it("uses a partial-day steps count only when it already exceeds the full-day range", () => {
+    const history = Array.from({ length: 14 }, (_, index) => day(index, {
+      steps: 7_800 + (index % 3) * 200
+    }));
+    const target = day(14, { steps: 12_000 }, { partialDayMetrics: ["steps"] });
+
+    const result = evaluatePersonalizedDailyAssessmentV3(target.localDate, [...history, target]);
+    const overlay = applyConservativePersonalOverlay("ready", readyAction, result.signals);
+
+    expect(result.publicBaseline.policyVersion).toBe("personal-baseline-v2");
+    expect(result.publicBaseline.comparisons).toHaveLength(8);
+    expect(result.publicBaseline.comparisons.find((item) => item.metric === "steps"))
+      .toMatchObject({ availability: "available", position: "above_usual" });
+    expect(result.reasons).toContain("steps_above_usual");
+    expect(overlay.status).toBe("ready");
+  });
+
+  it("does not call an incomplete lower steps count below usual", () => {
+    const history = Array.from({ length: 14 }, (_, index) => day(index, {
+      steps: 8_000 + (index % 3) * 200
+    }));
+    const target = day(14, { steps: 2_000 }, { partialDayMetrics: ["steps"] });
+
+    const result = evaluatePersonalizedDailyAssessmentV3(target.localDate, [...history, target]);
+
+    expect(result.publicBaseline.comparisons.find((item) => item.metric === "steps"))
+      .toMatchObject({ availability: "available", position: "within_usual", severity: "usual" });
+    expect(result.publicBaseline.summary).not.toContain("шагов пока меньше");
+    expect(result.reasons).not.toContain("steps_above_usual");
+  });
+
+  it("allows high steps to strengthen a decision only with another adverse signal", () => {
+    const history = Array.from({ length: 14 }, (_, index) => day(index, {
+      hrv_rmssd: 60 + (index % 3),
+      steps: 8_000 + (index % 3) * 200
+    }));
+    const target = day(14, { hrv_rmssd: 45, steps: 8_700 }, {
+      partialDayMetrics: ["steps"]
+    });
+
+    const result = evaluatePersonalizedDailyAssessmentV3(target.localDate, [...history, target]);
+    const overlay = applyConservativePersonalOverlay("ready", readyAction, result.signals);
+
+    expect(result.signals.movementAboveUsual).toBe(true);
+    expect(result.signals.adverseNonMovementSignalCount).toBe(1);
+    expect(overlay.status).toBe("caution");
   });
 });

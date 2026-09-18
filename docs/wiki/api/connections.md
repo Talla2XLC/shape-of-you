@@ -63,8 +63,12 @@ sync status after disconnect and reauthorization.
 The wellness request uses an explicit Intervals.icu field whitelist. Supported
 values are sleep duration, sleep score, resting heart rate, average sleeping
 heart rate, HRV rMSSD, SpO2, respiration rate, and separate daily Body Battery
-minimum and maximum. They become provider-neutral typed Recovery observations;
-unknown provider fields and raw response JSON are discarded at the adapter
+minimum and maximum, plus optional integer daily steps. They become
+provider-neutral typed Recovery observations; steps use `steps/count` and
+preserve the wellness `updated` instant for partial-day `asOf`. An absent steps
+field creates no zero, coverage requirement, or user prompt. Completed-day
+counts may inform a personal baseline while current-day counts remain partial.
+Unknown provider fields and raw response JSON are discarded at the adapter
 boundary.
 
 Garmin Body Battery is not a standard Intervals field. The athlete must enable
@@ -104,6 +108,7 @@ not expose connection controls or imported-record counts.
 
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 - [Import Intervals.icu history only on user request](../../adr/20260911-import-intervals-history-only-on-user-request.md)
+- [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md)
 - [Import supported Intervals wellness as typed Recovery](../../adr/20260912-import-supported-intervals-wellness-as-typed-recovery.md)
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)

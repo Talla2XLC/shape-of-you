@@ -43,14 +43,16 @@ statement appends a correction that supersedes the prior fact.
 `DailyContextNote` has typed `contextKind` and `baselineEligibility` fields for
 explicit context such as user-declared travel. Baseline policy does not infer
 travel or eligibility from free text, a provider, timezone changes, or an LLM.
-The live v2 assessment and read-only retrospective path both use the same
+The live v3 assessment and read-only retrospective path both use the same
 typed exclusions.
 
 Personal baselines are derived on read from current owning-domain facts rather
 than maintained as mutable records. Bounded history selection is deterministic,
 excludes the assessed day, and preserves equal weight per eligible local date.
-The same policy-parameterized pure evaluator serves live balanced v2 and every
-retrospective candidate. Late imports, corrections, withdrawals, supersession,
+The same policy-parameterized pure evaluator serves the live balanced V3 policy
+and every retrospective candidate. Completed local-day steps may enter the
+full-day baseline; a current `partial_day` count is retained in the immutable
+calculation but never teaches that baseline. Late imports, corrections, withdrawals, supersession,
 deletion, and privacy erasure change the current evidence set; the next live
 read creates or reuses the checksum-addressed immutable snapshot. Historical
 non-erased snapshots are not rewritten, and the retrospective command performs
@@ -60,7 +62,9 @@ Snapshot creation is serialized with every assessment-relevant Person writer
 through one transaction-scoped advisory lock, including typed API writes,
 Intake routing, and controlled import apply. The final transaction rechecks the
 timezone/preference version and complete evidence revision before insertion;
-three changing compositions fail closed. Legacy v1 snapshots remain readable.
+three changing compositions fail closed. Legacy v1 and v2 snapshots remain
+readable; V3 additionally pins the movement payload and personal-baseline-v2
+calculation.
 Additive migrations validate and backfill owner-safe Training activity and
 RecoveryAssessment evidence links so Recovery erasure can remove old and new
 derived snapshots before deleting their source graph.
@@ -93,6 +97,8 @@ without write or fallback authority.
   defines the current-facts replay, ambiguity envelope, and separated analytics.
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md)
   defines live activation, immutable calculation, and the consistency fence.
+- [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md)
+  defines V3 movement roles, unset-only timezone capture, and compatibility.
 
 ## Open questions
 

@@ -342,6 +342,13 @@ assessment through fresh model-facing content of its stable
 `get_daily_projection` read without changing that tool's structured contract.
 The response preserves the API-returned status and one action rather than
 adding prompt-owned nutrition, training, or recovery proposals.
+The repository catalog adds `set_current_timezone` as its 24th tool with the
+dedicated `person-timezone:write` scope. It changes only the Person IANA
+timezone after an explicit unambiguous user statement and immediately retries
+`get_daily_assessment`; a `person:read` token cannot call it. Authenticated Web
+uses the existing preferences HTTP boundary with an atomic unset-only write, so
+a stale browser cannot overwrite a concurrent explicit correction. The consent
+surface names this narrow permission independently from fitness-fact writes.
 Missing tools, MCP/OAuth authority, or typed read-back stop the workflow without
 another data source or chat-history fallback. A failed, unavailable,
 incomplete, or inconsistent required typed read leaves the affected field
@@ -450,6 +457,7 @@ lifecycle.
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 - [Backward-compatible MCP tool schemas](../../adr/20260902-evolve-mcp-tool-schemas-backward-compatibly.md)
 - [Portable Daily Coach protocol](../../adr/20260828-keep-daily-coach-protocol-portable-across-approved-mcp-clients.md)
+- [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md)
 
 ## Open questions
 

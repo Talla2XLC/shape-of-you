@@ -20,6 +20,19 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-18 — Zero-friction day context and optional movement-aware V3
+
+- Added atomic unset-only browser IANA timezone capture and a narrow
+  `person-timezone:write` MCP correction path with same-turn assessment retry.
+- Added provider-neutral `steps/count` ingestion from Intervals wellness,
+  robust completed-day personal baselines, and explicit current `partial_day`
+  movement that cannot imply low activity or change a decision alone.
+- Added immutable `daily-assessment-v3` movement snapshots while preserving V1
+  and V2 reads, plus correction, withdrawal, erasure, migration, and privacy-safe
+  aggregate V2/V3 retrospective coverage.
+- No commit, push, deployment, staging/production data access, backfill, or live
+  retrospective was performed as part of this repository change.
+
 ### 2026-09-17 — End-to-end staging migration bounds
 
 - Added an exact full-journal Identity preflight: current metadata returns
