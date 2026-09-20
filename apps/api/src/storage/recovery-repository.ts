@@ -142,7 +142,13 @@ export interface RecoveryStore {
   createObservation(personId: string, input: CreateRecoveryObservation): Promise<CreatedRecoveryObservation>;
   correctObservation(personId: string, id: string, input: CorrectRecoveryObservation): Promise<CreatedRecoveryObservation>;
   /** Appends an immutable terminal correction that removes a provider field from current projections. */
-  withdrawObservation(personId: string, id: string, dedupeKey: string, reason: string): Promise<CreatedRecoveryObservation>;
+  withdrawObservation(
+    personId: string,
+    id: string,
+    dedupeKey: string,
+    reason: string,
+    ownership?: { readonly connectionId: string; readonly consentId: string }
+  ): Promise<CreatedRecoveryObservation>;
   findObservation(personId: string, id: string): Promise<RecoveryObservation | null>;
   listObservations(personId: string, query: ListRecoveryObservationsQuery): Promise<RecoveryObservationList>;
   /** Reads every current observation for one exact Person-local calendar date. */
@@ -519,7 +525,13 @@ export class RecoveryRepository implements RecoveryStore {
     });
   }
 
-  public withdrawObservation(personId: string, id: string, dedupeKey: string, reason: string): Promise<CreatedRecoveryObservation> {
+  public withdrawObservation(
+    personId: string,
+    id: string,
+    dedupeKey: string,
+    reason: string,
+    ownership?: { readonly connectionId: string; readonly consentId: string }
+  ): Promise<CreatedRecoveryObservation> {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, personId);
       const originals = await transaction.select().from(recoveryObservations).where(and(
@@ -538,8 +550,8 @@ export class RecoveryRepository implements RecoveryStore {
         localDate: hydrated.localDate,
         timezone: hydrated.timezone,
         quality: hydrated.quality,
-        connectionId: hydrated.connectionId,
-        consentId: hydrated.consentId,
+        connectionId: ownership?.connectionId ?? hydrated.connectionId,
+        consentId: ownership?.consentId ?? hydrated.consentId,
         dedupeKey,
         sourceReference: {
           channel: hydrated.sourceReference.channel,

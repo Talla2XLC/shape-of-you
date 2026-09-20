@@ -207,7 +207,8 @@ export class IntegrationService {
     for (const wellness of result.wellness) changed = await this.importWellness(connection, wellness) || changed;
     for (const activity of result.activities) {
       const checksum = normalizedChecksum(activity);
-      if (!await this.store!.recordInbox(connection.id, "activity", activity.identity, checksum)) continue;
+      const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "activity", activity.identity, checksum);
+      if (inbox.state !== "process") continue;
       const outcome = await this.training.importExternalActivity({
         connectionId: connection.id, personId: connection.personId, consentId: connection.consentId,
         providerIdentity: activity.identity, normalizedChecksum: checksum,
@@ -221,7 +222,7 @@ export class IntegrationService {
         sourceProvider: "intervals_icu", garminAttributed: activity.garminAttributed
       });
       if (outcome === "stopped") continue;
-      await this.store!.completeInbox(connection.id, "activity", activity.identity, checksum);
+      await this.store!.completeInbox(connection.id, connection.consentId, inbox.receiptId);
       changed = outcome !== "unchanged" || changed;
     }
     return changed;
@@ -229,7 +230,8 @@ export class IntegrationService {
 
   private async importWellness(connection: ActiveIntegrationConnection, wellness: ProviderWellnessRecord): Promise<boolean> {
     const recordChecksum = normalizedChecksum(wellness);
-    if (!await this.store!.recordInbox(connection.id, "wellness", wellness.identity, recordChecksum)) return false;
+    const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "wellness", wellness.identity, recordChecksum);
+    if (inbox.state !== "process") return false;
     const facts: readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] = [
       ...(wellness.totalSleepMinutes === null ? [] : [{ key: "sleep", detail: { type: "sleep" as const, totalSleepMinutes: wellness.totalSleepMinutes, sleepQuality: null } }]),
       ...metric("sleep_score", "score", wellness.sleepScore),
@@ -246,7 +248,10 @@ export class IntegrationService {
     for (const fact of facts) {
       const checksum = normalizedChecksum({ localDate: wellness.localDate, detail: fact.detail });
       const current = await this.store!.recoveryFact(connection.id, wellness.identity, fact.key);
-      if (current?.checksum === checksum) continue;
+      if (current?.checksum === checksum) {
+        await this.store!.linkRecoveryFact(connection.id, connection.consentId, wellness.identity, inbox.receiptId, fact.key, checksum, current.observationId);
+        continue;
+      }
       const base: CreateRecoveryObservation = {
         kind: fact.detail.type,
         observedFrom: null,
@@ -269,7 +274,7 @@ export class IntegrationService {
       const persisted = current
         ? await this.recovery.correctObservation(connection.personId, current.observationId, { ...base, reason: "provider_record_changed" })
         : await this.recovery.createObservation(connection.personId, base);
-      await this.store!.linkRecoveryFact(connection.id, wellness.identity, fact.key, checksum, persisted.observation.id);
+      await this.store!.linkRecoveryFact(connection.id, connection.consentId, wellness.identity, inbox.receiptId, fact.key, checksum, persisted.observation.id);
       changed = persisted.created || changed;
     }
     const present = new Set(facts.map((fact) => fact.key));
@@ -287,17 +292,22 @@ export class IntegrationService {
     ] as const) {
       if (present.has(factKey)) continue;
       const current = await this.store!.recoveryFact(connection.id, wellness.identity, factKey);
-      if (!current || current.checksum === "removed") continue;
+      if (!current) continue;
+      if (current.checksum === "removed") {
+        await this.store!.linkRecoveryFact(connection.id, connection.consentId, wellness.identity, inbox.receiptId, factKey, "removed", current.observationId);
+        continue;
+      }
       const withdrawn = await this.recovery.withdrawObservation(
         connection.personId,
         current.observationId,
         `intervals:${wellness.identity}:${factKey}:removed:${current.observationId}`,
-        "provider_field_removed"
+        "provider_field_removed",
+        { connectionId: connection.recoveryConnectionId, consentId: connection.consentId }
       );
-      await this.store!.linkRecoveryFact(connection.id, wellness.identity, factKey, "removed", withdrawn.observation.id);
+      await this.store!.linkRecoveryFact(connection.id, connection.consentId, wellness.identity, inbox.receiptId, factKey, "removed", withdrawn.observation.id);
       changed = withdrawn.created || changed;
     }
-    await this.store!.completeInbox(connection.id, "wellness", wellness.identity, recordChecksum);
+    await this.store!.completeInbox(connection.id, connection.consentId, inbox.receiptId);
     return changed;
   }
 

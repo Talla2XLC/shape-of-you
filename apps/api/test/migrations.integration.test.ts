@@ -162,6 +162,21 @@ describe("API migration chain", () => {
     expect(overlongIdentifiers).toEqual([]);
   });
 
+  it("keeps legacy Recovery delivery generations fail-closed until a worker confirms them", async () => {
+    const migration = await readFile(
+      new URL("20260919112031_task0120_consent_scoped_recovery_delivery.sql", migrationsFolder),
+      "utf8"
+    );
+
+    expect(migration).toContain('ADD COLUMN "consent_id" uuid');
+    expect(migration).toContain('ADD COLUMN "confirmed_consent_id" uuid');
+    expect(migration).toContain('ADD COLUMN "confirmed_delivery_id" uuid');
+    expect(migration).toContain('integration_recovery_fact_delivery_fk');
+    expect(migration).not.toContain('ADD CONSTRAINT "integration_inbox_delivery_uq"');
+    expect(migration).not.toMatch(/update\s+"?integration_(?:inbox|recovery_facts)/iu);
+    expect(migration).not.toMatch(/(?:consent_id|confirmed_consent_id|confirmed_delivery_id)"?\s+uuid\s+(?:default|not null)/iu);
+  });
+
   it("applies the full journal cleanly and idempotently", async () => {
     const url = container.getConnectionUri();
 

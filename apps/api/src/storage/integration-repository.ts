@@ -20,8 +20,10 @@ import type {
   IntegrationConnectionIdentity,
   IntegrationStore,
   RecoveryFactPointer,
-  ConnectedRecoveryDeliveryEvidence
+  ConnectedRecoveryDeliveryEvidence,
+  IntegrationInboxOutcome
 } from "../integrations/integration-store.js";
+import { CONNECTED_RECOVERY_METRIC_KEYS } from "../integrations/integration-store.js";
 import type { IntegrationFailureCode } from "../integrations/provider.js";
 import { ConflictError } from "../domain/errors.js";
 import { lockPersonEvidenceMutation } from "./source-reference-repository.js";
@@ -87,6 +89,16 @@ export class IntegrationRepository implements IntegrationStore {
         if (previous.disconnectedAt && previous.disconnectedAt >= input.authorizationStartedAt) throw new ConflictError("Authorization was superseded by disconnect");
       }
       if (previous) {
+        if (previous.consentId !== input.consentId) {
+          await transaction.update(recoveryConsents).set({
+            status: "revoked",
+            revokedAt: new Date(),
+            revocationReason: "OAuth consent replaced"
+          }).where(and(
+            eq(recoveryConsents.id, previous.consentId),
+            eq(recoveryConsents.status, "active")
+          ));
+        }
         await transaction.update(recoveryConnections).set({
           status: "active", disconnectedAt: null
         }).where(eq(recoveryConnections.id, previous.recoveryConnectionId));
@@ -182,31 +194,62 @@ export class IntegrationRepository implements IntegrationStore {
       )
     });
     if (!connection) return null;
-    const [record, fact] = await Promise.all([
-      this.database.db.query.integrationInbox.findFirst({
+    const [records, facts] = await Promise.all([
+      this.database.db.query.integrationInbox.findMany({
         where: and(
           eq(integrationInbox.connectionId, connection.id),
+          eq(integrationInbox.consentId, connection.consentId),
           eq(integrationInbox.kind, "wellness"),
           eq(integrationInbox.providerIdentity, localDate),
           eq(integrationInbox.status, "normalized")
         )
       }),
-      this.database.db.query.integrationRecoveryFacts.findFirst({
+      this.database.db.query.integrationRecoveryFacts.findMany({
         where: and(
           eq(integrationRecoveryFacts.connectionId, connection.id),
-          eq(integrationRecoveryFacts.providerIdentity, localDate),
-          sql`${integrationRecoveryFacts.normalizedChecksum} <> 'removed'`
+          eq(integrationRecoveryFacts.providerIdentity, localDate)
         )
       })
     ]);
+    const normalizedDeliveryIds = new Set(records.map((record) => record.id));
+    const pointers = new Map(facts.map((fact) => [fact.factKey, fact]));
+    const metricDelivery = CONNECTED_RECOVERY_METRIC_KEYS.map((metric) => {
+      const pointer = pointers.get(metric);
+      if (
+        pointer?.confirmedConsentId === connection.consentId
+        && pointer.confirmedDeliveryId !== null
+        && normalizedDeliveryIds.has(pointer.confirmedDeliveryId)
+      ) {
+        return {
+          metric,
+          state: pointer.normalizedChecksum === "removed"
+            ? "confirmed_absent" as const
+            : "confirmed_present" as const,
+          observationId: pointer.normalizedChecksum === "removed" ? null : pointer.observationId
+        };
+      }
+      if (pointer && pointer.normalizedChecksum !== "removed") {
+        return { metric, state: "retained_unconfirmed" as const, observationId: pointer.observationId };
+      }
+      if (pointer) {
+        return { metric, state: "unknown" as const, observationId: null };
+      }
+      return {
+        metric,
+        state: records.length > 0 ? "confirmed_absent" as const : "unknown" as const,
+        observationId: null
+      };
+    });
     return {
+      recoveryConnectionId: connection.recoveryConnectionId,
       lifecycle: connection.lifecycle,
       importEnabled: connection.importEnabled,
       failureCode: connection.failureCode,
       lastAttemptAt: connection.lastAttemptAt,
       lastSuccessfulSyncAt: connection.lastSuccessfulSyncAt,
-      targetDateRecordReceived: record !== undefined,
-      targetDateSupportedFactsPresent: fact !== undefined
+      targetDateRecordReceived: records.length > 0,
+      targetDateSupportedFactsPresent: metricDelivery.some((item) => item.state === "confirmed_present"),
+      metricDelivery
     };
   }
 
@@ -449,24 +492,68 @@ export class IntegrationRepository implements IntegrationStore {
     await this.database.db.update(integrationConnections).set({ lifecycle: "degraded", failureCode, lastAttemptAt: now, nextAttemptAt: new Date(now.valueOf() + 60_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
   }
 
-  public async recordInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<boolean> {
-    const inserted = await this.database.db.insert(integrationInbox).values({ connectionId: id, kind, providerIdentity: identity, checksum }).onConflictDoNothing().returning({ id: integrationInbox.id });
-    if (inserted[0]) return true;
-    const latest = await this.database.db.query.integrationInbox.findFirst({
-      where: and(eq(integrationInbox.connectionId, id), eq(integrationInbox.kind, kind), eq(integrationInbox.providerIdentity, identity)),
-      orderBy: [sql`${integrationInbox.normalizedAt} desc nulls last`, desc(integrationInbox.receivedAt)]
+  public async recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<IntegrationInboxOutcome> {
+    return this.database.db.transaction(async (transaction) => {
+      const current = await transaction.execute(sql`
+        select 1 from integration_connections
+        where id = ${id} and consent_id = ${consentId} and import_enabled = true
+        for update
+      `);
+      if (current.rowCount === 0) return { state: "stale_generation" };
+      const latest = await transaction.query.integrationInbox.findFirst({
+        where: and(eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId), eq(integrationInbox.kind, kind), eq(integrationInbox.providerIdentity, identity)),
+        orderBy: [desc(integrationInbox.receivedAt), desc(integrationInbox.id)]
+      });
+      if (latest?.checksum === checksum) {
+        return latest.status === "normalized"
+          ? { state: "unchanged" }
+          : { state: "process", receiptId: latest.id };
+      }
+      const inserted = await transaction.insert(integrationInbox).values({
+        connectionId: id,
+        consentId,
+        kind,
+        providerIdentity: identity,
+        checksum
+      }).returning({ id: integrationInbox.id });
+      if (!inserted[0]) throw new Error("Integration inbox receipt was not created");
+      return { state: "process", receiptId: inserted[0].id };
     });
-    return latest?.checksum !== checksum || latest.status !== "normalized";
   }
-  public async completeInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<void> {
-    await this.database.db.update(integrationInbox).set({ status: "normalized", normalizedAt: new Date(), failureCode: null }).where(and(eq(integrationInbox.connectionId, id), eq(integrationInbox.kind, kind), eq(integrationInbox.providerIdentity, identity), eq(integrationInbox.checksum, checksum)));
+  public async completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean> {
+    const rows = await this.database.db.update(integrationInbox).set({ status: "normalized", normalizedAt: new Date(), failureCode: null }).where(and(eq(integrationInbox.id, receiptId), eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId), sql`exists (select 1 from integration_connections c where c.id = ${id} and c.consent_id = ${consentId} and c.import_enabled = true)`)).returning({ id: integrationInbox.id });
+    return rows.length > 0;
   }
   public async recoveryFact(id: string, identity: string, factKey: string): Promise<RecoveryFactPointer | null> {
     const row = await this.database.db.query.integrationRecoveryFacts.findFirst({ where: and(eq(integrationRecoveryFacts.connectionId, id), eq(integrationRecoveryFacts.providerIdentity, identity), eq(integrationRecoveryFacts.factKey, factKey)) });
-    return row ? { checksum: row.normalizedChecksum, observationId: row.observationId } : null;
+    return row ? {
+      checksum: row.normalizedChecksum,
+      observationId: row.observationId,
+      confirmedConsentId: row.confirmedConsentId,
+      confirmedDeliveryId: row.confirmedDeliveryId
+    } : null;
   }
-  public async linkRecoveryFact(id: string, identity: string, factKey: string, checksum: string, observationId: string): Promise<void> {
-    await this.database.db.insert(integrationRecoveryFacts).values({ connectionId: id, providerIdentity: identity, factKey, normalizedChecksum: checksum, observationId }).onConflictDoUpdate({ target: [integrationRecoveryFacts.connectionId, integrationRecoveryFacts.providerIdentity, integrationRecoveryFacts.factKey], set: { normalizedChecksum: checksum, observationId, updatedAt: new Date() } });
+  public async linkRecoveryFact(id: string, consentId: string, identity: string, receiptId: string, factKey: string, checksum: string, observationId: string): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      const current = await transaction.execute(sql`
+        select 1 from integration_connections
+        where id = ${id} and consent_id = ${consentId} and import_enabled = true
+        for update
+      `);
+      if (current.rowCount === 0) return false;
+      const receipt = await transaction.query.integrationInbox.findFirst({
+        where: and(
+          eq(integrationInbox.id, receiptId),
+          eq(integrationInbox.connectionId, id),
+          eq(integrationInbox.consentId, consentId),
+          eq(integrationInbox.kind, "wellness"),
+          eq(integrationInbox.providerIdentity, identity)
+        )
+      });
+      if (!receipt) return false;
+      await transaction.insert(integrationRecoveryFacts).values({ connectionId: id, providerIdentity: identity, factKey, normalizedChecksum: checksum, observationId, confirmedConsentId: consentId, confirmedDeliveryId: receiptId }).onConflictDoUpdate({ target: [integrationRecoveryFacts.connectionId, integrationRecoveryFacts.providerIdentity, integrationRecoveryFacts.factKey], set: { normalizedChecksum: checksum, observationId, confirmedConsentId: consentId, confirmedDeliveryId: receiptId, updatedAt: new Date() } });
+      return true;
+    });
   }
 
 }

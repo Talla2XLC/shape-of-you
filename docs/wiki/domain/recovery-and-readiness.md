@@ -80,16 +80,34 @@ same normalization, deduplication, correction, consent, and erasure path.
 Unknown fields and raw Intervals JSON never become the Recovery domain model.
 
 Current focused Recovery reads compose typed observations with a separate
-provider-neutral delivery context. Observations remain the value authority.
-Integration contributes only safe lifecycle timestamps and whether the target
-date has a normalized wellness record or current fact pointer; credentials,
-connection identifiers, checksums, external user identifiers, and raw payloads
-do not cross the boundary. A normalized target-date record without supported
-fields is direct `record_without_supported_facts` evidence. A current fact
-pointer is `supported_facts_present`. Without either, target-date delivery is
-`unknown`; the system does not reconstruct a request window from a completion
-timestamp. Reauthorization resets operational sync timestamps so a previous
-consent cannot establish freshness for a new consent.
+provider-neutral delivery context. Observations remain the value authority;
+delivery evidence never changes a health value or DailyAssessment decision.
+The v2 context reports a closed state for every supported field:
+`confirmed_present`, `confirmed_absent`, `retained_unconfirmed`, or `unknown`.
+Confirmed absence means only that a normalized current-consent record omitted
+the field; it is neither zero nor evidence of a cause. Retained unconfirmed
+means that a local value remains available while the active consent has not
+yet confirmed its freshness.
+
+Integration contributes consent-scoped delivery evidence through the exact
+normalized inbox receipt and current fact pointer. A pointer confirms presence
+only when it names the exact current Recovery observation; a partially written
+create, correction, or withdrawal therefore fails closed. Replays such as
+`A -> B -> A` use attempt-specific receipts, and stale workers cannot publish
+evidence after reauthorization. Aggregate target-date delivery is derived from
+the reconciled per-metric states and cannot hide partial delivery.
+
+The Coach-facing observation projection contains only typed health detail,
+quality, and temporal semantics. Person, connection, consent, deduplication,
+source-record, correction-chain, receipt, checksum, credential, external-user,
+and raw-payload identities remain internal. The separate raw Recovery history
+contract retains its identifiers for explicit correction workflows.
+
+Current-day steps with an eligible provider update instant are
+`partial_day` as of that exact instant. They are an intermediate lower bound,
+not a completed daily total or evidence of low activity. Reauthorization
+preserves the stored value but removes its confirmation until a successful
+current-consent normalization.
 
 Intervals can return only values it has received and exposed. Sleep stages,
 overnight minimum SpO2, Garmin readiness or stress, skin temperature, and
@@ -184,6 +202,8 @@ reconstruction of the observation ordering used by a historical live v1 read.
   integration tests.
 - `TASK-0118` connected delivery projection, empty-record, reconnect,
   Person-isolation, and freshness-policy tests.
+- `TASK-0120` consent-scoped receipts, exact observation publication fences,
+  per-metric delivery, crash-cut, safe-projection, and correction tests.
 
 ## Decisions
 
@@ -201,6 +221,7 @@ reconstruction of the observation ordering used by a historical live v1 read.
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
 - [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
+- [Consent-scoped Recovery delivery evidence](../../adr/20260919-bind-recovery-delivery-to-consent-generation.md).
 
 ## Open questions
 

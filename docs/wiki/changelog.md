@@ -20,6 +20,24 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-20 — Consent-scoped Recovery delivery evidence
+
+- Bound wellness delivery confirmation to the active OAuth consent generation
+  and an attempt-specific normalized inbox receipt, including `A -> B -> A`
+  replay, retry, stale-worker, and crash-cut behavior.
+- Added closed per-metric delivery states so retained local values are visibly
+  unconfirmed after reconnect and omitted metrics remain absent rather than
+  zero or causally explained.
+- Kept current-day steps explicitly `partial_day` at their exact `asOf`, while
+  successful provider changes continue through immutable idempotent Recovery
+  corrections.
+- Added a Coach-safe current-context observation projection that excludes
+  storage, Person, connection, consent, source-record, and correction identity;
+  the separate raw Recovery history contract remains available for corrections.
+- Kept Coach reads local and provider-independent. No one-off environment,
+  manual server operation, deployment, staging/production migration, commit,
+  or push was performed.
+
 ### 2026-09-18 — Stable OAuth consent-session recovery
 
 - Recovered an existing provider-backed OAuth session after exact consent

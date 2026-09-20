@@ -5,7 +5,7 @@ title: "Передавать Coach проверяемое состояние с�
 status: accepted
 date: 2026-09-18
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20260919-bind-recovery-delivery-to-consent-generation"
 tags:
   - architecture
   - coaching

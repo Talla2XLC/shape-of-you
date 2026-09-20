@@ -60,6 +60,16 @@ current consent generation. A worker holding an old provider response cannot
 write facts, claim newly requested history, advance its cursor, or overwrite
 sync status after disconnect and reauthorization.
 
+Each successfully normalized wellness delivery is also bound to the active
+consent generation and to one immutable inbox receipt. Reauthorization keeps
+the stable connection and retained Recovery history, but it does not inherit
+delivery confirmation from the revoked consent. Until the first current-
+consent receipt is normalized, retained values remain readable only as
+unconfirmed local facts. A repeated checksum under a new consent confirms the
+existing fact without creating a duplicate observation; a changed value still
+uses the normal immutable correction path. Retries, including `A -> B -> A`,
+are fenced by the exact normalization attempt rather than checksum alone.
+
 The wellness request uses an explicit Intervals.icu field whitelist. Supported
 values are sleep duration, sleep score, resting heart rate, average sleeping
 heart rate, HRV rMSSD, SpO2, respiration rate, and separate daily Body Battery
@@ -103,6 +113,8 @@ not expose connection controls or imported-record counts.
 
 - Integration contracts, API unit/PostgreSQL tests, and Web Playwright flow.
 - `TASK-0101`, `TASK-0106`, and `TASK-0110` independent Quality acceptance.
+- `TASK-0120` consent-generation, attempt-receipt, correction, and stale-worker
+  integration acceptance.
 
 ## Decisions
 
@@ -112,6 +124,7 @@ not expose connection controls or imported-record counts.
 - [Import supported Intervals wellness as typed Recovery](../../adr/20260912-import-supported-intervals-wellness-as-typed-recovery.md)
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md)
+- [Consent-scoped Recovery delivery evidence](../../adr/20260919-bind-recovery-delivery-to-consent-generation.md)
 
 ## Open questions
 

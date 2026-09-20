@@ -1,4 +1,8 @@
-import type { GarminIntervalsConnection } from "@shape-of-you/contracts";
+import type {
+  ConnectedRecoveryMetricDeliveryState,
+  ConnectedRecoveryMetricKey,
+  GarminIntervalsConnection
+} from "@shape-of-you/contracts";
 
 import type { EncryptedCredential } from "./credential-cipher.js";
 import type { IntegrationFailureCode } from "./provider.js";
@@ -26,10 +30,31 @@ export interface ActiveIntegrationConnection {
 export interface RecoveryFactPointer {
   readonly checksum: string;
   readonly observationId: string;
+  readonly confirmedConsentId: string | null;
+  readonly confirmedDeliveryId: string | null;
 }
+
+export const CONNECTED_RECOVERY_METRIC_KEYS = [
+  "sleep",
+  "sleep_score",
+  "resting_heart_rate",
+  "night_heart_rate",
+  "hrv_rmssd",
+  "oxygen_saturation",
+  "respiration_rate",
+  "body_battery_min",
+  "body_battery_max",
+  "steps"
+] as const satisfies readonly ConnectedRecoveryMetricKey[];
+
+export type IntegrationInboxOutcome =
+  | { readonly state: "process"; readonly receiptId: string }
+  | { readonly state: "unchanged" }
+  | { readonly state: "stale_generation" };
 
 /** Safe delivery metadata used by provider-neutral Recovery composition. */
 export interface ConnectedRecoveryDeliveryEvidence {
+  readonly recoveryConnectionId: string;
   readonly lifecycle: "connecting" | "active" | "degraded" | "disconnected";
   readonly importEnabled: boolean;
   readonly failureCode: IntegrationFailureCode | null;
@@ -37,6 +62,11 @@ export interface ConnectedRecoveryDeliveryEvidence {
   readonly lastSuccessfulSyncAt: Date | null;
   readonly targetDateRecordReceived: boolean;
   readonly targetDateSupportedFactsPresent: boolean;
+  readonly metricDelivery: readonly {
+    readonly metric: ConnectedRecoveryMetricKey;
+    readonly state: ConnectedRecoveryMetricDeliveryState;
+    readonly observationId: string | null;
+  }[];
 }
 
 /** Stable ids reused on reauthorization so imported fact history is preserved. */
@@ -81,8 +111,8 @@ export interface IntegrationStore {
   failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode): Promise<void>;
   markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void>;
   markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void>;
-  recordInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<boolean>;
-  completeInbox(id: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<void>;
+  recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<IntegrationInboxOutcome>;
+  completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean>;
   recoveryFact(id: string, identity: string, factKey: string): Promise<RecoveryFactPointer | null>;
-  linkRecoveryFact(id: string, identity: string, factKey: string, checksum: string, observationId: string): Promise<void>;
+  linkRecoveryFact(id: string, consentId: string, identity: string, receiptId: string, factKey: string, checksum: string, observationId: string): Promise<boolean>;
 }

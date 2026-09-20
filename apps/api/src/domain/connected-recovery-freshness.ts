@@ -6,7 +6,7 @@ import type {
 import type { ConnectedRecoveryDeliveryEvidence } from "../integrations/integration-store.js";
 
 export const CONNECTED_RECOVERY_FRESHNESS_POLICY_VERSION =
-  "connected-recovery-freshness-v1" as const;
+  "connected-recovery-freshness-v2" as const;
 export const CONNECTED_RECOVERY_FRESHNESS_MAX_AGE_MS = 15 * 60_000;
 const maximumFutureSkewMs = 5 * 60_000;
 

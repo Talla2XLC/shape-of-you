@@ -57,6 +57,54 @@ const legacyMealToolCompatibilityContracts = {
   }
 } as const;
 
+const confirmedAbsentRecoveryMetrics = [
+  "sleep",
+  "sleep_score",
+  "resting_heart_rate",
+  "night_heart_rate",
+  "hrv_rmssd",
+  "oxygen_saturation",
+  "respiration_rate",
+  "body_battery_min",
+  "body_battery_max",
+  "steps"
+].map((metric) => ({ metric, state: "confirmed_absent", periodState: null, asOf: null }));
+
+const safeCurrentRecoveryObservation = {
+  kind: "metric",
+  observedFrom: null,
+  observedUntil: null,
+  temporalPrecision: "local_date",
+  localDate: "2026-09-18",
+  timezone: "Europe/Belgrade",
+  quality: "reliable",
+  detail: { type: "metric", metric: "steps", value: 2_834, unit: "count" }
+} as const;
+
+const forbiddenCurrentRecoveryIdentityKeys = [
+  "id",
+  "personId",
+  "connectionId",
+  "consentId",
+  "dedupeKey",
+  "sourceReference",
+  "supersedesId",
+  "correctionReason",
+  "createdAt"
+] as const;
+
+function expectNoCurrentRecoveryIdentity(value: unknown): void {
+  if (Array.isArray(value)) {
+    for (const item of value) expectNoCurrentRecoveryIdentity(item);
+    return;
+  }
+  if (value === null || typeof value !== "object") return;
+  for (const [key, child] of Object.entries(value)) {
+    expect(forbiddenCurrentRecoveryIdentityKeys).not.toContain(key);
+    expectNoCurrentRecoveryIdentity(child);
+  }
+}
+
 const legacyMealItemCompatibilityContract = {
   required: ["label"],
   properties: [
@@ -462,6 +510,11 @@ describe("MCP HTTP adapter", () => {
       annotations: { readOnlyHint: true, destructiveHint: false },
       securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
     });
+    const rawRecoveryTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "list_recovery_observations"
+    );
+    expect(rawRecoveryTool.outputSchema.properties.items.items.properties).toHaveProperty("id");
+    expect(rawRecoveryTool.outputSchema.properties.items.items.properties).toHaveProperty("dedupeKey");
     const dailyAssessmentAjv = new Ajv({ strict: false });
     const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
     installFormats(dailyAssessmentAjv);
@@ -473,13 +526,14 @@ describe("MCP HTTP adapter", () => {
     );
     expect(validateCurrentRecoveryContext({
       state: "available",
-      policyVersion: "connected-recovery-freshness-v1",
+      policyVersion: "connected-recovery-freshness-v2",
       calculatedAt: "2026-09-18T08:30:00.000Z",
       localDate: "2026-09-18",
       timezone: "Europe/Belgrade",
       syncState: "fresh_success",
       targetDateDelivery: "record_without_supported_facts",
       checkedAt: "2026-09-18T08:29:00.000Z",
+      metricDelivery: confirmedAbsentRecoveryMetrics,
       observations: { items: [] }
     })).toBe(true);
     expect(validateCurrentRecoveryContext({
@@ -488,11 +542,75 @@ describe("MCP HTTP adapter", () => {
       calculatedAt: "2026-09-18T08:30:00.000Z",
       localDate: "2026-09-18",
       timezone: "Europe/Belgrade",
+      syncState: "never_checked",
+      targetDateDelivery: "unknown",
+      checkedAt: null,
+      observations: { items: [] }
+    })).toBe(false);
+    const safeCurrentContext = {
+      state: "available",
+      policyVersion: "connected-recovery-freshness-v2",
+      calculatedAt: "2026-09-18T08:30:00.000Z",
+      localDate: "2026-09-18",
+      timezone: "Europe/Belgrade",
+      syncState: "fresh_success",
+      targetDateDelivery: "supported_facts_present",
+      checkedAt: "2026-09-18T08:29:00.000Z",
+      metricDelivery: confirmedAbsentRecoveryMetrics,
+      observations: { items: [safeCurrentRecoveryObservation] }
+    };
+    expect(validateCurrentRecoveryContext(safeCurrentContext)).toBe(true);
+    for (const forbiddenKey of forbiddenCurrentRecoveryIdentityKeys) {
+      expect(validateCurrentRecoveryContext({
+        ...safeCurrentContext,
+        observations: {
+          items: [{ ...safeCurrentRecoveryObservation, [forbiddenKey]: "internal" }]
+        }
+      }), forbiddenKey).toBe(false);
+    }
+    expect(validateCurrentRecoveryContext({
+      state: "available",
+      policyVersion: "connected-recovery-freshness-v2",
+      calculatedAt: "2026-09-18T08:30:00.000Z",
+      localDate: "2026-09-18",
+      timezone: "Europe/Belgrade",
       syncState: "fresh_success",
       targetDateDelivery: "record_without_supported_facts",
       checkedAt: "2026-09-18T08:29:00.000Z",
+      metricDelivery: confirmedAbsentRecoveryMetrics,
       observations: { items: [] },
       provider: "garmin"
+    })).toBe(false);
+    expect(validateCurrentRecoveryContext({
+      state: "available",
+      policyVersion: "connected-recovery-freshness-v2",
+      calculatedAt: "2026-09-18T08:30:00.000Z",
+      localDate: "2026-09-18",
+      timezone: "Europe/Belgrade",
+      syncState: "fresh_success",
+      targetDateDelivery: "record_without_supported_facts",
+      checkedAt: "2026-09-18T08:29:00.000Z",
+      metricDelivery: Array.from({ length: 10 }, () => ({
+        metric: "sleep",
+        state: "confirmed_absent",
+        periodState: null,
+        asOf: null
+      })),
+      observations: { items: [] }
+    })).toBe(false);
+    expect(validateCurrentRecoveryContext({
+      state: "available",
+      policyVersion: "connected-recovery-freshness-v2",
+      calculatedAt: "2026-09-18T08:30:00.000Z",
+      localDate: "2026-09-18",
+      timezone: "Europe/Belgrade",
+      syncState: "fresh_success",
+      targetDateDelivery: "record_without_supported_facts",
+      checkedAt: "2026-09-18T08:29:00.000Z",
+      metricDelivery: confirmedAbsentRecoveryMetrics.map((item) => item.metric === "sleep"
+        ? { ...item, periodState: "partial_day", asOf: "2026-09-18T08:00:00.000Z" }
+        : item),
+      observations: { items: [] }
     })).toBe(false);
     const timezoneTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "set_current_timezone"
@@ -1538,14 +1656,15 @@ describe("MCP HTTP adapter", () => {
         currentRecoveryContext: {
           read: async () => ({
             state: "available",
-            policyVersion: "connected-recovery-freshness-v1",
+            policyVersion: "connected-recovery-freshness-v2",
             calculatedAt: "2026-09-02T09:00:00.000Z",
             localDate: "2026-09-02",
             timezone: "Europe/Moscow",
             syncState: "fresh_success",
             targetDateDelivery: "record_without_supported_facts",
             checkedAt: "2026-09-02T08:59:00.000Z",
-            observations: { items: [] }
+            metricDelivery: confirmedAbsentRecoveryMetrics,
+            observations: { items: [safeCurrentRecoveryObservation] }
           })
         },
         dailyContextNotes: {
@@ -1709,6 +1828,16 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.content[0].text, name).toContain(
             "Never promise to check again later unless an automation was actually created"
           );
+          expect(toolResult.content[0].text, name).toContain(
+            "previously saved local value whose freshness has not yet been confirmed"
+          );
+          expect(toolResult.content[0].text, name).toContain(
+            "do not infer whether reconnect, migration, or another delivery transition caused"
+          );
+          expect(toolResult.content[0].text, name).toContain(
+            "Never call it a final, complete, or end-of-day total"
+          );
+          expectNoCurrentRecoveryIdentity(toolResult.structuredContent);
         } else if (name === "get_daily_assessment") {
           expect(toolResult.structuredContent, name).toEqual({
             state: "timezone_required",

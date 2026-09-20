@@ -12,6 +12,7 @@ function evidence(
   patch: Partial<ConnectedRecoveryDeliveryEvidence> = {}
 ): ConnectedRecoveryDeliveryEvidence {
   return {
+    recoveryConnectionId: "00000000-0000-4000-8000-000000000019",
     lifecycle: "active",
     importEnabled: true,
     failureCode: null,
@@ -19,6 +20,7 @@ function evidence(
     lastSuccessfulSyncAt: new Date("2026-09-18T08:29:00.000Z"),
     targetDateRecordReceived: true,
     targetDateSupportedFactsPresent: false,
+    metricDelivery: [],
     ...patch
   };
 }

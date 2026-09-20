@@ -27,6 +27,9 @@ import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
 import type { ProviderReconciliation } from "../src/integrations/provider.js";
 import { IntegrationService } from "../src/integrations/integration.service.js";
 import { SyntheticPersonContext } from "../src/application/person-context.js";
+import { RecoveryService } from "../src/recovery/recovery.service.js";
+import { CurrentRecoveryContextService } from "../src/coaching/current-recovery-context.service.js";
+import type { DailyAssessmentStore } from "../src/storage/daily-assessment-repository.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
@@ -42,6 +45,86 @@ const personE = "00000000-0000-4000-8000-000000000005";
 const personF = "00000000-0000-4000-8000-000000000006";
 const personG = "00000000-0000-4000-8000-000000000007";
 const personH = "00000000-0000-4000-8000-000000000008";
+const personI = "00000000-0000-4000-8000-000000000009";
+const personJ = "00000000-0000-4000-8000-000000000010";
+
+class FailAfterFirstFactLinkRepository extends IntegrationRepository {
+  private failAfterFirstFactLink = true;
+
+  public override async linkRecoveryFact(
+    connectionId: string,
+    consentId: string,
+    identity: string,
+    receiptId: string,
+    factKey: string,
+    checksum: string,
+    observationId: string
+  ): Promise<boolean> {
+    const linked = await super.linkRecoveryFact(
+      connectionId,
+      consentId,
+      identity,
+      receiptId,
+      factKey,
+      checksum,
+      observationId
+    );
+    if (this.failAfterFirstFactLink) {
+      this.failAfterFirstFactLink = false;
+      throw new Error("mid-record normalization failure");
+    }
+    return linked;
+  }
+}
+
+class FailBeforeFactLinkRepository extends IntegrationRepository {
+  private failed = false;
+
+  public constructor(databaseContext: DatabaseContext, private readonly targetFactKey: string) {
+    super(databaseContext);
+  }
+
+  public override linkRecoveryFact(
+    connectionId: string,
+    consentId: string,
+    identity: string,
+    receiptId: string,
+    factKey: string,
+    checksum: string,
+    observationId: string
+  ): Promise<boolean> {
+    if (!this.failed && factKey === this.targetFactKey) {
+      this.failed = true;
+      throw new Error("post-observation pre-pointer failure");
+    }
+    return super.linkRecoveryFact(
+      connectionId,
+      consentId,
+      identity,
+      receiptId,
+      factKey,
+      checksum,
+      observationId
+    );
+  }
+}
+
+function currentRecoveryContext(
+  personId: string,
+  integrations: IntegrationRepository,
+  localDate: string
+): Promise<Awaited<ReturnType<CurrentRecoveryContextService["read"]>>> {
+  const personContext = new SyntheticPersonContext(personId);
+  const preferences = {
+    getPreferences: async () => ({ timezone: "UTC", updatedAt: new Date(0).toISOString() })
+  } as unknown as DailyAssessmentStore;
+  return new CurrentRecoveryContextService(
+    personContext,
+    preferences,
+    integrations,
+    new RecoveryService(repository, personContext)
+  ).read(new Date(`${localDate}T12:00:00.000Z`));
+}
 
 async function acknowledgeAcceptedErasure(requestId: string): Promise<void> {
   await database.pool.query(
@@ -72,8 +155,8 @@ beforeAll(async () => {
   await runMigrations(databaseUrl);
   database = createDatabase(config);
   await database.pool.query(
-    "insert into persons (id, kind, status) values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active'), ($4, 'real', 'active'), ($5, 'real', 'active'), ($6, 'real', 'active'), ($7, 'real', 'active')",
-    [personB, personC, personD, personE, personF, personG, personH]
+    "insert into persons (id, kind, status) values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active'), ($4, 'real', 'active'), ($5, 'real', 'active'), ($6, 'real', 'active'), ($7, 'real', 'active'), ($8, 'real', 'active'), ($9, 'real', 'active')",
+    [personB, personC, personD, personE, personF, personG, personH, personI, personJ]
   );
   repository = new RecoveryRepository(database);
   app = await buildApp({ config, database });
@@ -86,6 +169,269 @@ afterAll(async () => {
 });
 
 describe("Recovery PostgreSQL vertical", () => {
+  it("does not inherit delivery evidence across consent generations and preserves idempotent corrections", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const provider = new FakeHealthDataProvider();
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const id = "00000000-0000-4000-8000-000000000171";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000172";
+    const oldConsentId = "00000000-0000-4000-8000-000000000173";
+    const newConsentId = "00000000-0000-4000-8000-000000000174";
+    const credential = cipher.encrypt("generation-token", `intervals_icu:${personI}:${id}`);
+    const service = new IntegrationService(
+      new SyntheticPersonContext(personI), integrations, provider, cipher, repository, training
+    );
+    const baseWellness = {
+      identity: "2026-09-18",
+      localDate: "2026-09-18",
+      timezone: "Europe/Belgrade",
+      updatedAt: "2026-09-18T12:00:00.000Z",
+      steps: 2_834,
+      totalSleepMinutes: null,
+      sleepScore: null,
+      restingHeartRate: null,
+      averageSleepingHeartRate: null,
+      hrvRmssd: 57,
+      oxygenSaturation: null,
+      respirationRate: null,
+      bodyBatteryMinimum: null,
+      bodyBatteryMaximum: null
+    };
+
+    await integrations.activate({
+      id, recoveryConnectionId, consentId: oldConsentId, personId: personI,
+      externalUserId: "athlete-i", credential,
+      authorizationStartedAt: new Date(Date.now() - 2_000)
+    });
+    provider.reconciliation = { wellness: [baseWellness], activities: [] };
+    await service.reconcileConnection((await integrations.findActive(personI))!);
+
+    await integrations.beginDisconnect(personI, "test reconnect");
+    await integrations.activate({
+      id, recoveryConnectionId, consentId: newConsentId, personId: personI,
+      externalUserId: "athlete-i", credential,
+      authorizationStartedAt: new Date(Date.now() + 1_000)
+    });
+
+    const beforeFirstSync = await integrations.connectedRecoveryDelivery(personI, "2026-09-18");
+    expect(beforeFirstSync).toMatchObject({
+      lastSuccessfulSyncAt: null,
+      targetDateRecordReceived: false,
+      targetDateSupportedFactsPresent: false
+    });
+    expect(beforeFirstSync?.metricDelivery).toEqual(expect.arrayContaining([
+      expect.objectContaining({ metric: "hrv_rmssd", state: "retained_unconfirmed" }),
+      expect.objectContaining({ metric: "steps", state: "retained_unconfirmed" }),
+      expect.objectContaining({ metric: "sleep", state: "unknown" })
+    ]));
+    expect((await repository.listObservations(personI, { localDate: "2026-09-18", limit: 50 })).items)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ detail: expect.objectContaining({ metric: "steps", value: 2_834 }) }),
+        expect.objectContaining({ detail: expect.objectContaining({ metric: "hrv_rmssd", value: 57 }) })
+      ]));
+
+    provider.reconciliation = {
+      wellness: [{ ...baseWellness, steps: null }],
+      activities: []
+    };
+    const failingIntegrations = new FailAfterFirstFactLinkRepository(database);
+    const failingService = new IntegrationService(
+      new SyntheticPersonContext(personI), failingIntegrations, provider, cipher, repository, training
+    );
+    await failingService.reconcileConnection((await integrations.findActive(personI))!);
+
+    const afterPartialFailure = await integrations.connectedRecoveryDelivery(personI, "2026-09-18");
+    expect(afterPartialFailure).toMatchObject({
+      lifecycle: "degraded",
+      lastSuccessfulSyncAt: null,
+      targetDateRecordReceived: false,
+      targetDateSupportedFactsPresent: false
+    });
+    expect(afterPartialFailure?.metricDelivery).toEqual(expect.arrayContaining([
+      expect.objectContaining({ metric: "hrv_rmssd", state: "retained_unconfirmed" }),
+      expect.objectContaining({ metric: "steps", state: "retained_unconfirmed" }),
+      expect.objectContaining({ metric: "sleep", state: "unknown" })
+    ]));
+    expect((await database.pool.query(
+      `select status from integration_inbox
+        where connection_id = $1 and consent_id = $2 and provider_identity = '2026-09-18'`,
+      [id, newConsentId]
+    )).rows).toEqual([{ status: "pending" }]);
+
+    await service.reconcileConnection((await integrations.findActive(personI))!);
+    const partial = await integrations.connectedRecoveryDelivery(personI, "2026-09-18");
+    expect(partial?.metricDelivery).toEqual(expect.arrayContaining([
+      expect.objectContaining({ metric: "hrv_rmssd", state: "confirmed_present" }),
+      expect.objectContaining({ metric: "steps", state: "confirmed_absent" }),
+      expect.objectContaining({ metric: "sleep", state: "confirmed_absent" })
+    ]));
+    expect((await database.pool.query(
+      `select count(*)::int as count from recovery_observations o
+       join recovery_metric_details d on d.observation_id = o.id
+       where o.person_id = $1 and d.metric = 'hrv_rmssd'`,
+      [personI]
+    )).rows[0]).toEqual({ count: 1 });
+
+    provider.reconciliation = {
+      wellness: [{ ...baseWellness, steps: 12_002, updatedAt: "2026-09-18T21:00:00.000Z" }],
+      activities: []
+    };
+    const current = (await integrations.findActive(personI))!;
+    await service.reconcileConnection(current);
+    await service.reconcileConnection(current);
+    const currentSteps = (await repository.listObservations(personI, { localDate: "2026-09-18", limit: 50 })).items
+      .filter((item) => item.detail.type === "metric" && item.detail.metric === "steps");
+    expect(currentSteps).toHaveLength(1);
+    expect(currentSteps[0]).toMatchObject({
+      consentId: newConsentId,
+      correctionReason: "provider_record_changed",
+      sourceReference: { occurredAt: "2026-09-18T21:00:00.000Z" },
+      detail: { metric: "steps", value: 12_002, unit: "count" }
+    });
+    expect((await database.pool.query(
+      `select count(*)::int as count from recovery_observations o
+       join recovery_metric_details d on d.observation_id = o.id
+       where o.person_id = $1 and d.metric = 'steps'`,
+      [personI]
+    )).rows[0]).toEqual({ count: 3 });
+    expect((await database.pool.query(
+      `select count(*)::int as count
+         from integration_inbox
+        where connection_id = $1 and consent_id = $2 and provider_identity = '2026-09-18'`,
+      [id, newConsentId]
+    )).rows[0]).toEqual({ count: 2 });
+    expect((await database.pool.query(
+      `select normalized_checksum, confirmed_consent_id
+         from integration_recovery_facts
+        where connection_id = $1 and provider_identity = '2026-09-18' and fact_key = 'steps'`,
+      [id]
+    )).rows[0]).toMatchObject({ confirmed_consent_id: newConsentId });
+  });
+
+  it("fails closed when create, correction or withdrawal commits before pointer publication", async () => {
+    const integrations = new IntegrationRepository(database);
+    const training = new TrainingRepository(database);
+    const provider = new FakeHealthDataProvider();
+    const cipher = new ConnectionCredentialCipher("v1", new Map([["v1", randomBytes(32)]]));
+    const id = "00000000-0000-4000-8000-000000000181";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000182";
+    const consentId = "00000000-0000-4000-8000-000000000183";
+    const credential = cipher.encrypt("projection-fence-token", `intervals_icu:${personJ}:${id}`);
+    const wellness = (localDate: string, totalSleepMinutes: number | null, hrvRmssd: number | null) => ({
+      identity: localDate,
+      localDate,
+      timezone: "UTC",
+      updatedAt: `${localDate}T08:00:00.000Z`,
+      steps: null,
+      totalSleepMinutes,
+      sleepScore: null,
+      restingHeartRate: null,
+      averageSleepingHeartRate: null,
+      hrvRmssd,
+      oxygenSaturation: null,
+      respirationRate: null,
+      bodyBatteryMinimum: null,
+      bodyBatteryMaximum: null
+    });
+    const personContext = new SyntheticPersonContext(personJ);
+    const service = new IntegrationService(
+      personContext,
+      integrations,
+      provider,
+      cipher,
+      repository,
+      training
+    );
+
+    await integrations.activate({
+      id,
+      recoveryConnectionId,
+      consentId,
+      personId: personJ,
+      externalUserId: "athlete-j",
+      credential,
+      authorizationStartedAt: new Date(Date.now() - 1_000)
+    });
+    provider.reconciliation = {
+      wellness: [
+        wellness("2026-09-10", 400, null),
+        wellness("2026-09-11", null, 57),
+        wellness("2026-09-12", null, 57)
+      ],
+      activities: []
+    };
+    await service.reconcileConnection((await integrations.findActive(personJ))!);
+
+    provider.reconciliation = { wellness: [wellness("2026-09-10", 400, 60)], activities: [] };
+    await new IntegrationService(
+      personContext,
+      new FailBeforeFactLinkRepository(database, "hrv_rmssd"),
+      provider,
+      cipher,
+      repository,
+      training
+    ).reconcileConnection((await integrations.findActive(personJ))!);
+    const afterCreateCut = await currentRecoveryContext(personJ, integrations, "2026-09-10");
+    expect(afterCreateCut).toMatchObject({
+      state: "available",
+      targetDateDelivery: "record_without_supported_facts",
+      metricDelivery: expect.arrayContaining([
+        expect.objectContaining({ metric: "hrv_rmssd", state: "retained_unconfirmed" })
+      ]),
+      observations: {
+        items: expect.arrayContaining([
+          expect.objectContaining({ detail: { type: "metric", metric: "hrv_rmssd", value: 60, unit: "ms" } })
+        ])
+      }
+    });
+
+    provider.reconciliation = { wellness: [wellness("2026-09-11", null, 58)], activities: [] };
+    await new IntegrationService(
+      personContext,
+      new FailBeforeFactLinkRepository(database, "hrv_rmssd"),
+      provider,
+      cipher,
+      repository,
+      training
+    ).reconcileConnection((await integrations.findActive(personJ))!);
+    const afterCorrectionCut = await currentRecoveryContext(personJ, integrations, "2026-09-11");
+    expect(afterCorrectionCut).toMatchObject({
+      state: "available",
+      targetDateDelivery: "record_without_supported_facts",
+      metricDelivery: expect.arrayContaining([
+        expect.objectContaining({ metric: "hrv_rmssd", state: "retained_unconfirmed" })
+      ]),
+      observations: {
+        items: expect.arrayContaining([
+          expect.objectContaining({ detail: { type: "metric", metric: "hrv_rmssd", value: 58, unit: "ms" } })
+        ])
+      }
+    });
+
+    provider.reconciliation = { wellness: [wellness("2026-09-12", null, null)], activities: [] };
+    await new IntegrationService(
+      personContext,
+      new FailBeforeFactLinkRepository(database, "hrv_rmssd"),
+      provider,
+      cipher,
+      repository,
+      training
+    ).reconcileConnection((await integrations.findActive(personJ))!);
+    const afterWithdrawalCut = await currentRecoveryContext(personJ, integrations, "2026-09-12");
+    expect(afterWithdrawalCut).toMatchObject({
+      state: "available",
+      targetDateDelivery: "record_without_supported_facts",
+      metricDelivery: expect.arrayContaining([
+        expect.objectContaining({ metric: "hrv_rmssd", state: "unknown" })
+      ])
+    });
+    if (afterWithdrawalCut.state !== "available") throw new Error("Recovery context must be available");
+    expect(afterWithdrawalCut.observations.items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ detail: expect.objectContaining({ metric: "hrv_rmssd" }) })
+    ]));
+  });
+
   it("imports account wellness through IntegrationService with no-op, A-B-A, field removal and disconnect stop", async () => {
     const integrations = new IntegrationRepository(database);
     const training = new TrainingRepository(database);
@@ -172,8 +518,45 @@ describe("Recovery PostgreSQL vertical", () => {
     };
     await service.reconcileConnection(connection);
     provider.reconciliation = { wellness: [wellness], activities: [] };
+    const replayFailingService = new IntegrationService(
+      new SyntheticPersonContext(personD),
+      new FailAfterFirstFactLinkRepository(database),
+      provider,
+      cipher,
+      repository,
+      training
+    );
+    await replayFailingService.reconcileConnection(connection);
+    const failedReplay = await integrations.connectedRecoveryDelivery(personD, "2026-09-06");
+    expect(failedReplay).toMatchObject({ lifecycle: "degraded", failureCode: "provider_unavailable" });
+    expect(failedReplay?.metricDelivery).toEqual(expect.arrayContaining([
+      expect.objectContaining({ metric: "sleep", state: "retained_unconfirmed" }),
+      expect.objectContaining({ metric: "night_heart_rate", state: "confirmed_present" })
+    ]));
+    expect((await database.pool.query(
+      `select count(*)::int as count,
+              count(*) filter (where status = 'pending')::int as pending,
+              count(*) filter (where status = 'normalized')::int as normalized
+         from integration_inbox
+        where connection_id = $1 and consent_id = $2 and provider_identity = '2026-09-06'
+      `,
+      [id, consentId]
+    )).rows[0]).toEqual({ count: 3, pending: 1, normalized: 2 });
     await service.reconcileConnection(connection);
     await service.reconcileConnection(connection);
+    expect((await integrations.connectedRecoveryDelivery(personD, "2026-09-06"))?.metricDelivery)
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ metric: "sleep", state: "confirmed_present" }),
+        expect.objectContaining({ metric: "night_heart_rate", state: "confirmed_present" })
+      ]));
+    expect((await database.pool.query(
+      `select count(*)::int as count,
+              count(*) filter (where status = 'pending')::int as pending,
+              count(*) filter (where status = 'normalized')::int as normalized
+         from integration_inbox
+        where connection_id = $1 and consent_id = $2 and provider_identity = '2026-09-06'`,
+      [id, consentId]
+    )).rows[0]).toEqual({ count: 3, pending: 0, normalized: 3 });
     provider.reconciliation = {
       wellness: [{
         ...wellness,
@@ -864,7 +1247,25 @@ describe("Recovery PostgreSQL vertical", () => {
       authorizationStartedAt: new Date(Date.now() + 1_000)
     });
     await staleService.startHistoricalImport();
-    releaseRolling({ wellness: [], activities: [] });
+    releaseRolling({
+      wellness: [{
+        identity: "2026-09-19",
+        localDate: "2026-09-19",
+        timezone: "UTC",
+        updatedAt: "2026-09-19T09:00:00.000Z",
+        steps: 4_321,
+        totalSleepMinutes: null,
+        sleepScore: null,
+        restingHeartRate: null,
+        averageSleepingHeartRate: null,
+        hrvRmssd: 58,
+        oxygenSaturation: null,
+        respirationRate: null,
+        bodyBatteryMinimum: null,
+        bodyBatteryMaximum: null
+      }],
+      activities: []
+    });
     await staleReconciliation;
 
     expect(provider.reconcileCalls).toHaveLength(1);
@@ -873,6 +1274,14 @@ describe("Recovery PostgreSQL vertical", () => {
       lastSuccessfulSyncAt: null,
       historicalImport: { status: "running", processedThroughDate: null, lastAttemptAt: null }
     });
+    expect((await database.pool.query(
+      "select 1 from integration_inbox where connection_id = $1 and provider_identity = '2026-09-19'",
+      [id]
+    )).rowCount).toBe(0);
+    expect((await database.pool.query(
+      "select 1 from recovery_observations where person_id = $1 and local_date = '2026-09-19'",
+      [personH]
+    )).rowCount).toBe(0);
   });
 
   it("applies the additive Recovery migration on a clean schema", async () => {

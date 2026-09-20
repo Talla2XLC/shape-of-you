@@ -557,8 +557,105 @@ export const ConnectedRecoveryTargetDateDeliverySchema = {
   ]
 } as const;
 
+/** Closed provider-neutral metric keys whose delivery is reported to Coach. */
+export type ConnectedRecoveryMetricKey =
+  | "sleep"
+  | "sleep_score"
+  | "resting_heart_rate"
+  | "night_heart_rate"
+  | "hrv_rmssd"
+  | "oxygen_saturation"
+  | "respiration_rate"
+  | "body_battery_min"
+  | "body_battery_max"
+  | "steps";
+
+/** Consent-scoped delivery evidence for one supported Recovery metric. */
+export type ConnectedRecoveryMetricDeliveryState =
+  | "confirmed_present"
+  | "confirmed_absent"
+  | "retained_unconfirmed"
+  | "unknown";
+
+/** Public per-metric delivery state, including day-completeness only for steps. */
+export type ConnectedRecoveryMetricDelivery =
+  | {
+    readonly metric: Exclude<ConnectedRecoveryMetricKey, "steps">;
+    readonly state: ConnectedRecoveryMetricDeliveryState;
+    readonly periodState: null;
+    readonly asOf: null;
+  }
+  | {
+    readonly metric: "steps";
+    readonly state: ConnectedRecoveryMetricDeliveryState;
+    readonly periodState: "partial_day" | "completed_day" | null;
+    readonly asOf: string | null;
+  };
+
+export const ConnectedRecoveryMetricKeySchema = {
+  type: "string",
+  enum: [
+    "sleep",
+    "sleep_score",
+    "resting_heart_rate",
+    "night_heart_rate",
+    "hrv_rmssd",
+    "oxygen_saturation",
+    "respiration_rate",
+    "body_battery_min",
+    "body_battery_max",
+    "steps"
+  ]
+} as const;
+
+export const ConnectedRecoveryMetricDeliveryStateSchema = {
+  type: "string",
+  enum: [
+    "confirmed_present",
+    "confirmed_absent",
+    "retained_unconfirmed",
+    "unknown"
+  ]
+} as const;
+
+export const ConnectedRecoveryMetricDeliverySchema = {
+  $id: "ConnectedRecoveryMetricDelivery",
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["metric", "state", "periodState", "asOf"],
+      properties: {
+        metric: { const: "steps" },
+        state: ConnectedRecoveryMetricDeliveryStateSchema,
+        periodState: {
+          anyOf: [
+            { type: "string", enum: ["partial_day", "completed_day"] },
+            { type: "null" }
+          ]
+        },
+        asOf: { anyOf: [dateTime, { type: "null" }] }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["metric", "state", "periodState", "asOf"],
+      properties: {
+        metric: {
+          type: "string",
+          enum: ConnectedRecoveryMetricKeySchema.enum.filter((metric) => metric !== "steps")
+        },
+        state: ConnectedRecoveryMetricDeliveryStateSchema,
+        periodState: { type: "null" },
+        asOf: { type: "null" }
+      }
+    }
+  ]
+} as const;
+
 /** Provider-neutral current-day Recovery evidence and connected-data freshness. */
-export interface CurrentRecoveryContext {
+export interface CurrentRecoveryContextV1 {
   readonly state: "available";
   readonly policyVersion: "connected-recovery-freshness-v1";
   readonly calculatedAt: string;
@@ -570,9 +667,94 @@ export interface CurrentRecoveryContext {
   readonly observations: RecoveryObservationList;
 }
 
+/**
+ * Coach-safe Recovery fact without storage, consent, source-record, or correction identity.
+ */
+export interface CurrentRecoveryObservation {
+  readonly kind: RecoveryObservationKind;
+  readonly observedFrom: string | null;
+  readonly observedUntil: string | null;
+  readonly temporalPrecision: "instant" | "local_date";
+  readonly localDate: string;
+  readonly timezone: string;
+  readonly quality: RecoveryObservationQuality;
+  readonly detail: RecoveryObservationDetail;
+}
+
+/** Closed list of Coach-safe current-context Recovery facts. */
+export interface CurrentRecoveryObservationList {
+  readonly items: readonly CurrentRecoveryObservation[];
+}
+
+export const CurrentRecoveryObservationSchema = {
+  $id: "CurrentRecoveryObservation",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "kind", "observedFrom", "observedUntil", "temporalPrecision", "localDate",
+    "timezone", "quality", "detail"
+  ],
+  properties: {
+    kind: RecoveryObservationKindSchema,
+    observedFrom: { anyOf: [dateTime, { type: "null" }] },
+    observedUntil: { anyOf: [dateTime, { type: "null" }] },
+    temporalPrecision: { type: "string", enum: ["instant", "local_date"] },
+    localDate,
+    timezone: { type: "string", minLength: 1, maxLength: 64 },
+    quality: RecoveryObservationQualitySchema,
+    detail: {
+      oneOf: [SleepObservationDetailSchema, MetricObservationDetailSchema, SubjectiveObservationDetailSchema]
+    }
+  }
+} as const;
+
+export const CurrentRecoveryObservationListSchema = {
+  $id: "CurrentRecoveryObservationList",
+  type: "object",
+  additionalProperties: false,
+  required: ["items"],
+  properties: { items: { type: "array", items: CurrentRecoveryObservationSchema } }
+} as const;
+
+/** Provider-neutral current-day Recovery evidence scoped to the active consent generation. */
+export interface CurrentRecoveryContext {
+  readonly state: "available";
+  readonly policyVersion: "connected-recovery-freshness-v2";
+  readonly calculatedAt: string;
+  readonly localDate: string;
+  readonly timezone: string;
+  readonly syncState: ConnectedRecoverySyncState;
+  readonly targetDateDelivery: ConnectedRecoveryTargetDateDelivery;
+  readonly checkedAt: string | null;
+  readonly metricDelivery: readonly ConnectedRecoveryMetricDelivery[];
+  readonly observations: CurrentRecoveryObservationList;
+}
+
 export type CurrentRecoveryContextResult =
   | CurrentRecoveryContext
   | { readonly state: "timezone_required"; readonly timezone: null };
+
+/** Readable legacy v1 contract retained outside the active MCP tool schema. */
+export const CurrentRecoveryContextV1Schema = {
+  $id: "CurrentRecoveryContextV1",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "state", "policyVersion", "calculatedAt", "localDate", "timezone",
+    "syncState", "targetDateDelivery", "checkedAt", "observations"
+  ],
+  properties: {
+    state: { const: "available" },
+    policyVersion: { const: "connected-recovery-freshness-v1" },
+    calculatedAt: dateTime,
+    localDate,
+    timezone: { type: "string", minLength: 1, maxLength: 64 },
+    syncState: ConnectedRecoverySyncStateSchema,
+    targetDateDelivery: ConnectedRecoveryTargetDateDeliverySchema,
+    checkedAt: { anyOf: [dateTime, { type: "null" }] },
+    observations: RecoveryObservationListSchema
+  }
+} as const;
 
 export const CurrentRecoveryContextResultSchema = {
   $id: "CurrentRecoveryContextResult",
@@ -582,18 +764,31 @@ export const CurrentRecoveryContextResultSchema = {
       additionalProperties: false,
       required: [
         "state", "policyVersion", "calculatedAt", "localDate", "timezone",
-        "syncState", "targetDateDelivery", "checkedAt", "observations"
+        "syncState", "targetDateDelivery", "checkedAt", "metricDelivery", "observations"
       ],
       properties: {
         state: { const: "available" },
-        policyVersion: { const: "connected-recovery-freshness-v1" },
+        policyVersion: { const: "connected-recovery-freshness-v2" },
         calculatedAt: dateTime,
         localDate,
         timezone: { type: "string", minLength: 1, maxLength: 64 },
         syncState: ConnectedRecoverySyncStateSchema,
         targetDateDelivery: ConnectedRecoveryTargetDateDeliverySchema,
         checkedAt: { anyOf: [dateTime, { type: "null" }] },
-        observations: RecoveryObservationListSchema
+        metricDelivery: {
+          type: "array",
+          minItems: 10,
+          maxItems: 10,
+          items: ConnectedRecoveryMetricDeliverySchema,
+          allOf: ConnectedRecoveryMetricKeySchema.enum.map((metric) => ({
+            contains: {
+              type: "object",
+              required: ["metric"],
+              properties: { metric: { const: metric } }
+            }
+          }))
+        },
+        observations: CurrentRecoveryObservationListSchema
       }
     },
     {

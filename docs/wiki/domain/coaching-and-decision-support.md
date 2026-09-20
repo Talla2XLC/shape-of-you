@@ -144,16 +144,30 @@ recommendation from individual facts.
 
 Focused questions about today's sleep, HRV, resting heart rate, Body Battery,
 or steps use the read-only `get_current_recovery_context` composition. Typed
-Recovery observations remain the only authority for metric values. The
-provider-neutral `syncState` describes whether a connected-data attempt is
-fresh, stale, failed, absent, or unavailable; the independent
-`targetDateDelivery` reports only direct target-date evidence: supported facts,
-a normalized record without supported facts, or `unknown`. An absent record is
-always `unknown` because completion timestamps do not prove the exact provider
-request window. This context may explain availability but cannot change the
-status or action returned by `get_daily_assessment`. Coach does not infer zero,
-name a provider-side cause, diagnose a condition, initiate refresh, or promise
-an autonomous recheck without an actual automation.
+Recovery observations remain the only authority for metric values. The v2
+context pairs a Coach-safe typed observation projection with closed per-metric
+delivery states. Before the first successful normalization under a new OAuth
+consent, a stored value is explicitly `retained_unconfirmed`: Coach says that
+it was saved earlier and that current freshness is not yet confirmed. It does
+not claim that reconnect, migration, or another unverified event caused the
+state.
+
+`confirmed_absent` means only that the current normalized delivery omitted the
+field. Coach never converts absence into zero or invents a provider-side or
+physiological explanation. Current-day steps with `partial_day` and `asOf` are
+reported only as the intermediate count observed at that instant, never as a
+final or complete day total or evidence of low activity. Aggregate
+`targetDateDelivery` remains a compatibility summary; explanations use the
+individual metric states so an HRV-only delivery cannot imply complete sleep,
+steps, or Body Battery data.
+
+The provider-neutral `syncState` still describes whether a connected-data
+attempt is fresh, stale, failed, absent, or unavailable. This context may
+explain availability but cannot change the status or action returned by
+`get_daily_assessment`. The read is local and does not depend on provider
+availability, initiate refresh, create automation, or promise an autonomous
+recheck. Its public schema excludes Person, connection, consent, source-record,
+correction-chain, receipt, checksum, credential, and raw provider identities.
 
 A direct relevant user report authorizes one routine low-risk idempotent write
 through the owning typed tool without a duplicate confirmation question. The
@@ -231,6 +245,8 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
   tests.
 - TASK-0118 accepted provider-neutral Recovery freshness composition, direct
   delivery evidence, consent-reset, MCP contract, and fail-closed wording tests.
+- TASK-0120 accepted consent-scoped per-metric delivery, exact observation
+  publication, partial-step wording, safe MCP projection, and crash-cut tests.
 - TASK-0119 accepted typed daily-recommendation feedback contracts, exact
   snapshot ownership, idempotency, concurrency, privacy cascade, OAuth/MCP,
   and DailyAssessment non-interference tests.
@@ -252,6 +268,7 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
 - [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
+- [Consent-scoped Recovery delivery evidence](../../adr/20260919-bind-recovery-delivery-to-consent-generation.md).
 - [Typed feedback for daily recommendations](../../adr/20260918-record-typed-daily-recommendation-feedback.md).
 
 ## Open questions

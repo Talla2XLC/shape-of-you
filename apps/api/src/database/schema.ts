@@ -3099,6 +3099,7 @@ export const integrationInbox = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
     connectionId: uuid("connection_id").notNull(),
+    consentId: uuid("consent_id"),
     kind: integrationInboxKind("kind").notNull(),
     providerIdentity: varchar("provider_identity", { length: 256 }).notNull(),
     checksum: varchar("checksum", { length: 64 }).notNull(),
@@ -3113,7 +3114,18 @@ export const integrationInbox = pgTable(
       columns: [table.connectionId],
       foreignColumns: [integrationConnections.id]
     }).onDelete("cascade"),
-    unique("integration_inbox_delivery_uq").on(table.connectionId, table.kind, table.providerIdentity, table.checksum)
+    foreignKey({
+      name: "integration_inbox_consent_fk",
+      columns: [table.consentId],
+      foreignColumns: [recoveryConsents.id]
+    }).onDelete("cascade"),
+    index("integration_inbox_delivery_idx").on(
+      table.connectionId,
+      table.consentId,
+      table.kind,
+      table.providerIdentity,
+      table.receivedAt
+    )
   ]
 );
 
@@ -3126,6 +3138,8 @@ export const integrationRecoveryFacts = pgTable(
     factKey: varchar("fact_key", { length: 64 }).notNull(),
     normalizedChecksum: varchar("normalized_checksum", { length: 64 }).notNull(),
     observationId: uuid("observation_id").notNull(),
+    confirmedConsentId: uuid("confirmed_consent_id"),
+    confirmedDeliveryId: uuid("confirmed_delivery_id"),
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
   },
   (table) => [
@@ -3133,6 +3147,16 @@ export const integrationRecoveryFacts = pgTable(
       name: "integration_recovery_fact_connection_fk",
       columns: [table.connectionId],
       foreignColumns: [integrationConnections.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "integration_recovery_fact_consent_fk",
+      columns: [table.confirmedConsentId],
+      foreignColumns: [recoveryConsents.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "integration_recovery_fact_delivery_fk",
+      columns: [table.confirmedDeliveryId],
+      foreignColumns: [integrationInbox.id]
     }).onDelete("cascade"),
     foreignKey({
       name: "integration_recovery_fact_observation_fk",
