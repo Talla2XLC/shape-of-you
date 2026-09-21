@@ -146,6 +146,25 @@ boundaries must not be implicitly shared between deployable services.
 - A proposed commit message is informational only and never authorizes
   staging, committing, pushing, tagging, releasing, or deploying; each action
   still requires its corresponding explicit approval.
+- Before reporting migration, deployment, release, or environment status,
+  inspect the repository's current delivery configuration and canonical
+  operational documentation. After a relevant push, inspect the live CI/CD run
+  when access is available; do not infer environment state from local actions
+  or Git state alone.
+- Operational status reports must distinguish at least these states when they
+  apply: migration authored, verified in isolated tests, committed, pushed,
+  queued or running in CI/CD, applied to a named environment, runtime-ready,
+  and smoke-verified. Always name the actor and environment when saying that a
+  migration was or was not executed.
+- Never describe an automatic deployment migration as simply "not executed"
+  merely because the current agent did not run it manually. State whether the
+  delivery pipeline is expected to run it, whether that pipeline has reached
+  the migration step, and what evidence confirms application.
+- When an accepted task is pushed through an automatic staging pipeline, call
+  the implementation complete but the staging delivery incomplete until the
+  exact workflow run has succeeded through migrations, runtime readiness, and
+  smoke verification. Final status must name both completion levels and any
+  remaining production or release gates.
 - Never disclose credentials, private keys, tokens, `.env` contents, dumps, or
   production data in chat, documentation, plans, reports, or commits.
 
