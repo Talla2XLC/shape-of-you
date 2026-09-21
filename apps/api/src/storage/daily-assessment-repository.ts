@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { createHash, randomUUID } from "node:crypto";
 
 import type {
@@ -153,6 +153,11 @@ export interface DailyAssessmentStore {
     snapshotId: string
   ): Promise<DailyRecommendationFeedbackList>;
   getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4>;
+  /** Finds the latest V4 recommendation for one exact Person-local date. */
+  findLatestV4SnapshotForLocalDate(
+    personId: string,
+    localDate: string
+  ): Promise<DailyAssessmentAvailableV4 | null>;
   createOrGetCompletion(
     personId: string,
     input: DailyCompletionAssessmentInput
@@ -451,6 +456,36 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
     return snapshot;
   }
 
+  public async findLatestV4SnapshotForLocalDate(
+    personId: string,
+    localDate: string
+  ): Promise<DailyAssessmentAvailableV4 | null> {
+    const rows = await this.database.db.select({
+      recommendation: coachingRecommendations,
+      detail: coachingDailyAssessmentDetails
+    }).from(coachingRecommendations)
+      .innerJoin(
+        coachingDailyAssessmentDetails,
+        eq(coachingDailyAssessmentDetails.recommendationId, coachingRecommendations.id)
+      )
+      .where(and(
+        eq(coachingRecommendations.personId, personId),
+        eq(coachingDailyAssessmentDetails.personId, personId),
+        eq(coachingDailyAssessmentDetails.localDate, localDate),
+        eq(coachingDailyAssessmentDetails.policyVersion, "daily-assessment-v4")
+      ))
+      .orderBy(
+        desc(coachingRecommendations.createdAt),
+        desc(coachingRecommendations.id)
+      )
+      .limit(1);
+    if (!rows[0]) return null;
+    return this.hydrate(
+      rows[0].recommendation,
+      rows[0].detail
+    ) as DailyAssessmentAvailableV4;
+  }
+
   public createOrGetCompletion(
     personId: string,
     input: DailyCompletionAssessmentInput
@@ -690,6 +725,23 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
       throw new DomainValidationError("Completion assessment requires a daily-assessment-v4 snapshot");
     }
     return snapshot;
+  }
+
+  public async findLatestV4SnapshotForLocalDate(
+    personId: string,
+    localDate: string
+  ): Promise<DailyAssessmentAvailableV4 | null> {
+    const snapshots = [...this.snapshots.values()]
+      .filter((item): item is DailyAssessmentAvailableV4 =>
+        item.policyVersion === "daily-assessment-v4" &&
+        item.localDate === localDate &&
+        this.snapshotOwners.get(item.snapshotId) === personId
+      )
+      .sort((left, right) =>
+        right.createdAt.localeCompare(left.createdAt) ||
+        right.snapshotId.localeCompare(left.snapshotId)
+      );
+    return snapshots[0] ?? null;
   }
 
   public async createOrGetCompletion(

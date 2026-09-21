@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import type { DailyAssessmentUsedFacts } from "@shape-of-you/contracts";
 
@@ -9,9 +9,11 @@ import {
   evaluateDailyAssessment
 } from "../src/domain/daily-assessment.js";
 import {
+  DailyAssessmentService,
   derivePersonLocalDate,
   withDailyAssessmentConsistency
 } from "../src/coaching/daily-assessment.service.js";
+import type { DailyAssessmentStore } from "../src/storage/daily-assessment-repository.js";
 import { DailyAssessmentEvidenceChangedError } from "../src/domain/errors.js";
 
 const programVersionId = "00000000-0000-4000-8000-000000000101";
@@ -201,5 +203,105 @@ describe("daily assessment policy", () => {
       .toBe("2026-09-14");
     expect(derivePersonLocalDate("Europe/Moscow", new Date("2026-09-14T21:00:00.000Z")))
       .toBe("2026-09-15");
+  });
+
+  it("selects at most one previous recommendation from the immediately prior local date", async () => {
+    const previous = {
+      state: "available" as const,
+      snapshotId: "00000000-0000-4000-8000-000000000122",
+      localDate: "2026-09-20",
+      timezone: "Europe/Belgrade",
+      status: "insufficient_data" as const,
+      usedFacts: {
+        ...facts(),
+        dailyContextNoteIds: []
+      },
+      missingImportantData: ["nutrition" as const],
+      reasons: ["partial_nutrition" as const],
+      recommendedAction: {
+        type: "complete_nutrition_record" as const,
+        text: "Record the next meal after eating.",
+        trainingProgramVersionId: null,
+        completion: {
+          aggregation: "all_of" as const,
+          criteria: [{
+            id: "meal_recorded",
+            type: "meal_recorded" as const,
+            role: "required" as const,
+            ownerDomain: "nutrition" as const,
+            observationWindow: "after_recommendation_on_local_date" as const,
+            targetValue: null,
+            trainingProgramVersionId: null
+          }]
+        }
+      },
+      alternatives: [],
+      limitations: ["not_medical_advice" as const],
+      confidence: 0.6,
+      policyVersion: "daily-assessment-v4" as const,
+      personalBaseline: {
+        policyKey: "balanced" as const,
+        policyVersion: "personal-baseline-v2" as const,
+        status: "unavailable" as const,
+        summary: "Personal baseline is unavailable.",
+        comparisons: []
+      },
+      movement: { status: "unavailable" as const, summary: "Movement is unavailable.", current: null },
+      evidenceChecksum: "b".repeat(64),
+      createdAt: "2026-09-20T08:00:00.000Z"
+    };
+    const store = {
+      findLatestV4SnapshotForLocalDate: vi.fn().mockResolvedValue(previous)
+    } as unknown as DailyAssessmentStore;
+    const service = new DailyAssessmentService(
+      store,
+      { getPersonId: () => "00000000-0000-4000-8000-000000000001" } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never
+    );
+    vi.spyOn(service, "read").mockResolvedValue({
+      ...previous,
+      snapshotId: "00000000-0000-4000-8000-000000000123",
+      localDate: "2026-09-21",
+      createdAt: "2026-09-21T08:00:00.000Z"
+    });
+
+    await expect(service.readCoachContext()).resolves.toEqual({
+      assessment: expect.objectContaining({ localDate: "2026-09-21" }),
+      previousRecommendation: {
+        snapshotId: previous.snapshotId,
+        localDate: previous.localDate,
+        recommendedAction: previous.recommendedAction
+      }
+    });
+    expect(store.findLatestV4SnapshotForLocalDate).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000001",
+      "2026-09-20"
+    );
+  });
+
+  it("does not look for a previous recommendation when timezone is required", async () => {
+    const store = {
+      findLatestV4SnapshotForLocalDate: vi.fn()
+    } as unknown as DailyAssessmentStore;
+    const service = new DailyAssessmentService(
+      store,
+      { getPersonId: () => "00000000-0000-4000-8000-000000000001" } as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never,
+      {} as never
+    );
+    vi.spyOn(service, "read").mockResolvedValue({ state: "timezone_required", timezone: null });
+
+    await expect(service.readCoachContext()).resolves.toEqual({
+      assessment: { state: "timezone_required", timezone: null },
+      previousRecommendation: null
+    });
+    expect(store.findLatestV4SnapshotForLocalDate).not.toHaveBeenCalled();
   });
 });

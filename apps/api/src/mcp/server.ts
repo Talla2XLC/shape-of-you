@@ -55,7 +55,7 @@ import {
   type CreateRecoveryObservation,
   type CreateWeightMeasurement,
   type CreateWorkoutSession,
-  type DailyAssessmentResult,
+  type DailyRecommendationCompletionAssessment,
   type ReadDailyRecommendationCompletion,
   type DailyProjectionQuery,
   type ListDailyContextNotesQuery,
@@ -87,6 +87,7 @@ import type { WeightMeasurementService } from "../weight-measurements/weight-mea
 import type { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
 import type { DailyProjectionService } from "../daily-projections/daily-projection.service.js";
 import type { DailyAssessmentService } from "../coaching/daily-assessment.service.js";
+import type { DailyAssessmentCoachContext } from "../coaching/daily-assessment.service.js";
 import type { CurrentRecoveryContextService } from "../coaching/current-recovery-context.service.js";
 import { ConflictError, NotFoundError } from "../domain/errors.js";
 import {
@@ -120,7 +121,10 @@ interface McpServices {
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
-  readonly dailyAssessment?: Pick<DailyAssessmentService, "read" | "readCompletion" | "updatePreferences" | "recordFeedback">;
+  readonly dailyAssessment?: Pick<
+    DailyAssessmentService,
+    "read" | "readCoachContext" | "readCompletion" | "updatePreferences" | "recordFeedback"
+  >;
   readonly currentRecoveryContext: Pick<CurrentRecoveryContextService, "read">;
 }
 
@@ -147,7 +151,7 @@ interface ToolDefinition {
 interface DailyProjectionCompatibilityResult {
   readonly projection: unknown;
   readonly query: DailyProjectionQuery;
-  readonly assessment: DailyAssessmentResult | null;
+  readonly assessmentContext: DailyAssessmentCoachContext | null;
 }
 
 class ConnectorInputError extends Error {}
@@ -265,18 +269,59 @@ const trainingContextResultContent = coachResultContent(
   "Use an active program as planned authority. Keep detailed completed sessions separate from connected activity summaries. A connected summary confirms the activity and load shown but never supplies exercises or sets. When the program is absent, historical evidence is proposal input only and must never be presented as an existing plan."
 );
 
-const dailyAssessmentResultContent = coachResultContent(
-  "Treat this API-owned daily assessment as the sole decision authority: preserve and explain its exact status, reasons, missing data, limitations, confidence, movement context, and single recommended next action. Do not recalculate, replace, or embellish the policy decision. Do not add a duration, intensity, workout, medical rationale, trend, or substitute action that the result did not return. If timezone is required and the user has explicitly provided an unambiguous current timezone or location, call set_current_timezone and retry this read in the same turn. Otherwise ask one natural location clarification. Never construct a fallback recommendation.",
-  dailyCoachReplyShape
-);
+const dailyAssessmentGuidance =
+  "Treat this API-owned daily assessment as the sole decision authority: preserve and explain its exact status, reasons, missing data, limitations, confidence, movement context, and single recommended next action. Do not recalculate, replace, or embellish the policy decision. Do not add a duration, intensity, workout, medical rationale, trend, or substitute action that the result did not return. Completion is a separate exact-snapshot read and never changes this assessment. Call it only when the outcome can change the useful reply: an explicit progress question, a verified owning-domain fact relevant to the known current action, a reused current snapshot whose outcome matters, or the bounded previous recommendation candidate in a full today brief. Never perform background completion discovery for unrelated routine conversation. If timezone is required and the user has explicitly provided an unambiguous current timezone or location, call set_current_timezone and retry this read in the same turn. Otherwise ask one natural location clarification. Never construct a fallback recommendation.";
+
+function dailyAssessmentCoachContent(context: DailyAssessmentCoachContext): string {
+  if (context.previousRecommendation === null) {
+    return coachResultContent(
+      `${dailyAssessmentGuidance} NO PREVIOUS RECOMMENDATION CANDIDATE: Do not call completion for a previous recommendation and do not search older dates.`,
+      dailyCoachReplyShape
+    );
+  }
+  return coachResultContent(
+    `${dailyAssessmentGuidance} PREVIOUS RECOMMENDATION CANDIDATE (internal exact server-owned reference; never expose identifiers or field names): ${JSON.stringify(context.previousRecommendation)} Use it only for a brief previous-day retrospective in this full today answer. Call get_daily_recommendation_completion with exactly this snapshotId; never combine its result with another date or action.`,
+    dailyCoachReplyShape
+  );
+}
 
 const dailyRecommendationFeedbackResultContent = coachResultContent(
   "The user's explicit typed response to the exact daily recommendation snapshot was recorded. A completed status is feedback evidence only: do not create or imply a WorkoutSession, Meal, RecoveryObservation, or other owning-domain fact, and do not claim that policy or future recommendations changed."
 );
 
-const dailyRecommendationCompletionResultContent = coachResultContent(
-  "Use this immutable typed conclusion as the authority for whether the exact daily recommendation is completed, partially completed, not completed, or unknown. Explain its evidence mode and limitations without treating missing records as failure. Never create or imply a new owning-domain fact from this Coaching conclusion."
-);
+function dailyRecommendationCompletionResultContent(value: unknown): string {
+  const result = value as DailyRecommendationCompletionAssessment;
+  const base =
+    "Use this immutable typed conclusion only for its exact recommendation snapshot. Pair it with the action and local date from the same server-owned recommendation context; never transfer it to another snapshot, date, or action. Never create, overwrite, or imply a new owning-domain fact from this Coaching conclusion. ";
+  if (result.limitations.includes("self_report_conflicts_with_observation")) {
+    return coachResultContent(
+      base +
+      "The active user report and automatic observation conflict. State both naturally and preserve honest uncertainty; do not choose one as hidden truth. Ask one clarification only if resolving the conflict changes the useful next step."
+    );
+  }
+  switch (result.evidenceMode) {
+    case "observed":
+      return coachResultContent(
+        base +
+        "Reliable domain evidence confirms the recommendation outcome. Briefly acknowledge the confirmed result and do not ask whether the user completed it."
+      );
+    case "self_reported":
+      return coachResultContent(
+        base +
+        "This conclusion comes from the active explicit user report after append-only corrections. Attribute it to the user rather than presenting it as an owning-domain observation, and do not repeat superseded reports."
+      );
+    case "partially_observed":
+      return coachResultContent(
+        base +
+        "Explain which criterion is confirmed and which part remains partial, stale, unknown, unlinked, or dependent on self-report. Do not promote partial evidence to completion. Ask only if the missing information materially changes the useful answer."
+      );
+    case "unknown":
+      return coachResultContent(
+        base +
+        "Evidence is insufficient. Unknown is neither completed nor not completed. Usually omit the outcome; explain the uncertainty or ask one question only when the answer materially changes the useful next step."
+      );
+  }
+}
 
 const timezoneWriteResultContent = coachResultContent(
   "The user's current IANA timezone was saved from their explicit context. Immediately retry the authoritative read that required it: get_daily_assessment for a Daily Coach request or get_current_recovery_context for a focused current Recovery request. Do not expose the timezone identifier unless the user asked for it, and do not claim a daily recommendation until get_daily_assessment succeeds."
@@ -310,16 +355,17 @@ const unavailableProjectionAssessmentContent =
 function dailyProjectionCompatibilityContent(
   result: DailyProjectionCompatibilityResult
 ): string {
-  const { assessment, query } = result;
-  if (assessment === null) {
+  const { assessmentContext, query } = result;
+  if (assessmentContext === null) {
     return unavailableProjectionAssessmentContent;
   }
+  const { assessment } = assessmentContext;
   if (assessment.state === "available" && (
     assessment.localDate !== query.localDate || assessment.timezone !== query.timezone
   )) {
     return dailyProjectionResultContent;
   }
-  return `API-OWNED DAILY ASSESSMENT RESULT (exact JSON; preserve every decision field): ${JSON.stringify(assessment)} ${dailyAssessmentResultContent}`;
+  return `API-OWNED DAILY ASSESSMENT RESULT (exact JSON; preserve every decision field): ${JSON.stringify(assessment)} ${dailyAssessmentCoachContent(assessmentContext)}`;
 }
 
 /** Durable operational policy published by the API-owned MCP server. */
@@ -339,6 +385,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For a focused question about today's sleep, HRV, resting heart rate, Body Battery, or steps, call get_current_recovery_context. Treat its typed observations as value authority and its delivery state only as availability evidence. Never infer that Garmin or another provider failed from an empty observation set, never infer zero from absence, and never promise a later autonomous recheck without a real automation. " +
   "For a full Daily Coach assessment, preserve the assessment status, reasons, missing data, limitations, confidence, and single recommended action. Never reconstruct or alter that decision from get_daily_projection, other typed reads, or conversation context. Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment. For a factual day record that does not ask for a status or next action, require an exact local date and IANA timezone and use get_daily_projection without turning it into a decision. " +
+  "Use recommendation completion contextually, never on every response. Call get_daily_recommendation_completion only for an exact known snapshot when an explicit progress question, a newly verified relevant owner fact, a reused current recommendation, or the bounded previous-day candidate makes the outcome useful. Never call get_daily_assessment merely to discover completion during unrelated routine capture. If the daily result provides no previous candidate, do not call completion for a previous recommendation and do not search older dates. Keep each completion paired with the action and local date from the same snapshot. Reliable observed completion suppresses did-you-complete-it questions; partial evidence names what is confirmed and missing; unknown is not failure; active self-reported corrections are attributed to the user; conflicts preserve both claims and honest uncertainty. Ask manually only when the answer changes the useful next step. " +
   "When the user explicitly says the displayed daily recommendation was accepted, completed, skipped, too heavy, or unsuitable, immediately call record_daily_recommendation_feedback with that exact assessment snapshotId and one typed status. A free-text comment may only supplement the status. Never infer feedback from silence or unrelated behavior, never translate completed feedback into an owning-domain fact, and never claim that feedback automatically changed policy or future recommendations. " +
   "When get_daily_assessment requires timezone, use set_current_timezone only from an explicit unambiguous statement about the user's current timezone or location, then retry the assessment in the same turn. Ask one natural clarification if the location is ambiguous. Never guess silently or expose a technical setup task. " +
   "Outside a full Daily Coach assessment, present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
@@ -811,8 +858,9 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       DailyAssessmentResultSchema,
       false,
       MCP_READ_SCOPE,
-      () => services.dailyAssessment?.read() ?? Promise.reject(new Error("Daily assessment service is unavailable")),
-      () => dailyAssessmentResultContent
+      () => services.dailyAssessment?.readCoachContext() ?? Promise.reject(new Error("Daily assessment service is unavailable")),
+      (value) => dailyAssessmentCoachContent(value as DailyAssessmentCoachContext),
+      (value) => (value as DailyAssessmentCoachContext).assessment
     ),
     defineTool(
       "record_daily_recommendation_feedback",
@@ -842,7 +890,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
         if (!service) throw new Error("Daily assessment service is unavailable");
         return service.readCompletion((input as unknown as ReadDailyRecommendationCompletion).snapshotId);
       },
-      () => dailyRecommendationCompletionResultContent
+      (value) => dailyRecommendationCompletionResultContent(value)
     ),
     defineTool(
       "get_daily_projection",
@@ -854,13 +902,13 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       async (input) => {
         const query = input as DailyProjectionQuery;
         const projection = await services.dailyProjection.projection(query);
-        let assessment: DailyAssessmentResult | null = null;
+        let assessmentContext: DailyAssessmentCoachContext | null = null;
         try {
-          assessment = await services.dailyAssessment?.read() ?? null;
+          assessmentContext = await services.dailyAssessment?.readCoachContext() ?? null;
         } catch {
           // A compatibility assessment must not hide an otherwise valid factual projection.
         }
-        return { projection, query, assessment } satisfies DailyProjectionCompatibilityResult;
+        return { projection, query, assessmentContext } satisfies DailyProjectionCompatibilityResult;
       },
       (value) => dailyProjectionCompatibilityContent(
         value as DailyProjectionCompatibilityResult

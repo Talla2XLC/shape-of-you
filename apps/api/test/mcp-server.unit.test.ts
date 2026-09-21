@@ -12,11 +12,13 @@ import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
 import type {
   CreateRecoveryObservation,
   DailyAssessmentResult,
+  DailyRecommendationCompletionAssessment,
   ListRecoveryObservationsQuery,
   RecoveryObservation
 } from "@shape-of-you/contracts";
 
 import { RequestPersonContext } from "../src/application/person-context.js";
+import type { DailyAssessmentCoachContext } from "../src/coaching/daily-assessment.service.js";
 import { ConflictError, NotFoundError } from "../src/domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
@@ -265,6 +267,15 @@ describe("MCP HTTP adapter", () => {
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Use recommendation completion contextually, never on every response"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Never call get_daily_assessment merely to discover completion during unrelated routine capture"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "If the daily result provides no previous candidate, do not call completion"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
       "Give one clear Next step plus"
@@ -1521,6 +1532,40 @@ describe("MCP HTTP adapter", () => {
         reportedAt: "2026-09-02T10:00:00.000Z"
       }
     });
+    const completion = (
+      evidenceMode: DailyRecommendationCompletionAssessment["evidenceMode"],
+      limitations: DailyRecommendationCompletionAssessment["limitations"] = []
+    ): DailyRecommendationCompletionAssessment => ({
+      id: "00000000-0000-4000-8000-000000000701",
+      snapshotId: "00000000-0000-4000-8000-000000000502",
+      completionPolicyVersion: "daily-completion-v1",
+      completionState: evidenceMode === "unknown"
+        ? "unknown"
+        : evidenceMode === "partially_observed" ? "partially_completed" : "completed",
+      evidenceMode,
+      criteria: [{
+        criterionId: "meal_recorded",
+        status: evidenceMode === "unknown" ? "unknown" : evidenceMode === "partially_observed" ? "partial" : "satisfied",
+        freshness: evidenceMode === "unknown" ? "unknown" : "fresh",
+        completeness: evidenceMode === "unknown" ? "unknown" : evidenceMode === "partially_observed" ? "partial" : "complete",
+        observedAt: evidenceMode === "unknown" ? null : "2026-09-01T10:00:00.000Z",
+        evidence: evidenceMode === "unknown" ? null : {
+          ownerDomain: "nutrition",
+          factType: "meal",
+          factId: "00000000-0000-4000-8000-000000000702"
+        },
+        limitations
+      }],
+      reasons: evidenceMode === "unknown"
+        ? ["insufficient_evidence"]
+        : evidenceMode === "partially_observed"
+          ? ["some_required_criteria_observed"]
+          : evidenceMode === "self_reported" ? ["manual_completed"] : ["all_required_criteria_observed"],
+      limitations,
+      evaluatedAt: "2026-09-02T09:00:00.000Z",
+      evidenceChecksum: "c".repeat(64)
+    });
+    const readCompletion = vi.fn().mockResolvedValue(completion("observed"));
     const availableDailyAssessment: DailyAssessmentResult = {
       state: "available",
       snapshotId: "00000000-0000-4000-8000-000000000501",
@@ -1608,6 +1653,31 @@ describe("MCP HTTP adapter", () => {
       evidenceChecksum: "a".repeat(64),
       createdAt: "2026-09-02T09:00:00.000Z"
     };
+    const previousRecommendation = {
+      snapshotId: "00000000-0000-4000-8000-000000000502",
+      localDate: "2026-09-01",
+      recommendedAction: {
+        type: "complete_nutrition_record" as const,
+        text: "Record the next meal after eating.",
+        trainingProgramVersionId: null,
+        completion: {
+          aggregation: "all_of" as const,
+          criteria: [{
+            id: "meal_recorded",
+            type: "meal_recorded" as const,
+            role: "required" as const,
+            ownerDomain: "nutrition" as const,
+            observationWindow: "after_recommendation_on_local_date" as const,
+            targetValue: null,
+            trainingProgramVersionId: null
+          }]
+        }
+      }
+    };
+    const readCoachContext = vi.fn<() => Promise<DailyAssessmentCoachContext>>(async () => ({
+      assessment: await readDailyAssessment(),
+      previousRecommendation
+    }));
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1678,6 +1748,8 @@ describe("MCP HTTP adapter", () => {
         },
         dailyAssessment: {
           read: readDailyAssessment,
+          readCoachContext,
+          readCompletion,
           updatePreferences,
           recordFeedback
         }
@@ -2095,6 +2167,94 @@ describe("MCP HTTP adapter", () => {
       expect(directDailyAssessment.json().result.content[0].text).toContain(
         "Do not recalculate, replace, or embellish the policy decision"
       );
+      expect(directDailyAssessment.json().result.content[0].text).toContain(
+        "PREVIOUS RECOMMENDATION CANDIDATE"
+      );
+      expect(directDailyAssessment.json().result.content[0].text).toContain(
+        previousRecommendation.snapshotId
+      );
+
+      readCoachContext.mockResolvedValueOnce({
+        assessment: availableDailyAssessment,
+        previousRecommendation: null
+      });
+      const dailyAssessmentWithoutPrevious = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "direct-daily-assessment-without-previous",
+          method: "tools/call",
+          params: { name: "get_daily_assessment", arguments: {} }
+        }
+      });
+      expect(dailyAssessmentWithoutPrevious.json().result.structuredContent).toEqual(
+        availableDailyAssessment
+      );
+      expect(dailyAssessmentWithoutPrevious.json().result.content[0].text).toContain(
+        "NO PREVIOUS RECOMMENDATION CANDIDATE"
+      );
+      expect(dailyAssessmentWithoutPrevious.json().result.content[0].text).not.toContain(
+        previousRecommendation.snapshotId
+      );
+
+      const callCompletion = async (rpcId: string) => (await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: rpcId,
+          method: "tools/call",
+          params: {
+            name: "get_daily_recommendation_completion",
+            arguments: { snapshotId: previousRecommendation.snapshotId }
+          }
+        }
+      })).json().result;
+
+      const observedCompletion = await callCompletion("observed-completion");
+      expect(observedCompletion.content[0].text).toContain(
+        "do not ask whether the user completed it"
+      );
+      expect(readCompletion).toHaveBeenLastCalledWith(previousRecommendation.snapshotId);
+
+      readCompletion.mockResolvedValueOnce(completion("self_reported"));
+      const selfReportedCompletion = await callCompletion("self-reported-completion");
+      expect(selfReportedCompletion.content[0].text).toContain(
+        "active explicit user report after append-only corrections"
+      );
+      expect(selfReportedCompletion.content[0].text).toContain(
+        "Attribute it to the user"
+      );
+
+      readCompletion.mockResolvedValueOnce(completion("partially_observed", ["source_partial"]));
+      const partialCompletion = await callCompletion("partial-completion");
+      expect(partialCompletion.content[0].text).toContain(
+        "Explain which criterion is confirmed and which part remains partial"
+      );
+
+      readCompletion.mockResolvedValueOnce(completion("unknown", ["source_unknown"]));
+      const unknownCompletion = await callCompletion("unknown-completion");
+      expect(unknownCompletion.content[0].text).toContain(
+        "Unknown is neither completed nor not completed"
+      );
+
+      readCompletion.mockResolvedValueOnce(completion(
+        "self_reported",
+        ["self_report_conflicts_with_observation"]
+      ));
+      const conflictingCompletion = await callCompletion("conflicting-completion");
+      expect(conflictingCompletion.content[0].text).toContain(
+        "active user report and automatic observation conflict"
+      );
 
       readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
       const compatibleDailyProjection = await authorizedFastify.inject({
@@ -2120,6 +2280,9 @@ describe("MCP HTTP adapter", () => {
       });
       expect(compatibleDailyProjection.json().result.content[0].text).toContain(
         "Do not recalculate, replace, or embellish the policy decision"
+      );
+      expect(compatibleDailyProjection.json().result.content[0].text).toContain(
+        previousRecommendation.snapshotId
       );
 
       readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);

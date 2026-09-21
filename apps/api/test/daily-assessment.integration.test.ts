@@ -224,8 +224,20 @@ describe("API-owned daily assessment", () => {
     expect(rows.rows[0]).toEqual({ count: 2, all_v4: true, all_reproducible: true });
 
     const dailyRepository = new DailyAssessmentRepository(database);
-    await dailyRepository.setTimezone(otherPersonId, "Europe/Moscow");
     const changedBody = changed.json();
+    await expect(dailyRepository.findLatestV4SnapshotForLocalDate(
+      personId,
+      changedBody.localDate
+    )).resolves.toMatchObject({
+      snapshotId: changedBody.snapshotId,
+      localDate: changedBody.localDate,
+      policyVersion: "daily-assessment-v4"
+    });
+    await expect(dailyRepository.findLatestV4SnapshotForLocalDate(
+      personId,
+      "2000-01-01"
+    )).resolves.toBeNull();
+    await dailyRepository.setTimezone(otherPersonId, "Europe/Moscow");
     const sameEvidence = {
       localDate: changedBody.localDate,
       timezone: changedBody.timezone,

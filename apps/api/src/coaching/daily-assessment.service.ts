@@ -5,6 +5,7 @@ import type {
   DailyCompletionCriterion,
   DailyCompletionCriterionResult,
   DailyAssessmentMovement,
+  DailyAssessmentAvailableV4,
   DailyAssessmentResult,
   DailyAssessmentV2UsedFacts,
   DailyRecommendationFeedbackList,
@@ -67,6 +68,19 @@ export function derivePersonLocalDate(timezone: string, now = new Date()): strin
   return new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
 }
 
+/** Exact immutable recommendation reference used only for Coach orchestration. */
+export interface DailyRecommendationReference {
+  readonly snapshotId: string;
+  readonly localDate: string;
+  readonly recommendedAction: DailyAssessmentAvailableV4["recommendedAction"];
+}
+
+/** DailyAssessment plus one bounded previous-day recommendation candidate. */
+export interface DailyAssessmentCoachContext {
+  readonly assessment: DailyAssessmentResult;
+  readonly previousRecommendation: DailyRecommendationReference | null;
+}
+
 function median(values: readonly number[]): number | null {
   if (values.length < 7) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -104,6 +118,28 @@ export class DailyAssessmentService {
 
   public read(): Promise<DailyAssessmentResult> {
     return withDailyAssessmentConsistency(() => this.readConsistent());
+  }
+
+  /** Composes fresh MCP guidance without changing the public assessment result. */
+  public async readCoachContext(): Promise<DailyAssessmentCoachContext> {
+    const assessment = await this.read();
+    if (assessment.state !== "available") {
+      return { assessment, previousRecommendation: null };
+    }
+    const previous = await this.store.findLatestV4SnapshotForLocalDate(
+      this.personContext.getPersonId(),
+      shiftLocalDate(assessment.localDate, -1)
+    );
+    return {
+      assessment,
+      previousRecommendation: previous === null
+        ? null
+        : {
+            snapshotId: previous.snapshotId,
+            localDate: previous.localDate,
+            recommendedAction: previous.recommendedAction
+          }
+    };
   }
 
   /** Records one idempotent typed event about an exact daily snapshot. */

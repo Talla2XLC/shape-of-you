@@ -77,6 +77,15 @@ describe("daily recommendation completion policy", () => {
       .toMatchObject({ completionState: "not_completed", evidenceMode: "self_reported" });
   });
 
+  it("keeps a skipped report visibly in conflict with fully observed completion", () => {
+    expect(evaluateDailyRecommendationCompletion([criterion], [result("satisfied")], "skipped"))
+      .toMatchObject({
+        completionState: "not_completed",
+        evidenceMode: "self_reported",
+        limitations: ["self_report_conflicts_with_observation"]
+      });
+  });
+
   it("does not promote incomplete positive evidence to fully observed", () => {
     const incomplete = { ...result("satisfied"), completeness: "partial" as const, limitations: ["source_partial" as const] };
     expect(evaluateDailyRecommendationCompletion([criterion], [incomplete], null)).toMatchObject({

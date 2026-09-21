@@ -291,6 +291,24 @@ absence-as-zero, timestamp comparison by the model, and promises of a later
 autonomous recheck. The tool explains availability only;
 `get_daily_assessment` remains the sole Daily Coach decision authority.
 
+`get_daily_recommendation_completion` remains a separate read for one exact V4
+snapshot. Coach calls it only when that result can affect a useful reply: an
+explicit progress question, a relevant verified owner fact for an already-known
+current recommendation, a reused current snapshot, or the single previous-day
+candidate supplied during a full current Daily Coach response. The API selects
+that candidate as the latest V4 snapshot for exactly the preceding Person-local
+date and omits it when absent; Coach does not search older dates or make a
+previous-completion call without it. The candidate is model-facing orchestration
+context only, while the public `DailyAssessmentResult` structured contract and
+the assessment policy inputs remain unchanged.
+
+Completion presentation is evidence-aware. Reliable observed results suppress
+duplicate confirmation questions; active corrected self-reports are attributed
+to the user; partial results identify confirmed and missing evidence; unknown is
+neutral; and conflicts preserve both automatic and manual claims. Every call and
+reply remains paired with the same snapshot, action, and local date. A manual
+question is reserved for cases where the answer changes the useful next step.
+
 `get_daily_projection` is also the compatibility carrier for already open
 conversations whose cached catalog does not contain `get_daily_assessment`.
 Its public name, input/output schemas, `person:read` scope, and factual
@@ -469,6 +487,9 @@ lifecycle.
 - TASK-0118 accepted the 25th read-only MCP tool, its closed schema,
   Person-local composition, provider-neutral delivery evidence, and fail-closed
   Coach wording without a new OAuth scope.
+- TASK-0122 accepted contextual completion orchestration, exact previous-day
+  candidate selection, unchanged public DailyAssessment structured content,
+  and evidence-aware MCP presentation without a new OAuth scope.
 
 ## Decisions
 
@@ -493,6 +514,7 @@ lifecycle.
 - [Portable Daily Coach protocol](../../adr/20260828-keep-daily-coach-protocol-portable-across-approved-mcp-clients.md)
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md)
 - [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md)
+- [Contextual completion in the ordinary Coach flow](../../adr/20260921-use-recommendation-completion-in-ordinary-coach-flow.md)
 
 ## Open questions
 

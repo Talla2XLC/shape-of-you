@@ -154,6 +154,24 @@ event records the user's explicit outcome report for that recommendation, but do
 WorkoutSession, Meal, RecoveryObservation, TrainingProgram mutation, or other
 owning-domain fact.
 
+Coach consults that completion conclusion contextually rather than after every
+message. It uses an exact already-known current snapshot for a relevant progress
+question, verified owner fact, or reused current recommendation. A full current
+Daily Coach response may additionally receive one API-selected candidate: the
+latest V4 snapshot from exactly the previous Person-local date. No candidate
+means no previous-completion call and no search across older dates. Every result
+stays paired with the action and date from the same snapshot; completion never
+enters DailyAssessment evidence or changes the next action.
+
+Reliable `observed` completion suppresses a duplicate completion question.
+`self_reported` reflects the active append-only feedback correction and is
+attributed to the user. `partially_observed` names both the confirmed criterion
+and the partial, stale, unknown, or unlinked remainder. `unknown` is not treated
+as non-completion and is normally omitted unless it changes the useful reply.
+When an active report conflicts with automatic evidence, Coach states both
+claims as uncertain without changing owner facts. A manual clarification is
+asked only when its answer changes the useful next step.
+
 The exact-date factual view remains the always-live `get_daily_projection`
 read. For clients with the current tool catalog, a full Daily Coach decision
 starts with `get_daily_assessment`. For an already open conversation that knows
@@ -286,6 +304,9 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - TASK-0121 accepted DailyAssessment V4 criteria, hybrid completion evaluator,
   immutable provenance, append-only feedback correction, HTTP/MCP reads,
   migration, privacy, policy-matrix, and legacy-compatibility tests.
+- TASK-0122 accepted contextual exact-snapshot completion lookup, bounded
+  previous-day candidate selection, state-specific Coach presentation,
+  symmetric conflict handling, and unchanged DailyAssessment authority.
 
 ## Decisions
 
@@ -307,6 +328,7 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Consent-scoped Recovery delivery evidence](../../adr/20260919-bind-recovery-delivery-to-consent-generation.md).
 - [Typed feedback for daily recommendations](../../adr/20260918-record-typed-daily-recommendation-feedback.md).
 - [Domain-fact completion for daily recommendations](../../adr/20260921-determine-daily-recommendation-completion-from-domain-facts.md).
+- [Contextual completion in the ordinary Coach flow](../../adr/20260921-use-recommendation-completion-in-ordinary-coach-flow.md).
 
 ## Open questions
 

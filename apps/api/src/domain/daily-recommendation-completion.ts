@@ -130,7 +130,15 @@ export function evaluateDailyRecommendationCompletion(
   const limitations = [...new Set(results.flatMap((item) => item.limitations))];
 
   if (activeDisposition === "skipped") {
-    return { completionState: "not_completed", evidenceMode: "self_reported", reasons: ["manual_skipped"], limitations };
+    const conflict = requiredCriteria.length > 0 && observedSatisfied === requiredCriteria.length;
+    return {
+      completionState: "not_completed",
+      evidenceMode: "self_reported",
+      reasons: ["manual_skipped"],
+      limitations: conflict
+        ? [...new Set([...limitations, "self_report_conflicts_with_observation" as const])]
+        : limitations
+    };
   }
   if (activeDisposition === "completed") {
     const conflict = hasObserved && observedSatisfied < required.length;
