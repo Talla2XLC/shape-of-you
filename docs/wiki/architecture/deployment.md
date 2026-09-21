@@ -37,9 +37,16 @@ Pushes to `main` that include any path outside Markdown, `docs/**`, and
 `plans/**` run quality, publish SHA-linked GHCR images, and automatically deploy
 exact digests to Environment `staging`. Documentation-only and plan-only pushes
 do not start the publication workflow; manual dispatch remains available. API,
-Identity, edge, and Certbot
-are independently built and attested, and all four coordinates belong to one
-atomic release. Input is a bounded `key=value` request to
+edge, and Certbot are built and attested for every such release. Identity is
+built and attested only when `.dockerignore`, `apps/identity/**`, its root build inputs, or its
+staging Compose overlay changed; unknown history and manual dispatch use the
+full Identity path. All four exact coordinates still belong to one atomic
+release. An API-only release inherits the validated Identity coordinate from
+the current immutable release manifest and records `true` compatibility for
+the no-op Identity transition. Reuse also requires the current manifest's
+runtime-environment hash and image digest to match the root-owned `identity.env`
+and the single running Compose Identity container. Input
+is a bounded `key=value` request to
 `/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no build context,
 toolchain, writable scripts, or Compose file from CI.
 
@@ -125,13 +132,17 @@ network. Both containers reach host port `5431` through
 database exposure is a throwaway-staging limitation; developer access should
 use SSH tunneling.
 
-Staging runs both API and Identity one-shot migration services with an init
+Staging runs changed API and Identity one-shot migration services with an init
 process. Each command has a 300-second outer limit and 30 seconds from `TERM`
-to `KILL`. Identity also uses process-owned PostgreSQL session limits of 30
-seconds for lock acquisition and 240 seconds per statement. An exact match
-between the complete committed Identity migration journal and database journal
-returns a no-op before Drizzle DDL; an absent or exact older prefix uses the
-normal migrator, while malformed, ahead, or divergent metadata fails closed.
+to `KILL`. Identity readiness uses up to 12 disposable database pools: each
+attempt has a one-second connection timeout and three-second statement timeout,
+executes `select 1`, and closes before the next attempt. Only after readiness
+succeeds does Identity create its migration pool with process-owned PostgreSQL
+session limits of 30 seconds for lock acquisition and 240 seconds per statement.
+An exact match between the complete committed Identity migration journal and
+database journal returns a no-op before Drizzle DDL; an absent or exact older
+prefix uses the normal migrator, while malformed, ahead, or divergent metadata
+fails closed.
 
 Each one-shot container has a deterministic name. After failure, the controller
 uses independently bounded Docker operations to stop it and confirm it is no
@@ -158,11 +169,17 @@ VM resources are limited and swap is in use. Current limits (`384m` API,
 `64m` edge) require observation before adding load.
 
 Identity runs from its independently published digest through the staging
-overlay. The versioned deployment controller writes its database URL only to
-root-owned `/etc/shape-of-you/staging/identity.env`, applies Identity-owned migrations,
+overlay. When Identity delivery is required, the versioned deployment
+controller writes its database URL only to root-owned
+`/etc/shape-of-you/staging/identity.env`, applies Identity-owned migrations,
 reconciles the versioned predefined OAuth client policy through an
 operations-only process, waits for database-aware readiness, and then starts
-edge. The exact ChatGPT callback comes from the protected staging Environment
+edge. When Identity is unchanged, `IDENTITY_UPDATE_REQUIRED=false` preserves
+its Compose topology and external smoke checks but skips Identity pull,
+configuration probe, migration, reconciliation, and direct or dependency-driven
+runtime replacement. The
+controller fails closed rather than reusing a missing, ambiguous, invalid, or
+runtime-divergent current manifest. The exact ChatGPT callback comes from the protected staging Environment
 as non-secret external configuration and is never stored in the manifest or
 deployment logs. API schema, Identity schema, and predefined-client
 compatibility are declared independently; automatic rollback of an Identity
@@ -212,6 +229,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
 - [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
 - [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
+- [Component-aware Identity delivery and bounded readiness](../../adr/20260921-skip-unchanged-identity-delivery-and-bound-readiness-probes.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Static Nuxt edge delivery](../../adr/20260807-serve-static-nuxt-client-through-existing-edge.md)
 - [Predefined OAuth client reconciliation](../../adr/20260811-reconcile-predefined-oauth-clients-during-deployment.md)

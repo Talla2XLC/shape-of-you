@@ -16,6 +16,7 @@ IDENTITY_HOST=identity.staging.shape-of-you.ru
 CERT_NAME=shape-of-you-staging
 bootstrap_started=false
 identity_enabled=false
+identity_update_required=false
 rollback_schema_compatible=false
 rollback_client_compatible=false
 active_migration_container=
@@ -65,6 +66,14 @@ if [ -n "${IDENTITY_IMAGE:-}" ] || [ -n "${IDENTITY_DIGEST:-}" ] ||
     true|false) ;;
     *)
       printf '%s\n' 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE must be true or false.' >&2
+      exit 2
+      ;;
+  esac
+  identity_update_required=${IDENTITY_UPDATE_REQUIRED:-true}
+  case "$identity_update_required" in
+    true|false) ;;
+    *)
+      printf '%s\n' 'IDENTITY_UPDATE_REQUIRED must be true or false.' >&2
       exit 2
       ;;
   esac
@@ -263,9 +272,13 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
-compose --profile operations pull
+if [ "$identity_update_required" = true ]; then
+  compose --profile operations pull
+else
+  compose --profile operations pull api edge certbot
+fi
 
-if [ "$identity_enabled" = "true" ]; then
+if [ "$identity_update_required" = true ]; then
   compose run --rm --no-deps identity node --input-type=module --eval \
     "const c=(await import('./dist/config.js')).loadIdentityConfig(); const p=await import('./dist/authentication/totp.js'); p.parseTotpKeyRing(c.IDENTITY_TOTP_ACTIVE_KEY_ID ?? '', c.IDENTITY_TOTP_ENCRYPTION_KEYS ?? '');"
 fi
@@ -318,7 +331,7 @@ if [ "$bootstrap_started" = "true" ]; then
 fi
 
 run_migration 'API migration' migrate
-if [ "$identity_enabled" = "true" ]; then
+if [ "$identity_update_required" = true ]; then
   run_migration 'Identity migration' identity-migrate
   compose --profile operations run --rm identity-reconcile-oauth-clients
   compose up --detach --wait --wait-timeout 90 api identity
@@ -327,7 +340,7 @@ else
 fi
 compose run --rm --no-deps \
   --entrypoint /usr/local/bin/start-shape-of-you-edge edge --test
-compose up --detach --wait --wait-timeout 90 --remove-orphans edge
+compose up --detach --no-deps --wait --wait-timeout 90 --remove-orphans edge
 
 assert_no_published_ports() {
   service=$1

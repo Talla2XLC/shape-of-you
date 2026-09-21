@@ -51,6 +51,9 @@ assert_contains "$PUBLISH_WORKFLOW" 'file: apps/identity/Dockerfile'
 assert_contains "$PUBLISH_WORKFLOW" 'shape-of-you-identity:sha-${{ github.sha }}'
 assert_contains "$PUBLISH_WORKFLOW" 'Attest Identity image'
 assert_contains "$PUBLISH_WORKFLOW" 'identity_digest: ${{ needs.publish-identity.outputs.digest }}'
+assert_contains "$PUBLISH_WORKFLOW" 'deploy_identity: ${{ needs.identity-changes.outputs.deploy_identity == '\''true'\'' }}'
+assert_contains "$PUBLISH_WORKFLOW" "if: needs.identity-changes.outputs.deploy_identity == 'true'"
+assert_contains "$PUBLISH_WORKFLOW" "needs.identity-changes.outputs.deploy_identity == 'false' && needs.publish-identity.result == 'skipped'"
 assert_contains "$PUBLISH_WORKFLOW" 'identity_oauth_clients_backward_compatible: false'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_DATABASE_URL'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_TOTP_ACTIVE_KEY_ID'
@@ -64,6 +67,8 @@ assert_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_WEB_REDIRECT_URI'
 assert_contains "$DEPLOY_WORKFLOW" 'STAGING_API_BROWSER_SESSION_KEYS'
 assert_not_contains "$DEPLOY_WORKFLOW" 'STAGING_IDENTITY_OWNER_ACCOUNT_ID'
 assert_not_contains "$DEPLOY_WORKFLOW" 'IDENTITY_ACCESS_ACTION'
+assert_contains "$DEPLOY_WORKFLOW" 'DEPLOY_IDENTITY: ${{ github.event_name == '\''workflow_dispatch'\'' || inputs.deploy_identity }}'
+assert_contains "$DEPLOY_WORKFLOW" 'if [ "$DEPLOY_IDENTITY" = true ]; then'
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_DIGEST=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=%s"
 assert_contains "$DEPLOY_WORKFLOW" "printf 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=%s"
@@ -85,6 +90,8 @@ assert_contains "$CONTROLLER" 'IDENTITY_OAUTH_SIGNING_KEYS'
 assert_contains "$CONTROLLER" 'IDENTITY_OAUTH_COOKIE_KEYS'
 assert_contains "$CONTROLLER" 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE'
 assert_contains "$CONTROLLER" 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE'
+assert_contains "$CONTROLLER" 'IDENTITY_UPDATE_REQUIRED=$DEPLOY_IDENTITY'
+assert_contains "$CONTROLLER" 'read_current_release_value IDENTITY_DIGEST'
 assert_contains "$CONTROLLER" 'IDENTITY_CHATGPT_REDIRECT_URI'
 assert_contains "$CONTROLLER" 'https://chatgpt.com/connector_platform_oauth_redirect'
 assert_contains "$CONTROLLER" 'IDENTITY_WEB_REDIRECT_URI'

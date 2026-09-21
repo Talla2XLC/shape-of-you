@@ -118,14 +118,16 @@ file during a move.
 
 ### Publication and deployment
 
-`publish-staging.yml` publishes SHA tags for API, Identity, edge, and the
-project Certbot image and records provenance/SBOM; digest is deployment
-authority. A `main` push containing any path outside Markdown, `docs/**`, and
-`plans/**` runs quality and publication, then automatically invokes
-`deploy-staging.yml` with all four digests. Documentation-only and plan-only
-pushes skip the whole publication workflow. Manual targeted retry
-supplies full commit SHA, all image digests, separate API and Identity schema
-backward-compatibility flags, and the write-smoke choice. Fitness Tracker
+`publish-staging.yml` publishes SHA tags for API, edge, and the project Certbot
+image and records provenance/SBOM; digest is deployment authority. It publishes
+Identity only when the exact Identity source/build/Compose inputs changed.
+Unknown history and every manual dispatch select the full Identity path. A
+`main` push containing any path outside Markdown, `docs/**`, and `plans/**`
+runs quality and publication, then automatically invokes `deploy-staging.yml`.
+Documentation-only and plan-only pushes skip the whole publication workflow.
+Manual targeted retry supplies full commit SHA, all image digests, separate API
+and Identity schema backward-compatibility flags, and the write-smoke choice.
+Fitness Tracker
 imports are not part of deployment; controlled runs use the operator
 workstation workflow documented in the migration strategy.
 
@@ -139,18 +141,30 @@ The stable bootstrap accepts a bounded `key=value` request, extracts only
 `CONTROL_SHA`, verifies it against current `origin/main`, and invokes the fixed
 `deploy/staging/scripts/deployment-controller.sh` path from that exact commit.
 The versioned controller strictly validates the complete allowlist, creates
-runtime env, uses temporary `DOCKER_CONFIG`, and runs `deploy.sh`. CI sends no
-Compose, scripts, paths, or arbitrary shell. Successful release updates
-`current` and `previous`.
+runtime env, uses temporary `DOCKER_CONFIG`, and runs `deploy.sh`. For an
+API-only automatic release it reads the current root-owned manifest, validates
+one exact Identity coordinate and both historical compatibility declarations,
+then records `true` for the new no-op Identity transition in the complete
+manifest with `IDENTITY_UPDATE_REQUIRED=false`.
+It also requires the manifest's `IDENTITY_RUNTIME_ENV_SHA256` and Identity
+digest to match the root-owned runtime env and the single running Compose
+Identity container. Missing, ambiguous, or runtime-divergent current state
+aborts deployment. CI sends no Compose,
+scripts, paths, or arbitrary shell. Successful release updates `current` and
+`previous`.
 
 The Actions SSH client sends a keepalive every 30 seconds and fails only after
 six unanswered probes; `BatchMode`, the dedicated key, and strict known-host
-verification remain mandatory. API and Identity migrations each have a fixed
-300-second limit with a 30-second `TERM`-to-`KILL` grace period, and both
-one-shot services use an init process. Identity additionally sets session-local
-30-second lock and 240-second statement limits and returns before DDL when its
-full local/database journal metadata matches exactly. Journal drift fails
-closed.
+verification remain mandatory. API and changed Identity migrations each have a
+fixed 300-second limit with a 30-second `TERM`-to-`KILL` grace period, and both
+one-shot services use an init process. Each Identity readiness attempt uses a
+fresh pool with one-second connection and three-second statement limits; up to
+12 attempts run before the separate migration pool is created. That pool keeps
+the session-local 30-second lock and 240-second statement limits and returns
+before DDL when its full local/database journal metadata matches exactly.
+Journal drift fails closed. An inherited Identity remains part of Compose and
+smoke verification but is not pulled, migrated, reconciled, or replaced; the
+edge update uses `--no-deps` to preserve that guarantee.
 
 A failure names the migration and exit status. The controller uses bounded
 Docker calls to stop the deterministic named container and confirm
@@ -297,6 +311,7 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
 - [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
 - [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
+- [Component-aware Identity delivery and bounded readiness](../../adr/20260921-skip-unchanged-identity-delivery-and-bound-readiness-probes.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 

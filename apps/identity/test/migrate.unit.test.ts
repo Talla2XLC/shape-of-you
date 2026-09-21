@@ -3,8 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assessIdentityMigrationJournal,
   describeIdentityMigrationError,
+  probeIdentityDatabaseReadiness,
   waitForIdentityDatabaseReadiness
 } from "../src/database/migrate.js";
+import type { IdentityDatabaseContext } from "../src/database/context.js";
 
 const firstMigration = {
   createdAt: "1754000000000",
@@ -16,6 +18,48 @@ const secondMigration = {
 };
 
 describe("Identity migration startup", () => {
+  it("uses a fresh short-lived pool for one bounded readiness probe", async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ "?column?": 1 }] });
+    const end = vi.fn().mockResolvedValue(undefined);
+    const databaseFactory = vi.fn(() => ({
+      db: {},
+      pool: { query, end }
+    }) as unknown as IdentityDatabaseContext);
+
+    await expect(
+      probeIdentityDatabaseReadiness(
+        "postgresql://identity:secret@example.test/identity",
+        databaseFactory
+      )
+    ).resolves.toBeUndefined();
+
+    expect(databaseFactory).toHaveBeenCalledWith(
+      "postgresql://identity:secret@example.test/identity",
+      1,
+      { statementTimeoutMs: 3_000 }
+    );
+    expect(query).toHaveBeenCalledWith("select 1");
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the disposable readiness pool after a failed probe", async () => {
+    const failure = new Error("probe timed out");
+    const end = vi.fn().mockResolvedValue(undefined);
+    const databaseFactory = vi.fn(() => ({
+      db: {},
+      pool: { query: vi.fn().mockRejectedValue(failure), end }
+    }) as unknown as IdentityDatabaseContext);
+
+    await expect(
+      probeIdentityDatabaseReadiness(
+        "postgresql://identity:secret@example.test/identity",
+        databaseFactory
+      )
+    ).rejects.toBe(failure);
+
+    expect(end).toHaveBeenCalledTimes(1);
+  });
+
   it("retries only the readiness probe until it succeeds", async () => {
     const check = vi
       .fn<() => Promise<void>>()

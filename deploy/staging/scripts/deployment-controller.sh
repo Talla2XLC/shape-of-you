@@ -32,10 +32,15 @@ fail() {
 [ "${SHAPE_OF_YOU_STAGING_LOCK_HELD:-}" = true ] ||
   fail 'Deployment controller must be invoked by the root-owned bootstrap.'
 [ "$#" -eq 0 ] || fail 'Deployment controller accepts no arguments.'
+command -v sha256sum >/dev/null 2>&1 ||
+  fail 'sha256sum is required for Identity runtime verification.'
 
 RELEASE_ID=
 API_DIGEST=
+DEPLOY_IDENTITY=
+IDENTITY_IMAGE=
 IDENTITY_DIGEST=
+IDENTITY_RUNTIME_ENV_SHA256=
 IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=
 IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=
 EDGE_DIGEST=
@@ -78,7 +83,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|IDENTITY_TOTP_ACTIVE_KEY_ID|IDENTITY_TOTP_ENCRYPTION_KEYS|IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID|IDENTITY_OAUTH_SIGNING_KEYS|IDENTITY_OAUTH_COOKIE_KEYS|IDENTITY_CHATGPT_REDIRECT_URI|IDENTITY_WEB_REDIRECT_URI|API_BROWSER_SESSION_KEYS|INTERVALS_ICU_CLIENT_ID|INTERVALS_ICU_CLIENT_SECRET|INTERVALS_ICU_REDIRECT_URI|INTEGRATION_ENCRYPTION_KEY_RING|INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|DEPLOY_IDENTITY|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|IDENTITY_TOTP_ACTIVE_KEY_ID|IDENTITY_TOTP_ENCRYPTION_KEYS|IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID|IDENTITY_OAUTH_SIGNING_KEYS|IDENTITY_OAUTH_COOKIE_KEYS|IDENTITY_CHATGPT_REDIRECT_URI|IDENTITY_WEB_REDIRECT_URI|API_BROWSER_SESSION_KEYS|INTERVALS_ICU_CLIENT_ID|INTERVALS_ICU_CLIENT_SECRET|INTERVALS_ICU_REDIRECT_URI|INTEGRATION_ENCRYPTION_KEY_RING|INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -86,6 +91,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
       case "$input_key" in
         RELEASE_ID) RELEASE_ID=$input_value ;;
         API_DIGEST) API_DIGEST=$input_value ;;
+        DEPLOY_IDENTITY) DEPLOY_IDENTITY=$input_value ;;
         IDENTITY_DIGEST) IDENTITY_DIGEST=$input_value ;;
         EDGE_DIGEST) EDGE_DIGEST=$input_value ;;
         CERTBOT_DIGEST) CERTBOT_DIGEST=$input_value ;;
@@ -125,6 +131,7 @@ done
 
 [ -n "$RELEASE_ID" ] || fail 'RELEASE_ID is required.'
 [ -n "$API_DIGEST" ] || fail 'API_DIGEST is required.'
+[ -n "$DEPLOY_IDENTITY" ] || fail 'DEPLOY_IDENTITY is required.'
 [ -n "$EDGE_DIGEST" ] || fail 'EDGE_DIGEST is required.'
 [ -n "$CERTBOT_DIGEST" ] || fail 'CERTBOT_DIGEST is required.'
 [ -n "$ACME_EMAIL" ] || fail 'ACME_EMAIL is required.'
@@ -142,26 +149,76 @@ done
 printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid RELEASE_ID.'
 printf '%s\n' "$CONTROL_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid CONTROL_SHA.'
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid API_DIGEST.'
-if [ -n "$IDENTITY_DIGEST" ] || [ -n "$IDENTITY_DATABASE_URL" ] ||
-  [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ] ||
-  [ -n "$IDENTITY_TOTP_ACTIVE_KEY_ID" ] ||
-  [ -n "$IDENTITY_TOTP_ENCRYPTION_KEYS" ]; then
-  [ -n "$IDENTITY_DIGEST" ] || fail 'IDENTITY_DIGEST is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_DATABASE_URL" ] || fail 'IDENTITY_DATABASE_URL is required when Identity deployment is enabled.'
+case "$DEPLOY_IDENTITY" in
+  true|false) ;;
+  *) fail 'Invalid DEPLOY_IDENTITY.' ;;
+esac
+
+read_current_release_value() {
+  current_key=$1
+  current_file=$2
+  if ! current_value=$(awk -v key="$current_key" '
+    index($0, key "=") == 1 {
+      count += 1
+      value = substr($0, length(key) + 2)
+    }
+    END {
+      if (count != 1 || value == "") exit 1
+      print value
+    }
+  ' "$current_file"); then
+    fail "Current release has no unique $current_key."
+  fi
+  printf '%s\n' "$current_value"
+}
+
+if [ "$DEPLOY_IDENTITY" = false ]; then
+  if [ -n "$IDENTITY_DIGEST" ] || [ -n "$IDENTITY_DATABASE_URL" ] ||
+    [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ] ||
+    [ -n "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" ] ||
+    [ -n "$IDENTITY_TOTP_ACTIVE_KEY_ID" ] ||
+    [ -n "$IDENTITY_TOTP_ENCRYPTION_KEYS" ] ||
+    [ -n "$IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID" ] ||
+    [ -n "$IDENTITY_OAUTH_SIGNING_KEYS" ] ||
+    [ -n "$IDENTITY_OAUTH_COOKIE_KEYS" ] ||
+    [ -n "$IDENTITY_CHATGPT_REDIRECT_URI" ] ||
+    [ -n "$IDENTITY_WEB_REDIRECT_URI" ]; then
+    fail 'Identity deployment inputs must be omitted when current Identity is reused.'
+  fi
+  [ -L "$DEPLOY_ROOT/current" ] ||
+    fail 'Current release is required when Identity delivery is reused.'
+  current_release=$(readlink -f "$DEPLOY_ROOT/current")
+  current_release_id=${current_release##*/}
+  printf '%s\n' "$current_release_id" | grep -Eq '^[0-9a-f]{40}$' ||
+    fail 'Current release target is not an immutable release.'
+  [ "$current_release" = "$DEPLOY_ROOT/releases/$current_release_id" ] ||
+    fail 'Current release target is outside the release store.'
+  current_release_env=$current_release/release.env
+  [ -f "$current_release_env" ] && [ ! -L "$current_release_env" ] ||
+    fail 'Current release manifest is missing or unsafe.'
+  IDENTITY_IMAGE=$(read_current_release_value IDENTITY_IMAGE "$current_release_env")
+  IDENTITY_DIGEST=$(read_current_release_value IDENTITY_DIGEST "$current_release_env")
+  IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=$(
+    read_current_release_value IDENTITY_SCHEMA_BACKWARD_COMPATIBLE "$current_release_env"
+  )
+  IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=$(
+    read_current_release_value IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE "$current_release_env"
+  )
+  IDENTITY_RUNTIME_ENV_SHA256=$(
+    read_current_release_value IDENTITY_RUNTIME_ENV_SHA256 "$current_release_env"
+  )
+else
+  IDENTITY_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-identity
+  [ -n "$IDENTITY_DIGEST" ] ||
+    fail 'IDENTITY_DIGEST is required when Identity deployment is enabled.'
+fi
+
+if [ -n "$IDENTITY_DIGEST" ]; then
   [ -n "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" ] || fail 'IDENTITY_SCHEMA_BACKWARD_COMPATIBLE is required when Identity deployment is enabled.'
   [ -n "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" ] || fail 'IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_TOTP_ACTIVE_KEY_ID" ] || fail 'IDENTITY_TOTP_ACTIVE_KEY_ID is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_TOTP_ENCRYPTION_KEYS" ] || fail 'IDENTITY_TOTP_ENCRYPTION_KEYS is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID" ] || fail 'IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_OAUTH_SIGNING_KEYS" ] || fail 'IDENTITY_OAUTH_SIGNING_KEYS is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_OAUTH_COOKIE_KEYS" ] || fail 'IDENTITY_OAUTH_COOKIE_KEYS is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_CHATGPT_REDIRECT_URI" ] || fail 'IDENTITY_CHATGPT_REDIRECT_URI is required when Identity deployment is enabled.'
-  [ -n "$IDENTITY_WEB_REDIRECT_URI" ] || fail 'IDENTITY_WEB_REDIRECT_URI is required when Identity deployment is enabled.'
+  [ "$IDENTITY_IMAGE" = "ghcr.io/$GHCR_NAMESPACE/shape-of-you-identity" ] ||
+    fail 'Current Identity image does not match the configured namespace.'
   printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid IDENTITY_DIGEST.'
-  case "$IDENTITY_DATABASE_URL" in
-    postgresql://*) ;;
-    *) fail 'IDENTITY_DATABASE_URL must use the postgresql scheme.' ;;
-  esac
   case "$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE" in
     true|false) ;;
     *) fail 'Invalid IDENTITY_SCHEMA_BACKWARD_COMPATIBLE.' ;;
@@ -169,6 +226,39 @@ if [ -n "$IDENTITY_DIGEST" ] || [ -n "$IDENTITY_DATABASE_URL" ] ||
   case "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" in
     true|false) ;;
     *) fail 'Invalid IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE.' ;;
+  esac
+  if [ "$DEPLOY_IDENTITY" = false ]; then
+    # No Identity schema, client policy, or runtime transition occurs. The
+    # inherited coordinate is therefore exactly compatible with itself.
+    IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=true
+    IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=true
+  fi
+fi
+
+IDENTITY_STATE_VERIFIER=$CONTROL_STAGING/scripts/verify-current-identity-state.sh
+test -f "$IDENTITY_STATE_VERIFIER" && test ! -L "$IDENTITY_STATE_VERIFIER" ||
+  fail 'Verified Identity state verifier is missing or unsafe.'
+if [ "$DEPLOY_IDENTITY" = false ]; then
+  sh "$IDENTITY_STATE_VERIFIER" \
+    "$IDENTITY_IMAGE" \
+    "$IDENTITY_DIGEST" \
+    "$IDENTITY_RUNTIME_ENV_SHA256" \
+    "$IDENTITY_RUNTIME_ENV" \
+    shape-of-you-staging
+fi
+
+if [ "$DEPLOY_IDENTITY" = true ]; then
+  [ -n "$IDENTITY_DATABASE_URL" ] || fail 'IDENTITY_DATABASE_URL is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_TOTP_ACTIVE_KEY_ID" ] || fail 'IDENTITY_TOTP_ACTIVE_KEY_ID is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_TOTP_ENCRYPTION_KEYS" ] || fail 'IDENTITY_TOTP_ENCRYPTION_KEYS is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID" ] || fail 'IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_OAUTH_SIGNING_KEYS" ] || fail 'IDENTITY_OAUTH_SIGNING_KEYS is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_OAUTH_COOKIE_KEYS" ] || fail 'IDENTITY_OAUTH_COOKIE_KEYS is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_CHATGPT_REDIRECT_URI" ] || fail 'IDENTITY_CHATGPT_REDIRECT_URI is required when Identity deployment is enabled.'
+  [ -n "$IDENTITY_WEB_REDIRECT_URI" ] || fail 'IDENTITY_WEB_REDIRECT_URI is required when Identity deployment is enabled.'
+  case "$IDENTITY_DATABASE_URL" in
+    postgresql://*) ;;
+    *) fail 'IDENTITY_DATABASE_URL must use the postgresql scheme.' ;;
   esac
   [ "$IDENTITY_CHATGPT_REDIRECT_URI" = 'https://chatgpt.com/connector_platform_oauth_redirect' ] ||
     fail 'Invalid IDENTITY_CHATGPT_REDIRECT_URI.'
@@ -255,7 +345,7 @@ fi
 install -m 0600 "$runtime_file" "$RUNTIME_ENV"
 rm -f "$runtime_file"
 
-if [ -n "$IDENTITY_DATABASE_URL" ]; then
+if [ "$DEPLOY_IDENTITY" = true ]; then
   identity_runtime_file=$(mktemp /etc/shape-of-you/staging/identity.env.XXXXXX)
   {
     printf 'DATABASE_URL=%s\n' "$IDENTITY_DATABASE_URL"
@@ -269,6 +359,7 @@ if [ -n "$IDENTITY_DATABASE_URL" ]; then
   } > "$identity_runtime_file"
   install -m 0600 "$identity_runtime_file" "$IDENTITY_RUNTIME_ENV"
   rm -f "$identity_runtime_file"
+  IDENTITY_RUNTIME_ENV_SHA256=$(sha256sum "$IDENTITY_RUNTIME_ENV" | awk '{print $1}')
 fi
 
 RELEASE_ENV=$(mktemp /run/shape-of-you-staging-release.XXXXXX)
@@ -288,10 +379,12 @@ EOF
 
 if [ -n "$IDENTITY_DIGEST" ]; then
   cat >> "$RELEASE_ENV" <<EOF
-IDENTITY_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-identity
+IDENTITY_IMAGE=$IDENTITY_IMAGE
 IDENTITY_DIGEST=$IDENTITY_DIGEST
+IDENTITY_RUNTIME_ENV_SHA256=$IDENTITY_RUNTIME_ENV_SHA256
 IDENTITY_SCHEMA_BACKWARD_COMPATIBLE=$IDENTITY_SCHEMA_BACKWARD_COMPATIBLE
 IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE=$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE
+IDENTITY_UPDATE_REQUIRED=$DEPLOY_IDENTITY
 EOF
 fi
 

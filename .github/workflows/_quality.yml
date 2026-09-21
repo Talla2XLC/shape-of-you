@@ -27,6 +27,12 @@ jobs:
       - name: Test Identity deployment contract
         run: sh deploy/staging/scripts/tests/identity-deployment-contract.sh
 
+      - name: Test component-aware Identity delivery contract
+        run: sh deploy/staging/scripts/tests/component-aware-identity-contract.sh
+
+      - name: Test current Identity state verification
+        run: sh deploy/staging/scripts/tests/current-identity-state-contract.sh
+
       - name: Test stable deployment bootstrap contract
         run: sh deploy/staging/scripts/tests/deployment-bootstrap-contract.sh
 

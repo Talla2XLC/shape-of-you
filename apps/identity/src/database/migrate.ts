@@ -14,6 +14,7 @@ import {
 
 const DEFAULT_READINESS_ATTEMPTS = 12;
 const DEFAULT_READINESS_DELAY_MS = 1_000;
+const READINESS_STATEMENT_TIMEOUT_MS = 3_000;
 const MIGRATION_LOCK_TIMEOUT_MS = 30_000;
 const MIGRATION_STATEMENT_TIMEOUT_MS = 240_000;
 const MAX_ERROR_CAUSE_DEPTH = 5;
@@ -300,6 +301,27 @@ export async function waitForIdentityDatabaseReadiness(
 }
 
 /**
+ * Runs one bounded readiness probe in a disposable Identity database pool.
+ *
+ * @param databaseUrl - Identity PostgreSQL connection URL.
+ * @param databaseFactory - Context factory override used by focused tests.
+ * @throws Error when the probe fails; the disposable pool is always closed.
+ */
+export async function probeIdentityDatabaseReadiness(
+  databaseUrl: string,
+  databaseFactory: typeof createIdentityDatabase = createIdentityDatabase
+): Promise<void> {
+  const database = databaseFactory(databaseUrl, 1, {
+    statementTimeoutMs: READINESS_STATEMENT_TIMEOUT_MS
+  });
+  try {
+    await checkIdentityDatabaseReadiness(database);
+  } finally {
+    await database.pool.end();
+  }
+}
+
+/**
  * Applies all pending Identity-owned migrations and closes the connection.
  *
  * @param databaseUrl - Optional PostgreSQL URL override for operational use.
@@ -315,20 +337,20 @@ export async function runIdentityMigrations(
     throw new Error("DATABASE_URL is required for Identity migrations");
   }
 
+  const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const migrationsFolder = path.resolve(currentDirectory, "../../drizzle");
+
+  options.onPhase?.("readiness_started");
+  await waitForIdentityDatabaseReadiness(() =>
+    probeIdentityDatabaseReadiness(databaseUrl)
+  );
+  options.onPhase?.("readiness_completed");
+
   const database = createIdentityDatabase(databaseUrl, 2, {
     lockTimeoutMs: MIGRATION_LOCK_TIMEOUT_MS,
     statementTimeoutMs: MIGRATION_STATEMENT_TIMEOUT_MS
   });
-  const currentDirectory = path.dirname(fileURLToPath(import.meta.url));
-  const migrationsFolder = path.resolve(currentDirectory, "../../drizzle");
-
   try {
-    options.onPhase?.("readiness_started");
-    await waitForIdentityDatabaseReadiness(() =>
-      checkIdentityDatabaseReadiness(database)
-    );
-    options.onPhase?.("readiness_completed");
-
     options.onPhase?.("journal_check_started");
     const localJournal = readMigrationFiles({ migrationsFolder }).map(
       localJournalEntry

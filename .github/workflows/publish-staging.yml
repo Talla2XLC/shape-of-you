@@ -18,6 +18,32 @@ jobs:
   quality:
     uses: ./.github/workflows/_quality.yml
 
+  identity-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_identity: ${{ steps.classify.outputs.deploy_identity }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Classify Identity delivery
+        id: classify
+        shell: bash
+        env:
+          BEFORE_REVISION: ${{ github.event.before }}
+          AFTER_REVISION: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            deploy_identity=true
+          else
+            deploy_identity=$(sh deploy/staging/scripts/detect-identity-change.sh \
+              "$BEFORE_REVISION" "$AFTER_REVISION")
+          fi
+          printf 'deploy_identity=%s\n' "$deploy_identity" >> "$GITHUB_OUTPUT"
+
   publish-api:
     needs: quality
     concurrency:
@@ -96,7 +122,10 @@ jobs:
             "${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
   publish-identity:
-    needs: quality
+    needs:
+      - quality
+      - identity-changes
+    if: needs.identity-changes.outputs.deploy_identity == 'true'
     concurrency:
       group: publish-staging-identity-${{ github.ref }}
       cancel-in-progress: true
@@ -328,15 +357,27 @@ jobs:
 
   deploy-staging:
     needs:
+      - quality
+      - identity-changes
       - publish-api
       - publish-identity
       - publish-edge
       - publish-certbot
+    if: >-
+      always() &&
+      needs.quality.result == 'success' &&
+      needs.identity-changes.result == 'success' &&
+      needs.publish-api.result == 'success' &&
+      ((needs.identity-changes.outputs.deploy_identity == 'true' && needs.publish-identity.result == 'success') ||
+       (needs.identity-changes.outputs.deploy_identity == 'false' && needs.publish-identity.result == 'skipped')) &&
+      needs.publish-edge.result == 'success' &&
+      needs.publish-certbot.result == 'success'
     uses: ./.github/workflows/deploy-staging.yml
     with:
       release_id: ${{ github.sha }}
       api_digest: ${{ needs.publish-api.outputs.digest }}
       identity_digest: ${{ needs.publish-identity.outputs.digest }}
+      deploy_identity: ${{ needs.identity-changes.outputs.deploy_identity == 'true' }}
       edge_digest: ${{ needs.publish-edge.outputs.digest }}
       certbot_digest: ${{ needs.publish-certbot.outputs.digest }}
       schema_backward_compatible: false

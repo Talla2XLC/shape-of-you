@@ -46,6 +46,7 @@ write_identity_request() {
   {
     printf '%s\n' 'RELEASE_ID=0123456789abcdef0123456789abcdef01234567'
     printf '%s\n' 'API_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    printf '%s\n' 'DEPLOY_IDENTITY=true'
     printf '%s\n' 'IDENTITY_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
     printf '%s\n' 'EDGE_DIGEST=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
     printf '%s\n' 'CERTBOT_DIGEST=sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
@@ -138,6 +139,12 @@ assert_contains "$CONTROLLER" 'Duplicate input:'
 assert_contains "$CONTROLLER" 'DATABASE_URL'
 assert_contains "$CONTROLLER" 'GHCR_TOKEN'
 assert_contains "$CONTROLLER" 'API_BROWSER_SESSION_KEYS'
+assert_contains "$CONTROLLER" 'DEPLOY_IDENTITY'
+assert_contains "$CONTROLLER" 'Current release is required when Identity delivery is reused.'
+assert_contains "$CONTROLLER" 'IDENTITY_UPDATE_REQUIRED=$DEPLOY_IDENTITY'
+assert_contains "$CONTROLLER" 'IDENTITY_RUNTIME_ENV_SHA256'
+assert_contains "$CONTROLLER" 'verify-current-identity-state.sh'
+assert_contains "$CONTROLLER" 'sha256sum is required for Identity runtime verification.'
 assert_not_contains "$CONTROLLER" 'INTERVALS_ICU_ENABLED'
 assert_contains "$CONTROLLER" 'integration_settings_count'
 assert_contains "$CONTROLLER" 'must be supplied together.'
@@ -155,6 +162,10 @@ assert_contains "$PUBLISH_WORKFLOW" 'paths-ignore:'
 assert_contains "$PUBLISH_WORKFLOW" "- '**/*.md'"
 assert_contains "$PUBLISH_WORKFLOW" "- 'docs/**'"
 assert_contains "$PUBLISH_WORKFLOW" "- 'plans/**'"
+assert_contains "$PUBLISH_WORKFLOW" 'deploy_identity: ${{ steps.classify.outputs.deploy_identity }}'
+assert_contains "$PUBLISH_WORKFLOW" 'fetch-depth: 0'
+assert_contains "$PUBLISH_WORKFLOW" "if: needs.identity-changes.outputs.deploy_identity == 'true'"
+assert_contains "$DEPLOY_WORKFLOW" 'printf '\''DEPLOY_IDENTITY=%s\n'\'' "$DEPLOY_IDENTITY"'
 assert_contains "$DEPLOY_WORKFLOW" 'ServerAliveInterval=30'
 assert_contains "$DEPLOY_WORKFLOW" 'ServerAliveCountMax=6'
 assert_contains "$PREFLIGHT" 'command -v timeout'
@@ -172,6 +183,9 @@ assert_contains "$DEPLOY" 'container ls --all --quiet'
 assert_contains "$DEPLOY" '--filter "name=^/${container_name}$"'
 assert_contains "$DEPLOY" "run_migration 'API migration' migrate"
 assert_contains "$DEPLOY" "run_migration 'Identity migration' identity-migrate"
+assert_contains "$DEPLOY" 'compose --profile operations pull api edge certbot'
+assert_contains "$DEPLOY" 'compose up --detach --no-deps --wait --wait-timeout 90 --remove-orphans edge'
+assert_contains "$DEPLOY" 'if [ "$identity_update_required" = true ]; then'
 assert_contains "$DEPLOY" 'timed out after 300 seconds'
 assert_contains "$DEPLOY" 'ended with SIGKILL or timeout escalation'
 assert_contains "$DEPLOY" 'logs --tail "$MIGRATION_LOG_TAIL_LINES" "$migration_container"'
