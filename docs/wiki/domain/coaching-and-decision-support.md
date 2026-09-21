@@ -17,8 +17,9 @@ tags:
 
 Implemented Coaching separates immutable recommendations, user decisions, and
 executed domain facts. It supports typed training adjustments, an API-owned
-explainable daily assessment, and typed feedback on its recommended action;
-none is applied automatically.
+explainable daily assessment, hybrid evidence-backed completion assessment,
+and typed feedback on its recommended action. None creates or mutates an
+owning-domain fact.
 
 ## Content
 
@@ -39,7 +40,7 @@ most one parameter. It creates no program/session change.
 The `daily_next_action` recommendation is a lazily materialized immutable
 snapshot for the current Person-local date. The API gathers current typed
 Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile
-coverage, and applies the code-owned `daily-assessment-v3` policy. Version 3
+coverage, and applies the code-owned `daily-assessment-v4` policy. Version 4
 first evaluates the unchanged absolute v1 safety rules, then applies the
 balanced personal-baseline policy to Recovery, Training, and optional daily
 movement. Completed local-day step totals can form a robust personal range;
@@ -48,26 +49,53 @@ A partial count can prove only that movement is already above the usual full-day
 range. It cannot prove low activity, request missing steps, or strengthen the
 result without corroborating adverse Recovery or Training evidence. The result
 contains a safe day status, used facts, important missing data, typed reasons,
-one recommended action, bounded alternatives, limitations, confidence, policy
-version, qualitative personal comparisons, and evidence checksum. Its private
+one primary recommended action, bounded alternatives, limitations, confidence,
+policy version, qualitative personal comparisons, and evidence checksum. The
+primary V4 action also carries a closed `all_of` completion specification whose
+authoring default is one atomic required criterion. Its observation window is
+limited to owner facts recorded after the recommendation on the same
+Person-local date; presentation text is never parsed as an executable rule. Its private
 immutable calculation preserves the exact policy bundle, selected evidence,
 eligibility trace, comparisons, signal groups, and chosen result. Identical
 evidence reuses the snapshot; a late or corrected fact, context exclusion, or
 active TrainingProgramVersion changes the checksum and selects a new snapshot.
 Historical snapshots remain readable audit evidence unless privacy erasure
-removes one derived from erased evidence. Legacy v1 and v2 snapshots remain
-readable.
+removes one derived from erased evidence. Legacy v1, v2, and v3 snapshots
+remain readable.
+
+`DailyRecommendationCompletionAssessment` is a separate immutable Coaching
+conclusion for one exact V4 snapshot and completion-policy version. It keeps
+`completionState` (`completed`, `partially_completed`, `not_completed`, or
+`unknown`) independent from `evidenceMode` (`observed`, `self_reported`,
+`partially_observed`, or `unknown`). The lazy Person-scoped read evaluates
+current Weight, Meal, exact-program WorkoutSession, connected activity,
+Recovery check-in, sleep, steps, and TrainingProgram evidence through existing
+owner-module reads. Each criterion result retains freshness, completeness,
+observation time, limitations, and a typed relational link to the exact owner
+fact when one exists. Identical evidence checksums reuse an assessment; changed
+or corrected evidence appends a new one.
+
+Automatic completion v1 is positive-evidence only. Every required criterion
+must be satisfied by fresh and complete evidence for `completed/observed`.
+Partial, stale, ambiguous, unlinked, or unavailable evidence remains partial or
+unknown. Missing data never means failure, and automation never derives
+`not_completed`. An unlinked external activity can only partially support an
+exact programmed-workout criterion. A partial-day step value can prove a
+threshold already crossed but cannot prove low activity or non-completion.
+Broad recovery-first behavior remains manual or unknown.
 
 `DailyRecommendationFeedback` is a separate Person-owned append-only event
 stream linked to the exact `daily_next_action` snapshot. Its required status is
 `accepted`, `completed`, `skipped`, `too_heavy`, or `unsuitable`; an optional
 nonblank comment only supplements that status. `accepted` may precede an
-outcome, suitability feedback may coexist with it, and `completed` and
-`skipped` are mutually exclusive. One status is recorded at most once per
-snapshot. Exact retries are idempotent in the Person boundary, while reuse of
-an idempotency key with a different snapshot, status, or comment conflicts.
-Feedback remains valid after recommendation expiry and is removed when privacy
-erasure removes the linked snapshot.
+outcome, and suitability feedback may coexist with it. `completed` and
+`skipped` form one disposition signal family. Corrections append a new event
+whose `supersedesFeedbackId` identifies the exact active predecessor; the old
+event remains immutable, and competing successors conflict. Exact retries are
+idempotent in the Person boundary, including the supersession target, while
+reuse of an idempotency key with different content conflicts. Feedback remains
+valid after recommendation expiry and is removed when privacy erasure removes
+the linked snapshot.
 
 The API exposes Person-scoped feedback creation and ordered history under the
 daily-assessment boundary. Coach records an explicit, unambiguous response
@@ -78,7 +106,10 @@ silence or unrelated behavior, guess an ambiguous snapshot, or ask for a
 duplicate confirmation. Feedback is evidence for later analysis only: it does
 not enter assessment evidence, checksum, baseline, status, action, or policy;
 does not create an owning-domain fact; and does not trigger learning or policy
-calibration.
+calibration. The active explicit `completed` or `skipped` disposition resolves
+the user-facing completion conclusion as self-reported. Suitability signals do
+not resolve completion. A conflict with observed evidence is retained as an
+explicit limitation rather than silently changing either claim.
 
 The read-only retrospective calibration path calls the same parameterized pure
 personal-policy evaluator as live V3 and adds only aggregate reporting. Its
@@ -116,8 +147,10 @@ TrainingProgramVersion and prescriptions. `Proposed now` contains bounded,
 evidence-linked conversation advice and is not a persisted fact. `Actually
 completed` contains only current owning-domain facts verified through typed
 reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
-chat message never proves execution. A `completed` feedback event records the
-user's explicit outcome report for that recommendation, but does not create a
+chat message never creates execution facts. The exact completion assessment
+may explain that an action is observed, partially observed, self-reported, or
+unknown, but remains a derived Coaching conclusion. A `completed` feedback
+event records the user's explicit outcome report for that recommendation, but does not create a
 WorkoutSession, Meal, RecoveryObservation, TrainingProgram mutation, or other
 owning-domain fact.
 
@@ -250,6 +283,9 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - TASK-0119 accepted typed daily-recommendation feedback contracts, exact
   snapshot ownership, idempotency, concurrency, privacy cascade, OAuth/MCP,
   and DailyAssessment non-interference tests.
+- TASK-0121 accepted DailyAssessment V4 criteria, hybrid completion evaluator,
+  immutable provenance, append-only feedback correction, HTTP/MCP reads,
+  migration, privacy, policy-matrix, and legacy-compatibility tests.
 
 ## Decisions
 
@@ -270,10 +306,11 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
 - [Consent-scoped Recovery delivery evidence](../../adr/20260919-bind-recovery-delivery-to-consent-generation.md).
 - [Typed feedback for daily recommendations](../../adr/20260918-record-typed-daily-recommendation-feedback.md).
+- [Domain-fact completion for daily recommendations](../../adr/20260921-determine-daily-recommendation-completion-from-domain-facts.md).
 
 ## Open questions
 
-- Measured post-deployment V3 stability, feedback correction/supersession,
+- Measured post-deployment V4 stability, broader atomic action authoring,
   future evidence-based calibration, difficulty/exercise replacement, future
   daily policy versions, and explicit owning-domain execution linkage.
 

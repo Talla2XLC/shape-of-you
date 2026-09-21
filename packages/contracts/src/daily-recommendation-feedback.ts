@@ -20,6 +20,7 @@ export interface CreateDailyRecommendationFeedback {
   readonly status: DailyRecommendationFeedbackStatus;
   readonly comment?: string;
   readonly idempotencyKey: string;
+  readonly supersedesFeedbackId?: string;
 }
 
 export const CreateDailyRecommendationFeedbackSchema = {
@@ -31,7 +32,8 @@ export const CreateDailyRecommendationFeedbackSchema = {
     snapshotId: uuid,
     status: DailyRecommendationFeedbackStatusSchema,
     comment: { type: "string", minLength: 1, maxLength: 1000, pattern: ".*\\S.*" },
-    idempotencyKey: { type: "string", minLength: 1, maxLength: 256, pattern: ".*\\S.*" }
+    idempotencyKey: { type: "string", minLength: 1, maxLength: 256, pattern: ".*\\S.*" },
+    supersedesFeedbackId: uuid
   }
 } as const;
 
@@ -44,6 +46,7 @@ export interface DailyRecommendationFeedback {
   readonly status: DailyRecommendationFeedbackStatus;
   readonly comment: string | null;
   readonly idempotencyKey: string;
+  readonly supersedesFeedbackId: string | null;
   readonly reportedAt: string;
 }
 
@@ -59,6 +62,7 @@ export const DailyRecommendationFeedbackSchema = {
     "status",
     "comment",
     "idempotencyKey",
+    "supersedesFeedbackId",
     "reportedAt"
   ],
   properties: {
@@ -74,6 +78,7 @@ export const DailyRecommendationFeedbackSchema = {
       ]
     },
     idempotencyKey: { type: "string", minLength: 1, maxLength: 256, pattern: ".*\\S.*" },
+    supersedesFeedbackId: { anyOf: [uuid, { type: "null" }] },
     reportedAt: dateTime
   }
 } as const;

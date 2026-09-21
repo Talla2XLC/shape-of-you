@@ -4,6 +4,10 @@ import { createHash, randomUUID } from "node:crypto";
 import type {
   DailyAssessmentAvailable,
   DailyAssessmentAvailableV1,
+  DailyAssessmentAvailableV4,
+  DailyCompletionCriterionResult,
+  DailyCompletionOwnerDomain,
+  DailyRecommendationCompletionAssessment,
   DailyAssessmentPersonalBaseline,
   DailyAssessmentMovement,
   DailyAssessmentV2UsedFacts,
@@ -13,6 +17,7 @@ import type {
   PersonPreferences
 } from "@shape-of-you/contracts";
 import type { DailyAssessmentPersonalCalculation } from "../domain/personalized-daily-assessment.js";
+import { assertDailyCompletionSpecification } from "../domain/daily-recommendation-completion.js";
 
 import type { DatabaseContext } from "../database/context.js";
 import {
@@ -30,6 +35,9 @@ import {
   coachingDailyAssessmentDetails,
   coachingDailyAssessmentRecoveryEvidence,
   coachingDailyAssessmentTrainingEvidence,
+  coachingDailyCompletionCriteria,
+  coachingDailyCompletionAssessments,
+  coachingDailyCompletionResults,
   coachingDailyRecommendationFeedback,
   coachingPolicies,
   coachingPolicyVersions,
@@ -63,6 +71,16 @@ export type DailyAssessmentSnapshotInput = DailyAssessmentSnapshotBase & (
       readonly personalBaselineCalculation: DailyAssessmentPersonalCalculation;
       readonly movement: DailyAssessmentMovement;
     }
+  | {
+      readonly policyVersion: "daily-assessment-v4";
+      readonly usedFacts: DailyAssessmentV2UsedFacts;
+      readonly recommendedAction: DailyAssessmentAvailableV4["recommendedAction"];
+      readonly personalBaseline: DailyAssessmentPersonalBaseline & {
+        readonly policyVersion: "personal-baseline-v2";
+      };
+      readonly personalBaselineCalculation: DailyAssessmentPersonalCalculation;
+      readonly movement: DailyAssessmentMovement;
+    }
 );
 
 export interface DailyAssessmentConsistencyGuard {
@@ -77,6 +95,16 @@ export interface DailyAssessmentConsistencyGuard {
 export interface CreatedDailyRecommendationFeedback {
   readonly created: boolean;
   readonly feedback: DailyRecommendationFeedback;
+}
+
+export interface DailyCompletionAssessmentInput {
+  readonly snapshot: DailyAssessmentAvailableV4;
+  readonly criteria: readonly DailyCompletionCriterionResult[];
+  readonly completionState: DailyRecommendationCompletionAssessment["completionState"];
+  readonly evidenceMode: DailyRecommendationCompletionAssessment["evidenceMode"];
+  readonly reasons: DailyRecommendationCompletionAssessment["reasons"];
+  readonly limitations: DailyRecommendationCompletionAssessment["limitations"];
+  readonly evidenceChecksum: string;
 }
 
 function evidenceRevisionQuery(personId: string, from: string, to: string) {
@@ -124,6 +152,11 @@ export interface DailyAssessmentStore {
     personId: string,
     snapshotId: string
   ): Promise<DailyRecommendationFeedbackList>;
+  getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4>;
+  createOrGetCompletion(
+    personId: string,
+    input: DailyCompletionAssessmentInput
+  ): Promise<DailyRecommendationCompletionAssessment>;
 }
 
 /** PostgreSQL implementation of the daily assessment persistence boundary. */
@@ -163,12 +196,15 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
   }
 
   public createOrGet(personId: string, input: DailyAssessmentSnapshotInput, guard?: DailyAssessmentConsistencyGuard): Promise<DailyAssessmentAvailable> {
-    if ((input.policyVersion === "daily-assessment-v2" || input.policyVersion === "daily-assessment-v3") &&
+    if (input.policyVersion !== "daily-assessment-v1" &&
         (input.personalBaseline === undefined || input.personalBaselineCalculation === undefined)) {
       throw new Error("Personalized daily assessment requires its versioned baseline payload");
     }
-    if (input.policyVersion === "daily-assessment-v3" && input.movement === undefined) {
-      throw new Error("Daily assessment v3 requires its movement payload");
+    if ((input.policyVersion === "daily-assessment-v3" || input.policyVersion === "daily-assessment-v4") && input.movement === undefined) {
+      throw new Error("Daily assessment v3/v4 requires its movement payload");
+    }
+    if (input.policyVersion === "daily-assessment-v4") {
+      assertDailyCompletionSpecification(input.recommendedAction);
     }
     if (input.policyVersion === "daily-assessment-v1" &&
         (input.personalBaseline !== undefined || input.personalBaselineCalculation !== undefined ||
@@ -207,14 +243,15 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
       const policyRows = await transaction.insert(coachingPolicies).values({ key: "daily-assessment", name: "Daily assessment" }).onConflictDoNothing().returning();
       const policy = policyRows[0] ?? (await transaction.select().from(coachingPolicies).where(eq(coachingPolicies.key, "daily-assessment")).limit(1))[0];
       if (!policy) throw new Error("Daily assessment policy could not be resolved");
-      const policyVersionNumber = input.policyVersion === "daily-assessment-v3"
-        ? 3
+      const policyVersionNumber = input.policyVersion === "daily-assessment-v4"
+        ? 4
+        : input.policyVersion === "daily-assessment-v3" ? 3
         : input.policyVersion === "daily-assessment-v2" ? 2 : 1;
       const versionRows = await transaction.insert(coachingPolicyVersions).values({
         policyId: policy.id,
         version: policyVersionNumber,
         effectiveFrom: new Date(
-          policyVersionNumber === 3
+          policyVersionNumber >= 2
             ? "2026-09-17T00:00:00.000Z"
             : policyVersionNumber === 2
             ? "2026-09-17T00:00:00.000Z"
@@ -259,6 +296,22 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         personalBaselineCalculation: input.personalBaselineCalculation ?? null,
         movement: "movement" in input ? input.movement : null
       }).onConflictDoNothing();
+      if (input.policyVersion === "daily-assessment-v4") {
+        await transaction.insert(coachingDailyCompletionCriteria).values(
+          input.recommendedAction.completion.criteria.map((item, index) => ({
+            recommendationId: recommendation.id,
+            personId,
+            position: index + 1,
+            criterionKey: item.id,
+            type: item.type,
+            role: item.role,
+            ownerDomain: item.ownerDomain,
+            observationWindow: item.observationWindow,
+            targetValue: item.targetValue === null ? null : item.targetValue.toString(),
+            trainingProgramVersionId: item.trainingProgramVersionId
+          }))
+        ).onConflictDoNothing();
+      }
       if (input.usedFacts.recoveryObservationIds.length > 0) {
         await transaction.insert(coachingDailyAssessmentRecoveryEvidence).values(
           input.usedFacts.recoveryObservationIds.map((observationId) => ({
@@ -321,34 +374,20 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         if (
           existingKey[0].recommendationId !== input.snapshotId ||
           existingKey[0].status !== input.status ||
-          existingKey[0].comment !== comment
+          existingKey[0].comment !== comment ||
+          existingKey[0].supersedesFeedbackId !== (input.supersedesFeedbackId ?? null)
         ) {
           throw new ConflictError("Feedback idempotency key is already used");
         }
         return { created: false, feedback: hydrateFeedback(existingKey[0]) };
       }
 
-      const existingStatus = await transaction.select({
-        id: coachingDailyRecommendationFeedback.id
-      }).from(coachingDailyRecommendationFeedback).where(and(
-        eq(coachingDailyRecommendationFeedback.recommendationId, input.snapshotId),
-        eq(coachingDailyRecommendationFeedback.status, input.status)
-      )).limit(1);
-      if (existingStatus[0]) {
-        throw new ConflictError("Feedback status is already recorded for this snapshot");
-      }
-      if (input.status === "completed" || input.status === "skipped") {
-        const opposite = input.status === "completed" ? "skipped" : "completed";
-        const existingDisposition = await transaction.select({
-          id: coachingDailyRecommendationFeedback.id
-        }).from(coachingDailyRecommendationFeedback).where(and(
+      const history = await transaction.select().from(coachingDailyRecommendationFeedback)
+        .where(and(
           eq(coachingDailyRecommendationFeedback.recommendationId, input.snapshotId),
-          eq(coachingDailyRecommendationFeedback.status, opposite)
-        )).limit(1);
-        if (existingDisposition[0]) {
-          throw new ConflictError("Completed and skipped feedback are mutually exclusive");
-        }
-      }
+          eq(coachingDailyRecommendationFeedback.personId, personId)
+        ));
+      validateFeedbackSupersession(history.map(hydrateFeedback), input);
 
       const inserted = await transaction.insert(coachingDailyRecommendationFeedback)
         .values({
@@ -357,7 +396,8 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
           actorPersonId: personId,
           status: input.status,
           comment,
-          idempotencyKey: input.idempotencyKey
+          idempotencyKey: input.idempotencyKey,
+          supersedesFeedbackId: input.supersedesFeedbackId ?? null
         })
         .returning();
       if (!inserted[0]) throw new Error("Daily recommendation feedback was not stored");
@@ -393,8 +433,99 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
     });
   }
 
+  public async getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4> {
+    const rows = await this.database.db.select({
+      recommendation: coachingRecommendations,
+      detail: coachingDailyAssessmentDetails
+    }).from(coachingRecommendations)
+      .innerJoin(coachingDailyAssessmentDetails, eq(coachingDailyAssessmentDetails.recommendationId, coachingRecommendations.id))
+      .where(and(
+        eq(coachingRecommendations.id, snapshotId),
+        eq(coachingRecommendations.personId, personId)
+      )).limit(1);
+    if (!rows[0]) throw new NotFoundError("Daily recommendation snapshot was not found");
+    const snapshot = this.hydrate(rows[0].recommendation, rows[0].detail);
+    if (snapshot.policyVersion !== "daily-assessment-v4") {
+      throw new DomainValidationError("Completion assessment requires a daily-assessment-v4 snapshot");
+    }
+    return snapshot;
+  }
+
+  public createOrGetCompletion(
+    personId: string,
+    input: DailyCompletionAssessmentInput
+  ): Promise<DailyRecommendationCompletionAssessment> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
+      const existing = await transaction.select().from(coachingDailyCompletionAssessments).where(and(
+        eq(coachingDailyCompletionAssessments.recommendationId, input.snapshot.snapshotId),
+        eq(coachingDailyCompletionAssessments.personId, personId),
+        eq(coachingDailyCompletionAssessments.policyVersion, "daily-completion-v1"),
+        eq(coachingDailyCompletionAssessments.evidenceChecksum, input.evidenceChecksum)
+      )).limit(1);
+      let assessment = existing[0];
+      if (!assessment) {
+        assessment = (await transaction.insert(coachingDailyCompletionAssessments).values({
+          recommendationId: input.snapshot.snapshotId,
+          personId,
+          policyVersion: "daily-completion-v1",
+          evidenceChecksum: input.evidenceChecksum,
+          completionState: input.completionState,
+          evidenceMode: input.evidenceMode,
+          reasons: [...input.reasons],
+          limitations: [...input.limitations]
+        }).returning())[0];
+        if (!assessment) throw new Error("Daily completion assessment was not stored");
+        const positions = new Map(input.snapshot.recommendedAction.completion.criteria.map((item, index) => [item.id, index + 1]));
+        await transaction.insert(coachingDailyCompletionResults).values(input.criteria.map((result) => {
+          const position = positions.get(result.criterionId);
+          if (position === undefined) throw new Error(`Unknown completion criterion: ${result.criterionId}`);
+          const evidence = result.evidence;
+          return {
+            assessmentId: assessment!.id,
+            recommendationId: input.snapshot.snapshotId,
+            personId,
+            criterionPosition: position,
+            status: result.status,
+            freshness: result.freshness,
+            completeness: result.completeness,
+            observedAt: result.observedAt === null ? null : new Date(result.observedAt),
+            limitations: [...result.limitations],
+            weightMeasurementId: evidence?.factType === "weight_measurement" ? evidence.factId : null,
+            mealId: evidence?.factType === "meal" ? evidence.factId : null,
+            workoutSessionId: evidence?.factType === "workout_session" ? evidence.factId : null,
+            externalActivityId: evidence?.factType === "external_activity" ? evidence.factId : null,
+            recoveryObservationId: evidence?.factType === "recovery_observation" ? evidence.factId : null,
+            trainingProgramVersionId: evidence?.factType === "training_program_version" ? evidence.factId : null
+          };
+        }));
+      }
+      const rows = await transaction.select({
+        result: coachingDailyCompletionResults,
+        criterion: coachingDailyCompletionCriteria
+      }).from(coachingDailyCompletionResults)
+        .innerJoin(coachingDailyCompletionCriteria, and(
+          eq(coachingDailyCompletionCriteria.recommendationId, coachingDailyCompletionResults.recommendationId),
+          eq(coachingDailyCompletionCriteria.position, coachingDailyCompletionResults.criterionPosition)
+        )).where(eq(coachingDailyCompletionResults.assessmentId, assessment.id))
+        .orderBy(asc(coachingDailyCompletionResults.criterionPosition));
+      return {
+        id: assessment.id,
+        snapshotId: assessment.recommendationId,
+        completionPolicyVersion: "daily-completion-v1",
+        completionState: assessment.completionState,
+        evidenceMode: assessment.evidenceMode,
+        criteria: rows.map(({ result, criterion }) => hydrateCompletionResult(result, criterion.criterionKey, criterion.ownerDomain)),
+        reasons: assessment.reasons as DailyRecommendationCompletionAssessment["reasons"],
+        limitations: assessment.limitations as DailyRecommendationCompletionAssessment["limitations"],
+        evaluatedAt: assessment.evaluatedAt.toISOString(),
+        evidenceChecksum: assessment.evidenceChecksum
+      };
+    });
+  }
+
   private hydrate(recommendation: typeof coachingRecommendations.$inferSelect, detail: typeof coachingDailyAssessmentDetails.$inferSelect): DailyAssessmentAvailable {
-    if (detail.policyVersion !== "daily-assessment-v1" && detail.policyVersion !== "daily-assessment-v2" && detail.policyVersion !== "daily-assessment-v3") {
+    if (detail.policyVersion !== "daily-assessment-v1" && detail.policyVersion !== "daily-assessment-v2" && detail.policyVersion !== "daily-assessment-v3" && detail.policyVersion !== "daily-assessment-v4") {
       throw new Error(`Unsupported daily assessment policy version: ${detail.policyVersion}`);
     }
     if (detail.policyVersion !== "daily-assessment-v1" && detail.personalBaseline === null) {
@@ -404,10 +535,10 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         !Array.isArray(detail.usedFacts.dailyContextNoteIds)) {
       throw new Error("Stored personalized daily assessment is missing its context-note evidence IDs");
     }
-    if (detail.policyVersion === "daily-assessment-v3" && detail.movement === null) {
-      throw new Error("Stored daily assessment v3 is missing its movement context");
+    if ((detail.policyVersion === "daily-assessment-v3" || detail.policyVersion === "daily-assessment-v4") && detail.movement === null) {
+      throw new Error("Stored daily assessment v3/v4 is missing its movement context");
     }
-    if (detail.policyVersion === "daily-assessment-v3" &&
+    if ((detail.policyVersion === "daily-assessment-v3" || detail.policyVersion === "daily-assessment-v4") &&
         detail.personalBaseline?.policyVersion !== "personal-baseline-v2") {
       throw new Error("Stored daily assessment v3 has the wrong baseline policy");
     }
@@ -452,6 +583,17 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         movement: detail.movement!
       };
     }
+    if (detail.policyVersion === "daily-assessment-v4") {
+      return {
+        ...personalized,
+        policyVersion: detail.policyVersion,
+        recommendedAction: detail.recommendedAction as DailyAssessmentAvailableV4["recommendedAction"],
+        personalBaseline: detail.personalBaseline as DailyAssessmentPersonalBaseline & {
+          readonly policyVersion: "personal-baseline-v2";
+        },
+        movement: detail.movement!
+      };
+    }
     return { ...personalized, policyVersion: "daily-assessment-v2" };
   }
 }
@@ -462,6 +604,7 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
   private readonly snapshots = new Map<string, DailyAssessmentAvailable>();
   private readonly snapshotOwners = new Map<string, string>();
   private readonly feedback = new Map<string, DailyRecommendationFeedback>();
+  private readonly completionAssessments = new Map<string, DailyRecommendationCompletionAssessment>();
   public async getPreferences(): Promise<PersonPreferences> { return { timezone: this.timezone, updatedAt: new Date(0).toISOString() }; }
   public async setTimezone(
     _personId: string,
@@ -499,20 +642,15 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
       if (
         existing.snapshotId !== input.snapshotId ||
         existing.status !== input.status ||
-        existing.comment !== comment
+        existing.comment !== comment ||
+        existing.supersedesFeedbackId !== (input.supersedesFeedbackId ?? null)
       ) throw new ConflictError("Feedback idempotency key is already used");
       return { created: false, feedback: existing };
     }
     const snapshotEvents = [...this.feedback.values()].filter(
       (item) => item.personId === personId && item.snapshotId === input.snapshotId
     );
-    if (snapshotEvents.some((item) => item.status === input.status)) {
-      throw new ConflictError("Feedback status is already recorded for this snapshot");
-    }
-    if (
-      (input.status === "completed" && snapshotEvents.some((item) => item.status === "skipped")) ||
-      (input.status === "skipped" && snapshotEvents.some((item) => item.status === "completed"))
-    ) throw new ConflictError("Completed and skipped feedback are mutually exclusive");
+    validateFeedbackSupersession(snapshotEvents, input);
     const created: DailyRecommendationFeedback = {
       id: randomUUID(),
       snapshotId: input.snapshotId,
@@ -521,6 +659,7 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
       status: input.status,
       comment,
       idempotencyKey: input.idempotencyKey,
+      supersedesFeedbackId: input.supersedesFeedbackId ?? null,
       reportedAt: new Date().toISOString()
     };
     this.feedback.set(key, created);
@@ -541,6 +680,39 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
         .sort((left, right) => left.reportedAt.localeCompare(right.reportedAt) || left.id.localeCompare(right.id))
     };
   }
+
+  public async getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4> {
+    const snapshot = [...this.snapshots.values()].find((item) => item.snapshotId === snapshotId);
+    if (!snapshot || this.snapshotOwners.get(snapshotId) !== personId) {
+      throw new NotFoundError("Daily recommendation snapshot was not found");
+    }
+    if (snapshot.policyVersion !== "daily-assessment-v4") {
+      throw new DomainValidationError("Completion assessment requires a daily-assessment-v4 snapshot");
+    }
+    return snapshot;
+  }
+
+  public async createOrGetCompletion(
+    _personId: string,
+    input: DailyCompletionAssessmentInput
+  ): Promise<DailyRecommendationCompletionAssessment> {
+    const existing = this.completionAssessments.get(input.evidenceChecksum);
+    if (existing) return existing;
+    const created: DailyRecommendationCompletionAssessment = {
+      id: randomUUID(),
+      snapshotId: input.snapshot.snapshotId,
+      completionPolicyVersion: "daily-completion-v1",
+      completionState: input.completionState,
+      evidenceMode: input.evidenceMode,
+      criteria: input.criteria,
+      reasons: input.reasons,
+      limitations: input.limitations,
+      evaluatedAt: new Date().toISOString(),
+      evidenceChecksum: input.evidenceChecksum
+    };
+    this.completionAssessments.set(input.evidenceChecksum, created);
+    return created;
+  }
 }
 
 function normalizeFeedbackComment(comment: string | undefined): string | null {
@@ -558,6 +730,28 @@ function validateFeedbackIdempotencyKey(idempotencyKey: string): void {
   }
 }
 
+function feedbackFamily(status: DailyRecommendationFeedback["status"]): string {
+  return status === "completed" || status === "skipped" ? "disposition" : status;
+}
+
+function validateFeedbackSupersession(
+  history: readonly DailyRecommendationFeedback[],
+  input: CreateDailyRecommendationFeedback
+): void {
+  const superseded = new Set(history.map((item) => item.supersedesFeedbackId).filter(Boolean));
+  const active = history.filter((item) => !superseded.has(item.id));
+  if (input.supersedesFeedbackId === undefined) {
+    if (active.some((item) => feedbackFamily(item.status) === feedbackFamily(input.status))) {
+      throw new ConflictError("Active feedback in this signal family already exists; supersede it explicitly");
+    }
+    return;
+  }
+  const predecessor = active.find((item) => item.id === input.supersedesFeedbackId);
+  if (!predecessor || feedbackFamily(predecessor.status) !== feedbackFamily(input.status)) {
+    throw new ConflictError("Feedback correction must supersede the active event in the same signal family");
+  }
+}
+
 function hydrateFeedback(
   row: typeof coachingDailyRecommendationFeedback.$inferSelect
 ): DailyRecommendationFeedback {
@@ -569,6 +763,30 @@ function hydrateFeedback(
     status: row.status,
     comment: row.comment,
     idempotencyKey: row.idempotencyKey,
+    supersedesFeedbackId: row.supersedesFeedbackId,
     reportedAt: row.reportedAt.toISOString()
+  };
+}
+
+function hydrateCompletionResult(
+  row: typeof coachingDailyCompletionResults.$inferSelect,
+  criterionId: string,
+  ownerDomain: DailyCompletionOwnerDomain
+): DailyCompletionCriterionResult {
+  const evidence = row.weightMeasurementId ? { factType: "weight_measurement" as const, factId: row.weightMeasurementId }
+    : row.mealId ? { factType: "meal" as const, factId: row.mealId }
+    : row.workoutSessionId ? { factType: "workout_session" as const, factId: row.workoutSessionId }
+    : row.externalActivityId ? { factType: "external_activity" as const, factId: row.externalActivityId }
+    : row.recoveryObservationId ? { factType: "recovery_observation" as const, factId: row.recoveryObservationId }
+    : row.trainingProgramVersionId ? { factType: "training_program_version" as const, factId: row.trainingProgramVersionId }
+    : null;
+  return {
+    criterionId,
+    status: row.status,
+    freshness: row.freshness,
+    completeness: row.completeness,
+    observedAt: row.observedAt?.toISOString() ?? null,
+    evidence: evidence === null ? null : { ownerDomain, ...evidence },
+    limitations: row.limitations as DailyCompletionCriterionResult["limitations"]
   };
 }

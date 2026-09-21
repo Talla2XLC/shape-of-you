@@ -442,7 +442,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(26);
+    expect(body.result.tools).toHaveLength(27);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -484,6 +484,7 @@ describe("MCP HTTP adapter", () => {
       correct_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       set_current_timezone: MCP_PERSON_TIMEZONE_WRITE_SCOPE,
       get_daily_assessment: MCP_READ_SCOPE,
+      get_daily_recommendation_completion: MCP_READ_SCOPE,
       record_daily_recommendation_feedback: MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
       get_daily_projection: MCP_READ_SCOPE
     });

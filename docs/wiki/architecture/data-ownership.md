@@ -110,6 +110,20 @@ reusing the snapshot's policy, action, reasons, confidence, and evidence links
 instead of copying them. It is neither a mutable recommendation state nor an
 owning-domain completion fact. Snapshot privacy erasure cascades to feedback;
 feedback does not flow back into assessment calculation or policy selection.
+Feedback corrections are append-only supersession events and never rewrite the
+original report.
+
+Coaching also owns immutable `DailyRecommendationCompletionAssessment`
+conclusions for exact V4 daily recommendations. It owns the criterion contract,
+resolution policy, evidence checksum, and explanation, but not the underlying
+facts. Weight, Nutrition, Training, Recovery, and Integration remain the only
+owners of measurements, meals, workout sessions, programs, observations,
+sleep, steps, and connected activities. Completion provenance uses typed
+Person-bound foreign keys to those facts; Coaching never synthesizes or
+corrects them. Missing owner evidence remains unknown rather than becoming a
+negative fact. Recovery erasure removes derived completion assessments that
+retain erased observations or connected activities, while recommendation
+snapshot deletion cascades through all completion and feedback evidence.
 
 ## Evidence
 
@@ -143,4 +157,5 @@ feedback does not flow back into assessment calculation or policy selection.
 - [Operational evidence isolation ADR](../../adr/20260913-separate-operational-evidence-from-person-context.md)
 - [Connected Recovery freshness for Coach ADR](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md)
 - [Typed daily-recommendation feedback ADR](../../adr/20260918-record-typed-daily-recommendation-feedback.md)
+- [Daily-recommendation completion ADR](../../adr/20260921-determine-daily-recommendation-completion-from-domain-facts.md)
 - [Capture-first Coach and DayClosure removal](../../adr/20260829-remove-day-closure-and-use-capture-first-coach.md)

@@ -136,8 +136,16 @@ boundaries must not be implicitly shared between deployable services.
 - Staging, commits, pushes, tags, releases, deployments, migrations,
   destructive actions, production access, and secret access require the
   corresponding explicit approvals.
-- When asking the operator to create a Git commit or push changes, always
-  propose a concise Conventional Commit message suitable for the current diff.
+- Every final completion report that leaves commit-worthy Git changes must
+  include a ready-to-copy, concise Conventional Commit message verified
+  against the current diff. This is mandatory even when the operator did not
+  ask to commit and no commit permission is being requested.
+- If a completion report does not include a commit message, it must explicitly
+  state why no commit is applicable (for example, there are no Git changes or
+  the scoped changes are already committed).
+- A proposed commit message is informational only and never authorizes
+  staging, committing, pushing, tagging, releasing, or deploying; each action
+  still requires its corresponding explicit approval.
 - Never disclose credentials, private keys, tokens, `.env` contents, dumps, or
   production data in chat, documentation, plans, reports, or commits.
 

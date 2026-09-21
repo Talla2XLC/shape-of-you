@@ -24,6 +24,10 @@ import type {
   DailyAssessmentMovement,
   DailyAssessmentPersonalBaseline,
   DailyAssessmentUsedFacts,
+  DailyCompletionCriterionType,
+  DailyCompletionOwnerDomain,
+  DailyRecommendationCompletionState,
+  DailyRecommendationEvidenceMode,
   DailyNextAction,
   DailyRecommendationFeedbackStatus
 } from "@shape-of-you/contracts";
@@ -286,6 +290,32 @@ export const dailyRecommendationFeedbackStatus = pgEnum(
   "daily_recommendation_feedback_status",
   ["accepted", "completed", "skipped", "too_heavy", "unsuitable"]
 );
+export const dailyCompletionCriterionType = pgEnum("daily_completion_criterion_type", [
+  "weight_recorded", "meal_recorded", "program_workout_completed",
+  "recovery_check_in_recorded", "steps_threshold_reached",
+  "sleep_duration_reached", "training_program_confirmed", "manual_confirmation"
+]);
+export const dailyCompletionCriterionRole = pgEnum("daily_completion_criterion_role", [
+  "required", "supporting"
+]);
+export const dailyCompletionOwnerDomain = pgEnum("daily_completion_owner_domain", [
+  "weight", "nutrition", "training", "recovery", "coaching"
+]);
+export const dailyCompletionState = pgEnum("daily_completion_state", [
+  "completed", "partially_completed", "not_completed", "unknown"
+]);
+export const dailyCompletionEvidenceMode = pgEnum("daily_completion_evidence_mode", [
+  "observed", "self_reported", "partially_observed", "unknown"
+]);
+export const dailyCompletionResultStatus = pgEnum("daily_completion_result_status", [
+  "satisfied", "partial", "unknown"
+]);
+export const dailyCompletionFreshness = pgEnum("daily_completion_freshness", [
+  "fresh", "stale", "unknown"
+]);
+export const dailyCompletionCompleteness = pgEnum("daily_completion_completeness", [
+  "complete", "partial", "unknown"
+]);
 export const coachingTrainingAdjustmentAction = pgEnum(
   "coaching_training_adjustment_action",
   ["hold", "target_weight", "repetition_range"]
@@ -3535,7 +3565,7 @@ export const coachingDailyAssessmentDetails = pgTable(
             AND ${table.personalBaseline} IS NOT NULL
             AND ${table.personalBaselineCalculation} IS NOT NULL
             AND ${table.movement} IS NULL)
-        OR (${table.policyVersion} = 'daily-assessment-v3'
+        OR (${table.policyVersion} in ('daily-assessment-v3', 'daily-assessment-v4')
             AND ${table.personalBaseline} IS NOT NULL
             AND ${table.personalBaselineCalculation} IS NOT NULL
             AND ${table.movement} IS NOT NULL)`
@@ -3556,6 +3586,7 @@ export const coachingDailyRecommendationFeedback = pgTable(
       .notNull(),
     comment: varchar("comment", { length: 1000 }),
     idempotencyKey: varchar("idempotency_key", { length: 256 }).notNull(),
+    supersedesFeedbackId: uuid("supersedes_feedback_id"),
     reportedAt: timestamp("reported_at", { withTimezone: true, mode: "date" })
       .defaultNow()
       .notNull()
@@ -3578,13 +3609,14 @@ export const coachingDailyRecommendationFeedback = pgTable(
       table.personId,
       table.idempotencyKey
     ),
-    unique("coach_daily_feedback_status_uq").on(
-      table.recommendationId,
-      table.status
-    ),
-    uniqueIndex("coach_daily_feedback_disposition_uq")
-      .on(table.recommendationId)
-      .where(sql`${table.status} in ('completed', 'skipped')`),
+    foreignKey({
+      name: "coach_daily_feedback_supersedes_fk",
+      columns: [table.supersedesFeedbackId],
+      foreignColumns: [table.id]
+    }),
+    uniqueIndex("coach_daily_feedback_supersedes_uq")
+      .on(table.supersedesFeedbackId)
+      .where(sql`${table.supersedesFeedbackId} IS NOT NULL`),
     index("coach_daily_feedback_person_time_idx").on(
       table.personId,
       table.reportedAt
@@ -3597,6 +3629,108 @@ export const coachingDailyRecommendationFeedback = pgTable(
       "coach_daily_feedback_comment_nonblank",
       sql`${table.comment} IS NULL OR btrim(${table.comment}) <> ''`
     )
+  ]
+);
+
+/** Atomic typed criteria owned by the immutable recommendation snapshot. */
+export const coachingDailyCompletionCriteria = pgTable(
+  "coaching_daily_completion_criteria",
+  {
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    position: smallint("position").notNull(),
+    criterionKey: varchar("criterion_key", { length: 64 }).notNull(),
+    type: dailyCompletionCriterionType("type").$type<DailyCompletionCriterionType>().notNull(),
+    role: dailyCompletionCriterionRole("role").notNull(),
+    ownerDomain: dailyCompletionOwnerDomain("owner_domain").$type<DailyCompletionOwnerDomain>().notNull(),
+    observationWindow: varchar("observation_window", { length: 64 }).notNull(),
+    targetValue: numeric("target_value", { precision: 14, scale: 3 }),
+    trainingProgramVersionId: uuid("training_program_version_id")
+  },
+  (table) => [
+    primaryKey({ name: "coach_daily_completion_criteria_pk", columns: [table.recommendationId, table.position] }),
+    foreignKey({
+      name: "coach_daily_completion_criteria_snapshot_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingDailyAssessmentDetails.recommendationId, coachingDailyAssessmentDetails.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coach_daily_completion_criteria_program_fk",
+      columns: [table.trainingProgramVersionId, table.personId],
+      foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.personId]
+    }),
+    unique("coach_daily_completion_criteria_key_uq").on(table.recommendationId, table.criterionKey),
+    check("coach_daily_completion_criteria_position", sql`${table.position} > 0`)
+  ]
+);
+
+/** Immutable conclusion over one exact evidence checksum. */
+export const coachingDailyCompletionAssessments = pgTable(
+  "coaching_daily_completion_assessments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    policyVersion: varchar("policy_version", { length: 128 }).notNull(),
+    evidenceChecksum: varchar("evidence_checksum", { length: 64 }).notNull(),
+    completionState: dailyCompletionState("completion_state").$type<DailyRecommendationCompletionState>().notNull(),
+    evidenceMode: dailyCompletionEvidenceMode("evidence_mode").$type<DailyRecommendationEvidenceMode>().notNull(),
+    reasons: text("reasons").array().notNull(),
+    limitations: text("limitations").array().notNull(),
+    evaluatedAt: timestamp("evaluated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "coach_daily_completion_assessment_snapshot_fk",
+      columns: [table.recommendationId, table.personId],
+      foreignColumns: [coachingDailyAssessmentDetails.recommendationId, coachingDailyAssessmentDetails.personId]
+    }).onDelete("cascade"),
+    unique("coach_daily_completion_assessment_evidence_uq").on(
+      table.recommendationId, table.policyVersion, table.evidenceChecksum
+    ),
+    unique("coach_daily_completion_assessment_owner_uq").on(table.id, table.recommendationId, table.personId)
+  ]
+);
+
+/** Per-criterion provenance; each result points to at most one owning-domain fact. */
+export const coachingDailyCompletionResults = pgTable(
+  "coaching_daily_completion_results",
+  {
+    assessmentId: uuid("assessment_id").notNull(),
+    recommendationId: uuid("recommendation_id").notNull(),
+    personId: uuid("person_id").notNull(),
+    criterionPosition: smallint("criterion_position").notNull(),
+    status: dailyCompletionResultStatus("status").notNull(),
+    freshness: dailyCompletionFreshness("freshness").notNull(),
+    completeness: dailyCompletionCompleteness("completeness").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true, mode: "date" }),
+    limitations: text("limitations").array().notNull(),
+    weightMeasurementId: uuid("weight_measurement_id"),
+    mealId: uuid("meal_id"),
+    workoutSessionId: uuid("workout_session_id"),
+    externalActivityId: uuid("external_activity_id"),
+    recoveryObservationId: uuid("recovery_observation_id"),
+    trainingProgramVersionId: uuid("training_program_version_id")
+  },
+  (table) => [
+    primaryKey({ name: "coach_daily_completion_results_pk", columns: [table.assessmentId, table.criterionPosition] }),
+    foreignKey({
+      name: "coach_daily_completion_results_assessment_fk",
+      columns: [table.assessmentId, table.recommendationId, table.personId],
+      foreignColumns: [coachingDailyCompletionAssessments.id, coachingDailyCompletionAssessments.recommendationId, coachingDailyCompletionAssessments.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "coach_daily_completion_results_criterion_fk",
+      columns: [table.recommendationId, table.criterionPosition],
+      foreignColumns: [coachingDailyCompletionCriteria.recommendationId, coachingDailyCompletionCriteria.position]
+    }),
+    foreignKey({ name: "coach_daily_completion_results_weight_fk", columns: [table.weightMeasurementId, table.personId], foreignColumns: [weightMeasurements.id, weightMeasurements.personId] }),
+    foreignKey({ name: "coach_daily_completion_results_meal_fk", columns: [table.mealId, table.personId], foreignColumns: [meals.id, meals.personId] }),
+    foreignKey({ name: "coach_daily_completion_results_workout_fk", columns: [table.workoutSessionId, table.personId], foreignColumns: [workoutSessions.id, workoutSessions.personId] }),
+    foreignKey({ name: "coach_daily_completion_results_activity_fk", columns: [table.externalActivityId, table.personId], foreignColumns: [integrationActivityFacts.id, integrationActivityFacts.personId] }),
+    foreignKey({ name: "coach_daily_completion_results_recovery_fk", columns: [table.recoveryObservationId, table.personId], foreignColumns: [recoveryObservations.id, recoveryObservations.personId] }),
+    foreignKey({ name: "coach_daily_completion_results_program_fk", columns: [table.trainingProgramVersionId, table.personId], foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.personId] }),
+    check("coach_daily_completion_results_evidence_count", sql`num_nonnulls(${table.weightMeasurementId}, ${table.mealId}, ${table.workoutSessionId}, ${table.externalActivityId}, ${table.recoveryObservationId}, ${table.trainingProgramVersionId}) <= 1`)
   ]
 );
 

@@ -170,7 +170,7 @@ describe("API-owned daily assessment", () => {
       timezone: "Europe/Moscow",
       status: "insufficient_data",
       recommendedAction: { type: "record_recovery_check_in" },
-      policyVersion: "daily-assessment-v3",
+      policyVersion: "daily-assessment-v4",
       personalBaseline: {
         policyKey: "balanced",
         policyVersion: "personal-baseline-v2",
@@ -210,18 +210,18 @@ describe("API-owned daily assessment", () => {
 
     const rows = await database.pool.query<{
       count: number;
-      all_v3: boolean;
+      all_v4: boolean;
       all_reproducible: boolean;
     }>(
       `select count(*)::int as count,
-              bool_and(policy_version = 'daily-assessment-v3') as all_v3,
+              bool_and(policy_version = 'daily-assessment-v4') as all_v4,
               bool_and(personal_baseline is not null
                        and personal_baseline_calculation is not null) as all_reproducible
          from coaching_daily_assessment_details
         where person_id = $1`,
       [personId]
     );
-    expect(rows.rows[0]).toEqual({ count: 2, all_v3: true, all_reproducible: true });
+    expect(rows.rows[0]).toEqual({ count: 2, all_v4: true, all_reproducible: true });
 
     const dailyRepository = new DailyAssessmentRepository(database);
     await dailyRepository.setTimezone(otherPersonId, "Europe/Moscow");
@@ -613,7 +613,7 @@ describe("API-owned daily assessment", () => {
     const body = response.json();
     expect(evaluateDailyAssessment(body.usedFacts).status).toBe("caution");
     expect(body).toMatchObject({
-      policyVersion: "daily-assessment-v3",
+      policyVersion: "daily-assessment-v4",
       status: "recovery_priority",
       personalBaseline: {
         policyKey: "balanced",
@@ -662,7 +662,7 @@ describe("API-owned daily assessment", () => {
 
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json()).toMatchObject({
-      policyVersion: "daily-assessment-v3",
+      policyVersion: "daily-assessment-v4",
       movement: {
         status: "available",
         current: {
@@ -776,6 +776,34 @@ describe("API-owned daily assessment", () => {
     });
     expect(skippedAfterCompleted.statusCode, skippedAfterCompleted.body).toBe(409);
 
+    const correctedSkipped = await fastify.inject({
+      method: "POST",
+      url: `/v1/daily-assessment/${snapshotId}/feedback`,
+      payload: {
+        status: "skipped",
+        idempotencyKey: "feedback-skipped-correction",
+        supersedesFeedbackId: completed.json().id
+      }
+    });
+    expect(correctedSkipped.statusCode, correctedSkipped.body).toBe(201);
+    expect(correctedSkipped.json()).toMatchObject({
+      status: "skipped",
+      supersedesFeedbackId: completed.json().id
+    });
+
+    const completion = await fastify.inject({
+      method: "GET",
+      url: `/v1/daily-assessment/${snapshotId}/completion`
+    });
+    expect(completion.statusCode, completion.body).toBe(200);
+    expect(completion.json()).toMatchObject({
+      snapshotId,
+      completionPolicyVersion: "daily-completion-v1",
+      completionState: "not_completed",
+      evidenceMode: "self_reported",
+      reasons: ["manual_skipped"]
+    });
+
     const concurrentCommand = {
       status: "unsuitable",
       comment: "Не подходит по контексту",
@@ -807,6 +835,7 @@ describe("API-owned daily assessment", () => {
         { status: "accepted" },
         { status: "too_heavy" },
         { status: "completed" },
+        { status: "skipped", supersedesFeedbackId: completed.json().id },
         { status: "unsuitable" }
       ]
     });

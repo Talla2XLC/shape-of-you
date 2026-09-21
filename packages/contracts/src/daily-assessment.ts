@@ -1,3 +1,8 @@
+import {
+  DailyCompletionSpecificationSchema,
+  type DailyCompletionSpecification
+} from "./daily-recommendation-completion.js";
+
 const uuid = { type: "string", format: "uuid" } as const;
 const localDate = { type: "string", format: "date" } as const;
 const nullableNumber = { anyOf: [{ type: "number" }, { type: "null" }] } as const;
@@ -39,6 +44,15 @@ export const DailyNextActionSchema = {
     type: DailyNextActionTypeSchema,
     text: { type: "string", minLength: 1, maxLength: 512 },
     trainingProgramVersionId: { anyOf: [uuid, { type: "null" }] }
+  }
+} as const;
+
+export const DailyNextActionV4Schema = {
+  ...DailyNextActionSchema,
+  required: [...DailyNextActionSchema.required, "completion"],
+  properties: {
+    ...DailyNextActionSchema.properties,
+    completion: DailyCompletionSpecificationSchema
   }
 } as const;
 
@@ -270,6 +284,22 @@ export const DailyAssessmentResultSchema = {
         personalBaseline: DailyAssessmentV3PersonalBaselineSchema,
         movement: DailyAssessmentMovementSchema
       }
+    },
+    {
+      type: "object", additionalProperties: false,
+      required: [
+        "state", ...Object.keys(readyProperties), "policyVersion",
+        "personalBaseline", "movement"
+      ],
+      properties: {
+        state: { const: "available" },
+        ...readyProperties,
+        recommendedAction: DailyNextActionV4Schema,
+        usedFacts: DailyAssessmentV2UsedFactsSchema,
+        policyVersion: { const: "daily-assessment-v4" },
+        personalBaseline: DailyAssessmentV3PersonalBaselineSchema,
+        movement: DailyAssessmentMovementSchema
+      }
     }
   ]
 } as const;
@@ -300,6 +330,11 @@ export interface DailyNextAction {
   readonly type: DailyNextActionType;
   readonly text: string;
   readonly trainingProgramVersionId: string | null;
+}
+
+/** V4 primary action with an immutable machine-verifiable specification. */
+export interface DailyNextActionV4 extends DailyNextAction {
+  readonly completion: DailyCompletionSpecification;
 }
 
 /** Provider-neutral evidence envelope captured in an immutable daily snapshot. */
@@ -428,10 +463,20 @@ export interface DailyAssessmentAvailableV3 extends Omit<DailyAssessmentAvailabl
   readonly movement: DailyAssessmentMovement;
 }
 
+/** V4 daily snapshot with completion criteria but no mutable completion state. */
+export interface DailyAssessmentAvailableV4 extends Omit<
+  DailyAssessmentAvailableV3,
+  "policyVersion" | "recommendedAction"
+> {
+  readonly policyVersion: "daily-assessment-v4";
+  readonly recommendedAction: DailyNextActionV4;
+}
+
 export type DailyAssessmentAvailable =
   | DailyAssessmentAvailableV1
   | DailyAssessmentAvailableV2
-  | DailyAssessmentAvailableV3;
+  | DailyAssessmentAvailableV3
+  | DailyAssessmentAvailableV4;
 
 /** Read result that fails explicitly when Person timezone has not been configured. */
 export type DailyAssessmentResult =

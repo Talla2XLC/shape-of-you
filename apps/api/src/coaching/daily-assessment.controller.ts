@@ -5,6 +5,7 @@ import {
   CreateDailyRecommendationFeedbackSchema,
   DailyAssessmentResultSchema,
   DailyRecommendationFeedbackListSchema,
+  DailyRecommendationCompletionAssessmentSchema,
   DailyRecommendationFeedbackSchema,
   DailyRecommendationSnapshotIdParamsSchema,
   PersonPreferencesSchema,
@@ -13,6 +14,7 @@ import {
   type DailyAssessmentResult,
   type DailyRecommendationFeedback,
   type DailyRecommendationFeedbackList,
+  type DailyRecommendationCompletionAssessment,
   type DailyRecommendationSnapshotIdParams,
   type PersonPreferences,
   type UpdatePersonPreferences
@@ -41,6 +43,15 @@ export class DailyAssessmentController {
   @Get()
   @UseInterceptors(new JsonSchemaResponseInterceptor(DailyAssessmentResultSchema))
   public read(): Promise<DailyAssessmentResult> { return this.service.read(); }
+
+  @Get(":snapshotId/completion")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(DailyRecommendationCompletionAssessmentSchema))
+  public completion(
+    @Param(new JsonSchemaPipe<DailyRecommendationSnapshotIdParams>(DailyRecommendationSnapshotIdParamsSchema, true))
+    params: DailyRecommendationSnapshotIdParams
+  ): Promise<DailyRecommendationCompletionAssessment> {
+    return this.service.readCompletion(params.snapshotId);
+  }
 
   @Get(":snapshotId/feedback")
   @UseInterceptors(new JsonSchemaResponseInterceptor(DailyRecommendationFeedbackListSchema))

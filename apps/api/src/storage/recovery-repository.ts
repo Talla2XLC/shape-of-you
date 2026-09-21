@@ -1340,6 +1340,31 @@ export class RecoveryRepository implements RecoveryStore {
       ));
 
     await transaction.execute(sql`
+      delete from coaching_daily_completion_assessments
+       where person_id = ${personId}
+         and id in (
+           select result.assessment_id
+             from coaching_daily_completion_results result
+             join recovery_observations observation
+               on observation.id = result.recovery_observation_id
+              and observation.person_id = result.person_id
+            where result.person_id = ${personId}
+              and observation.connection_id = ${connectionId}
+           union
+           select result.assessment_id
+             from coaching_daily_completion_results result
+             join integration_activity_facts activity
+               on activity.id = result.external_activity_id
+              and activity.person_id = result.person_id
+             join integration_connections integration_connection
+               on integration_connection.id = activity.connection_id
+              and integration_connection.person_id = activity.person_id
+            where result.person_id = ${personId}
+              and integration_connection.recovery_connection_id = ${connectionId}
+         )
+    `);
+
+    await transaction.execute(sql`
       delete from coaching_recommendations
        where person_id = ${personId}
          and id in (

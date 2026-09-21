@@ -2,10 +2,13 @@ import { Inject, Injectable } from "@nestjs/common";
 
 import type {
   CreateDailyRecommendationFeedback,
+  DailyCompletionCriterion,
+  DailyCompletionCriterionResult,
   DailyAssessmentMovement,
   DailyAssessmentResult,
   DailyAssessmentV2UsedFacts,
   DailyRecommendationFeedbackList,
+  DailyRecommendationCompletionAssessment,
   PersonPreferences,
   RecoveryObservation,
   UpdatePersonPreferences
@@ -15,10 +18,15 @@ import type { PersonContext } from "../application/person-context.js";
 import { DAILY_ASSESSMENT_STORE, PERSON_CONTEXT } from "../application/tokens.js";
 import { assertIanaTimezone } from "../domain/date-context.js";
 import {
-  DAILY_ASSESSMENT_V3_POLICY_VERSION,
-  dailyAssessmentV3Checksum,
+  DAILY_ASSESSMENT_V4_POLICY_VERSION,
+  dailyAssessmentV4Checksum,
   evaluateDailyAssessment
 } from "../domain/daily-assessment.js";
+import { withDailyCompletionSpecification } from "../domain/daily-recommendation-completion.js";
+import {
+  dailyCompletionEvidenceChecksum,
+  evaluateDailyRecommendationCompletion
+} from "../domain/daily-recommendation-completion.js";
 import { applyConservativePersonalOverlay } from "../domain/daily-assessment-personal-overlay.js";
 import {
   evaluatePersonalizedDailyAssessmentV3,
@@ -108,6 +116,50 @@ export class DailyAssessmentService {
   /** Reads the ordered feedback history for one exact daily snapshot. */
   public listFeedback(snapshotId: string): Promise<DailyRecommendationFeedbackList> {
     return this.store.listFeedback(this.personContext.getPersonId(), snapshotId);
+  }
+
+  /** Lazily materializes an immutable completion conclusion from current owner facts. */
+  public async readCompletion(snapshotId: string): Promise<DailyRecommendationCompletionAssessment> {
+    const personId = this.personContext.getPersonId();
+    const snapshot = await this.store.getCompletionSnapshot(personId, snapshotId);
+    const [weights, meals, sessions, observations, training, feedback] = await Promise.all([
+      this.weights.listForLocalDate(snapshot.localDate),
+      this.nutrition.listMealsForLocalDate(snapshot.localDate),
+      this.training.listWorkoutSessionsForLocalDate(snapshot.localDate),
+      this.recovery.listObservationsForLocalDate(snapshot.localDate),
+      this.training.getTrainingContext({ historyLimit: 50 }),
+      this.store.listFeedback(personId, snapshotId)
+    ]);
+    const asOf = snapshot.createdAt;
+    const results = snapshot.recommendedAction.completion.criteria.map((criterion) =>
+      evaluateCompletionCriterion(criterion, asOf, { localDate: snapshot.localDate, weights, meals, sessions, observations, training })
+    );
+    const superseded = new Set(feedback.items.map((item) => item.supersedesFeedbackId).filter(Boolean));
+    const activeDisposition = [...feedback.items].reverse().find((item) =>
+      !superseded.has(item.id) && (item.status === "completed" || item.status === "skipped")
+    ) ?? null;
+    const disposition = activeDisposition?.status === "completed" || activeDisposition?.status === "skipped"
+      ? activeDisposition.status
+      : null;
+    const evaluation = evaluateDailyRecommendationCompletion(
+      snapshot.recommendedAction.completion.criteria,
+      results,
+      disposition
+    );
+    const evidenceChecksum = dailyCompletionEvidenceChecksum({
+      snapshotId,
+      criteria: snapshot.recommendedAction.completion.criteria,
+      results,
+      activeFeedback: activeDisposition === null
+        ? null
+        : { id: activeDisposition.id, status: activeDisposition.status }
+    });
+    return this.store.createOrGetCompletion(personId, {
+      snapshot,
+      criteria: results,
+      ...evaluation,
+      evidenceChecksum
+    });
   }
 
   private async readConsistent(): Promise<DailyAssessmentResult> {
@@ -348,17 +400,21 @@ export class DailyAssessmentService {
           }
         }
       : { status: "unavailable", summary: null, current: null };
-    const evidenceChecksum = dailyAssessmentV3Checksum(
+    const v4Evaluation = {
+      ...evaluation,
+      recommendedAction: withDailyCompletionSpecification(evaluation.recommendedAction)
+    };
+    const evidenceChecksum = dailyAssessmentV4Checksum(
       localDate,
       timezone,
       facts,
       personal.calculation,
       movement,
-      { ...evaluation, personalBaseline: personal.publicBaseline }
+      { ...v4Evaluation, personalBaseline: personal.publicBaseline }
     );
     return this.store.createOrGet(personId, {
-      localDate, timezone, ...evaluation, usedFacts: facts,
-      policyVersion: DAILY_ASSESSMENT_V3_POLICY_VERSION,
+      localDate, timezone, ...v4Evaluation, usedFacts: facts,
+      policyVersion: DAILY_ASSESSMENT_V4_POLICY_VERSION,
       evidenceChecksum,
       personalBaseline: personal.publicBaseline,
       personalBaselineCalculation: personal.calculation,
@@ -371,4 +427,97 @@ export class DailyAssessmentService {
       to: localDate
     });
   }
+}
+
+type CompletionFacts = {
+  readonly localDate: string;
+  readonly weights: Awaited<ReturnType<WeightMeasurementService["listForLocalDate"]>>;
+  readonly meals: Awaited<ReturnType<NutritionService["listMealsForLocalDate"]>>;
+  readonly sessions: Awaited<ReturnType<TrainingService["listWorkoutSessionsForLocalDate"]>>;
+  readonly observations: Awaited<ReturnType<RecoveryService["listObservationsForLocalDate"]>>;
+  readonly training: Awaited<ReturnType<TrainingService["getTrainingContext"]>>;
+};
+
+function unknownCriterion(criterion: DailyCompletionCriterion, limitation: DailyCompletionCriterionResult["limitations"][number] = "source_unknown"): DailyCompletionCriterionResult {
+  return {
+    criterionId: criterion.id,
+    status: "unknown",
+    freshness: limitation === "source_stale" ? "stale" : "unknown",
+    completeness: "unknown",
+    observedAt: null,
+    evidence: null,
+    limitations: [limitation]
+  };
+}
+
+function evaluateCompletionCriterion(
+  criterion: DailyCompletionCriterion,
+  asOf: string,
+  facts: CompletionFacts
+): DailyCompletionCriterionResult {
+  const isFresh = (createdAt: string) => createdAt > asOf;
+  const result = (
+    status: DailyCompletionCriterionResult["status"],
+    completeness: DailyCompletionCriterionResult["completeness"],
+    observedAt: string,
+    factType: NonNullable<DailyCompletionCriterionResult["evidence"]>["factType"],
+    factId: string,
+    limitations: DailyCompletionCriterionResult["limitations"] = []
+  ): DailyCompletionCriterionResult => ({
+    criterionId: criterion.id,
+    status,
+    freshness: "fresh",
+    completeness,
+    observedAt,
+    evidence: { ownerDomain: criterion.ownerDomain, factType, factId },
+    limitations
+  });
+
+  if (criterion.type === "weight_recorded") {
+    const fact = facts.weights.find((item) => isFresh(item.createdAt));
+    return fact ? result("satisfied", "complete", fact.measuredAt ?? fact.createdAt, "weight_measurement", fact.id)
+      : facts.weights.length > 0 ? unknownCriterion(criterion, "source_stale") : unknownCriterion(criterion);
+  }
+  if (criterion.type === "meal_recorded") {
+    const fact = facts.meals.find((item) => isFresh(item.createdAt));
+    return fact ? result("satisfied", fact.nutritionCompleteness, fact.occurredAt ?? fact.createdAt, "meal", fact.id,
+      fact.nutritionCompleteness === "partial" ? ["source_partial"] : [])
+      : facts.meals.length > 0 ? unknownCriterion(criterion, "source_stale") : unknownCriterion(criterion);
+  }
+  if (criterion.type === "program_workout_completed") {
+    const fact = facts.sessions.find((item) => isFresh(item.createdAt) && item.programVersionId === criterion.trainingProgramVersionId);
+    if (fact) return result("satisfied", "complete", fact.occurredAt ?? fact.createdAt, "workout_session", fact.id);
+    const external = facts.training.recentExternalActivities.find((item) =>
+      item.localDate === facts.localDate && item.occurredAt > asOf
+    );
+    if (external) return result("partial", "partial", external.occurredAt, "external_activity", external.id, ["external_activity_not_program_linked"]);
+    return unknownCriterion(criterion);
+  }
+  if (criterion.type === "recovery_check_in_recorded") {
+    const fact = facts.observations.find((item) => isFresh(item.createdAt) && item.detail.type === "subjective");
+    return fact ? result("satisfied", fact.quality === "reliable" ? "complete" : "partial", fact.observedUntil ?? fact.observedFrom ?? fact.createdAt, "recovery_observation", fact.id,
+      fact.quality === "reliable" ? [] : ["source_partial"]) : unknownCriterion(criterion);
+  }
+  if (criterion.type === "steps_threshold_reached" || criterion.type === "sleep_duration_reached") {
+    const fact = facts.observations.find((item) => isFresh(item.createdAt) && (
+      criterion.type === "steps_threshold_reached"
+        ? item.detail.type === "metric" && item.detail.metric === "steps"
+        : item.detail.type === "sleep"
+    ));
+    if (!fact) return unknownCriterion(criterion);
+    const value = fact.detail.type === "sleep" ? fact.detail.totalSleepMinutes
+      : fact.detail.type === "metric" ? fact.detail.value : 0;
+    return result(value >= (criterion.targetValue ?? Number.POSITIVE_INFINITY) ? "satisfied" : "partial",
+      fact.quality === "reliable" ? "complete" : "partial",
+      fact.observedUntil ?? fact.observedFrom ?? fact.createdAt,
+      "recovery_observation", fact.id,
+      fact.quality === "reliable" ? [] : ["source_partial"]);
+  }
+  if (criterion.type === "training_program_confirmed") {
+    const version = facts.training.status === "active" ? facts.training.program.activeVersion : null;
+    return version && isFresh(version.createdAt)
+      ? result("satisfied", "complete", version.createdAt, "training_program_version", version.id)
+      : unknownCriterion(criterion);
+  }
+  return unknownCriterion(criterion, "action_requires_self_report");
 }

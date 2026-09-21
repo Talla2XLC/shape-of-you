@@ -21,6 +21,8 @@ import {
   DailyContextNoteListSchema,
   DailyAssessmentResultSchema,
   DailyRecommendationFeedbackSchema,
+  DailyRecommendationCompletionAssessmentSchema,
+  ReadDailyRecommendationCompletionSchema,
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
   ListDailyContextNotesQuerySchema,
@@ -54,6 +56,7 @@ import {
   type CreateWeightMeasurement,
   type CreateWorkoutSession,
   type DailyAssessmentResult,
+  type ReadDailyRecommendationCompletion,
   type DailyProjectionQuery,
   type ListDailyContextNotesQuery,
   type ListBodyMeasurementSessionsQuery,
@@ -117,7 +120,7 @@ interface McpServices {
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
-  readonly dailyAssessment?: Pick<DailyAssessmentService, "read" | "updatePreferences" | "recordFeedback">;
+  readonly dailyAssessment?: Pick<DailyAssessmentService, "read" | "readCompletion" | "updatePreferences" | "recordFeedback">;
   readonly currentRecoveryContext: Pick<CurrentRecoveryContextService, "read">;
 }
 
@@ -171,7 +174,7 @@ export const MCP_COACH_REPLY_POLICY =
   "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
   "For every meaningful nutrition, training, recovery, body, or daily-summary interaction, one useful evidence-grounded observation and one concrete next step are mandatory. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
-  "Keep planned facts, proposed guidance, and verified completed facts distinct, and never imply that a recommendation was completed unless the exact daily-recommendation feedback result records completed; that feedback is still not an owning-domain completion fact.";
+  "Keep planned facts, proposed guidance, and verified completed facts distinct. Use the structured completion assessment for completion claims; neither it nor manual feedback creates an owning-domain fact.";
 
 /** Mandatory ending delivered last in every successful MCP result. */
 export const MCP_COACH_FINAL_RESPONSE_REQUIREMENT =
@@ -269,6 +272,10 @@ const dailyAssessmentResultContent = coachResultContent(
 
 const dailyRecommendationFeedbackResultContent = coachResultContent(
   "The user's explicit typed response to the exact daily recommendation snapshot was recorded. A completed status is feedback evidence only: do not create or imply a WorkoutSession, Meal, RecoveryObservation, or other owning-domain fact, and do not claim that policy or future recommendations changed."
+);
+
+const dailyRecommendationCompletionResultContent = coachResultContent(
+  "Use this immutable typed conclusion as the authority for whether the exact daily recommendation is completed, partially completed, not completed, or unknown. Explain its evidence mode and limitations without treating missing records as failure. Never create or imply a new owning-domain fact from this Coaching conclusion."
 );
 
 const timezoneWriteResultContent = coachResultContent(
@@ -822,6 +829,20 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
         )).feedback;
       },
       () => dailyRecommendationFeedbackResultContent
+    ),
+    defineTool(
+      "get_daily_recommendation_completion",
+      "Read an immutable explainable completion assessment for one exact daily-assessment-v4 snapshot from owning-domain facts and active manual correction evidence.",
+      ReadDailyRecommendationCompletionSchema,
+      DailyRecommendationCompletionAssessmentSchema,
+      false,
+      MCP_READ_SCOPE,
+      async (input) => {
+        const service = services.dailyAssessment;
+        if (!service) throw new Error("Daily assessment service is unavailable");
+        return service.readCompletion((input as unknown as ReadDailyRecommendationCompletion).snapshotId);
+      },
+      () => dailyRecommendationCompletionResultContent
     ),
     defineTool(
       "get_daily_projection",
