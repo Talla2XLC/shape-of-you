@@ -305,10 +305,55 @@ describe("MCP HTTP adapter", () => {
       "do not count both as separate training"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "obtain explicit user confirmation"
+      "A complete program supplied by the user together with an unambiguous request"
+    );
+    const directUserProgramRequests = [
+      "используй эту программу",
+      "сохрани как активную"
+    ];
+    for (const phrase of directUserProgramRequests) {
+      expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(phrase);
+    }
+    const naturalProgramAcceptances = [
+      "да",
+      "го",
+      "подходит",
+      "делаем так",
+      "yes",
+      "go ahead",
+      "works for me",
+      "let's do it",
+      "a clear affirmative emoji"
+    ];
+    for (const phrase of naturalProgramAcceptances) {
+      expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(phrase);
+    }
+    const nonConfirmingProgramCases = [
+      "Praise without acceptance",
+      "a question",
+      "doubt",
+      "an alternative",
+      "да, но замени...",
+      "an unrelated yes/no question",
+      "after another program version"
+    ];
+    for (const scenario of nonConfirmingProgramCases) {
+      expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(scenario);
+    }
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Сохраняю эту программу как активную?"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "compare the complete snapshot before claiming success"
+      "end that same message with exactly one short question"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "they are not magic phrases"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "call save_confirmed_training_program and then get_training_context in the same turn"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "label every such program only Proposed now"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "label the affected field unknown"
@@ -872,10 +917,16 @@ describe("MCP HTTP adapter", () => {
       securitySchemes: [{ scopes: [MCP_WORKOUT_WRITE_SCOPE] }]
     });
     expect(saveProgramTool.description).toContain(
-      "only after the user explicitly confirmed"
+      "complete user-supplied program plus an unambiguous request"
     );
     expect(saveProgramTool.description).toContain(
-      "read the active program again"
+      "ordinary natural acceptance authorizes only the latest complete published version"
+    );
+    expect(saveProgramTool.description).toContain(
+      "never require a special phrase"
+    );
+    expect(saveProgramTool.description).toContain(
+      "call get_training_context in the same turn"
     );
     expect(ToolSchema.safeParse(trainingContextTool).success).toBe(true);
     expect(ToolSchema.safeParse(saveProgramTool).success).toBe(true);
@@ -957,10 +1008,14 @@ describe("MCP HTTP adapter", () => {
         recentExternalActivities: []
       })
       .mockRejectedValueOnce(new Error("Training repository unavailable"));
-    const saveConfirmedProgram = vi.fn().mockResolvedValue({
-      outcome: "created",
-      program: { id: programId, lockVersion: 1 }
-    });
+    const saveConfirmedProgram = vi
+      .fn()
+      .mockResolvedValueOnce({
+        outcome: "created",
+        program: { id: programId, lockVersion: 1 }
+      })
+      .mockRejectedValueOnce(new ConflictError("Active program changed"))
+      .mockRejectedValueOnce(new Error("Training repository unavailable"));
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1056,7 +1111,17 @@ describe("MCP HTTP adapter", () => {
           expectedActiveProgramId: programId
         })
       ).json().result;
-      expect(invalid).toMatchObject({ isError: true });
+      expect(invalid).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "invalid_snapshot",
+          recovery: "read_context_rebuild_exact_snapshot_retry_once"
+        }
+      });
+      expect(invalid.content[0].text).toContain(
+        "never ask the user to repeat the whole program"
+      );
       expect(saveConfirmedProgram).not.toHaveBeenCalled();
 
       const saved = (
@@ -1069,7 +1134,7 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(saved.content[0].text).toContain(
-        "compare the complete snapshot before claiming success"
+        "MUST immediately call get_training_context in this same turn"
       );
       expect(saveConfirmedProgram).toHaveBeenCalledWith(confirmedProgram);
 
@@ -1112,6 +1177,45 @@ describe("MCP HTTP adapter", () => {
         ]
       });
       expect(unavailable.structuredContent).toBeUndefined();
+
+      const stale = (
+        await call(206, "save_confirmed_training_program", confirmedProgram)
+      ).json().result;
+      expect(stale).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "stale_active_program",
+          recovery: "read_context_compare_then_confirm_replacement"
+        }
+      });
+      expect(stale.content[0].text).toContain(
+        "If the complete active snapshot already equals the accepted version"
+      );
+      expect(stale.content[0].text).toContain(
+        "do not overwrite or retry automatically"
+      );
+      expect(stale.content[0].text).toContain(
+        "without asking the user to repeat it"
+      );
+
+      const retryable = (
+        await call(207, "save_confirmed_training_program", confirmedProgram)
+      ).json().result;
+      expect(retryable).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "retryable_failure",
+          recovery: "read_context_verify_or_retry_once"
+        }
+      });
+      expect(retryable.content[0].text).toContain(
+        "If the previous authority is unchanged, retry the exact accepted snapshot once"
+      );
+      expect(retryable.content[0].text).toContain(
+        "keep the program Proposed now"
+      );
     } finally {
       await authorizedFastify.close();
     }

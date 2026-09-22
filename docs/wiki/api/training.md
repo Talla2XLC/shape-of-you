@@ -59,6 +59,22 @@ and returns an idempotent no-op when the active snapshot already matches. Coach
 must read the active program back before claiming that the change is saved.
 The existing HTTP draft/version/activation lifecycle is unchanged.
 
+A complete program supplied by the user together with an unambiguous request to
+use it is already confirmed. For a complete Coach proposal, ordinary natural
+acceptance applies only to the latest fully published version offered for
+activation; it does not require a special phrase. Questions, doubt,
+alternatives, partial edits, unrelated positive replies, and acceptance after a
+newer version are not confirmation. Coach publishes a complete revised snapshot
+after an edit and asks one short save-as-active question when the reference is
+ambiguous.
+
+Until the atomic write and complete `get_training_context` read-back agree, the
+program remains `Proposed now` and cannot be described as active, agreed, or the
+current plan. A stale conflict triggers a fresh read. An already matching active
+snapshot verifies success; a different active version is never overwritten
+automatically and requires a short replacement confirmation without making the
+user repeat the program.
+
 New programs/versions are inactive. Activation uses `expectedLockVersion`; one
 Person cannot have two active programs.
 
@@ -100,4 +116,5 @@ pending acceptance.
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md)
 - [MCP active-program absence ADR](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md)
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md)
+- [Natural TrainingProgram acceptance](../../adr/20260922-bind-natural-training-program-acceptance-to-latest-complete-proposal.md)
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md)

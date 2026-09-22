@@ -274,6 +274,22 @@ duplicate no-op behavior. Coach verifies the complete active snapshot through
 a typed read before reporting success. The persisted active program is shared
 authority across conversations; per-chat memory is not an authority source.
 
+The confirmation is contextual rather than phrase-based. A complete program
+provided by the user with an unambiguous request to use it is immediately
+authorized. For a Coach proposal, a natural short acceptance refers only to the
+latest complete version offered for activation. Praise, questions, doubt,
+alternatives, partial edits, unrelated affirmative replies, or replies after a
+newer version do not authorize persistence. Coach asks one short save-as-active
+question when the reference is ambiguous and never requires the user to repeat
+an already complete program.
+
+The proposal stays `Proposed now` until the save and same-turn composed read
+agree on the complete active snapshot. A stale read that already matches proves
+the accepted version is active. A different active version is not overwritten
+automatically; Coach keeps the accepted snapshot available and asks whether to
+replace the current program. Failed or inconsistent verification never permits
+an active, agreed, or current-plan claim.
+
 The same Training context also returns a separate bounded list of current
 connected activity summaries. Coach treats an imported run, ride, or other
 activity as completed evidence without asking the user to resend a screenshot
@@ -317,6 +333,7 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 - [Per-result proactive Coach policy](../../adr/20260902-deliver-coach-reply-policy-in-every-relevant-mcp-result.md).
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md).
+- [Natural TrainingProgram acceptance](../../adr/20260922-bind-natural-training-program-acceptance-to-latest-complete-proposal.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).

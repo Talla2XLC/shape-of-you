@@ -337,8 +337,15 @@ const setCurrentTimezoneInputSchema = {
   }
 } as const;
 
+const trainingProgramConfirmationPolicy =
+  "TRAINING PROGRAM CONFIRMATION: A complete program supplied by the user together with an unambiguous request such as «используй эту программу» or «сохрани как активную» is sufficient authority to persist it immediately; do not ask for another confirmation. " +
+  "For a complete program proposed by Coach, bind acceptance only to the latest complete version that Coach published and offered for activation. Short natural replies such as «да» or yes, «го» or go ahead, «подходит» or works for me, «делаем так» or let's do it, and a clear affirmative emoji directly answering the save question are examples of valid acceptance; they are not magic phrases. " +
+  "Praise without acceptance, a question, doubt, an alternative, a partial edit such as «да, но замени...», a reply to an unrelated yes/no question, or a reply after another program version does not confirm the program. Publish a fully revised snapshot after an edit and never invent missing exercises, order, loads, or progression. " +
+  "When Coach publishes a complete version without already having authority to save it, end that same message with exactly one short question equivalent to «Сохраняю эту программу как активную?» in the user's language. Use the same one-question form whenever the later reference is genuinely ambiguous. Until persistence and a matching active read-back succeed, label every such program only Proposed now and never call it agreed, active, current, or our plan. " +
+  "After unambiguous acceptance, call save_confirmed_training_program and then get_training_context in the same turn, comparing the entire active snapshot with the accepted version before claiming success.";
+
 const confirmedTrainingProgramWriteResultContent = coachResultContent(
-  "The explicitly confirmed program was persisted. Silently read the active program again and compare the complete snapshot before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as active."
+  "The accepted program snapshot was persisted. MUST immediately call get_training_context in this same turn and compare the complete active snapshot with the accepted version before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as agreed, current, active, or the user's plan."
 );
 
 const dailyProjectionResultContent =
@@ -381,7 +388,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
-  "Saving or changing a training program is material: first show the complete proposed snapshot and obtain explicit user confirmation. Preserve exercises, order, loads, and progression exactly as confirmed. After saving, read the active program again and compare the complete snapshot before claiming success; any failed or inconsistent read-back leaves the program unverified. " +
+  trainingProgramConfirmationPolicy + " " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For a focused question about today's sleep, HRV, resting heart rate, Body Battery, or steps, call get_current_recovery_context. Treat its typed observations as value authority and its delivery state only as availability evidence. Never infer that Garmin or another provider failed from an empty observation set, never infer zero from absence, and never promise a later autonomous recheck without a real automation. " +
   "For a full Daily Coach assessment, preserve the assessment status, reasons, missing data, limitations, confidence, and single recommended action. Never reconstruct or alter that decision from get_daily_projection, other typed reads, or conversation context. Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment. For a factual day record that does not ask for a status or next action, require an exact local date and IANA timezone and use get_daily_projection without turning it into a decision. " +
@@ -566,6 +573,15 @@ function createServer(
       if (definition.tool.name === "correct_meal") {
         return mealCorrectionErrorResult("retryable_failure");
       }
+      if (
+        definition.tool.name === "save_confirmed_training_program" &&
+        (error instanceof ConflictError || error instanceof NotFoundError)
+      ) {
+        return trainingProgramSaveErrorResult("stale_active_program");
+      }
+      if (definition.tool.name === "save_confirmed_training_program") {
+        return trainingProgramSaveErrorResult("retryable_failure");
+      }
       return errorResult(coachFailureResultContent(
         definition.write
           ? "The requested fact was not saved. Say this briefly and naturally without blaming the user."
@@ -715,7 +731,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "save_confirmed_training_program",
-      "Persist and activate one complete training-program snapshot only after the user explicitly confirmed every workout, exercise order, load, and progression. Supply the active identity and lock from the preceding read, or both null only when absence was read. Repeated identical snapshots are safe. After success, read the active program again and compare the complete snapshot before claiming it is saved.",
+      "Persist and activate one complete training-program snapshot. A complete user-supplied program plus an unambiguous request to use it is already authorized. For a Coach proposal, ordinary natural acceptance authorizes only the latest complete published version; never require a special phrase. Discussion, doubt, questions, alternatives, partial edits, and unrelated positive replies are not confirmation. Supply the active identity and lock from the preceding read, or both null only when absence was read. Repeated identical snapshots are safe. After success, call get_training_context in the same turn and compare the complete active snapshot before claiming it is saved, agreed, current, or active.",
       SaveConfirmedTrainingProgramSchema,
       SaveConfirmedTrainingProgramResultSchema,
       true,
@@ -1399,6 +1415,9 @@ function inputErrorResult(toolName: string): CallToolResult {
   if (toolName === "correct_meal") {
     return mealCorrectionErrorResult("invalid_replacement");
   }
+  if (toolName === "save_confirmed_training_program") {
+    return trainingProgramSaveErrorResult("invalid_snapshot");
+  }
   if (toolName === "record_meal") {
     return errorResult(coachFailureResultContent(
       "Retry the Meal once silently from the photo and text already present in the conversation. Every identifiable item must have non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates; estimate realistic portions with text/photo method and bounded confidence because exact measured grams are not required. Do not ask the user for values that can be reasonably estimated, do not save an incomplete Meal, and do not mention internal completeness, tools, staging, APIs, contracts, fields, or this retry. If material food or scale is genuinely unidentifiable, ask one natural clarification instead of claiming it was saved."
@@ -1424,6 +1443,36 @@ function inputErrorResult(toolName: string): CallToolResult {
   return errorResult(coachFailureResultContent(
     "Retry once silently using the unambiguous facts already present. If essential meaning is genuinely ambiguous, ask one natural clarification; otherwise say briefly that this item could not be completed."
   ));
+}
+
+type TrainingProgramSaveFailureReason =
+  | "invalid_snapshot"
+  | "stale_active_program"
+  | "retryable_failure";
+
+function trainingProgramSaveErrorResult(
+  reason: TrainingProgramSaveFailureReason
+): CallToolResult {
+  const recovery = reason === "invalid_snapshot"
+    ? "read_context_rebuild_exact_snapshot_retry_once"
+    : reason === "stale_active_program"
+      ? "read_context_compare_then_confirm_replacement"
+      : "read_context_verify_or_retry_once";
+  const instruction = reason === "invalid_snapshot"
+    ? "TRAINING PROGRAM NOT SAVED: Call get_training_context, rebuild the exact already accepted complete snapshot from the conversation, and retry once. If the accepted snapshot itself lacks an essential detail, ask only one short question for that detail; never ask the user to repeat the whole program."
+    : reason === "stale_active_program"
+      ? "TRAINING PROGRAM NOT SAVED: Call get_training_context immediately. If the complete active snapshot already equals the accepted version, the read-back verifies success. If it differs, do not overwrite or retry automatically; retain the already accepted snapshot and ask one short natural question whether to replace the current active program with that version, without asking the user to repeat it."
+      : "TRAINING PROGRAM SAVE NOT VERIFIED: Call get_training_context immediately. If the complete active snapshot equals the accepted version, the read-back verifies success. If the previous authority is unchanged, retry the exact accepted snapshot once. If a different active version exists, do not overwrite it automatically; ask one short natural replacement question without requiring the program again.";
+  return errorResult(
+    coachFailureResultContent(
+      `${instruction} Until a matching active read-back succeeds, keep the program Proposed now and never call it saved, agreed, current, active, or the user's plan. Keep all tool names, ids, fields, error categories, and recovery mechanics out of the user-facing reply.`
+    ),
+    {
+      state: "not_saved",
+      reason,
+      recovery
+    }
+  );
 }
 
 type MealCorrectionFailureReason =
