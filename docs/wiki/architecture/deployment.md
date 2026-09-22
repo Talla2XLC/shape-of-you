@@ -34,21 +34,38 @@ coordinate.
 ### Delivery
 
 Pushes to `main` that include any path outside Markdown, `docs/**`, and
-`plans/**` run quality, publish SHA-linked GHCR images, and automatically deploy
-exact digests to Environment `staging`. Documentation-only and plan-only pushes
-do not start the publication workflow; manual dispatch remains available. API,
-edge, and Certbot are built and attested for every such release. Identity is
+`plans/**` run quality and publish SHA-linked GHCR images, but do not contact
+the VM. Documentation-only and plan-only pushes do not start the publication
+workflow; manual publication remains available. A successful publication emits
+a 30-day release-candidate artifact bound to its repository, workflow run,
+exact current-`main` SHA, image digests, Identity update decision, and the
+expected deployed base release when Identity is inherited. The
+separate `Promote staging` workflow accepts only that full SHA, revalidates the
+successful publication and strict candidate fields, and then invokes the
+protected reusable deployment. API, edge, and Certbot are built and attested
+for every candidate. Identity is
 built and attested only when `.dockerignore`, `apps/identity/**`, its root build inputs, or its
 staging Compose overlay changed; unknown history and manual dispatch use the
 full Identity path. All four exact coordinates still belong to one atomic
 release. An API-only release inherits the validated Identity coordinate from
 the current immutable release manifest and records `true` compatibility for
 the no-op Identity transition. Reuse also requires the current manifest's
-runtime-environment hash and image digest to match the root-owned `identity.env`
+release ID to equal the candidate's expected staging base; this prevents a
+skipped Identity-changing candidate from being silently omitted. A mismatch
+fails closed and requires a manually published full candidate for current
+`main`. The current manifest's runtime-environment hash and image digest must
+also match the root-owned `identity.env`
 and the single running Compose Identity container. Input
 is a bounded `key=value` request to
 `/usr/local/sbin/shape-of-you-staging-deploy`. The VM receives no build context,
 toolchain, writable scripts, or Compose file from CI.
+
+The deployment controller pulls API, changed Identity, edge, and Certbot
+serially instead of asking Compose to fetch them concurrently. Promotion may
+therefore take longer, but avoids unnecessary parallel image decompression and
+page-cache pressure on the constrained shared VM. The reusable deployment
+remains serialized and retains its migration, reconciliation, smoke, rollback,
+and immutable release-pointer behavior.
 
 `shape-deploy` is outside Docker group and has passwordless sudo only for the
 bootstrap without arguments. The stable bootstrap extracts only
@@ -228,6 +245,7 @@ ChatGPT client, consent, and active Person grant remain separate gates.
 - [Temporary shared-VM deployment](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
 - [Verified main deployment control](../../adr/20260729-use-verified-main-for-staging-deployment-control.md)
 - [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
+- [Manual immutable staging promotion](../../adr/20260922-promote-staging-manually-with-immutable-candidates.md)
 - [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
 - [Component-aware Identity delivery and bounded readiness](../../adr/20260921-skip-unchanged-identity-delivery-and-bound-readiness-probes.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)

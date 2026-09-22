@@ -120,7 +120,9 @@ COMPOSE_FILE="$DEPLOY_PACKAGE/compose.yaml" \
 IDENTITY_COMPOSE_FILE="$DEPLOY_PACKAGE/compose.identity.yaml" \
   sh "$DEPLOY_PACKAGE/scripts/deploy.sh" "$RELEASE_ENV" >/dev/null
 
-grep -F -- 'pull api edge certbot' "$FAKE_DOCKER_LOG" >/dev/null
+grep -F -- 'pull api' "$FAKE_DOCKER_LOG" >/dev/null
+grep -F -- 'pull edge' "$FAKE_DOCKER_LOG" >/dev/null
+grep -F -- 'pull certbot' "$FAKE_DOCKER_LOG" >/dev/null
 grep -F -- 'run --name shape-of-you-staging-migrate-migration --rm migrate' \
   "$FAKE_DOCKER_LOG" >/dev/null
 grep -F -- 'up --detach --wait --wait-timeout 90 api' "$FAKE_DOCKER_LOG" >/dev/null
@@ -132,6 +134,7 @@ for forbidden_operation in \
   'identity-migrate' \
   'identity-reconcile-oauth-clients' \
   'parseTotpKeyRing' \
+  'pull identity' \
   'up --detach --wait --wait-timeout 90 api identity'; do
   if grep -F -- "$forbidden_operation" "$FAKE_DOCKER_LOG" >/dev/null; then
     printf '%s\n' "Unchanged Identity operation was executed: $forbidden_operation" >&2

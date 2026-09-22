@@ -20,6 +20,26 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-09-22 — Manual low-footprint staging promotion
+
+- Stopped successful `main` publication from contacting the shared staging VM;
+  quality, immutable image publication, attestation, and a bounded release-
+  candidate artifact remain automatic.
+- Added explicit `Promote staging` by exact current-`main` SHA, with successful
+  publication lookup, strict repository/run/SHA/digest validation, and no
+  manual digest copying in the normal path.
+- Bound unchanged-Identity reuse to the exact deployed base release recorded
+  by the candidate, so skipped Identity-changing releases fail closed.
+- Preserved the protected reusable deployment, root-owned bootstrap,
+  migrations, Identity reconciliation, smoke, rollback, and atomic release
+  pointers while pulling required services sequentially to reduce transient VM
+  pressure.
+- No deployment, migration, VM mutation, commit, or push was performed. Local
+  Docker-dependent runtime/Testcontainers checks were unavailable after the
+  Docker Desktop daemon stopped; task-specific contracts, YAML/shell checks,
+  lint, typecheck, build, 327 unit tests, docs validation, and independent
+  Quality Review passed.
+
 ### 2026-09-20 — Consent-scoped Recovery delivery evidence
 
 - Bound wellness delivery confirmation to the active OAuth consent generation

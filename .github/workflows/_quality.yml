@@ -30,6 +30,9 @@ jobs:
       - name: Test component-aware Identity delivery contract
         run: sh deploy/staging/scripts/tests/component-aware-identity-contract.sh
 
+      - name: Test staging release candidate contract
+        run: sh deploy/staging/scripts/tests/release-candidate-contract.sh
+
       - name: Test current Identity state verification
         run: sh deploy/staging/scripts/tests/current-identity-state-contract.sh
 

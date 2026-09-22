@@ -1,0 +1,120 @@
+name: Promote staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_id:
+        description: Full 40-character Git commit SHA from a successful publication
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  packages: read
+
+jobs:
+  resolve-candidate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      release_id: ${{ steps.candidate.outputs.release_id }}
+      api_digest: ${{ steps.candidate.outputs.api_digest }}
+      deploy_identity: ${{ steps.candidate.outputs.deploy_identity }}
+      expected_staging_base: ${{ steps.candidate.outputs.expected_staging_base }}
+      identity_digest: ${{ steps.candidate.outputs.identity_digest }}
+      edge_digest: ${{ steps.candidate.outputs.edge_digest }}
+      certbot_digest: ${{ steps.candidate.outputs.certbot_digest }}
+
+    steps:
+      - name: Check out current main control tree
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate release id
+        shell: bash
+        env:
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$'
+          test "$(git rev-parse HEAD)" = "$RELEASE_ID"
+
+      - name: Resolve exact successful publication run
+        id: publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release_id }}
+        run: |
+          set -euo pipefail
+          run_id=$(gh run list \
+            --repo "$GITHUB_REPOSITORY" \
+            --workflow publish-staging.yml \
+            --branch main \
+            --commit "$RELEASE_ID" \
+            --status success \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId')
+          test -n "$run_id"
+
+          head_sha=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json headSha --jq '.headSha')
+          head_branch=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json headBranch --jq '.headBranch')
+          conclusion=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion')
+          event=$(gh run view "$run_id" --repo "$GITHUB_REPOSITORY" --json event --jq '.event')
+
+          test "$head_sha" = "$RELEASE_ID"
+          test "$head_branch" = main
+          test "$conclusion" = success
+          case "$event" in
+            push|workflow_dispatch) ;;
+            *) exit 1 ;;
+          esac
+
+          printf 'run_id=%s\n' "$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download exact release candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ inputs.release_id }}
+          RUN_ID: ${{ steps.publication.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          gh run download "$RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "staging-release-candidate-$RELEASE_ID" \
+            --dir candidate
+
+      - name: Validate release candidate
+        id: candidate
+        shell: bash
+        env:
+          RELEASE_ID: ${{ inputs.release_id }}
+          RUN_ID: ${{ steps.publication.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          sh deploy/staging/scripts/read-release-candidate.sh \
+            candidate/candidate.env \
+            "$RELEASE_ID" \
+            "$RUN_ID" \
+            "$GITHUB_REPOSITORY" >> "$GITHUB_OUTPUT"
+
+  deploy-staging:
+    needs: resolve-candidate
+    uses: ./.github/workflows/deploy-staging.yml
+    with:
+      release_id: ${{ needs.resolve-candidate.outputs.release_id }}
+      api_digest: ${{ needs.resolve-candidate.outputs.api_digest }}
+      identity_digest: ${{ needs.resolve-candidate.outputs.identity_digest }}
+      deploy_identity: ${{ needs.resolve-candidate.outputs.deploy_identity == 'true' }}
+      expected_staging_base: ${{ needs.resolve-candidate.outputs.expected_staging_base }}
+      edge_digest: ${{ needs.resolve-candidate.outputs.edge_digest }}
+      certbot_digest: ${{ needs.resolve-candidate.outputs.certbot_digest }}
+      schema_backward_compatible: false
+      identity_schema_backward_compatible: false
+      identity_oauth_clients_backward_compatible: false
+      run_write_smoke: false
+    secrets: inherit

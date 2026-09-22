@@ -11,6 +11,9 @@ PREFLIGHT="$REPOSITORY_ROOT/deploy/staging/scripts/vm-preflight.sh"
 DEPLOY="$REPOSITORY_ROOT/deploy/staging/scripts/deploy.sh"
 DEPLOY_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/deploy-staging.yml"
 PUBLISH_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/publish-staging.yml"
+PROMOTE_WORKFLOW="$REPOSITORY_ROOT/.github/workflows/promote-staging.yml"
+CANDIDATE_WRITER="$REPOSITORY_ROOT/deploy/staging/scripts/write-release-candidate.sh"
+CANDIDATE_READER="$REPOSITORY_ROOT/deploy/staging/scripts/read-release-candidate.sh"
 
 assert_contains() {
   file=$1
@@ -141,6 +144,8 @@ assert_contains "$CONTROLLER" 'GHCR_TOKEN'
 assert_contains "$CONTROLLER" 'API_BROWSER_SESSION_KEYS'
 assert_contains "$CONTROLLER" 'DEPLOY_IDENTITY'
 assert_contains "$CONTROLLER" 'Current release is required when Identity delivery is reused.'
+assert_contains "$CONTROLLER" 'Current release does not match the candidate staging base.'
+assert_contains "$CONTROLLER" '[ "$current_release_id" = "$EXPECTED_STAGING_BASE" ]'
 assert_contains "$CONTROLLER" 'IDENTITY_UPDATE_REQUIRED=$DEPLOY_IDENTITY'
 assert_contains "$CONTROLLER" 'IDENTITY_RUNTIME_ENV_SHA256'
 assert_contains "$CONTROLLER" 'verify-current-identity-state.sh'
@@ -163,9 +168,33 @@ assert_contains "$PUBLISH_WORKFLOW" "- '**/*.md'"
 assert_contains "$PUBLISH_WORKFLOW" "- 'docs/**'"
 assert_contains "$PUBLISH_WORKFLOW" "- 'plans/**'"
 assert_contains "$PUBLISH_WORKFLOW" 'deploy_identity: ${{ steps.classify.outputs.deploy_identity }}'
+assert_contains "$PUBLISH_WORKFLOW" 'expected_staging_base: ${{ steps.classify.outputs.expected_staging_base }}'
+assert_contains "$PUBLISH_WORKFLOW" 'expected_staging_base=$BEFORE_REVISION'
 assert_contains "$PUBLISH_WORKFLOW" 'fetch-depth: 0'
 assert_contains "$PUBLISH_WORKFLOW" "if: needs.identity-changes.outputs.deploy_identity == 'true'"
+assert_contains "$PUBLISH_WORKFLOW" 'release-candidate:'
+assert_contains "$PUBLISH_WORKFLOW" 'actions/upload-artifact@v4'
+assert_contains "$PUBLISH_WORKFLOW" 'staging-release-candidate-${{ github.sha }}'
+assert_contains "$PUBLISH_WORKFLOW" 'write-release-candidate.sh candidate.env'
+assert_not_contains "$PUBLISH_WORKFLOW" 'uses: ./.github/workflows/deploy-staging.yml'
+assert_contains "$PROMOTE_WORKFLOW" 'release_id:'
+assert_contains "$PROMOTE_WORKFLOW" 'test "$(git rev-parse HEAD)" = "$RELEASE_ID"'
+assert_contains "$PROMOTE_WORKFLOW" '--workflow publish-staging.yml'
+assert_contains "$PROMOTE_WORKFLOW" '--branch main'
+assert_contains "$PROMOTE_WORKFLOW" '--commit "$RELEASE_ID"'
+assert_contains "$PROMOTE_WORKFLOW" '--status success'
+assert_contains "$PROMOTE_WORKFLOW" 'staging-release-candidate-$RELEASE_ID'
+assert_contains "$PROMOTE_WORKFLOW" 'read-release-candidate.sh'
+assert_contains "$PROMOTE_WORKFLOW" 'uses: ./.github/workflows/deploy-staging.yml'
+assert_contains "$CANDIDATE_WRITER" 'SOURCE_REPOSITORY'
+assert_contains "$CANDIDATE_WRITER" 'SOURCE_RUN_ID'
+assert_contains "$CANDIDATE_READER" 'Unexpected staging release candidate field.'
+assert_contains "$CANDIDATE_READER" 'Staging release candidate provenance mismatch.'
+assert_not_contains "$CANDIDATE_READER" 'eval '
+assert_not_contains "$CANDIDATE_READER" '. "$CANDIDATE_FILE"'
 assert_contains "$DEPLOY_WORKFLOW" 'printf '\''DEPLOY_IDENTITY=%s\n'\'' "$DEPLOY_IDENTITY"'
+assert_contains "$DEPLOY_WORKFLOW" 'EXPECTED_STAGING_BASE: ${{ inputs.expected_staging_base }}'
+assert_contains "$DEPLOY_WORKFLOW" 'printf '\''EXPECTED_STAGING_BASE=%s\n'\'' "$EXPECTED_STAGING_BASE"'
 assert_contains "$DEPLOY_WORKFLOW" 'ServerAliveInterval=30'
 assert_contains "$DEPLOY_WORKFLOW" 'ServerAliveCountMax=6'
 assert_contains "$PREFLIGHT" 'command -v timeout'
@@ -183,7 +212,10 @@ assert_contains "$DEPLOY" 'container ls --all --quiet'
 assert_contains "$DEPLOY" '--filter "name=^/${container_name}$"'
 assert_contains "$DEPLOY" "run_migration 'API migration' migrate"
 assert_contains "$DEPLOY" "run_migration 'Identity migration' identity-migrate"
-assert_contains "$DEPLOY" 'compose --profile operations pull api edge certbot'
+assert_contains "$DEPLOY" 'pull_service api'
+assert_contains "$DEPLOY" 'pull_service identity'
+assert_contains "$DEPLOY" 'pull_service edge'
+assert_contains "$DEPLOY" 'pull_service certbot'
 assert_contains "$DEPLOY" 'compose up --detach --no-deps --wait --wait-timeout 90 --remove-orphans edge'
 assert_contains "$DEPLOY" 'if [ "$identity_update_required" = true ]; then'
 assert_contains "$DEPLOY" 'timed out after 300 seconds'
@@ -221,5 +253,7 @@ sh -n "$BOOTSTRAP"
 sh -n "$CONTROLLER"
 sh -n "$DEPLOY"
 sh -n "$PREFLIGHT"
+sh -n "$CANDIDATE_WRITER"
+sh -n "$CANDIDATE_READER"
 
 printf '%s\n' 'Deployment bootstrap contract test passed.'

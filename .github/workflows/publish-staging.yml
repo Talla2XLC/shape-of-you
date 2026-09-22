@@ -22,6 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       deploy_identity: ${{ steps.classify.outputs.deploy_identity }}
+      expected_staging_base: ${{ steps.classify.outputs.expected_staging_base }}
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -38,11 +39,19 @@ jobs:
           set -euo pipefail
           if [ "${{ github.event_name }}" = workflow_dispatch ]; then
             deploy_identity=true
+            expected_staging_base=
           else
             deploy_identity=$(sh deploy/staging/scripts/detect-identity-change.sh \
               "$BEFORE_REVISION" "$AFTER_REVISION")
+            if [ "$deploy_identity" = false ]; then
+              printf '%s\n' "$BEFORE_REVISION" | grep -Eq '^[0-9a-f]{40}$'
+              expected_staging_base=$BEFORE_REVISION
+            else
+              expected_staging_base=
+            fi
           fi
           printf 'deploy_identity=%s\n' "$deploy_identity" >> "$GITHUB_OUTPUT"
+          printf 'expected_staging_base=%s\n' "$expected_staging_base" >> "$GITHUB_OUTPUT"
 
   publish-api:
     needs: quality
@@ -355,7 +364,7 @@ jobs:
             "ghcr.io/${{ vars.GHCR_NAMESPACE }}/shape-of-you-certbot" \
             "${{ steps.build.outputs.digest }}" >> "$GITHUB_STEP_SUMMARY"
 
-  deploy-staging:
+  release-candidate:
     needs:
       - quality
       - identity-changes
@@ -372,16 +381,33 @@ jobs:
        (needs.identity-changes.outputs.deploy_identity == 'false' && needs.publish-identity.result == 'skipped')) &&
       needs.publish-edge.result == 'success' &&
       needs.publish-certbot.result == 'success'
-    uses: ./.github/workflows/deploy-staging.yml
-    with:
-      release_id: ${{ github.sha }}
-      api_digest: ${{ needs.publish-api.outputs.digest }}
-      identity_digest: ${{ needs.publish-identity.outputs.digest }}
-      deploy_identity: ${{ needs.identity-changes.outputs.deploy_identity == 'true' }}
-      edge_digest: ${{ needs.publish-edge.outputs.digest }}
-      certbot_digest: ${{ needs.publish-certbot.outputs.digest }}
-      schema_backward_compatible: false
-      identity_schema_backward_compatible: false
-      identity_oauth_clients_backward_compatible: false
-      run_write_smoke: false
-    secrets: inherit
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    env:
+      SOURCE_REPOSITORY: ${{ github.repository }}
+      SOURCE_RUN_ID: ${{ github.run_id }}
+      RELEASE_ID: ${{ github.sha }}
+      API_DIGEST: ${{ needs.publish-api.outputs.digest }}
+      DEPLOY_IDENTITY: ${{ needs.identity-changes.outputs.deploy_identity }}
+      EXPECTED_STAGING_BASE: ${{ needs.identity-changes.outputs.expected_staging_base }}
+      IDENTITY_DIGEST: ${{ needs.publish-identity.outputs.digest }}
+      EDGE_DIGEST: ${{ needs.publish-edge.outputs.digest }}
+      CERTBOT_DIGEST: ${{ needs.publish-certbot.outputs.digest }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Write exact staging release candidate
+        shell: bash
+        run: sh deploy/staging/scripts/write-release-candidate.sh candidate.env
+
+      - name: Upload staging release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-release-candidate-${{ github.sha }}
+          path: candidate.env
+          if-no-files-found: error
+          retention-days: 30

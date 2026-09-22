@@ -5,7 +5,7 @@ title: "Ограничить автоматическую staging-доставк
 status: accepted
 date: 2026-09-03
 supersedes: "decisions-20260729-auto-deploy-main-to-staging"
-superseded_by: null
+superseded_by: "decisions-20260922-promote-staging-manually-with-immutable-candidates"
 tags:
   - "deployment"
   - "staging"

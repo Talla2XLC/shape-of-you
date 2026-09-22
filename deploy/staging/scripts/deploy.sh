@@ -272,11 +272,16 @@ cleanup() {
 
 trap cleanup EXIT HUP INT TERM
 
+pull_service() {
+  compose --profile operations pull "$1"
+}
+
+pull_service api
 if [ "$identity_update_required" = true ]; then
-  compose --profile operations pull
-else
-  compose --profile operations pull api edge certbot
+  pull_service identity
 fi
+pull_service edge
+pull_service certbot
 
 if [ "$identity_update_required" = true ]; then
   compose run --rm --no-deps identity node --input-type=module --eval \

@@ -16,6 +16,10 @@ on:
       deploy_identity:
         required: true
         type: boolean
+      expected_staging_base:
+        required: false
+        default: ''
+        type: string
       edge_digest:
         required: true
         type: string
@@ -47,6 +51,16 @@ on:
       identity_digest:
         description: Published Identity sha256 digest
         required: true
+        type: string
+      deploy_identity:
+        description: Deploy Identity (direct recovery dispatch must keep the default)
+        required: true
+        default: true
+        type: boolean
+      expected_staging_base:
+        description: Exact currently deployed release required when Identity is reused
+        required: false
+        default: ''
         type: string
       edge_digest:
         description: Published edge sha256 digest
@@ -101,7 +115,8 @@ jobs:
       RELEASE_ID: ${{ inputs.release_id }}
       API_DIGEST: ${{ inputs.api_digest }}
       IDENTITY_DIGEST: ${{ inputs.identity_digest }}
-      DEPLOY_IDENTITY: ${{ github.event_name == 'workflow_dispatch' || inputs.deploy_identity }}
+      DEPLOY_IDENTITY: ${{ inputs.deploy_identity }}
+      EXPECTED_STAGING_BASE: ${{ inputs.expected_staging_base }}
       EDGE_DIGEST: ${{ inputs.edge_digest }}
       CERTBOT_DIGEST: ${{ inputs.certbot_digest }}
       ACME_EMAIL: ${{ vars.STAGING_ACME_EMAIL }}
@@ -122,8 +137,10 @@ jobs:
           printf '%s\n' "$DEPLOY_IDENTITY" | grep -Eq '^(true|false)$'
           if [ "$DEPLOY_IDENTITY" = true ]; then
             printf '%s\n' "$IDENTITY_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+            test -z "$EXPECTED_STAGING_BASE"
           else
             test -z "$IDENTITY_DIGEST"
+            printf '%s\n' "$EXPECTED_STAGING_BASE" | grep -Eq '^[0-9a-f]{40}$'
           fi
           printf '%s\n' "$EDGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$CERTBOT_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
@@ -188,6 +205,7 @@ jobs:
             printf 'RELEASE_ID=%s\n' "$RELEASE_ID"
             printf 'API_DIGEST=%s\n' "$API_DIGEST"
             printf 'DEPLOY_IDENTITY=%s\n' "$DEPLOY_IDENTITY"
+            printf 'EXPECTED_STAGING_BASE=%s\n' "$EXPECTED_STAGING_BASE"
             printf 'EDGE_DIGEST=%s\n' "$EDGE_DIGEST"
             printf 'CERTBOT_DIGEST=%s\n' "$CERTBOT_DIGEST"
             printf 'ACME_EMAIL=%s\n' "$ACME_EMAIL"

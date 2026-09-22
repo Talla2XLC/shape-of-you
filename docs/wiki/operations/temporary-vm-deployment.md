@@ -92,8 +92,8 @@ ring, copy it into chat, or commit it.
 
 `STAGING_DEPLOYMENT_TOPOLOGY` accepts `shared-ingress` or `standalone`. The
 current shared VM uses `shared-ingress`; the workflow defaults to that value
-while the variable is absent. Set it explicitly before enabling automatic
-deployment. A dedicated VM uses `standalone` and must have ports `80/443` free
+while the variable is absent. Set it explicitly before promotion. A dedicated
+VM uses `standalone` and must have ports `80/443` free
 or already owned by the Shape of You Compose project.
 
 The corresponding render contracts are explicit:
@@ -123,10 +123,24 @@ image and records provenance/SBOM; digest is deployment authority. It publishes
 Identity only when the exact Identity source/build/Compose inputs changed.
 Unknown history and every manual dispatch select the full Identity path. A
 `main` push containing any path outside Markdown, `docs/**`, and `plans/**`
-runs quality and publication, then automatically invokes `deploy-staging.yml`.
-Documentation-only and plan-only pushes skip the whole publication workflow.
-Manual targeted retry supplies full commit SHA, all image digests, separate API
-and Identity schema backward-compatibility flags, and the write-smoke choice.
+runs quality and publication without contacting the VM. Documentation-only and
+plan-only pushes skip the whole publication workflow. Successful publication
+uploads `staging-release-candidate-<full-sha>` for 30 days. The artifact contains
+only repository/run provenance, exact release SHA, published digests, the
+Identity update decision, and the expected deployed base release for Identity
+reuse; it contains no credentials or runtime configuration.
+
+To deploy the exact current `main`, manually dispatch `Promote staging` with
+that one full 40-character SHA. The workflow resolves one successful matching
+publication run on `main`, downloads only the exact candidate artifact, rejects
+unknown, missing, duplicate, malformed, or mismatched fields without shell
+evaluation, and then invokes `deploy-staging.yml`. If a documentation-only
+commit advanced `main` after the last candidate, first manually dispatch
+`Publish staging images` for current `main`. The root bootstrap continues to
+require exact current `origin/main`, not an ancestor. Direct `Deploy staging`
+dispatch remains the digest-based recovery path and defaults to full Identity;
+it supplies full commit SHA, all image digests, separate API and Identity
+schema compatibility flags, and the write-smoke choice.
 Fitness Tracker
 imports are not part of deployment; controlled runs use the operator
 workstation workflow documented in the migration strategy.
@@ -142,16 +156,26 @@ The stable bootstrap accepts a bounded `key=value` request, extracts only
 `deploy/staging/scripts/deployment-controller.sh` path from that exact commit.
 The versioned controller strictly validates the complete allowlist, creates
 runtime env, uses temporary `DOCKER_CONFIG`, and runs `deploy.sh`. For an
-API-only automatic release it reads the current root-owned manifest, validates
+API-only promoted release it reads the current root-owned manifest, validates
 one exact Identity coordinate and both historical compatibility declarations,
 then records `true` for the new no-op Identity transition in the complete
 manifest with `IDENTITY_UPDATE_REQUIRED=false`.
+Before inheritance, the controller also requires the atomic `current` release
+ID to equal the candidate's expected staging base (the push `before` SHA used
+for change classification). If staging skipped an intermediate release, the
+promotion fails closed; manually publish current `main` to produce a full
+Identity candidate, then promote that SHA.
 It also requires the manifest's `IDENTITY_RUNTIME_ENV_SHA256` and Identity
 digest to match the root-owned runtime env and the single running Compose
 Identity container. Missing, ambiguous, or runtime-divergent current state
 aborts deployment. CI sends no Compose,
 scripts, paths, or arbitrary shell. Successful release updates `current` and
 `previous`.
+
+The versioned controller pulls each required image service sequentially: API,
+changed Identity, edge, then Certbot. Unchanged Identity is not pulled. This
+trades deployment duration for lower concurrent image extraction and page-cache
+pressure on the constrained shared VM.
 
 The Actions SSH client sends a keepalive every 30 seconds and fails only after
 six unanswered probes; `BatchMode`, the dedicated key, and strict known-host
@@ -198,8 +222,8 @@ That one-time installation must precede the deployment retry; otherwise the VM
 continues to execute the previously installed bootstrap.
 
 GitHub Actions never runs this installer. Ordinary controller, Compose,
-migration, smoke, and runtime-field changes arrive automatically with the
-verified commit and require no SSH maintenance.
+migration, smoke, and runtime-field changes are used by the next explicitly
+promoted verified commit and require no SSH maintenance.
 
 The completed Identity cutover used a backward-compatible preparation release
 before the digest, database URL, and Identity schema-compatibility declaration
@@ -214,9 +238,10 @@ Before the first OAuth/MCP-capable deployment, add the two OAuth secrets and
 active signing-key variable listed above, perform the one-time replacement of
 the old field-aware wrapper with the reviewed stable bootstrap, and deploy the
 accepted release. Stage that exact commit through a non-`main` preparation ref
-so the VM installation completes before updating `main`; this avoids an
-automatic deployment racing the old wrapper. All later controller protocol
-changes use the normal automatic `main` flow. Create the exact API subject
+so the VM installation completes before updating `main`; this avoided the
+historical automatic deployment racing the old wrapper. Later controller
+protocol changes use the normal publication and manual-promotion flow. Create
+the exact API subject
 binding through the provided operator CLI. For the reserved ChatGPT client,
 set the non-secret staging Environment variable
 `STAGING_IDENTITY_CHATGPT_REDIRECT_URI` to the exact stable callback
@@ -247,10 +272,10 @@ separate approval, the operator:
    rollback readiness;
 6. retired the temporary gate.
 
-The cutover completed on 2026-08-05. Every successful non-documentation-only
-`main` publication invokes staging deployment automatically. Direct
-`Deploy staging` dispatch remains available for an explicit retry or
-operator-selected release. The
+The cutover completed on 2026-08-05. Successful non-documentation-only `main`
+publication now creates an immutable candidate and never contacts the VM.
+`Promote staging` is the normal explicit delivery gate; direct `Deploy staging`
+dispatch remains available for a digest-based recovery attempt. The
 historical sequence prevented the new workflow input contract from racing the
 old installed root wrapper; the stable bootstrap removes this class of
 steady-state rollout race.
@@ -310,6 +335,7 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Dedicated identity ADR](../../adr/20260729-use-dedicated-staging-deployment-identity.md)
 - [Automatic staging ADR](../../adr/20260729-auto-deploy-main-to-staging.md)
 - [Bound automatic staging delivery](../../adr/20260903-bound-automatic-staging-delivery.md)
+- [Manual immutable staging promotion](../../adr/20260922-promote-staging-manually-with-immutable-candidates.md)
 - [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
 - [Component-aware Identity delivery and bounded readiness](../../adr/20260921-skip-unchanged-identity-delivery-and-bound-readiness-probes.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
