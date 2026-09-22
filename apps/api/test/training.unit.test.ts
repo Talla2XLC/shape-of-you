@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import type {
   CreateTrainingProgram,
-  SaveConfirmedTrainingProgram,
   TrainingProgramVersion
 } from "@shape-of-you/contracts";
 
@@ -99,7 +98,7 @@ describe("Training domain", () => {
   });
 
   it("compares confirmed programs by ordered domain meaning only", () => {
-    const confirmed: SaveConfirmedTrainingProgram = {
+    const confirmed = {
       expectedActiveProgramId: null,
       expectedLockVersion: null,
       ...program()

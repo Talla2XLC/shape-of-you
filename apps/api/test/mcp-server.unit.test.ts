@@ -911,7 +911,7 @@ describe("MCP HTTP adapter", () => {
       },
       outputSchema: {
         $id: "SaveConfirmedTrainingProgramResult",
-        required: ["outcome", "program"]
+        oneOf: expect.any(Array)
       },
       annotations: { readOnlyHint: false },
       securitySchemes: [{ scopes: [MCP_WORKOUT_WRITE_SCOPE] }]
@@ -924,6 +924,18 @@ describe("MCP HTTP adapter", () => {
     );
     expect(saveProgramTool.description).toContain(
       "never require a special phrase"
+    );
+    expect(saveProgramTool.description).toContain(
+      "creates a Person-private exercise"
+    );
+    expect(saveProgramTool.description).toContain(
+      "never substitutes a similar exercise"
+    );
+    expect(saveProgramTool.description).toContain(
+      "ask one short human question"
+    );
+    expect(saveProgramTool.description).toContain(
+      "without exposing ids or requiring the program again"
     );
     expect(saveProgramTool.description).toContain(
       "call get_training_context in the same turn"
@@ -1014,6 +1026,31 @@ describe("MCP HTTP adapter", () => {
         outcome: "created",
         program: { id: programId, lockVersion: 1 }
       })
+      .mockResolvedValueOnce({
+        outcome: "needs_clarification",
+        program: null,
+        ambiguities: [{
+          requestedName: "Тяга",
+          candidates: [
+            {
+              exerciseId: "00000000-0000-4000-8000-000000000411",
+              exerciseVersionId: "00000000-0000-4000-8000-000000000412",
+              name: "Тяга",
+              category: "strength",
+              movementPattern: "pull",
+              equipment: "cable"
+            },
+            {
+              exerciseId: "00000000-0000-4000-8000-000000000413",
+              exerciseVersionId: "00000000-0000-4000-8000-000000000414",
+              name: "Тяга",
+              category: "strength",
+              movementPattern: "pull",
+              equipment: "machine"
+            }
+          ]
+        }]
+      })
       .mockRejectedValueOnce(new ConflictError("Active program changed"))
       .mockRejectedValueOnce(new Error("Training repository unavailable"));
     registerMcpRoutes({
@@ -1085,6 +1122,30 @@ describe("MCP HTTP adapter", () => {
         }
       ]
     };
+    const inlineExerciseProgram = {
+      ...confirmedProgram,
+      workouts: [{
+        name: "A",
+        prescriptions: [{
+          exercise: {
+            name: "Тяга",
+            category: "strength",
+            movementPattern: "pull",
+            equipment: null,
+            instructions: null,
+            note: null
+          },
+          loadBasis: "external_weight",
+          targetWeightKg: 20,
+          targetSets: 3,
+          targetRepsMin: 8,
+          targetRepsMax: 10,
+          targetRir: 2,
+          progressionIncrementKg: 2,
+          note: null
+        }]
+      }]
+    };
 
     try {
       const absent = (
@@ -1124,6 +1185,30 @@ describe("MCP HTTP adapter", () => {
       );
       expect(saveConfirmedProgram).not.toHaveBeenCalled();
 
+      const invalidInlineDescriptor = (
+        await call(209, "save_confirmed_training_program", {
+          ...inlineExerciseProgram,
+          workouts: [{
+            ...inlineExerciseProgram.workouts[0],
+            prescriptions: [{
+              ...inlineExerciseProgram.workouts[0]?.prescriptions[0],
+              exercise: {
+                ...inlineExerciseProgram.workouts[0]?.prescriptions[0]?.exercise,
+                visibility: "shared"
+              }
+            }]
+          }]
+        })
+      ).json().result;
+      expect(invalidInlineDescriptor).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "invalid_snapshot"
+        }
+      });
+      expect(saveConfirmedProgram).not.toHaveBeenCalled();
+
       const saved = (
         await call(202, "save_confirmed_training_program", confirmedProgram)
       ).json().result;
@@ -1137,6 +1222,31 @@ describe("MCP HTTP adapter", () => {
         "MUST immediately call get_training_context in this same turn"
       );
       expect(saveConfirmedProgram).toHaveBeenCalledWith(confirmedProgram);
+
+      const ambiguous = (
+        await call(208, "save_confirmed_training_program", inlineExerciseProgram)
+      ).json().result;
+      expect(ambiguous).toMatchObject({
+        structuredContent: {
+          outcome: "needs_clarification",
+          program: null,
+          ambiguities: [{ requestedName: "Тяга" }]
+        }
+      });
+      expect(ambiguous.isError).toBeUndefined();
+      expect(ambiguous.content[0].text).toContain(
+        "Ask exactly one short natural question"
+      );
+      expect(ambiguous.content[0].text).toContain(
+        "without asking the user to repeat the program"
+      );
+      expect(ambiguous.content[0].text).not.toContain(
+        "00000000-0000-4000-8000-000000000412"
+      );
+      expect(saveConfirmedProgram).toHaveBeenNthCalledWith(
+        2,
+        inlineExerciseProgram
+      );
 
       const active = (
         await call(203, "get_training_context", {})

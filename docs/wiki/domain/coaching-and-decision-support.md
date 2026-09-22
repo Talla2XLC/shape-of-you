@@ -274,6 +274,16 @@ duplicate no-op behavior. Coach verifies the complete active snapshot through
 a typed read before reporting success. The persisted active program is shared
 authority across conversations; per-chat memory is not an authority source.
 
+Coach may pass an accepted exact exercise name and only characteristics already
+known from the conversation instead of asking the user for catalog identifiers.
+The Training command reuses one exact accessible current version or creates a
+Person-private definition in the same transaction as program activation. It
+never chooses a merely similar exercise or publishes a new user name to the
+shared catalog. A typed multiple match leaves the whole program unsaved; Coach
+asks one short human question using safe candidate differences, retains the
+complete proposal, and retries with the selected internal reference without
+making the user repeat the program or confirm every other exercise.
+
 The confirmation is contextual rather than phrase-based. A complete program
 provided by the user with an unambiguous request to use it is immediately
 authorized. For a Coach proposal, a natural short acceptance refers only to the

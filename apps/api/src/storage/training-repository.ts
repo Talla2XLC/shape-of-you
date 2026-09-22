@@ -6,6 +6,7 @@ import {
   gte,
   lte,
   notExists,
+  or,
   sql
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
@@ -66,6 +67,7 @@ import {
 import {
   calculateProgressionWeight,
   canAccessTrainingExercise,
+  type ResolvedTrainingProgramSnapshot,
   trainingProgramSnapshotMatches,
   validateTrainingProgramVersion
 } from "../domain/training.js";
@@ -221,7 +223,62 @@ export interface TrainingStore {
 
 type ProgramVersionInput =
   | CreateTrainingProgram
-  | CreateTrainingProgramVersion;
+  | CreateTrainingProgramVersion
+  | ResolvedTrainingProgramSnapshot;
+
+type ConfirmedPrescription =
+  SaveConfirmedTrainingProgram["workouts"][number]["prescriptions"][number];
+type ConfirmedExerciseDescriptor = Extract<
+  ConfirmedPrescription,
+  { readonly exercise: unknown }
+>["exercise"];
+type ResolvedExercise = {
+  readonly exercise: TrainingExerciseRow;
+  readonly version: TrainingExerciseVersionRow;
+};
+
+function normalizeExerciseText(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLowerCase();
+}
+
+function descriptorKey(descriptor: ConfirmedExerciseDescriptor): string {
+  return JSON.stringify([
+    normalizeExerciseText(descriptor.name),
+    ...[
+      descriptor.category,
+      descriptor.movementPattern,
+      descriptor.equipment,
+      descriptor.instructions,
+      descriptor.note
+    ].map((value) => value === null ? null : normalizeExerciseText(value))
+  ]);
+}
+
+function descriptorMatches(
+  descriptor: ConfirmedExerciseDescriptor,
+  version: TrainingExerciseVersionRow,
+  alias: string | null
+): boolean {
+  const requestedName = normalizeExerciseText(descriptor.name);
+  if (
+    normalizeExerciseText(version.name) !== requestedName &&
+    (alias === null || normalizeExerciseText(alias) !== requestedName)
+  ) {
+    return false;
+  }
+  return ([
+    [descriptor.category, version.category],
+    [descriptor.movementPattern, version.movementPattern],
+    [descriptor.equipment, version.equipment],
+    [descriptor.instructions, version.instructions],
+    [descriptor.note, version.note]
+  ] as const).every(
+    ([requested, actual]) =>
+      requested === null ||
+      (actual !== null &&
+        normalizeExerciseText(requested) === normalizeExerciseText(actual))
+  );
+}
 
 const replacementSession = alias(workoutSessions, "replacement_session");
 
@@ -401,36 +458,11 @@ export class TrainingRepository implements TrainingStore {
     input: CreateExercise
   ): Promise<Exercise> {
     return this.database.db.transaction(async (transaction) => {
-      const [exercise] = await transaction
-        .insert(trainingExercises)
-        .values({
-          visibility: input.visibility,
-          ownerPersonId: catalogOwner(personId, input.visibility)
-        })
-        .returning();
-      if (!exercise) {
-        throw new Error("Exercise insert failed");
-      }
-      const [version] = await transaction
-        .insert(trainingExerciseVersions)
-        .values({
-          exerciseId: exercise.id,
-          version: 1,
-          name: input.name,
-          category: input.category,
-          movementPattern: input.movementPattern,
-          equipment: input.equipment,
-          instructions: input.instructions,
-          note: input.note
-        })
-        .returning();
-      if (!version) {
-        throw new Error("ExerciseVersion insert failed");
-      }
-      await transaction
-        .update(trainingExercises)
-        .set({ currentVersionId: version.id })
-        .where(eq(trainingExercises.id, exercise.id));
+      const { exercise, version } = await this.insertExercise(
+        transaction,
+        personId,
+        input
+      );
       return serializeExercise(exercise, version);
     });
   }
@@ -580,6 +612,203 @@ export class TrainingRepository implements TrainingStore {
       }
       return { id: existing.id, created: false };
     });
+  }
+
+  private async insertExercise(
+    transaction: DatabaseTransaction,
+    personId: string,
+    input: CreateExercise
+  ): Promise<ResolvedExercise> {
+    const [exercise] = await transaction
+      .insert(trainingExercises)
+      .values({
+        visibility: input.visibility,
+        ownerPersonId: catalogOwner(personId, input.visibility)
+      })
+      .returning();
+    if (!exercise) {
+      throw new Error("Exercise insert failed");
+    }
+    const [version] = await transaction
+      .insert(trainingExerciseVersions)
+      .values({
+        exerciseId: exercise.id,
+        version: 1,
+        name: input.name,
+        category: input.category,
+        movementPattern: input.movementPattern,
+        equipment: input.equipment,
+        instructions: input.instructions,
+        note: input.note
+      })
+      .returning();
+    if (!version) {
+      throw new Error("ExerciseVersion insert failed");
+    }
+    await transaction
+      .update(trainingExercises)
+      .set({ currentVersionId: version.id })
+      .where(eq(trainingExercises.id, exercise.id));
+    return { exercise, version };
+  }
+
+  private async resolveConfirmedProgram(
+    transaction: DatabaseTransaction,
+    personId: string,
+    input: SaveConfirmedTrainingProgram
+  ): Promise<
+    | { readonly status: "resolved"; readonly snapshot: ResolvedTrainingProgramSnapshot }
+    | {
+        readonly status: "needs_clarification";
+        readonly ambiguities: Extract<
+          SaveConfirmedTrainingProgramResult,
+          { readonly outcome: "needs_clarification" }
+        >["ambiguities"];
+      }
+  > {
+    const catalog = await transaction
+      .select({
+        exercise: trainingExercises,
+        version: trainingExerciseVersions,
+        overlay: trainingExerciseOverlays
+      })
+      .from(trainingExercises)
+      .innerJoin(
+        trainingExerciseVersions,
+        eq(trainingExercises.currentVersionId, trainingExerciseVersions.id)
+      )
+      .leftJoin(
+        trainingExerciseOverlays,
+        and(
+          eq(trainingExerciseOverlays.exerciseId, trainingExercises.id),
+          eq(trainingExerciseOverlays.personId, personId)
+        )
+      )
+      .where(
+        or(
+          eq(trainingExercises.visibility, "shared"),
+          eq(trainingExercises.ownerPersonId, personId)
+        )
+      );
+    const availableCatalog = catalog.filter(
+      ({ overlay }) => overlay === null || overlay.available
+    );
+    const resolvedDescriptors = new Map<string, ResolvedExercise>();
+    const missingDescriptors = new Map<string, ConfirmedExerciseDescriptor>();
+    const ambiguities = new Map<
+      string,
+      Extract<
+        SaveConfirmedTrainingProgramResult,
+        { readonly outcome: "needs_clarification" }
+      >["ambiguities"][number]
+    >();
+
+    for (const workout of input.workouts) {
+      for (const prescription of workout.prescriptions) {
+        if (!("exercise" in prescription)) {
+          continue;
+        }
+        const key = descriptorKey(prescription.exercise);
+        if (
+          resolvedDescriptors.has(key) ||
+          missingDescriptors.has(key) ||
+          ambiguities.has(key)
+        ) {
+          continue;
+        }
+        const candidates = availableCatalog.filter(({ version, overlay }) =>
+          descriptorMatches(prescription.exercise, version, overlay?.alias ?? null)
+        );
+        if (candidates.length === 1) {
+          const candidate = candidates[0];
+          if (!candidate) {
+            throw new Error("Resolved ExerciseVersion was lost");
+          }
+          resolvedDescriptors.set(key, {
+            exercise: candidate.exercise,
+            version: candidate.version
+          });
+        } else if (candidates.length > 1) {
+          ambiguities.set(key, {
+            requestedName: prescription.exercise.name,
+            candidates: candidates.map(({ exercise, version }) => ({
+              exerciseId: exercise.id,
+              exerciseVersionId: version.id,
+              name: version.name,
+              category: version.category,
+              movementPattern: version.movementPattern,
+              equipment: version.equipment
+            }))
+          });
+        } else {
+          missingDescriptors.set(key, prescription.exercise);
+        }
+      }
+    }
+
+    const resolvedIds = new Map<string, ResolvedExercise>();
+    for (const workout of input.workouts) {
+      for (const prescription of workout.prescriptions) {
+        if ("exerciseVersionId" in prescription) {
+          if (!resolvedIds.has(prescription.exerciseVersionId)) {
+            const resolved = await this.resolveExerciseVersion(
+              transaction,
+              personId,
+              prescription.exerciseVersionId
+            );
+            if (!resolved) {
+              throw new NotFoundError("Training ExerciseVersion was not found");
+            }
+            resolvedIds.set(prescription.exerciseVersionId, resolved);
+          }
+        }
+      }
+    }
+    if (ambiguities.size > 0) {
+      return {
+        status: "needs_clarification",
+        ambiguities: [...ambiguities.values()]
+      };
+    }
+    for (const [key, descriptor] of missingDescriptors) {
+      resolvedDescriptors.set(
+        key,
+        await this.insertExercise(transaction, personId, {
+          visibility: "private",
+          ...descriptor
+        })
+      );
+    }
+
+    return {
+      status: "resolved",
+      snapshot: {
+        name: input.name,
+        note: input.note,
+        workouts: input.workouts.map((workout) => ({
+          name: workout.name,
+          prescriptions: workout.prescriptions.map((prescription) => {
+            const resolved = "exerciseVersionId" in prescription
+              ? resolvedIds.get(prescription.exerciseVersionId)
+              : resolvedDescriptors.get(descriptorKey(prescription.exercise));
+            if (!resolved) {
+              throw new Error("Resolved ExerciseVersion was lost");
+            }
+            return {
+              exerciseVersionId: resolved.version.id,
+              loadBasis: prescription.loadBasis,
+              targetWeightKg: prescription.targetWeightKg,
+              targetSets: prescription.targetSets,
+              targetRepsMin: prescription.targetRepsMin,
+              targetRepsMax: prescription.targetRepsMax,
+              targetRir: prescription.targetRir,
+              progressionIncrementKg: prescription.progressionIncrementKg,
+              note: prescription.note
+            };
+          })
+        }))
+      }
+    };
   }
 
   private async insertProgramVersionContents(
@@ -947,6 +1176,7 @@ export class TrainingRepository implements TrainingStore {
   ): Promise<SaveConfirmedTrainingProgramResult> {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, personId);
+      validateTrainingProgramVersion(input);
       const [activeRow] = await transaction
         .select()
         .from(trainingPrograms)
@@ -960,10 +1190,23 @@ export class TrainingRepository implements TrainingStore {
       const active = activeRow
         ? await this.serializeProgram(transaction, activeRow)
         : null;
+      const resolution = await this.resolveConfirmedProgram(
+        transaction,
+        personId,
+        input
+      );
+      if (resolution.status === "needs_clarification") {
+        return {
+          outcome: "needs_clarification",
+          program: null,
+          ambiguities: resolution.ambiguities
+        };
+      }
+      const snapshot = resolution.snapshot;
 
       if (
         active?.activeVersion &&
-        trainingProgramSnapshotMatches(active.activeVersion, input)
+        trainingProgramSnapshotMatches(active.activeVersion, snapshot)
       ) {
         return { outcome: "unchanged", program: active };
       }
@@ -987,7 +1230,7 @@ export class TrainingRepository implements TrainingStore {
           personId,
           created.id,
           1,
-          input
+          snapshot
         );
         const [activated] = await transaction
           .update(trainingPrograms)
@@ -1024,7 +1267,7 @@ export class TrainingRepository implements TrainingStore {
         personId,
         active.id,
         active.currentVersion.version + 1,
-        input
+        snapshot
       );
       const [updated] = await transaction
         .update(trainingPrograms)

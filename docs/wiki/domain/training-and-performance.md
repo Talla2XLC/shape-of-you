@@ -21,6 +21,11 @@ automatically.
 
 - `Exercise` has stable identity and immutable ExerciseVersions; aliases and
   equipment are overlays; private exercises have an owner.
+- Confirmed-program persistence resolves only exact accessible current
+  ExerciseVersions and enabled Person aliases. A missing exact definition is
+  created as Person-private version 1 in the same transaction as program
+  activation; ambiguity performs no writes, and similar definitions are never
+  substituted or published automatically.
 - `TrainingProgram` belongs to Person and contains immutable versions with
   ordered workouts/assignments pinned to ExerciseVersion and target load,
   sets, repetitions, and RIR. At most one version is active.
@@ -66,6 +71,7 @@ automatically.
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
+- [Atomic exercise resolution during confirmed program save](../../adr/20260922-resolve-training-program-exercises-atomically.md).
 
 ## Open questions
 

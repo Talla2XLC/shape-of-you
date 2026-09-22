@@ -215,6 +215,91 @@ const prescriptionInputSchema = {
   }
 } as const;
 
+const confirmedExerciseDescriptorSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "name",
+    "category",
+    "movementPattern",
+    "equipment",
+    "instructions",
+    "note"
+  ],
+  properties: exerciseVersionProperties
+} as const;
+
+const confirmedPrescriptionProperties = {
+  loadBasis: TrainingLoadBasisSchema,
+  targetWeightKg: nullableWeightSchema,
+  targetSets: { type: "integer", minimum: 1, maximum: 100 },
+  targetRepsMin: { type: "integer", minimum: 1, maximum: 10000 },
+  targetRepsMax: { type: "integer", minimum: 1, maximum: 10000 },
+  targetRir: nullableRirSchema,
+  progressionIncrementKg: nullableWeightSchema,
+  note: nullableTextSchema
+} as const;
+
+const confirmedPrescriptionRequired = [
+  "loadBasis",
+  "targetWeightKg",
+  "targetSets",
+  "targetRepsMin",
+  "targetRepsMax",
+  "targetRir",
+  "progressionIncrementKg",
+  "note"
+] as const;
+
+const confirmedPrescriptionSchema = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["exerciseVersionId", ...confirmedPrescriptionRequired],
+      properties: {
+        exerciseVersionId: uuidSchema,
+        ...confirmedPrescriptionProperties
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["exercise", ...confirmedPrescriptionRequired],
+      properties: {
+        exercise: confirmedExerciseDescriptorSchema,
+        ...confirmedPrescriptionProperties
+      }
+    }
+  ]
+} as const;
+
+const confirmedProgramWorkoutInputSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["name", "prescriptions"],
+  properties: {
+    name: { type: "string", minLength: 1, maxLength: 256 },
+    prescriptions: {
+      type: "array",
+      minItems: 1,
+      maxItems: 200,
+      items: confirmedPrescriptionSchema
+    }
+  }
+} as const;
+
+const confirmedProgramVersionInputProperties = {
+  name: { type: "string", minLength: 1, maxLength: 256 },
+  note: nullableTextSchema,
+  workouts: {
+    type: "array",
+    minItems: 1,
+    maxItems: 100,
+    items: confirmedProgramWorkoutInputSchema
+  }
+} as const;
+
 export const ProgramWorkoutInputSchema = {
   type: "object",
   additionalProperties: false,
@@ -400,7 +485,7 @@ export const SaveConfirmedTrainingProgramSchema = {
         ...confirmedProgramExpectationProperties,
         expectedActiveProgramId: { type: "null" },
         expectedLockVersion: { type: "null" },
-        ...programVersionInputProperties
+        ...confirmedProgramVersionInputProperties
       }
     },
     {
@@ -417,7 +502,7 @@ export const SaveConfirmedTrainingProgramSchema = {
         ...confirmedProgramExpectationProperties,
         expectedActiveProgramId: uuidSchema,
         expectedLockVersion: { type: "integer", minimum: 0 },
-        ...programVersionInputProperties
+        ...confirmedProgramVersionInputProperties
       }
     }
   ]
@@ -434,12 +519,72 @@ export const SaveConfirmedTrainingProgramResultSchema = {
   additionalProperties: false,
   required: ["outcome", "program"],
   properties: {
-    outcome: { type: "string", enum: ["created", "updated", "unchanged"] },
-    program: TrainingProgramSchema
-  }
+    outcome: {
+      type: "string",
+      enum: ["created", "updated", "unchanged", "needs_clarification"]
+    },
+    program: {
+      anyOf: [TrainingProgramSchema, { type: "null" }]
+    },
+    ambiguities: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["requestedName", "candidates"],
+        properties: {
+          requestedName: { type: "string", minLength: 1, maxLength: 256 },
+          candidates: {
+            type: "array",
+            minItems: 2,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              required: [
+                "exerciseId",
+                "exerciseVersionId",
+                "name",
+                "category",
+                "movementPattern",
+                "equipment"
+              ],
+              properties: {
+                exerciseId: uuidSchema,
+                exerciseVersionId: uuidSchema,
+                name: { type: "string", minLength: 1, maxLength: 256 },
+                category: nullableShortTextSchema,
+                movementPattern: nullableShortTextSchema,
+                equipment: nullableShortTextSchema
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  oneOf: [
+    {
+      properties: {
+        outcome: {
+          type: "string",
+          enum: ["created", "updated", "unchanged"]
+        },
+        program: TrainingProgramSchema
+      },
+      not: { required: ["ambiguities"] }
+    },
+    {
+      required: ["ambiguities"],
+      properties: {
+        outcome: { type: "string", const: "needs_clarification" },
+        program: { type: "null" }
+      }
+    }
+  ]
 } as const;
 
-/** Result of atomically creating, revising, or deduplicating a confirmed program. */
+/** Result of an atomic confirmed save or a write-free exact-match ambiguity. */
 export type SaveConfirmedTrainingProgramResult = FromSchema<
   typeof SaveConfirmedTrainingProgramResultSchema
 >;

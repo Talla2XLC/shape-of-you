@@ -7,6 +7,26 @@ import type {
 
 import { DomainValidationError } from "./errors.js";
 
+/** Resolved program snapshot whose prescriptions pin immutable ExerciseVersions. */
+export interface ResolvedTrainingProgramSnapshot {
+  readonly name: string;
+  readonly note: string | null;
+  readonly workouts: readonly {
+    readonly name: string;
+    readonly prescriptions: readonly {
+      readonly exerciseVersionId: string;
+      readonly loadBasis: "external_weight" | "body_weight" | "assisted";
+      readonly targetWeightKg: number | null;
+      readonly targetSets: number;
+      readonly targetRepsMin: number;
+      readonly targetRepsMax: number;
+      readonly targetRir: number | null;
+      readonly progressionIncrementKg: number | null;
+      readonly note: string | null;
+    }[];
+  }[];
+}
+
 /** Minimal set result used to evaluate one progression prescription. */
 export interface ProgressionEvidenceSet {
   /** Completed repetitions. */
@@ -48,6 +68,7 @@ export function validateTrainingProgramVersion(
     | CreateTrainingProgram
     | CreateTrainingProgramVersion
     | SaveConfirmedTrainingProgram
+    | ResolvedTrainingProgramSnapshot
 ): void {
   for (const workout of input.workouts) {
     for (const prescription of workout.prescriptions) {
@@ -74,7 +95,7 @@ export function validateTrainingProgramVersion(
  */
 export function trainingProgramSnapshotMatches(
   active: TrainingProgramVersion,
-  confirmed: SaveConfirmedTrainingProgram
+  confirmed: ResolvedTrainingProgramSnapshot
 ): boolean {
   if (
     active.name !== confirmed.name ||

@@ -344,9 +344,16 @@ const trainingProgramConfirmationPolicy =
   "When Coach publishes a complete version without already having authority to save it, end that same message with exactly one short question equivalent to «Сохраняю эту программу как активную?» in the user's language. Use the same one-question form whenever the later reference is genuinely ambiguous. Until persistence and a matching active read-back succeed, label every such program only Proposed now and never call it agreed, active, current, or our plan. " +
   "After unambiguous acceptance, call save_confirmed_training_program and then get_training_context in the same turn, comparing the entire active snapshot with the accepted version before claiming success.";
 
-const confirmedTrainingProgramWriteResultContent = coachResultContent(
-  "The accepted program snapshot was persisted. MUST immediately call get_training_context in this same turn and compare the complete active snapshot with the accepted version before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as agreed, current, active, or the user's plan."
-);
+function confirmedTrainingProgramWriteResultContent(result: unknown): string {
+  if (isRecord(result) && result.outcome === "needs_clarification") {
+    return coachFailureResultContent(
+      "TRAINING PROGRAM NOT SAVED: Exact exercise resolution found more than one accessible candidate. Ask exactly one short natural question that distinguishes only the first unresolved exercise using its safe name, category, movement pattern, or equipment. Never show ids, tool names, fields, or catalog mechanics. Retain the complete accepted program in conversation context; after the answer, replace only that exercise with the selected internal version reference and retry the whole snapshot without asking the user to repeat the program or confirm every other exercise. Keep the program Proposed now until a later matching active read-back succeeds."
+    );
+  }
+  return coachResultContent(
+    "The accepted program snapshot and any missing Person-private exercises were persisted atomically. MUST immediately call get_training_context in this same turn and compare the complete active snapshot with the accepted version before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as agreed, current, active, or the user's plan."
+  );
+}
 
 const dailyProjectionResultContent =
   "FACTUAL-ONLY DAILY PROJECTION: Use this exact-date projection only to summarize recorded owning-domain facts. " +
@@ -731,7 +738,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "save_confirmed_training_program",
-      "Persist and activate one complete training-program snapshot. A complete user-supplied program plus an unambiguous request to use it is already authorized. For a Coach proposal, ordinary natural acceptance authorizes only the latest complete published version; never require a special phrase. Discussion, doubt, questions, alternatives, partial edits, and unrelated positive replies are not confirmation. Supply the active identity and lock from the preceding read, or both null only when absence was read. Repeated identical snapshots are safe. After success, call get_training_context in the same turn and compare the complete active snapshot before claiming it is saved, agreed, current, or active.",
+      "Persist and activate one complete training-program snapshot. A complete user-supplied program plus an unambiguous request to use it is already authorized. For a Coach proposal, ordinary natural acceptance authorizes only the latest complete published version; never require a special phrase. Discussion, doubt, questions, alternatives, partial edits, and unrelated positive replies are not confirmation. For each exercise, send a known exact version id or an inline descriptor with the accepted exact name and only characteristics already known; use null for unknown characteristics and never invent them. The server exact-matches accessible exercises or creates a Person-private exercise, never substitutes a similar exercise and never publishes a new name to the shared catalog. Supply the active identity and lock from the preceding read, or both null only when absence was read. Repeated identical snapshots are safe. A typed ambiguity means nothing was saved: ask one short human question, retain the complete snapshot, and retry with the selected internal reference without exposing ids or requiring the program again. After success, call get_training_context in the same turn and compare the complete active snapshot before claiming it is saved, agreed, current, or active.",
       SaveConfirmedTrainingProgramSchema,
       SaveConfirmedTrainingProgramResultSchema,
       true,
@@ -740,7 +747,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
         services.training.saveConfirmedProgram(
           input as SaveConfirmedTrainingProgram
         ),
-      () => confirmedTrainingProgramWriteResultContent
+      confirmedTrainingProgramWriteResultContent
     ),
     defineTool(
       "list_workout_sessions",

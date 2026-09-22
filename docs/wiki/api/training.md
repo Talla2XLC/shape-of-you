@@ -59,6 +59,18 @@ and returns an idempotent no-op when the active snapshot already matches. Coach
 must read the active program back before claiming that the change is saved.
 The existing HTTP draft/version/activation lifecycle is unchanged.
 
+Each confirmed prescription may pin an existing `ExerciseVersion` or provide a
+strict inline descriptor with the accepted exercise name and only known
+nullable characteristics. Inside the same Person-locked transaction, the
+command exact-matches accessible current versions and enabled aliases after
+Unicode, whitespace, and case normalization. Every supplied characteristic
+must also match; fuzzy substitution is forbidden. No match creates a
+Person-private `Exercise` and version 1. Multiple matches return typed
+`needs_clarification` with no catalog or program writes. Shared catalog creation
+is not available through this command. Repeated descriptors and concurrent
+retries resolve to one private identity and retain the existing semantic
+program no-op.
+
 A complete program supplied by the user together with an unambiguous request to
 use it is already confirmed. For a complete Coach proposal, ordinary natural
 acceptance applies only to the latest fully published version offered for
@@ -117,4 +129,5 @@ pending acceptance.
 - [MCP active-program absence ADR](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md)
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md)
 - [Natural TrainingProgram acceptance](../../adr/20260922-bind-natural-training-program-acceptance-to-latest-complete-proposal.md)
+- [Atomic exercise resolution during confirmed save](../../adr/20260922-resolve-training-program-exercises-atomically.md)
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md)

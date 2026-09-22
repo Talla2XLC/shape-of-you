@@ -480,6 +480,9 @@ describe("Training PostgreSQL vertical", () => {
     };
 
     const created = await repository.saveConfirmedProgram(personB, snapshot);
+    if (created.outcome === "needs_clarification") {
+      throw new Error("Expected the confirmed program to be saved");
+    }
     expect(created).toMatchObject({
       outcome: "created",
       program: {
@@ -528,6 +531,9 @@ describe("Training PostgreSQL vertical", () => {
         }))
       }))
     });
+    if (updated.outcome === "needs_clarification") {
+      throw new Error("Expected the confirmed program to be updated");
+    }
     expect(updated).toMatchObject({
       outcome: "updated",
       program: {
@@ -572,5 +578,250 @@ describe("Training PostgreSQL vertical", () => {
       })
     ).rejects.toThrow("changed concurrently");
     expect((await repository.findActiveProgram(personB))?.lockVersion).toBe(2);
+  });
+
+  it("resolves exact exercises or creates private versions inside the confirmed-program transaction", async () => {
+    const repository = new TrainingRepository(database);
+    const shared = await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0126 Exact Press",
+      category: "strength",
+      movementPattern: "push",
+      equipment: "dumbbell",
+      instructions: null,
+      note: null
+    });
+    const aliased = await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0126 Canonical Row",
+      category: "strength",
+      movementPattern: "pull",
+      equipment: "cable",
+      instructions: null,
+      note: null
+    });
+    await repository.upsertExerciseOverlay(personB, aliased.id, {
+      alias: "TASK-0126 My Row",
+      available: true,
+      note: null
+    });
+    const unavailable = await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0126 Hidden Cardio",
+      category: "cardio",
+      movementPattern: null,
+      equipment: "bike",
+      instructions: null,
+      note: null
+    });
+    await repository.upsertExerciseOverlay(personB, unavailable.id, {
+      alias: null,
+      available: false,
+      note: null
+    });
+    const similar = await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0126 Cable Row Machine",
+      category: "strength",
+      movementPattern: "pull",
+      equipment: "cable",
+      instructions: null,
+      note: null
+    });
+    const inaccessiblePrivate = await repository.createExercise(personA, {
+      visibility: "private",
+      name: "TASK-0126 Person Only",
+      category: "strength",
+      movementPattern: null,
+      equipment: null,
+      instructions: null,
+      note: null
+    });
+    const active = await repository.findActiveProgram(personB);
+    if (!active) {
+      throw new Error("Expected the preceding confirmed program fixture");
+    }
+    const prescription = (
+      name: string,
+      category: string | null,
+      movementPattern: string | null,
+      equipment: string | null
+    ) => ({
+      exercise: {
+        name,
+        category,
+        movementPattern,
+        equipment,
+        instructions: null,
+        note: null
+      },
+      loadBasis: "external_weight" as const,
+      targetWeightKg: null,
+      targetSets: 3,
+      targetRepsMin: 8,
+      targetRepsMax: 10,
+      targetRir: 2,
+      progressionIncrementKg: null,
+      note: null
+    });
+    const resolved = await repository.saveConfirmedProgram(personB, {
+      expectedActiveProgramId: active.id,
+      expectedLockVersion: active.lockVersion,
+      name: "TASK-0126 Resolution",
+      note: null,
+      workouts: [{
+        name: "A",
+        prescriptions: [
+          prescription("  task-0126   EXACT press  ", "strength", "push", "dumbbell"),
+          prescription("TASK-0126 My Row", "strength", "pull", "cable"),
+          prescription("TASK-0126 Hidden Cardio", "cardio", null, "bike"),
+          prescription("TASK-0126 Cable Row", "strength", "pull", "cable"),
+          prescription("TASK-0126 Cable Row", "strength", "pull", "cable"),
+          prescription("TASK-0126 Person Only", "strength", null, null)
+        ]
+      }]
+    });
+    if (resolved.outcome === "needs_clarification") {
+      throw new Error("Expected exact resolution and private creation");
+    }
+    const prescriptions = resolved.program.activeVersion?.workouts[0]?.prescriptions;
+    expect(prescriptions?.[0]?.exerciseVersionId).toBe(shared.currentVersion.id);
+    expect(prescriptions?.[1]?.exerciseVersionId).toBe(aliased.currentVersion.id);
+    expect(prescriptions?.[2]?.exerciseId).not.toBe(unavailable.id);
+    expect(prescriptions?.[3]?.exerciseId).toBe(prescriptions?.[4]?.exerciseId);
+    expect(prescriptions?.[3]?.exerciseId).not.toBe(similar.id);
+    expect(prescriptions?.[5]?.exerciseId).not.toBe(inaccessiblePrivate.id);
+    const privateRows = await database.pool.query<{
+      name: string;
+      visibility: string;
+      owner_person_id: string | null;
+    }>(
+      `select ev.name, e.visibility, e.owner_person_id
+         from training_exercises e
+         join training_exercise_versions ev on ev.id = e.current_version_id
+        where ev.name in (
+          'TASK-0126 Hidden Cardio',
+          'TASK-0126 Cable Row',
+          'TASK-0126 Person Only'
+        )
+          and e.owner_person_id = $1
+        order by ev.name`,
+      [personB]
+    );
+    expect(privateRows.rows).toEqual([
+      {
+        name: "TASK-0126 Cable Row",
+        visibility: "private",
+        owner_person_id: personB
+      },
+      {
+        name: "TASK-0126 Hidden Cardio",
+        visibility: "private",
+        owner_person_id: personB
+      },
+      {
+        name: "TASK-0126 Person Only",
+        visibility: "private",
+        owner_person_id: personB
+      }
+    ]);
+
+    await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0126 Ambiguous",
+      category: "strength",
+      movementPattern: null,
+      equipment: "cable",
+      instructions: null,
+      note: null
+    });
+    await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0126 Ambiguous",
+      category: "strength",
+      movementPattern: null,
+      equipment: "machine",
+      instructions: null,
+      note: null
+    });
+    const exerciseCountBeforeAmbiguity = await database.pool.query<{ count: string }>(
+      "select count(*)::text as count from training_exercises"
+    );
+    const ambiguous = await repository.saveConfirmedProgram(personB, {
+      expectedActiveProgramId: resolved.program.id,
+      expectedLockVersion: resolved.program.lockVersion,
+      name: "TASK-0126 Ambiguous Program",
+      note: null,
+      workouts: [{
+        name: "A",
+        prescriptions: [
+          prescription("TASK-0126 Ambiguous", "strength", null, null)
+        ]
+      }]
+    });
+    expect(ambiguous).toMatchObject({
+      outcome: "needs_clarification",
+      program: null,
+      ambiguities: [{
+        requestedName: "TASK-0126 Ambiguous",
+        candidates: [{ name: "TASK-0126 Ambiguous" }, { name: "TASK-0126 Ambiguous" }]
+      }]
+    });
+    const exerciseCountAfterAmbiguity = await database.pool.query<{ count: string }>(
+      "select count(*)::text as count from training_exercises"
+    );
+    expect(exerciseCountAfterAmbiguity.rows[0]?.count).toBe(
+      exerciseCountBeforeAmbiguity.rows[0]?.count
+    );
+    expect((await repository.findActiveProgram(personB))?.id).toBe(resolved.program.id);
+
+    const orphanCountBefore = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_exercise_versions
+        where name = 'TASK-0126 Must Roll Back'`
+    );
+    await expect(repository.saveConfirmedProgram(personB, {
+      expectedActiveProgramId: resolved.program.id,
+      expectedLockVersion: resolved.program.lockVersion - 1,
+      name: "TASK-0126 Stale",
+      note: null,
+      workouts: [{
+        name: "A",
+        prescriptions: [
+          prescription("TASK-0126 Must Roll Back", null, null, null)
+        ]
+      }]
+    })).rejects.toThrow("changed concurrently");
+    const orphanCountAfter = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_exercise_versions
+        where name = 'TASK-0126 Must Roll Back'`
+    );
+    expect(orphanCountAfter.rows[0]?.count).toBe(orphanCountBefore.rows[0]?.count);
+
+    const concurrentSnapshot = {
+      expectedActiveProgramId: resolved.program.id,
+      expectedLockVersion: resolved.program.lockVersion,
+      name: "TASK-0126 Concurrent",
+      note: null,
+      workouts: [{
+        name: "A",
+        prescriptions: [prescription("TASK-0126 Concurrent New", null, null, null)]
+      }]
+    };
+    const concurrent = await Promise.all([
+      repository.saveConfirmedProgram(personB, concurrentSnapshot),
+      repository.saveConfirmedProgram(personB, concurrentSnapshot)
+    ]);
+    expect(concurrent.map((result) => result.outcome).sort()).toEqual([
+      "unchanged",
+      "updated"
+    ]);
+    const concurrentExercises = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_exercise_versions
+        where name = 'TASK-0126 Concurrent New'`
+    );
+    expect(concurrentExercises.rows[0]?.count).toBe("1");
   });
 });
