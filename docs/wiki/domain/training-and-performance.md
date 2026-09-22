@@ -28,9 +28,14 @@ automatically.
   substituted or published automatically.
 - `TrainingProgram` belongs to Person and contains immutable versions with
   ordered workouts/assignments pinned to ExerciseVersion and target load,
-  sets, repetitions, and RIR. At most one version is active.
+  sets, repetitions, and RIR. A version may also own a closed typed
+  `rolling_weekly` cadence with an ordered workout-position cycle, weekly
+  strength target, and optional typed light-cardio target. At most one version
+  is active; legacy versions without cadence remain valid and are never inferred
+  from free text.
 - Immutable `WorkoutSession` contains performed exercises and individual sets
-  with actual weight/repetitions/RIR. Correction replaces the full session.
+  with actual weight/repetitions/RIR. It may pin the exact program-workout
+  position. Correction replaces the full session.
 - `TrainingRepository` also owns immutable connection-linked activity facts
   imported from Intervals.icu. They retain typed duration, distance, training
   load, heart-rate summary, device name, provider identity, and normalized
@@ -39,6 +44,18 @@ automatically.
 - Repeated external identity plus checksum is a no-op. Changed content creates
   an immutable successor, including a later return to a previously seen value.
   Current reads expose only the latest fact.
+- A separate Person-scoped relational association can identify one external
+  activity as evidence for a detailed WorkoutSession. The aggregates stay
+  distinct, and only the explicit association prevents double counting.
+  Connected-data erasure removes the association without mutating the session.
+- `NextTrainingStep` is a deterministic read projection over the active cadence
+  and current Training facts. Missed days do not move its sequence; explicit
+  repeats or reordering become the next anchor. Qualified external cardio may
+  satisfy cardio from typed duration, distance, and heart-rate facts. External
+  strength without an exact program-workout identity cannot advance A/B and
+  produces a bounded classification need instead of a guess. Legacy cadence,
+  missing local date, current-day completion, and completed weekly targets are
+  explicit states.
 - Profile coverage unions current WorkoutSession and external activity dates.
   One Person-local date is counted once regardless of source, and a date without
   a workout is not described as a missed training day.
@@ -72,6 +89,7 @@ automatically.
 - [Counterfactual v1 replay with explicit ambiguity](../../adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Atomic exercise resolution during confirmed program save](../../adr/20260922-resolve-training-program-exercises-atomically.md).
+- [Rolling cadence and Training-owned next step](../../adr/20260922-own-rolling-training-cadence-and-next-step-in-training.md).
 
 ## Open questions
 

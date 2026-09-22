@@ -45,6 +45,57 @@ const nullableRirSchema = {
   ]
 } as const;
 
+export const TrainingProgramCadenceSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "kind",
+    "strengthSessionsPerWeek",
+    "workoutSequence",
+    "lightCardio"
+  ],
+  properties: {
+    kind: { const: "rolling_weekly" },
+    strengthSessionsPerWeek: { type: "integer", minimum: 1, maximum: 14 },
+    workoutSequence: {
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      items: { type: "integer", minimum: 1, maximum: 100 }
+    },
+    lightCardio: {
+      anyOf: [
+        {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "sessionsPerWeek",
+            "durationSeconds",
+            "targetAverageHeartRateMin",
+            "targetAverageHeartRateMax",
+            "warmupSeconds",
+            "workSeconds",
+            "cooldownSeconds"
+          ],
+          properties: {
+            sessionsPerWeek: { type: "integer", minimum: 1, maximum: 14 },
+            durationSeconds: { type: "integer", minimum: 60, maximum: 86400 },
+            targetAverageHeartRateMin: { type: "integer", minimum: 30, maximum: 250 },
+            targetAverageHeartRateMax: { type: "integer", minimum: 30, maximum: 250 },
+            warmupSeconds: { type: "integer", minimum: 0, maximum: 86400 },
+            workSeconds: { type: "integer", minimum: 1, maximum: 86400 },
+            cooldownSeconds: { type: "integer", minimum: 0, maximum: 86400 }
+          }
+        },
+        { type: "null" }
+      ]
+    }
+  }
+} as const;
+
+/** Typed non-weekday cadence pinned to one immutable program version. */
+export type TrainingProgramCadence = FromSchema<typeof TrainingProgramCadenceSchema>;
+
 export const TrainingCatalogVisibilitySchema = {
   type: "string",
   enum: ["shared", "private"]
@@ -292,6 +343,7 @@ const confirmedProgramWorkoutInputSchema = {
 const confirmedProgramVersionInputProperties = {
   name: { type: "string", minLength: 1, maxLength: 256 },
   note: nullableTextSchema,
+  cadence: TrainingProgramCadenceSchema,
   workouts: {
     type: "array",
     minItems: 1,
@@ -318,6 +370,7 @@ export const ProgramWorkoutInputSchema = {
 const programVersionInputProperties = {
   name: { type: "string", minLength: 1, maxLength: 256 },
   note: nullableTextSchema,
+  cadence: TrainingProgramCadenceSchema,
   workouts: {
     type: "array",
     minItems: 1,
@@ -397,12 +450,15 @@ export const ProgramWorkoutSchema = {
 export const TrainingProgramVersionSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["id", "version", "name", "note", "workouts", "createdAt"],
+  required: ["id", "version", "name", "note", "cadence", "workouts", "createdAt"],
   properties: {
     id: uuidSchema,
     version: { type: "integer", minimum: 1 },
     name: { type: "string", minLength: 1, maxLength: 256 },
     note: nullableTextSchema,
+    cadence: {
+      anyOf: [TrainingProgramCadenceSchema, { type: "null" }]
+    },
     workouts: { type: "array", items: ProgramWorkoutSchema },
     createdAt: { type: "string", format: "date-time" }
   }
@@ -671,6 +727,10 @@ const workoutSessionInputProperties = {
   occurredAt: { type: "string", format: "date-time" },
   timezone: { type: "string", minLength: 1, maxLength: 64 },
   programVersionId: nullableUuidSchema,
+  programWorkoutPosition: {
+    anyOf: [{ type: "integer", minimum: 1, maximum: 100 }, { type: "null" }]
+  },
+  externalActivityId: nullableUuidSchema,
   workoutName: { type: "string", minLength: 1, maxLength: 256 },
   feeling: nullableShortTextSchema,
   note: nullableTextSchema,
@@ -799,6 +859,8 @@ export const WorkoutSessionSchema = {
     "localDate",
     "timezone",
     "programVersionId",
+    "programWorkoutPosition",
+    "externalActivityId",
     "workoutName",
     "feeling",
     "note",
@@ -823,6 +885,10 @@ export const WorkoutSessionSchema = {
     localDate: { type: "string", format: "date" },
     timezone: { type: "string", minLength: 1, maxLength: 64 },
     programVersionId: nullableUuidSchema,
+    programWorkoutPosition: {
+      anyOf: [{ type: "integer", minimum: 1, maximum: 100 }, { type: "null" }]
+    },
+    externalActivityId: nullableUuidSchema,
     workoutName: { type: "string", minLength: 1, maxLength: 256 },
     feeling: nullableShortTextSchema,
     note: nullableTextSchema,
@@ -973,7 +1039,8 @@ export const TrainingContextQuerySchema = {
   type: "object",
   additionalProperties: false,
   properties: {
-    historyLimit: { type: "integer", minimum: 1, maximum: 50, default: 20 }
+    historyLimit: { type: "integer", minimum: 1, maximum: 50, default: 20 },
+    localDate: { type: "string", format: "date" }
   }
 } as const;
 
@@ -981,6 +1048,85 @@ export const TrainingContextQuerySchema = {
 export type TrainingContextQuery = FromSchema<
   typeof TrainingContextQuerySchema
 >;
+
+export const NextTrainingStepSchema = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion"],
+      properties: {
+        state: { enum: ["no_active_program", "local_date_required", "schedule_unavailable"] },
+        policyVersion: { const: "training-next-step-v1" }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "externalActivityId", "question"],
+      properties: {
+        state: { const: "needs_classification" },
+        policyVersion: { const: "training-next-step-v1" },
+        localDate: { type: "string", format: "date" },
+        externalActivityId: uuidSchema,
+        question: { type: "string", minLength: 1, maxLength: 256 }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "reason", "evidenceIds"],
+      properties: {
+        state: { enum: ["complete_today", "week_complete"] },
+        policyVersion: { const: "training-next-step-v1" },
+        localDate: { type: "string", format: "date" },
+        reason: { enum: ["training_already_completed_today", "weekly_targets_completed"] },
+        evidenceIds: { type: "array", items: uuidSchema, uniqueItems: true }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "programVersionId", "workoutPosition", "workoutName", "reason"],
+      properties: {
+        state: { const: "strength" },
+        policyVersion: { const: "training-next-step-v1" },
+        localDate: { type: "string", format: "date" },
+        programVersionId: uuidSchema,
+        workoutPosition: { type: "integer", minimum: 1, maximum: 100 },
+        workoutName: { type: "string", minLength: 1, maxLength: 256 },
+        reason: { enum: ["sequence_start", "sequence_continues", "after_cardio", "sequence_reanchored_after_deviation", "cardio_target_completed"] }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "reason", "prescription"],
+      properties: {
+        state: { const: "light_cardio" },
+        policyVersion: { const: "training-next-step-v1" },
+        localDate: { type: "string", format: "date" },
+        reason: { enum: ["between_strength_sessions", "strength_target_completed"] },
+        prescription: {
+          type: "object",
+          additionalProperties: false,
+          required: ["durationSeconds", "targetAverageHeartRateMin", "targetAverageHeartRateMax", "warmupSeconds", "workSeconds", "cooldownSeconds"],
+          properties: {
+            durationSeconds: { type: "integer" },
+            targetAverageHeartRateMin: { type: "integer" },
+            targetAverageHeartRateMax: { type: "integer" },
+            warmupSeconds: { type: "integer" },
+            workSeconds: { type: "integer" },
+            cooldownSeconds: { type: "integer" }
+          }
+        }
+      }
+    }
+  ]
+} as const;
+
+/** Deterministic Training-owned projection of the next program step. */
+export type NextTrainingStep = FromSchema<typeof NextTrainingStepSchema>;
 
 export const TrainingContextSchema = {
   $id: "TrainingContext",
@@ -993,7 +1139,8 @@ export const TrainingContextSchema = {
         "status",
         "program",
         "recentSessions",
-        "recentExternalActivities"
+        "recentExternalActivities",
+        "nextStep"
       ],
       properties: {
         status: { const: "active" },
@@ -1002,7 +1149,8 @@ export const TrainingContextSchema = {
         recentExternalActivities: {
           type: "array",
           items: ExternalActivitySummarySchema
-        }
+        },
+        nextStep: NextTrainingStepSchema
       }
     },
     {
@@ -1012,7 +1160,8 @@ export const TrainingContextSchema = {
         "status",
         "program",
         "recentSessions",
-        "recentExternalActivities"
+        "recentExternalActivities",
+        "nextStep"
       ],
       properties: {
         status: { const: "absent" },
@@ -1021,7 +1170,8 @@ export const TrainingContextSchema = {
         recentExternalActivities: {
           type: "array",
           items: ExternalActivitySummarySchema
-        }
+        },
+        nextStep: NextTrainingStepSchema
       }
     }
   ]

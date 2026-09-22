@@ -30,6 +30,7 @@ import type { PersonContext } from "../application/person-context.js";
 import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import { PERSON_CONTEXT, TRAINING_STORE } from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
+import { evaluateNextTrainingStep } from "../domain/training.js";
 import type {
   CreateWorkoutSessionResult,
   ExternalActivityFact,
@@ -190,18 +191,26 @@ export class TrainingService {
     const recentExternalActivities = externalActivities.map(
       toExternalActivitySummary
     );
+    const nextStep = evaluateNextTrainingStep({
+      program,
+      localDate: query.localDate ?? null,
+      sessions: recentSessions.items,
+      externalActivities: recentExternalActivities
+    });
     return program
       ? {
           status: "active",
           program,
           recentSessions,
-          recentExternalActivities
+          recentExternalActivities,
+          nextStep
         }
       : {
           status: "absent",
           program: null,
           recentSessions,
-          recentExternalActivities
+          recentExternalActivities,
+          nextStep
         };
   }
 

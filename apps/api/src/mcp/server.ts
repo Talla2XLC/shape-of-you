@@ -266,7 +266,7 @@ const activeTrainingProgramResultContent = coachResultContent(
 );
 
 const trainingContextResultContent = coachResultContent(
-  "Use an active program as planned authority. Keep detailed completed sessions separate from connected activity summaries. A connected summary confirms the activity and load shown but never supplies exercises or sets. When the program is absent, historical evidence is proposal input only and must never be presented as an existing plan."
+  "Use an active program as planned authority and the returned next training step as the sole schedule projection for the requested Person-local date. Never derive A/B order from names, notes, or an unlinked activity. A classification-needed result requires exactly its one short human question; do not guess. A completed-today or completed-week result forbids adding another training action. Keep detailed completed sessions separate from connected activity summaries unless the exact explicit link is present. A connected summary confirms only the typed activity and load shown and never supplies exercises or sets. When the program is absent, historical evidence is proposal input only and must never be presented as an existing plan."
 );
 
 const dailyAssessmentGuidance =
@@ -727,7 +727,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_training_context",
-      "Read the authorized person's active training authority together with separate bounded recent detailed sessions and connected activity summaries. Use imported activities without requesting a screenshot or manual repeat, never infer exercises or sets from a summary, and do not double-count a possible match. When the active program is absent, historical evidence remains proposal input and is never a plan.",
+      "Read the authorized person's active training authority, deterministic next step for an optional Person-local date, and separate bounded recent detailed sessions and connected activity summaries. Supply the known local date when asking what to do now. Treat the returned next step as authoritative: never infer A/B order from text or unlinked activity, never bypass a classification question, and never add training after a completed-today or completed-week result. Use imported activities without requesting a screenshot or manual repeat, never infer exercises or sets from a summary, and do not double-count a possible match. When the active program is absent, historical evidence remains proposal input and is never a plan.",
       TrainingContextQuerySchema,
       TrainingContextSchema,
       false,

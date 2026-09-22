@@ -316,6 +316,13 @@
       "when": 1789983204876,
       "tag": "20260921093324_wealthy_shriek",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1790111828570,
+      "tag": "20260922211708_strange_vulcan",
+      "breakpoints": true
     }
   ]
 }

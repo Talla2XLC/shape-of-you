@@ -2243,6 +2243,85 @@ export const trainingProgramWorkouts = pgTable(
   ]
 );
 
+export const trainingProgramCadences = pgTable(
+  "training_program_cadences",
+  {
+    programVersionId: uuid("program_version_id").primaryKey(),
+    kind: varchar("kind", { length: 32 }).notNull(),
+    strengthSessionsPerWeek: smallint("strength_sessions_per_week").notNull(),
+    cardioSessionsPerWeek: smallint("cardio_sessions_per_week"),
+    cardioDurationSeconds: integer("cardio_duration_seconds"),
+    cardioHeartRateMin: smallint("cardio_heart_rate_min"),
+    cardioHeartRateMax: smallint("cardio_heart_rate_max"),
+    cardioWarmupSeconds: integer("cardio_warmup_seconds"),
+    cardioWorkSeconds: integer("cardio_work_seconds"),
+    cardioCooldownSeconds: integer("cardio_cooldown_seconds")
+  },
+  (table) => [
+    foreignKey({
+      name: "training_program_cadence_version_fk",
+      columns: [table.programVersionId],
+      foreignColumns: [trainingProgramVersions.id]
+    }).onDelete("cascade"),
+    check(
+      "training_program_cadence_values",
+      sql`${table.kind} = 'rolling_weekly'
+        AND ${table.strengthSessionsPerWeek} BETWEEN 1 AND 14
+        AND (
+          (${table.cardioSessionsPerWeek} IS NULL
+            AND ${table.cardioDurationSeconds} IS NULL
+            AND ${table.cardioHeartRateMin} IS NULL
+            AND ${table.cardioHeartRateMax} IS NULL
+            AND ${table.cardioWarmupSeconds} IS NULL
+            AND ${table.cardioWorkSeconds} IS NULL
+            AND ${table.cardioCooldownSeconds} IS NULL)
+          OR
+          (${table.cardioSessionsPerWeek} BETWEEN 1 AND 14
+            AND ${table.cardioDurationSeconds} > 0
+            AND ${table.cardioHeartRateMin} BETWEEN 30 AND 250
+            AND ${table.cardioHeartRateMax} >= ${table.cardioHeartRateMin}
+            AND ${table.cardioHeartRateMax} <= 250
+            AND ${table.cardioWarmupSeconds} >= 0
+            AND ${table.cardioWorkSeconds} > 0
+            AND ${table.cardioCooldownSeconds} >= 0
+            AND ${table.cardioWarmupSeconds} + ${table.cardioWorkSeconds} + ${table.cardioCooldownSeconds} = ${table.cardioDurationSeconds})
+        )`
+    )
+  ]
+);
+
+export const trainingProgramCadenceWorkouts = pgTable(
+  "training_program_cadence_workouts",
+  {
+    programVersionId: uuid("program_version_id").notNull(),
+    sequencePosition: smallint("sequence_position").notNull(),
+    workoutPosition: smallint("workout_position").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_program_cadence_workout_version_fk",
+      columns: [table.programVersionId],
+      foreignColumns: [trainingProgramCadences.programVersionId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "training_program_cadence_workout_target_fk",
+      columns: [table.programVersionId, table.workoutPosition],
+      foreignColumns: [
+        trainingProgramWorkouts.programVersionId,
+        trainingProgramWorkouts.position
+      ]
+    }).onDelete("cascade"),
+    unique("training_program_cadence_workouts_sequence_uq").on(
+      table.programVersionId,
+      table.sequencePosition
+    ),
+    check(
+      "training_program_cadence_workouts_positions",
+      sql`${table.sequencePosition} > 0 AND ${table.workoutPosition} > 0`
+    )
+  ]
+);
+
 export const trainingProgramPrescriptions = pgTable(
   "training_program_prescriptions",
   {
@@ -2309,6 +2388,7 @@ export const workoutSessions = pgTable(
     localDate: date("local_date", { mode: "string" }).notNull(),
     timezone: varchar("timezone", { length: 64 }).notNull(),
     programVersionId: uuid("program_version_id"),
+    programWorkoutPosition: smallint("program_workout_position"),
     workoutName: varchar("workout_name", { length: 256 }).notNull(),
     feeling: varchar("feeling", { length: 256 }),
     note: text("note"),
@@ -2337,6 +2417,14 @@ export const workoutSessions = pgTable(
       foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.personId]
     }),
     foreignKey({
+      name: "workout_session_program_workout_fk",
+      columns: [table.programVersionId, table.programWorkoutPosition],
+      foreignColumns: [
+        trainingProgramWorkouts.programVersionId,
+        trainingProgramWorkouts.position
+      ]
+    }),
+    foreignKey({
       name: "workout_session_source_reference_person_fk",
       columns: [table.sourceReferenceId, table.personId],
       foreignColumns: [sourceReferences.id, sourceReferences.personId]
@@ -2362,6 +2450,10 @@ export const workoutSessions = pgTable(
           OR (${table.temporalPrecision} = 'local_date' AND ${table.occurredAt} IS NULL)`
     ),
     check(
+      "workout_sessions_program_workout_shape",
+      sql`${table.programWorkoutPosition} IS NULL OR ${table.programVersionId} IS NOT NULL`
+    ),
+    check(
       "workout_sessions_confidence_range",
       sql`${table.confidence} IS NULL
           OR (${table.confidence} >= 0 AND ${table.confidence} <= 1)`
@@ -2374,6 +2466,31 @@ export const workoutSessions = pgTable(
     check(
       "workout_sessions_no_self_supersession",
       sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
+    )
+  ]
+);
+
+export const trainingWorkoutSessionActivityLinks = pgTable(
+  "training_workout_session_activity_links",
+  {
+    sessionId: uuid("session_id").primaryKey(),
+    personId: uuid("person_id").notNull(),
+    externalActivityId: uuid("external_activity_id").notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_workout_activity_link_session_fk",
+      columns: [table.sessionId, table.personId],
+      foreignColumns: [workoutSessions.id, workoutSessions.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "training_workout_activity_link_external_fk",
+      columns: [table.externalActivityId, table.personId],
+      foreignColumns: [integrationActivityFacts.id, integrationActivityFacts.personId]
+    }).onDelete("cascade"),
+    index("training_workout_activity_link_external_idx").on(
+      table.personId,
+      table.externalActivityId
     )
   ]
 );

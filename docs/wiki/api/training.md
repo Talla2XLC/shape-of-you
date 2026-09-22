@@ -13,8 +13,9 @@ tags:
 
 ## Summary
 
-Provides shared versioned exercises, Person-owned program versions, immutable
-sessions/sets, personal records, and progression candidates.
+Provides shared versioned exercises, Person-owned immutable program versions
+with optional typed cadence, immutable sessions/sets, deterministic next-step
+projection, personal records, and progression candidates.
 
 ## Content
 
@@ -37,12 +38,30 @@ or `status: absent` with `program: null`. Other failures remain tool errors.
 
 The MCP `get_training_context` read composes the active program with separate
 bounded lists of recent current `WorkoutSession` facts and connected
-`ExternalActivitySummary` facts. An active program is the only planned
+`ExternalActivitySummary` facts. When a Person-local date is supplied it also
+returns a Training-owned `NextTrainingStep`. An active program is the only planned
 authority. When it is absent, both collections remain completed evidence that
 may support a proposal but are not a plan. Connected activity summaries expose
 only safe typed occurrence, duration, distance, load, heart-rate, device, and
 normalized Garmin-attribution fields; provider identities, connection or
 consent identifiers, checksums, credentials, and raw payloads stay internal.
+
+New immutable versions may carry a closed `rolling_weekly` cadence: strength
+sessions per local week, an ordered cycle of program-workout positions, and an
+optional light-cardio target with duration, average-heart-rate range, and
+warmup/work/cooldown phases. Cadence has no weekdays. Existing versions without
+it remain readable and return `schedule_unavailable`; the API never parses
+`note` as policy. Progression-created successor versions preserve cadence.
+
+`NextTrainingStep` returns an exact strength workout, typed light cardio,
+`complete_today`, `week_complete`, `needs_classification`, or an explicit
+absence/unavailable state. Sequence advances only from classified current
+sessions, so missed days do not skip workouts. Explicit repeats or reordering
+anchor the next step and expose a deviation reason. A distance, duration, and
+heart-rate-qualified external cardio activity may satisfy cardio without a
+fabricated detailed session. An external activity without A/B identity never
+advances the strength sequence and may trigger one short classification
+question.
 
 `WorkoutSession` remains the detailed authority for performed exercises and
 sets. An external activity summary can prove that a run, ride, or other activity
@@ -50,6 +69,12 @@ occurred, but it never creates exercises, repetitions, weight, or RIR. Coach
 uses an imported summary without asking the user to repeat it or provide a
 screenshot and does not count a plausible cross-source match as two workouts
 without sufficient evidence.
+
+A `WorkoutSession` may pin the exact workout position in its immutable program
+version. It may also expose an exact external-activity correlation through a
+separate Person-scoped relational association. Only this explicit association
+deduplicates detailed and connected evidence. Deleting connected evidence
+removes the association without mutating the immutable session.
 
 After the user explicitly confirms a complete program snapshot, MCP
 `save_confirmed_training_program` atomically creates and activates its first
@@ -131,3 +156,4 @@ pending acceptance.
 - [Natural TrainingProgram acceptance](../../adr/20260922-bind-natural-training-program-acceptance-to-latest-complete-proposal.md)
 - [Atomic exercise resolution during confirmed save](../../adr/20260922-resolve-training-program-exercises-atomically.md)
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md)
+- [Rolling cadence and Training-owned next step](../../adr/20260922-own-rolling-training-cadence-and-next-step-in-training.md)

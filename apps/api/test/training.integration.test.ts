@@ -165,6 +165,12 @@ describe("Training PostgreSQL vertical", () => {
     const programPayload = {
       name: "Базовая программа",
       note: null,
+      cadence: {
+        kind: "rolling_weekly",
+        strengthSessionsPerWeek: 3,
+        workoutSequence: [1],
+        lightCardio: null
+      },
       workouts: [
         {
           name: "Тренировка A",
@@ -216,6 +222,8 @@ describe("Training PostgreSQL vertical", () => {
       occurredAt: "2026-07-31T07:00:00.000Z",
       timezone: "Europe/Moscow",
       programVersionId: versionId,
+      programWorkoutPosition: 1,
+      externalActivityId: null,
       workoutName: "Тренировка A",
       feeling: "good",
       note: null,
@@ -254,7 +262,18 @@ describe("Training PostgreSQL vertical", () => {
     expect(session.statusCode, session.body).toBe(201);
     expect(duplicate.statusCode, duplicate.body).toBe(200);
     expect(duplicate.json().id).toBe(session.json().id);
+    expect(session.json()).toMatchObject({
+      programVersionId: versionId,
+      programWorkoutPosition: 1,
+      externalActivityId: null
+    });
     expect(session.json().exercises[0].sets).toHaveLength(3);
+    const invalidPosition = await fastify.inject({
+      method: "POST",
+      url: "/v1/training/sessions",
+      payload: { ...sessionPayload, programWorkoutPosition: 2, dedupeKey: "training:session:invalid-position" }
+    });
+    expect(invalidPosition.statusCode).toBe(404);
     expect(
       await repository.findWorkoutSession(personB, session.json().id)
     ).toBeNull();
@@ -353,6 +372,7 @@ describe("Training PostgreSQL vertical", () => {
     });
     expect(accepted.statusCode, accepted.body).toBe(201);
     expect(accepted.json().currentVersion.version).toBe(2);
+    expect(accepted.json().currentVersion.cadence).toEqual(programPayload.cadence);
     expect(
       accepted.json().currentVersion.workouts[0].prescriptions[0]
         .targetWeightKg
@@ -443,7 +463,8 @@ describe("Training PostgreSQL vertical", () => {
         status: "absent",
         program: null,
         recentSessions: { items: [] },
-        recentExternalActivities: []
+        recentExternalActivities: [],
+        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v1" }
       });
     const exercise = await repository.createExercise(personA, {
       visibility: "shared",
@@ -459,6 +480,20 @@ describe("Training PostgreSQL vertical", () => {
       expectedLockVersion: null,
       name: "Confirmed A/B",
       note: "Confirmed by the user",
+      cadence: {
+        kind: "rolling_weekly" as const,
+        strengthSessionsPerWeek: 3,
+        workoutSequence: [1],
+        lightCardio: {
+          sessionsPerWeek: 2,
+          durationSeconds: 2400,
+          targetAverageHeartRateMin: 135,
+          targetAverageHeartRateMax: 145,
+          warmupSeconds: 300,
+          workSeconds: 1800,
+          cooldownSeconds: 300
+        }
+      },
       workouts: [
         {
           name: "A",
@@ -489,7 +524,7 @@ describe("Training PostgreSQL vertical", () => {
         personId: personB,
         lockVersion: 1,
         activeVersionId: expect.any(String),
-        activeVersion: { version: 1, name: "Confirmed A/B" },
+        activeVersion: { version: 1, name: "Confirmed A/B", cadence: snapshot.cadence },
         currentVersion: { version: 1, name: "Confirmed A/B" }
       }
     });
@@ -498,7 +533,8 @@ describe("Training PostgreSQL vertical", () => {
         status: "active",
         program: { id: created.program.id, personId: personB },
         recentSessions: { items: [] },
-        recentExternalActivities: []
+        recentExternalActivities: [],
+        nextStep: { state: "local_date_required" }
       });
     expect(await repository.findProgram(personA, created.program.id)).toBeNull();
 

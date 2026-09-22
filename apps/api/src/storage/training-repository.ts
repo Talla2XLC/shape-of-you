@@ -5,6 +5,7 @@ import {
   eq,
   gte,
   lte,
+  ne,
   notExists,
   or,
   sql
@@ -52,9 +53,12 @@ import {
   trainingExercises,
   trainingExerciseVersions,
   trainingProgramPrescriptions,
+  trainingProgramCadences,
+  trainingProgramCadenceWorkouts,
   trainingPrograms,
   trainingProgramVersions,
   trainingProgramWorkouts,
+  trainingWorkoutSessionActivityLinks,
   workoutSessions,
   type SourceReferenceRow,
   type TrainingExerciseOverlayRow,
@@ -785,6 +789,7 @@ export class TrainingRepository implements TrainingStore {
       snapshot: {
         name: input.name,
         note: input.note,
+        cadence: input.cadence ?? null,
         workouts: input.workouts.map((workout) => ({
           name: workout.name,
           prescriptions: workout.prescriptions.map((prescription) => {
@@ -897,6 +902,29 @@ export class TrainingRepository implements TrainingStore {
         })
       );
     }
+    const cadence = input.cadence ?? null;
+    if (cadence !== null) {
+      const cardio = cadence.lightCardio;
+      await transaction.insert(trainingProgramCadences).values({
+        programVersionId: version.id,
+        kind: cadence.kind,
+        strengthSessionsPerWeek: cadence.strengthSessionsPerWeek,
+        cardioSessionsPerWeek: cardio?.sessionsPerWeek ?? null,
+        cardioDurationSeconds: cardio?.durationSeconds ?? null,
+        cardioHeartRateMin: cardio?.targetAverageHeartRateMin ?? null,
+        cardioHeartRateMax: cardio?.targetAverageHeartRateMax ?? null,
+        cardioWarmupSeconds: cardio?.warmupSeconds ?? null,
+        cardioWorkSeconds: cardio?.workSeconds ?? null,
+        cardioCooldownSeconds: cardio?.cooldownSeconds ?? null
+      });
+      await transaction.insert(trainingProgramCadenceWorkouts).values(
+        cadence.workoutSequence.map((workoutPosition, index) => ({
+          programVersionId: version.id,
+          sequencePosition: index + 1,
+          workoutPosition
+        }))
+      );
+    }
     return version;
   }
 
@@ -918,6 +946,18 @@ export class TrainingRepository implements TrainingStore {
     if (!version) {
       return null;
     }
+    const [cadenceRow] = await transaction
+      .select()
+      .from(trainingProgramCadences)
+      .where(eq(trainingProgramCadences.programVersionId, version.id))
+      .limit(1);
+    const cadenceSequence = cadenceRow
+      ? await transaction
+          .select()
+          .from(trainingProgramCadenceWorkouts)
+          .where(eq(trainingProgramCadenceWorkouts.programVersionId, version.id))
+          .orderBy(asc(trainingProgramCadenceWorkouts.sequencePosition))
+      : [];
     const workouts = await transaction
       .select()
       .from(trainingProgramWorkouts)
@@ -966,6 +1006,24 @@ export class TrainingRepository implements TrainingStore {
       version: version.version,
       name: version.name,
       note: version.note,
+      cadence: cadenceRow
+        ? {
+            kind: "rolling_weekly",
+            strengthSessionsPerWeek: cadenceRow.strengthSessionsPerWeek,
+            workoutSequence: cadenceSequence.map((entry) => entry.workoutPosition),
+            lightCardio: cadenceRow.cardioSessionsPerWeek === null
+              ? null
+              : {
+                  sessionsPerWeek: cadenceRow.cardioSessionsPerWeek,
+                  durationSeconds: cadenceRow.cardioDurationSeconds!,
+                  targetAverageHeartRateMin: cadenceRow.cardioHeartRateMin!,
+                  targetAverageHeartRateMax: cadenceRow.cardioHeartRateMax!,
+                  warmupSeconds: cadenceRow.cardioWarmupSeconds!,
+                  workSeconds: cadenceRow.cardioWorkSeconds!,
+                  cooldownSeconds: cadenceRow.cardioCooldownSeconds!
+                }
+          }
+        : null,
       workouts: publicWorkouts,
       createdAt: version.createdAt.toISOString()
     };
@@ -1355,6 +1413,9 @@ export class TrainingRepository implements TrainingStore {
     correctionReason: string | null
   ): Promise<{ row: WorkoutSessionRow; created: boolean }> {
     await lockPerson(transaction, personId);
+    if (input.programWorkoutPosition != null && input.programVersionId == null) {
+      throw new NotFoundError("TrainingProgramVersion is required for a program workout position");
+    }
     if (input.programVersionId) {
       const [version] = await transaction
         .select({ id: trainingProgramVersions.id })
@@ -1368,6 +1429,52 @@ export class TrainingRepository implements TrainingStore {
         .limit(1);
       if (!version) {
         throw new NotFoundError("TrainingProgramVersion was not found");
+      }
+      if (input.programWorkoutPosition != null) {
+        const [workout] = await transaction
+          .select({ id: trainingProgramWorkouts.id })
+          .from(trainingProgramWorkouts)
+          .where(and(
+            eq(trainingProgramWorkouts.programVersionId, input.programVersionId),
+            eq(trainingProgramWorkouts.position, input.programWorkoutPosition)
+          ))
+          .limit(1);
+        if (!workout) {
+          throw new NotFoundError("TrainingProgram workout was not found");
+        }
+      }
+    }
+    if (input.externalActivityId != null) {
+      const successor = alias(integrationActivityFacts, "linked_activity_successor");
+      const [activity] = await transaction
+        .select({ id: integrationActivityFacts.id })
+        .from(integrationActivityFacts)
+        .where(and(
+          eq(integrationActivityFacts.id, input.externalActivityId),
+          eq(integrationActivityFacts.personId, personId),
+          notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, integrationActivityFacts.id)))
+        ))
+        .limit(1);
+      if (!activity) {
+        throw new NotFoundError("Current external activity was not found");
+      }
+      const sessionSuccessor = alias(workoutSessions, "linked_session_successor");
+      const [alreadyLinked] = await transaction
+        .select({ id: workoutSessions.id })
+        .from(workoutSessions)
+        .innerJoin(
+          trainingWorkoutSessionActivityLinks,
+          eq(trainingWorkoutSessionActivityLinks.sessionId, workoutSessions.id)
+        )
+        .where(and(
+          eq(workoutSessions.personId, personId),
+          eq(trainingWorkoutSessionActivityLinks.externalActivityId, input.externalActivityId),
+          supersedesId === null ? undefined : ne(workoutSessions.id, supersedesId),
+          notExists(transaction.select({ id: sessionSuccessor.id }).from(sessionSuccessor).where(eq(sessionSuccessor.supersedesId, workoutSessions.id)))
+        ))
+        .limit(1);
+      if (alreadyLinked) {
+        throw new ConflictError("External activity is already linked to a current WorkoutSession");
       }
     }
     const resolvedExercises = await this.resolveSessionExercises(
@@ -1390,6 +1497,7 @@ export class TrainingRepository implements TrainingStore {
         localDate: deriveLocalDate(occurredAt, input.timezone),
         timezone: input.timezone,
         programVersionId: input.programVersionId,
+        programWorkoutPosition: input.programWorkoutPosition ?? null,
         workoutName: input.workoutName,
         feeling: input.feeling,
         note: input.note,
@@ -1420,6 +1528,13 @@ export class TrainingRepository implements TrainingStore {
         throw new Error("WorkoutSession conflict did not resolve");
       }
       return { row: existing, created: false };
+    }
+    if (input.externalActivityId != null) {
+      await transaction.insert(trainingWorkoutSessionActivityLinks).values({
+        sessionId: session.id,
+        personId,
+        externalActivityId: input.externalActivityId
+      });
     }
     for (const [exerciseIndex, resolved] of resolvedExercises.entries()) {
       const [performed] = await transaction
@@ -1471,6 +1586,11 @@ export class TrainingRepository implements TrainingStore {
     if (!source) {
       throw new Error("WorkoutSession SourceReference was not found");
     }
+    const [activityLink] = await transaction
+      .select({ externalActivityId: trainingWorkoutSessionActivityLinks.externalActivityId })
+      .from(trainingWorkoutSessionActivityLinks)
+      .where(eq(trainingWorkoutSessionActivityLinks.sessionId, session.id))
+      .limit(1);
     const exercises = await transaction
       .select()
       .from(performedExercises)
@@ -1511,6 +1631,8 @@ export class TrainingRepository implements TrainingStore {
       localDate: session.localDate,
       timezone: session.timezone,
       programVersionId: session.programVersionId,
+      programWorkoutPosition: session.programWorkoutPosition,
+      externalActivityId: activityLink?.externalActivityId ?? null,
       workoutName: session.workoutName,
       feeling: session.feeling,
       note: session.note,
@@ -1969,6 +2091,7 @@ export class TrainingRepository implements TrainingStore {
         expectedLockVersion: input.expectedLockVersion,
         name: activeVersion.name,
         note: activeVersion.note,
+        ...(activeVersion.cadence === null ? {} : { cadence: activeVersion.cadence }),
         workouts: activeVersion.workouts.map((workout) => ({
           name: workout.name,
           prescriptions: workout.prescriptions.map((prescription) => ({

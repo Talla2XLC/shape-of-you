@@ -2,6 +2,7 @@ import {
   DailyCompletionSpecificationSchema,
   type DailyCompletionSpecification
 } from "./daily-recommendation-completion.js";
+import { NextTrainingStepSchema, type NextTrainingStep } from "./training.js";
 
 const uuid = { type: "string", format: "uuid" } as const;
 const localDate = { type: "string", format: "date" } as const;
@@ -94,6 +95,7 @@ export const DailyAssessmentUsedFactsSchema = {
     mealIds: { type: "array", items: uuid, uniqueItems: true },
     weightMeasurementIds: { type: "array", items: uuid, uniqueItems: true },
     activeTrainingProgramVersionId: { anyOf: [uuid, { type: "null" }] },
+    trainingNextStep: NextTrainingStepSchema,
     dailyContextNoteIds: { type: "array", items: uuid, uniqueItems: true },
     coveragePolicyVersion: { const: "profile-data-coverage-v1" },
     coverageReadiness: {
@@ -346,6 +348,7 @@ export interface DailyAssessmentUsedFacts {
   readonly mealIds: readonly string[];
   readonly weightMeasurementIds: readonly string[];
   readonly activeTrainingProgramVersionId: string | null;
+  readonly trainingNextStep?: NextTrainingStep;
   readonly dailyContextNoteIds?: readonly string[];
   readonly coveragePolicyVersion: "profile-data-coverage-v1";
   readonly coverageReadiness: {

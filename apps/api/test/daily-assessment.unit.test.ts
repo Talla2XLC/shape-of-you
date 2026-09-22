@@ -67,6 +67,27 @@ describe("daily assessment policy", () => {
       .toBe(dailyAssessmentChecksum("2026-09-14", "Europe/Moscow", evidence));
   });
 
+  it("turns the Training-owned next step into a concrete daily action", () => {
+    const evidence = {
+      ...facts({ recentWorkoutCount: 0, recentTrainingLoad: 20 }),
+      trainingNextStep: {
+        state: "strength" as const,
+        policyVersion: "training-next-step-v1" as const,
+        localDate: "2026-09-22",
+        programVersionId,
+        workoutPosition: 2,
+        workoutName: "Ahilej B",
+        reason: "sequence_continues" as const
+      }
+    };
+
+    expect(evaluateDailyAssessment(evidence).recommendedAction).toMatchObject({
+      type: "follow_active_program",
+      text: expect.stringContaining("Ahilej B"),
+      trainingProgramVersionId: programVersionId
+    });
+  });
+
   it("keeps V1, V2 and V3 identities independent of operational sync metadata", () => {
     const evidence = facts();
     const calculation = { policy: "personal-baseline-v1", comparisons: [] };

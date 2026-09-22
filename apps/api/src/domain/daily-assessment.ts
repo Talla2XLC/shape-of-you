@@ -35,6 +35,38 @@ function action(type: DailyNextAction["type"], text: string, trainingProgramVers
   return { type, text, trainingProgramVersionId };
 }
 
+function activeProgramAction(facts: DailyAssessmentUsedFacts): DailyNextAction {
+  const step = facts.trainingNextStep;
+  if (step?.state === "strength") {
+    return action(
+      "follow_active_program",
+      `Выполни тренировку «${step.workoutName}» из активной программы без добавления упражнений или нагрузки вне неё.`,
+      step.programVersionId
+    );
+  }
+  if (step?.state === "light_cardio") {
+    return action(
+      "follow_active_program",
+      `Выполни лёгкое кардио ${Math.round(step.prescription.durationSeconds / 60)} минут со средним пульсом ${step.prescription.targetAverageHeartRateMin}–${step.prescription.targetAverageHeartRateMax}.`,
+      facts.activeTrainingProgramVersionId
+    );
+  }
+  if (step?.state === "needs_classification") {
+    return action("follow_active_program", step.question, facts.activeTrainingProgramVersionId);
+  }
+  if (step?.state === "complete_today") {
+    return action("recovery_first", "Сегодняшняя тренировка уже выполнена; дополнительная тренировочная нагрузка не нужна.");
+  }
+  if (step?.state === "week_complete") {
+    return action("recovery_first", "Недельные цели активной программы уже выполнены; следующая тренировка пока не нужна.");
+  }
+  return action(
+    "follow_active_program",
+    "Следуй активной программе без добавления упражнений или нагрузки вне неё.",
+    facts.activeTrainingProgramVersionId
+  );
+}
+
 /** Produces one conservative next action from an already-normalized typed fact set. */
 export function evaluateDailyAssessment(facts: DailyAssessmentUsedFacts): DailyAssessmentEvaluation {
   const missing: Array<DailyAssessmentAvailable["missingImportantData"][number]> = [];
@@ -91,7 +123,9 @@ export function evaluateDailyAssessment(facts: DailyAssessmentUsedFacts): DailyA
   if (missing.length > 0) limitations.push("confidence_limited_by_missing_data");
   if (summary.bodyBattery === null && summary.bodyBatteryMin !== null && summary.bodyBatteryMax !== null) limitations.push("body_battery_daily_range_not_current");
   if (summary.nutritionCompleteness === "partial") limitations.push("nutrition_records_may_be_incomplete");
-  limitations.push("training_schedule_not_inferred");
+  if (!facts.trainingNextStep || ["local_date_required", "schedule_unavailable"].includes(facts.trainingNextStep.state)) {
+    limitations.push("training_schedule_not_inferred");
+  }
 
   let status: DailyAssessmentAvailable["status"];
   let recommendedAction: DailyNextAction;
@@ -106,7 +140,7 @@ export function evaluateDailyAssessment(facts: DailyAssessmentUsedFacts): DailyA
     recommendedAction = action("recovery_first", "Сегодня сохрани консервативную нагрузку и не выполняй прогрессию.");
   } else if (facts.activeTrainingProgramVersionId) {
     status = "ready";
-    recommendedAction = action("follow_active_program", "Следуй активной программе без добавления упражнений или нагрузки вне неё.", facts.activeTrainingProgramVersionId);
+    recommendedAction = activeProgramAction(facts);
   } else if (summary.nutritionCompleteness === "partial" || summary.mealCount === 0) {
     status = "caution";
     recommendedAction = action("complete_nutrition_record", "Запиши следующий приём пищи с доступной оценкой порции и нутриентов.");

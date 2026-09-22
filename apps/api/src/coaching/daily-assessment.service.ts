@@ -163,7 +163,7 @@ export class DailyAssessmentService {
       this.nutrition.listMealsForLocalDate(snapshot.localDate),
       this.training.listWorkoutSessionsForLocalDate(snapshot.localDate),
       this.recovery.listObservationsForLocalDate(snapshot.localDate),
-      this.training.getTrainingContext({ historyLimit: 50 }),
+      this.training.getTrainingContext({ historyLimit: 50, localDate: snapshot.localDate }),
       this.store.listFeedback(personId, snapshotId)
     ]);
     const asOf = snapshot.createdAt;
@@ -234,7 +234,7 @@ export class DailyAssessmentService {
     ] = await Promise.all([
       this.recovery.listObservationsForLocalDateRange(from, localDate),
       this.recovery.listAssessmentsForLocalDate(localDate),
-      this.training.getTrainingContext({ historyLimit: 20 }),
+      this.training.getTrainingContext({ historyLimit: 20, localDate }),
       this.nutrition.listMealsForLocalDate(localDate),
       this.nutrition.dailyTotals(localDate),
       this.weights.listForLocalDateRange(from, localDate),
@@ -314,6 +314,7 @@ export class DailyAssessmentService {
       mealIds: meals.map((item) => item.id).sort(),
       weightMeasurementIds: weights.map((item) => item.id).sort(),
       activeTrainingProgramVersionId: activeVersionId,
+      trainingNextStep: training.nextStep,
       dailyContextNoteIds: unique(contextNotes.items.map((item) => item.id)),
       coveragePolicyVersion: "profile-data-coverage-v1",
       coverageReadiness: {

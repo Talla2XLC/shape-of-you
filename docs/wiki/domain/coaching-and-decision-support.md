@@ -309,6 +309,16 @@ session, and does not double-count a plausible match between the two collections
 without sufficient identity evidence. Internal integration identities,
 credentials, checksums, and raw provider payloads are not exposed through MCP.
 
+For a supplied Person-local date, the Training context also returns the sole
+authoritative `NextTrainingStep` for the active typed cadence. Coach never
+derives A/B order from activity names, program notes, chat history, or an
+unlinked summary. It asks the one returned classification question when exact
+workout identity is missing and adds no training after `complete_today` or
+`week_complete`. DailyAssessment consumes the same projection and turns exact
+strength or cardio output into its concrete action only after existing
+Recovery and safety precedence has been applied. Legacy programs without typed
+cadence keep the explicit schedule-unavailable limitation.
+
 ## Evidence
 
 - Coaching schema/contracts/integration tests.
