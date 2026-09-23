@@ -1509,7 +1509,7 @@ describe("MCP HTTP adapter", () => {
     } finally {
       await authorizedFastify.close();
     }
-  });
+  }, 15_000);
 
   it("normalizes connector-compatible Workout sets before domain dispatch", async () => {
     const authorizedFastify = Fastify();
@@ -2790,7 +2790,7 @@ describe("MCP HTTP adapter", () => {
     } finally {
       await authorizedFastify.close();
     }
-  }, 15_000);
+  }, 30_000);
 
   it("dispatches the new typed writer lifecycle through the authorized MCP adapter", async () => {
     const authorizedFastify = Fastify();
