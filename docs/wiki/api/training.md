@@ -112,6 +112,19 @@ snapshot verifies success; a different active version is never overwritten
 automatically and requires a short replacement confirmation without making the
 user repeat the program.
 
+When an accepted complete cadence belongs to an already active legacy version
+whose other contents match, the narrow MCP cadence mutation avoids resending
+the full program. It binds the expected program id, active version id, and lock
+version, then takes the existing Person lock and copies the active version in
+one transaction. The backend preserves name, note, workout order, exact
+exercise versions, prescriptions, loads, RIR, and progression; only the
+accepted typed cadence changes. The immutable successor becomes current and
+active atomically. The old version remains unchanged, an identical cadence is
+a semantic no-op, and a stale expectation or invalid workout reference writes
+nothing. Coach must then read both Training context and Daily Assessment before
+claiming an active cadence or a concrete next action; prose in `note` is never
+used as schedule authority.
+
 New programs/versions are inactive. Activation uses `expectedLockVersion`; one
 Person cannot have two active programs.
 
@@ -157,3 +170,4 @@ pending acceptance.
 - [Atomic exercise resolution during confirmed save](../../adr/20260922-resolve-training-program-exercises-atomically.md)
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md)
 - [Rolling cadence and Training-owned next step](../../adr/20260922-own-rolling-training-cadence-and-next-step-in-training.md)
+- [Atomic accepted-cadence materialization](../../adr/20260923-materialize-confirmed-training-program-cadence-atomically.md)

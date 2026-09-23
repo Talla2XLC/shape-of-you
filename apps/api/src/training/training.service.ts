@@ -13,6 +13,8 @@ import type {
   ExerciseOverlay,
   ExternalActivitySummary,
   ListWorkoutSessionsQuery,
+  MaterializeTrainingProgramCadence,
+  MaterializeTrainingProgramCadenceResult,
   PersonalRecordList,
   ProgressionCandidateList,
   SaveConfirmedTrainingProgram,
@@ -172,6 +174,16 @@ export class TrainingService {
     input: SaveConfirmedTrainingProgram
   ): Promise<SaveConfirmedTrainingProgramResult> {
     return this.store.saveConfirmedProgram(
+      this.personContext.getPersonId(),
+      input
+    );
+  }
+
+  /** Atomically appends accepted cadence to one exact active immutable version. */
+  public materializeProgramCadence(
+    input: MaterializeTrainingProgramCadence
+  ): Promise<MaterializeTrainingProgramCadenceResult> {
+    return this.store.materializeProgramCadence(
       this.personContext.getPersonId(),
       input
     );

@@ -19,7 +19,11 @@ import type {
 
 import { RequestPersonContext } from "../src/application/person-context.js";
 import type { DailyAssessmentCoachContext } from "../src/coaching/daily-assessment.service.js";
-import { ConflictError, NotFoundError } from "../src/domain/errors.js";
+import {
+  ConflictError,
+  DomainValidationError,
+  NotFoundError
+} from "../src/domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
@@ -196,6 +200,7 @@ const unavailableServices = {
     correctWorkoutSession: unreachable,
     findActiveProgram: unreachable,
     saveConfirmedProgram: unreachable,
+    materializeProgramCadence: unreachable,
     getTrainingContext: unreachable
   },
   recovery: {
@@ -353,6 +358,15 @@ describe("MCP HTTP adapter", () => {
       "call save_confirmed_training_program and then get_training_context in the same turn"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "do not make the user restate the program"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "materialize it as an immutable successor"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "then call get_training_context and get_daily_assessment in the same turn"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "label every such program only Proposed now"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
@@ -498,7 +512,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(27);
+    expect(body.result.tools).toHaveLength(28);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -528,6 +542,7 @@ describe("MCP HTTP adapter", () => {
       get_active_training_program: MCP_READ_SCOPE,
       get_training_context: MCP_READ_SCOPE,
       save_confirmed_training_program: MCP_WORKOUT_WRITE_SCOPE,
+      materialize_training_program_cadence: MCP_WORKOUT_WRITE_SCOPE,
       list_workout_sessions: MCP_READ_SCOPE,
       record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       correct_workout_session: MCP_WORKOUT_WRITE_SCOPE,
@@ -942,6 +957,34 @@ describe("MCP HTTP adapter", () => {
     );
     expect(ToolSchema.safeParse(trainingContextTool).success).toBe(true);
     expect(ToolSchema.safeParse(saveProgramTool).success).toBe(true);
+    const materializeCadenceTool = body.result.tools.find(
+      (tool: { name: string }) =>
+        tool.name === "materialize_training_program_cadence"
+    );
+    expect(materializeCadenceTool).toMatchObject({
+      inputSchema: {
+        $id: "MaterializeTrainingProgramCadence",
+        required: expect.arrayContaining([
+          "expectedActiveProgramId",
+          "expectedActiveVersionId",
+          "expectedLockVersion",
+          "cadence"
+        ])
+      },
+      outputSchema: { $id: "MaterializeTrainingProgramCadenceResult" },
+      annotations: { readOnlyHint: false },
+      securitySchemes: [{ scopes: [MCP_WORKOUT_WRITE_SCOPE] }]
+    });
+    expect(materializeCadenceTool.description).toContain(
+      "without changing its name, note, workouts, exercise versions, order, loads, or progression"
+    );
+    expect(materializeCadenceTool.description).toContain(
+      "never ask the user to restate it"
+    );
+    expect(materializeCadenceTool.description).toContain(
+      "call get_training_context and get_daily_assessment in the same turn"
+    );
+    expect(ToolSchema.safeParse(materializeCadenceTool).success).toBe(true);
   });
 
   it("returns the OAuth challenge from a protected tool call", async () => {
@@ -986,6 +1029,7 @@ describe("MCP HTTP adapter", () => {
       .sign(pair.privateKey);
     const programId = "00000000-0000-4000-8000-000000000401";
     const exerciseVersionId = "00000000-0000-4000-8000-000000000402";
+    const activeVersionId = "00000000-0000-4000-8000-000000000403";
     const getTrainingContext = vi
       .fn()
       .mockResolvedValueOnce({
@@ -1053,6 +1097,29 @@ describe("MCP HTTP adapter", () => {
       })
       .mockRejectedValueOnce(new ConflictError("Active program changed"))
       .mockRejectedValueOnce(new Error("Training repository unavailable"));
+    const materializeProgramCadence = vi
+      .fn()
+      .mockResolvedValueOnce({
+        outcome: "updated",
+        program: {
+          id: programId,
+          activeVersionId: "00000000-0000-4000-8000-000000000404",
+          lockVersion: 2
+        }
+      })
+      .mockResolvedValueOnce({
+        outcome: "unchanged",
+        program: {
+          id: programId,
+          activeVersionId,
+          lockVersion: 2
+        }
+      })
+      .mockRejectedValueOnce(new DomainValidationError(
+        "cadence workoutSequence must reference an existing workout position"
+      ))
+      .mockRejectedValueOnce(new ConflictError("Active program changed"))
+      .mockRejectedValueOnce(new Error("Training repository unavailable"));
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1079,7 +1146,8 @@ describe("MCP HTTP adapter", () => {
         training: {
           ...unavailableServices.training,
           getTrainingContext,
-          saveConfirmedProgram
+          saveConfirmedProgram,
+          materializeProgramCadence
         }
       }
     });
@@ -1145,6 +1213,25 @@ describe("MCP HTTP adapter", () => {
           note: null
         }]
       }]
+    };
+    const acceptedCadence = {
+      expectedActiveProgramId: programId,
+      expectedActiveVersionId: activeVersionId,
+      expectedLockVersion: 1,
+      cadence: {
+        kind: "rolling_weekly",
+        strengthSessionsPerWeek: 3,
+        workoutSequence: [1, 2],
+        lightCardio: {
+          sessionsPerWeek: 2,
+          durationSeconds: 2400,
+          targetAverageHeartRateMin: 135,
+          targetAverageHeartRateMax: 145,
+          warmupSeconds: 300,
+          workSeconds: 1800,
+          cooldownSeconds: 300
+        }
+      }
     };
 
     try {
@@ -1325,6 +1412,99 @@ describe("MCP HTTP adapter", () => {
       );
       expect(retryable.content[0].text).toContain(
         "keep the program Proposed now"
+      );
+
+      const invalidCadence = (
+        await call(210, "materialize_training_program_cadence", {
+          ...acceptedCadence,
+          expectedActiveVersionId: undefined
+        })
+      ).json().result;
+      expect(invalidCadence).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "invalid_cadence"
+        }
+      });
+      expect(invalidCadence.content[0].text).toContain(
+        "never claim the cadence is active"
+      );
+      expect(materializeProgramCadence).not.toHaveBeenCalled();
+
+      const materialized = (
+        await call(211, "materialize_training_program_cadence", acceptedCadence)
+      ).json().result;
+      expect(materialized).toMatchObject({
+        structuredContent: {
+          outcome: "updated",
+          program: { id: programId, lockVersion: 2 }
+        }
+      });
+      expect(materialized.content[0].text).toContain(
+        "MUST immediately call get_training_context and get_daily_assessment"
+      );
+      expect(materializeProgramCadence).toHaveBeenCalledWith(acceptedCadence);
+
+      const alreadyMaterialized = (
+        await call(215, "materialize_training_program_cadence", acceptedCadence)
+      ).json().result;
+      expect(alreadyMaterialized).toMatchObject({
+        structuredContent: {
+          outcome: "unchanged",
+          program: { id: programId, lockVersion: 2 }
+        }
+      });
+      expect(alreadyMaterialized.content[0].text).toContain(
+        "semantic no-op and no new version was created"
+      );
+      expect(alreadyMaterialized.content[0].text).not.toContain(
+        "persisted as an immutable successor"
+      );
+
+      const semanticInvalidCadence = (
+        await call(214, "materialize_training_program_cadence", {
+          ...acceptedCadence,
+          cadence: { ...acceptedCadence.cadence, workoutSequence: [3] }
+        })
+      ).json().result;
+      expect(semanticInvalidCadence).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "invalid_cadence"
+        }
+      });
+      expect(semanticInvalidCadence.content[0].text).toContain(
+        "ask one short natural question for the single missing detail"
+      );
+
+      const staleCadence = (
+        await call(212, "materialize_training_program_cadence", acceptedCadence)
+      ).json().result;
+      expect(staleCadence).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "stale_active_program"
+        }
+      });
+      expect(staleCadence.content[0].text).toContain(
+        "do not overwrite or retry automatically"
+      );
+
+      const retryableCadence = (
+        await call(213, "materialize_training_program_cadence", acceptedCadence)
+      ).json().result;
+      expect(retryableCadence).toMatchObject({
+        isError: true,
+        structuredContent: {
+          state: "not_saved",
+          reason: "retryable_failure"
+        }
+      });
+      expect(retryableCadence.content[0].text).toContain(
+        "never claim the cadence is active"
       );
     } finally {
       await authorizedFastify.close();

@@ -219,6 +219,7 @@ const trainingStore: TrainingStore = {
   appendProgramVersion: unreachable,
   activateProgramVersion: unreachable,
   saveConfirmedProgram: unreachable,
+  materializeProgramCadence: unreachable,
   findProgram: unreachable,
   findActiveProgram: unreachable,
   createWorkoutSession: unreachable,

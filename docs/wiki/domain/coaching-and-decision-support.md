@@ -300,6 +300,18 @@ automatically; Coach keeps the accepted snapshot available and asks whether to
 replace the current program. Failed or inconsistent verification never permits
 an active, agreed, or current-plan claim.
 
+The same natural acceptance applies when the complete proposal adds a typed
+rolling cadence to an already active legacy program. The user does not restate
+the program, identify versions, or confirm each exercise. After verifying that
+the active name, note, workouts, exercise versions, order, loads, RIR, and
+progression still match the accepted proposal, Coach sends only the accepted
+cadence with the exact active authority. Training clones and activates the
+immutable successor atomically. Coach then rereads Training context and Daily
+Assessment in the same turn; only those results may establish the active
+cadence and today's concrete action. Ambiguous acceptance, a partial edit, a
+stale active version, or failed verification cannot be converted into a write
+or a prompt-inferred A/B decision.
+
 The same Training context also returns a separate bounded list of current
 connected activity summaries. Coach treats an imported run, ride, or other
 activity as completed evidence without asking the user to resend a screenshot
@@ -354,6 +366,7 @@ cadence keep the explicit schedule-unavailable limitation.
 - [MCP active-program absence](../../adr/20260828-represent-active-training-program-absence-explicitly-in-mcp.md).
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md).
 - [Natural TrainingProgram acceptance](../../adr/20260922-bind-natural-training-program-acceptance-to-latest-complete-proposal.md).
+- [Atomic accepted-cadence materialization](../../adr/20260923-materialize-confirmed-training-program-cadence-atomically.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).

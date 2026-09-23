@@ -645,6 +645,45 @@ export type SaveConfirmedTrainingProgramResult = FromSchema<
   typeof SaveConfirmedTrainingProgramResultSchema
 >;
 
+export const MaterializeTrainingProgramCadenceSchema = {
+  $id: "MaterializeTrainingProgramCadence",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "expectedActiveProgramId",
+    "expectedActiveVersionId",
+    "expectedLockVersion",
+    "cadence"
+  ],
+  properties: {
+    expectedActiveProgramId: uuidSchema,
+    expectedActiveVersionId: uuidSchema,
+    expectedLockVersion: { type: "integer", minimum: 0 },
+    cadence: TrainingProgramCadenceSchema
+  }
+} as const;
+
+/** Accepted typed cadence bound to one exact active immutable program version. */
+export type MaterializeTrainingProgramCadence = FromSchema<
+  typeof MaterializeTrainingProgramCadenceSchema
+>;
+
+export const MaterializeTrainingProgramCadenceResultSchema = {
+  $id: "MaterializeTrainingProgramCadenceResult",
+  type: "object",
+  additionalProperties: false,
+  required: ["outcome", "program"],
+  properties: {
+    outcome: { type: "string", enum: ["updated", "unchanged"] },
+    program: TrainingProgramSchema
+  }
+} as const;
+
+/** Result of atomically materializing cadence on the exact active program. */
+export type MaterializeTrainingProgramCadenceResult = FromSchema<
+  typeof MaterializeTrainingProgramCadenceResultSchema
+>;
+
 const performedSetInputProperties = {
   weightKg: nullableWeightSchema,
   reps: {

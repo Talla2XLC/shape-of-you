@@ -22,6 +22,7 @@ let database: DatabaseContext;
 let app: NestFastifyApplication;
 const personA = "00000000-0000-4000-8000-000000000001";
 const personB = "00000000-0000-4000-8000-000000000002";
+const personC = "00000000-0000-4000-8000-000000000003";
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:17-alpine")
@@ -46,8 +47,8 @@ beforeAll(async () => {
   database = createDatabase(config);
   await database.pool.query(
     `insert into persons (id, kind, status)
-     values ($1, 'real', 'active')`,
-    [personB]
+     values ($1, 'real', 'active'), ($2, 'real', 'active')`,
+    [personB, personC]
   );
   app = await buildApp({ config, database });
 });
@@ -614,6 +615,159 @@ describe("Training PostgreSQL vertical", () => {
       })
     ).rejects.toThrow("changed concurrently");
     expect((await repository.findActiveProgram(personB))?.lockVersion).toBe(2);
+  });
+
+  it("materializes accepted cadence as an exact immutable active successor", async () => {
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(
+      repository,
+      new SyntheticPersonContext(personC)
+    );
+    const exercise = await repository.createExercise(personA, {
+      visibility: "shared",
+      name: "TASK-0128 Cadence Press",
+      category: "strength",
+      movementPattern: "push",
+      equipment: "machine",
+      instructions: null,
+      note: null
+    });
+    const legacy = await repository.saveConfirmedProgram(personC, {
+      expectedActiveProgramId: null,
+      expectedLockVersion: null,
+      name: "TASK-0128 Ahilej A/B",
+      note: "Legacy schedule remains prose only",
+      workouts: [{
+        name: "A",
+        prescriptions: [{
+          exerciseVersionId: exercise.currentVersion.id,
+          loadBasis: "external_weight",
+          targetWeightKg: 22.5,
+          targetSets: 3,
+          targetRepsMin: 8,
+          targetRepsMax: 10,
+          targetRir: 2,
+          progressionIncrementKg: null,
+          note: null
+        }]
+      }]
+    });
+    if (legacy.outcome === "needs_clarification") {
+      throw new Error("Expected the legacy program to be saved");
+    }
+    const legacyVersion = legacy.program.activeVersion;
+    if (!legacyVersion) throw new Error("Expected an active legacy version");
+    expect(legacyVersion.cadence).toBeNull();
+    await expect(service.getTrainingContext({
+      historyLimit: 1,
+      localDate: "2026-09-23"
+    })).resolves.toMatchObject({ nextStep: { state: "schedule_unavailable" } });
+
+    const cadence = {
+      kind: "rolling_weekly" as const,
+      strengthSessionsPerWeek: 3,
+      workoutSequence: [1],
+      lightCardio: {
+        sessionsPerWeek: 2,
+        durationSeconds: 2400,
+        targetAverageHeartRateMin: 135,
+        targetAverageHeartRateMax: 145,
+        warmupSeconds: 300,
+        workSeconds: 1800,
+        cooldownSeconds: 300
+      }
+    };
+    const updated = await service.materializeProgramCadence({
+      expectedActiveProgramId: legacy.program.id,
+      expectedActiveVersionId: legacyVersion.id,
+      expectedLockVersion: legacy.program.lockVersion,
+      cadence
+    });
+    expect(updated).toMatchObject({
+      outcome: "updated",
+      program: {
+        id: legacy.program.id,
+        lockVersion: legacy.program.lockVersion + 1,
+        activeVersion: {
+          version: legacyVersion.version + 1,
+          name: legacyVersion.name,
+          note: legacyVersion.note,
+          cadence,
+          workouts: legacyVersion.workouts
+        }
+      }
+    });
+    expect(updated.program.activeVersionId).toBe(updated.program.currentVersion.id);
+    await expect(service.getTrainingContext({
+      historyLimit: 1,
+      localDate: "2026-09-23"
+    })).resolves.toMatchObject({
+      program: { activeVersion: { cadence } },
+      nextStep: { state: "strength", workoutPosition: 1, workoutName: "A" }
+    });
+
+    const oldVersionCadence = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_program_cadences
+        where program_version_id = $1`,
+      [legacyVersion.id]
+    );
+    expect(oldVersionCadence.rows[0]?.count).toBe("0");
+
+    const duplicate = await service.materializeProgramCadence({
+      expectedActiveProgramId: updated.program.id,
+      expectedActiveVersionId: updated.program.activeVersionId!,
+      expectedLockVersion: updated.program.lockVersion,
+      cadence: {
+        lightCardio: cadence.lightCardio === null ? null : {
+          cooldownSeconds: cadence.lightCardio.cooldownSeconds,
+          workSeconds: cadence.lightCardio.workSeconds,
+          warmupSeconds: cadence.lightCardio.warmupSeconds,
+          targetAverageHeartRateMax:
+            cadence.lightCardio.targetAverageHeartRateMax,
+          targetAverageHeartRateMin:
+            cadence.lightCardio.targetAverageHeartRateMin,
+          durationSeconds: cadence.lightCardio.durationSeconds,
+          sessionsPerWeek: cadence.lightCardio.sessionsPerWeek
+        },
+        workoutSequence: [...cadence.workoutSequence],
+        strengthSessionsPerWeek: cadence.strengthSessionsPerWeek,
+        kind: "rolling_weekly"
+      }
+    });
+    expect(duplicate).toMatchObject({
+      outcome: "unchanged",
+      program: {
+        activeVersionId: updated.program.activeVersionId,
+        lockVersion: updated.program.lockVersion
+      }
+    });
+
+    const beforeFailures = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_program_versions
+        where program_id = $1`,
+      [updated.program.id]
+    );
+    await expect(service.materializeProgramCadence({
+      expectedActiveProgramId: updated.program.id,
+      expectedActiveVersionId: legacyVersion.id,
+      expectedLockVersion: updated.program.lockVersion,
+      cadence: { ...cadence, workoutSequence: [1, 1] }
+    })).rejects.toThrow("changed concurrently");
+    await expect(service.materializeProgramCadence({
+      expectedActiveProgramId: updated.program.id,
+      expectedActiveVersionId: updated.program.activeVersionId!,
+      expectedLockVersion: updated.program.lockVersion,
+      cadence: { ...cadence, workoutSequence: [2] }
+    })).rejects.toThrow("must reference an existing workout position");
+    const afterFailures = await database.pool.query<{ count: string }>(
+      `select count(*)::text as count
+         from training_program_versions
+        where program_id = $1`,
+      [updated.program.id]
+    );
+    expect(afterFailures.rows[0]?.count).toBe(beforeFailures.rows[0]?.count);
   });
 
   it("resolves exact exercises or creates private versions inside the confirmed-program transaction", async () => {

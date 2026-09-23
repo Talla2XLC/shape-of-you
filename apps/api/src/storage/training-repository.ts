@@ -25,8 +25,11 @@ import type {
   ExerciseOverlay,
   PersonalRecordList,
   ProgressionCandidateList,
+  MaterializeTrainingProgramCadence,
+  MaterializeTrainingProgramCadenceResult,
   SaveConfirmedTrainingProgram,
   SaveConfirmedTrainingProgramResult,
+  TrainingProgramCadence,
   TrainingProgram,
   TrainingProgramVersion,
   UpsertExerciseOverlay,
@@ -187,6 +190,10 @@ export interface TrainingStore {
     personId: string,
     input: SaveConfirmedTrainingProgram
   ): Promise<SaveConfirmedTrainingProgramResult>;
+  materializeProgramCadence(
+    personId: string,
+    input: MaterializeTrainingProgramCadence
+  ): Promise<MaterializeTrainingProgramCadenceResult>;
   findProgram(personId: string, id: string): Promise<TrainingProgram | null>;
   findActiveProgram(personId: string): Promise<TrainingProgram | null>;
   createWorkoutSession(
@@ -256,6 +263,37 @@ function descriptorKey(descriptor: ConfirmedExerciseDescriptor): string {
       descriptor.note
     ].map((value) => value === null ? null : normalizeExerciseText(value))
   ]);
+}
+
+function trainingProgramCadenceMatches(
+  left: TrainingProgramCadence | null,
+  right: TrainingProgramCadence
+): boolean {
+  if (
+    left === null ||
+    left.kind !== right.kind ||
+    left.strengthSessionsPerWeek !== right.strengthSessionsPerWeek ||
+    left.workoutSequence.length !== right.workoutSequence.length ||
+    left.workoutSequence.some((position, index) =>
+      position !== right.workoutSequence[index]
+    )
+  ) {
+    return false;
+  }
+  if (left.lightCardio === null || right.lightCardio === null) {
+    return left.lightCardio === right.lightCardio;
+  }
+  return (
+    left.lightCardio.sessionsPerWeek === right.lightCardio.sessionsPerWeek &&
+    left.lightCardio.durationSeconds === right.lightCardio.durationSeconds &&
+    left.lightCardio.targetAverageHeartRateMin ===
+      right.lightCardio.targetAverageHeartRateMin &&
+    left.lightCardio.targetAverageHeartRateMax ===
+      right.lightCardio.targetAverageHeartRateMax &&
+    left.lightCardio.warmupSeconds === right.lightCardio.warmupSeconds &&
+    left.lightCardio.workSeconds === right.lightCardio.workSeconds &&
+    left.lightCardio.cooldownSeconds === right.lightCardio.cooldownSeconds
+  );
 }
 
 function descriptorMatches(
@@ -1338,6 +1376,96 @@ export class TrainingRepository implements TrainingStore {
           and(
             eq(trainingPrograms.id, active.id),
             eq(trainingPrograms.personId, personId),
+            eq(trainingPrograms.lockVersion, active.lockVersion)
+          )
+        )
+        .returning();
+      if (!updated) {
+        throw new ConflictError("TrainingProgram changed concurrently");
+      }
+      return {
+        outcome: "updated",
+        program: await this.serializeProgram(transaction, updated)
+      };
+    });
+  }
+
+  public async materializeProgramCadence(
+    personId: string,
+    input: MaterializeTrainingProgramCadence
+  ): Promise<MaterializeTrainingProgramCadenceResult> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const [activeRow] = await transaction
+        .select()
+        .from(trainingPrograms)
+        .where(
+          and(
+            eq(trainingPrograms.personId, personId),
+            sql`${trainingPrograms.activeVersionId} IS NOT NULL`
+          )
+        )
+        .limit(1);
+      const active = activeRow
+        ? await this.serializeProgram(transaction, activeRow)
+        : null;
+      if (
+        !active?.activeVersion ||
+        active.id !== input.expectedActiveProgramId ||
+        active.activeVersionId !== input.expectedActiveVersionId ||
+        active.lockVersion !== input.expectedLockVersion
+      ) {
+        throw new ConflictError("Active TrainingProgram changed concurrently");
+      }
+
+      const snapshot: CreateTrainingProgramVersion = {
+        expectedLockVersion: active.lockVersion,
+        name: active.activeVersion.name,
+        note: active.activeVersion.note,
+        cadence: input.cadence,
+        workouts: active.activeVersion.workouts.map((workout) => ({
+          name: workout.name,
+          prescriptions: workout.prescriptions.map((prescription) => ({
+            exerciseVersionId: prescription.exerciseVersionId,
+            loadBasis: prescription.loadBasis,
+            targetWeightKg: prescription.targetWeightKg,
+            targetSets: prescription.targetSets,
+            targetRepsMin: prescription.targetRepsMin,
+            targetRepsMax: prescription.targetRepsMax,
+            targetRir: prescription.targetRir,
+            progressionIncrementKg: prescription.progressionIncrementKg,
+            note: prescription.note
+          }))
+        }))
+      };
+      validateTrainingProgramVersion(snapshot);
+
+      if (trainingProgramCadenceMatches(
+        active.activeVersion.cadence,
+        input.cadence
+      )) {
+        return { outcome: "unchanged", program: active };
+      }
+
+      const version = await this.insertProgramVersionContents(
+        transaction,
+        personId,
+        active.id,
+        active.currentVersion.version + 1,
+        snapshot
+      );
+      const [updated] = await transaction
+        .update(trainingPrograms)
+        .set({
+          currentVersionId: version.id,
+          activeVersionId: version.id,
+          lockVersion: active.lockVersion + 1
+        })
+        .where(
+          and(
+            eq(trainingPrograms.id, active.id),
+            eq(trainingPrograms.personId, personId),
+            eq(trainingPrograms.activeVersionId, input.expectedActiveVersionId),
             eq(trainingPrograms.lockVersion, active.lockVersion)
           )
         )

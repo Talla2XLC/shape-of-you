@@ -32,6 +32,8 @@ import {
   ListWeightMeasurementsQuerySchema,
   ListWorkoutSessionsQuerySchema,
   MealListSchema,
+  MaterializeTrainingProgramCadenceResultSchema,
+  MaterializeTrainingProgramCadenceSchema,
   PersonPreferencesSchema,
   RecoveryObservationListSchema,
   SaveConfirmedTrainingProgramResultSchema,
@@ -64,6 +66,7 @@ import {
   type ListRecoveryObservationsQuery,
   type ListWeightMeasurementsQuery,
   type ListWorkoutSessionsQuery,
+  type MaterializeTrainingProgramCadence,
   type UpdatePersonPreferences,
   type SaveConfirmedTrainingProgram,
   type TrainingContextQuery,
@@ -89,7 +92,11 @@ import type { DailyProjectionService } from "../daily-projections/daily-projecti
 import type { DailyAssessmentService } from "../coaching/daily-assessment.service.js";
 import type { DailyAssessmentCoachContext } from "../coaching/daily-assessment.service.js";
 import type { CurrentRecoveryContextService } from "../coaching/current-recovery-context.service.js";
-import { ConflictError, NotFoundError } from "../domain/errors.js";
+import {
+  ConflictError,
+  DomainValidationError,
+  NotFoundError
+} from "../domain/errors.js";
 import {
   MCP_BODY_MEASUREMENT_WRITE_SCOPE,
   MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
@@ -116,6 +123,7 @@ interface McpServices {
     | "correctWorkoutSession"
     | "findActiveProgram"
     | "saveConfirmedProgram"
+    | "materializeProgramCadence"
     | "getTrainingContext"
   >;
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
@@ -342,7 +350,8 @@ const trainingProgramConfirmationPolicy =
   "For a complete program proposed by Coach, bind acceptance only to the latest complete version that Coach published and offered for activation. Short natural replies such as «да» or yes, «го» or go ahead, «подходит» or works for me, «делаем так» or let's do it, and a clear affirmative emoji directly answering the save question are examples of valid acceptance; they are not magic phrases. " +
   "Praise without acceptance, a question, doubt, an alternative, a partial edit such as «да, но замени...», a reply to an unrelated yes/no question, or a reply after another program version does not confirm the program. Publish a fully revised snapshot after an edit and never invent missing exercises, order, loads, or progression. " +
   "When Coach publishes a complete version without already having authority to save it, end that same message with exactly one short question equivalent to «Сохраняю эту программу как активную?» in the user's language. Use the same one-question form whenever the later reference is genuinely ambiguous. Until persistence and a matching active read-back succeed, label every such program only Proposed now and never call it agreed, active, current, or our plan. " +
-  "After unambiguous acceptance, call save_confirmed_training_program and then get_training_context in the same turn, comparing the entire active snapshot with the accepted version before claiming success.";
+  "After unambiguous acceptance, call save_confirmed_training_program and then get_training_context in the same turn, comparing the entire active snapshot with the accepted version before claiming success. " +
+  "If the accepted complete version already matches the active program's name, note, workouts, exercise versions, and prescriptions but its accepted cadence is absent or different, do not make the user restate the program and do not infer the schedule from prose. Bind the cadence to the exact active version returned by get_training_context, materialize it as an immutable successor, then call get_training_context and get_daily_assessment in the same turn. Only those successful reads may support a claim about the active cadence or today's next action.";
 
 function confirmedTrainingProgramWriteResultContent(result: unknown): string {
   if (isRecord(result) && result.outcome === "needs_clarification") {
@@ -352,6 +361,17 @@ function confirmedTrainingProgramWriteResultContent(result: unknown): string {
   }
   return coachResultContent(
     "The accepted program snapshot and any missing Person-private exercises were persisted atomically. MUST immediately call get_training_context in this same turn and compare the complete active snapshot with the accepted version before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as agreed, current, active, or the user's plan."
+  );
+}
+
+function materializedTrainingProgramCadenceResultContent(
+  result: unknown
+): string {
+  const persistence = isRecord(result) && result.outcome === "unchanged"
+    ? "The exact active program already contained the accepted cadence; this was a semantic no-op and no new version was created."
+    : "The accepted cadence was persisted as an immutable successor of the exact active program.";
+  return coachResultContent(
+    `${persistence} MUST immediately call get_training_context and get_daily_assessment in this same turn. Confirm that the active version contains the accepted cadence and use only the assessment's returned action for today's recommendation. If either verification fails or differs, do not claim that the cadence is active and do not infer a next workout from prose. Never expose tool names, ids, fields, or storage mechanics.`
   );
 }
 
@@ -589,6 +609,21 @@ function createServer(
       if (definition.tool.name === "save_confirmed_training_program") {
         return trainingProgramSaveErrorResult("retryable_failure");
       }
+      if (
+        definition.tool.name === "materialize_training_program_cadence" &&
+        (error instanceof ConflictError || error instanceof NotFoundError)
+      ) {
+        return trainingProgramCadenceErrorResult("stale_active_program");
+      }
+      if (
+        definition.tool.name === "materialize_training_program_cadence" &&
+        error instanceof DomainValidationError
+      ) {
+        return trainingProgramCadenceErrorResult("invalid_cadence");
+      }
+      if (definition.tool.name === "materialize_training_program_cadence") {
+        return trainingProgramCadenceErrorResult("retryable_failure");
+      }
       return errorResult(coachFailureResultContent(
         definition.write
           ? "The requested fact was not saved. Say this briefly and naturally without blaming the user."
@@ -748,6 +783,19 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
           input as SaveConfirmedTrainingProgram
         ),
       confirmedTrainingProgramWriteResultContent
+    ),
+    defineTool(
+      "materialize_training_program_cadence",
+      "Materialize one already accepted complete cadence as an immutable successor of the exact active TrainingProgram without changing its name, note, workouts, exercise versions, order, loads, or progression. Use only after get_training_context proves those active contents match the accepted version and only the cadence is absent or different. Natural acceptance of that complete version is sufficient; never ask the user to restate it or confirm each workout. Bind to the returned active program id, active version id, and lock version. A repeated identical cadence is a no-op. After success, call get_training_context and get_daily_assessment in the same turn; do not claim an active cadence or next action until both reads succeed.",
+      MaterializeTrainingProgramCadenceSchema,
+      MaterializeTrainingProgramCadenceResultSchema,
+      true,
+      MCP_WORKOUT_WRITE_SCOPE,
+      (input) =>
+        services.training.materializeProgramCadence(
+          input as MaterializeTrainingProgramCadence
+        ),
+      materializedTrainingProgramCadenceResultContent
     ),
     defineTool(
       "list_workout_sessions",
@@ -1425,6 +1473,9 @@ function inputErrorResult(toolName: string): CallToolResult {
   if (toolName === "save_confirmed_training_program") {
     return trainingProgramSaveErrorResult("invalid_snapshot");
   }
+  if (toolName === "materialize_training_program_cadence") {
+    return trainingProgramCadenceErrorResult("invalid_cadence");
+  }
   if (toolName === "record_meal") {
     return errorResult(coachFailureResultContent(
       "Retry the Meal once silently from the photo and text already present in the conversation. Every identifiable item must have non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates; estimate realistic portions with text/photo method and bounded confidence because exact measured grams are not required. Do not ask the user for values that can be reasonably estimated, do not save an incomplete Meal, and do not mention internal completeness, tools, staging, APIs, contracts, fields, or this retry. If material food or scale is genuinely unidentifiable, ask one natural clarification instead of claiming it was saved."
@@ -1478,6 +1529,31 @@ function trainingProgramSaveErrorResult(
       state: "not_saved",
       reason,
       recovery
+    }
+  );
+}
+
+type TrainingProgramCadenceFailureReason =
+  | "invalid_cadence"
+  | "stale_active_program"
+  | "retryable_failure";
+
+function trainingProgramCadenceErrorResult(
+  reason: TrainingProgramCadenceFailureReason
+): CallToolResult {
+  const instruction = reason === "invalid_cadence"
+    ? "TRAINING CADENCE NOT SAVED: Re-read the active training context and rebuild only the already accepted complete cadence from the conversation. Retry once only when every cadence value and workout position is explicit; otherwise ask one short natural question for the single missing detail."
+    : reason === "stale_active_program"
+      ? "TRAINING CADENCE NOT SAVED: Re-read the active training context. If that exact active version already contains the accepted cadence, continue to the daily assessment. If it differs, do not overwrite or retry automatically; ask one short natural question about applying the retained cadence to the current program without asking the user to repeat it."
+      : "TRAINING CADENCE SAVE NOT VERIFIED: Re-read the active training context. If the exact active version contains the accepted cadence, continue to the daily assessment. If the same expected active version remains unchanged, retry once; otherwise do not overwrite it automatically.";
+  return errorResult(
+    coachFailureResultContent(
+      `${instruction} Until both the active-program read and daily assessment succeed, never claim the cadence is active or infer today's next workout. Keep all tool names, ids, fields, error categories, and recovery mechanics out of the user-facing reply.`
+    ),
+    {
+      state: "not_saved",
+      reason,
+      recovery: "read_current_training_authority_then_continue_safely"
     }
   );
 }
