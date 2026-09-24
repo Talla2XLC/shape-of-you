@@ -457,6 +457,15 @@ describe("MCP HTTP adapter", () => {
     expect(MCP_COACH_REPLY_POLICY).toContain(
       "perform the action instead"
     );
+    expect(MCP_COACH_REPLY_POLICY).toContain(
+      "Never require Garmin Training Readiness or Recovery Time screenshots"
+    );
+    expect(MCP_COACH_REPLY_POLICY).toContain(
+      "an absent Garmin value is unknown, not a reason to withhold advice"
+    );
+    expect(MCP_COACH_REPLY_POLICY).toContain(
+      "A voluntarily supplied Garmin report is manual evidence, not connected-device data"
+    );
     const forbiddenRoutineReplyTerms = [
       "amountKind",
       "list_meals",
@@ -2341,6 +2350,11 @@ describe("MCP HTTP adapter", () => {
         successfulContent.set(name, toolResult.content[0].text);
         expect(toolResult.isError, name).not.toBe(true);
         expect(toolResult.content[0].text, name).toContain(MCP_COACH_REPLY_POLICY);
+        if (name === "get_current_recovery_context" || name === "get_daily_assessment") {
+          expect(toolResult.content[0].text, name).toContain(
+            "Never require Garmin Training Readiness or Recovery Time screenshots"
+          );
+        }
         expect(toolResult.content[0].text, name).toContain(
           MCP_COACH_FINAL_RESPONSE_REQUIREMENT
         );

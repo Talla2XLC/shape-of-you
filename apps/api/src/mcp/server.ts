@@ -189,6 +189,7 @@ export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
 export const MCP_COACH_REPLY_POLICY =
   "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
   "For every meaningful nutrition, training, recovery, body, or daily-summary interaction, one useful evidence-grounded observation and one concrete next step are mandatory. " +
+  "Never require Garmin Training Readiness or Recovery Time screenshots for routine recovery or daily guidance. Base advice on the Shape of You assessment and available recovery observations; an absent Garmin value is unknown, not a reason to withhold advice. Do not infer Garmin Training Readiness from a generic readiness field or present an activity-associated Recovery Time as current. A voluntarily supplied Garmin report is manual evidence, not connected-device data. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
   "Keep planned facts, proposed guidance, and verified completed facts distinct. Use the structured completion assessment for completion claims; neither it nor manual feedback creates an owning-domain fact.";
 
@@ -205,7 +206,7 @@ const dailyCoachReplyShape =
   "For a full Daily Coach answer, use the requested brief structure without a sentence limit.";
 
 const coachFailurePolicy =
-  "Do not claim that an unverified read or failed change succeeded. Keep implementation mechanics invisible, do not repeat an obvious permission question, and do not base guidance on unavailable or unverified facts.";
+  "Do not claim that an unverified read or failed change succeeded. Keep implementation mechanics invisible, do not repeat an obvious permission question, do not require Garmin Training Readiness or Recovery Time screenshots, and do not base guidance on unavailable or unverified facts.";
 
 function coachResultContent(
   instruction: string,
