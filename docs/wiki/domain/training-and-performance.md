@@ -44,10 +44,25 @@ automatically.
 - Repeated external identity plus checksum is a no-op. Changed content creates
   an immutable successor, including a later return to a previously seen value.
   Current reads expose only the latest fact.
+- `ExternalActivityProgramClassification` is a separate Training-owned
+  append-only fact over the stable correction lineage of one imported activity.
+  It pins the exact active TrainingProgramVersion and records either one
+  `program_workout` position or `not_program_workout`. An identical retry is a
+  semantic no-op; a changed answer appends a successor rather than overwriting
+  user authority.
+- Initial classification uses the expected Person-local date and recomputes the
+  same exact `needs_classification` projection under the Person lock. It writes
+  only when the expected current activity is still the date-scoped pending
+  target for the expected active program/version/lock. Stale authority, a
+  different pending activity, a future or old-week activity, or a newly created
+  session fails closed without a partial write.
 - A separate Person-scoped relational association can identify one external
   activity as evidence for a detailed WorkoutSession. The aggregates stay
   distinct, and only the explicit association prevents double counting.
-  Connected-data erasure removes the association without mutating the session.
+  A real linked session takes precedence over an external classification.
+  Provider correction retains classification through the stable lineage;
+  connected-data erasure removes both association and classification without
+  mutating the session.
 - `NextTrainingStep` is a deterministic read projection over the active cadence
   and current Training facts. Missed days do not move its sequence; explicit
   repeats or reordering become the next anchor. Qualified external cardio may
@@ -55,7 +70,10 @@ automatically.
   strength without an exact program-workout identity cannot advance A/B and
   produces a bounded classification need instead of a guess. Legacy cadence,
   missing local date, current-day completion, and completed weekly targets are
-  explicit states.
+  explicit states. Current projections emit `training-next-step-v2`; historical
+  Daily Assessment snapshots containing v1 remain readable. A classified
+  external strength activity can advance only cadence and never becomes
+  exercise, set, load, personal-record, or progression evidence.
 - Profile coverage unions current WorkoutSession and external activity dates.
   One Person-local date is counted once regardless of source, and a date without
   a workout is not described as a missed training day.
@@ -90,6 +108,7 @@ automatically.
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Atomic exercise resolution during confirmed program save](../../adr/20260922-resolve-training-program-exercises-atomically.md).
 - [Rolling cadence and Training-owned next step](../../adr/20260922-own-rolling-training-cadence-and-next-step-in-training.md).
+- [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 
 ## Open questions
 

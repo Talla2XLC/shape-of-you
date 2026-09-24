@@ -684,6 +684,106 @@ export type MaterializeTrainingProgramCadenceResult = FromSchema<
   typeof MaterializeTrainingProgramCadenceResultSchema
 >;
 
+export const ExternalActivityProgramClassificationValueSchema = {
+  oneOf: [
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind", "workoutPosition"],
+      properties: {
+        kind: { const: "program_workout" },
+        workoutPosition: { type: "integer", minimum: 1, maximum: 100 }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["kind"],
+      properties: { kind: { const: "not_program_workout" } }
+    }
+  ]
+} as const;
+
+/** Explicit user authority about one imported activity and active program. */
+export type ExternalActivityProgramClassificationValue = FromSchema<
+  typeof ExternalActivityProgramClassificationValueSchema
+>;
+
+export const ClassifyExternalActivitySchema = {
+  $id: "ClassifyExternalActivity",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "expectedExternalActivityId",
+    "expectedLocalDate",
+    "expectedActiveProgramId",
+    "expectedActiveVersionId",
+    "expectedLockVersion",
+    "expectedCurrentClassificationId",
+    "classification"
+  ],
+  properties: {
+    expectedExternalActivityId: uuidSchema,
+    expectedLocalDate: { type: "string", format: "date" },
+    expectedActiveProgramId: uuidSchema,
+    expectedActiveVersionId: uuidSchema,
+    expectedLockVersion: { type: "integer", minimum: 0 },
+    expectedCurrentClassificationId: nullableUuidSchema,
+    classification: ExternalActivityProgramClassificationValueSchema
+  }
+} as const;
+
+/** Optimistic command classifying one exact current imported activity. */
+export type ClassifyExternalActivity = FromSchema<
+  typeof ClassifyExternalActivitySchema
+>;
+
+export const ExternalActivityProgramClassificationSchema = {
+  $id: "ExternalActivityProgramClassification",
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "id",
+    "programId",
+    "programVersionId",
+    "classification",
+    "createdAt"
+  ],
+  properties: {
+    id: uuidSchema,
+    programId: uuidSchema,
+    programVersionId: uuidSchema,
+    classification: ExternalActivityProgramClassificationValueSchema,
+    createdAt: { type: "string", format: "date-time" }
+  }
+} as const;
+
+/** Current append-only classification projected without provider internals. */
+export type ExternalActivityProgramClassification = FromSchema<
+  typeof ExternalActivityProgramClassificationSchema
+>;
+
+export const ClassifyExternalActivityResultSchema = {
+  $id: "ClassifyExternalActivityResult",
+  type: "object",
+  additionalProperties: false,
+  required: ["outcome", "classification"],
+  properties: {
+    outcome: {
+      type: "string",
+      enum: ["created", "corrected", "unchanged", "stale", "not_pending"]
+    },
+    classification: {
+      anyOf: [ExternalActivityProgramClassificationSchema, { type: "null" }]
+    }
+  }
+} as const;
+
+/** Closed outcome of an idempotent or optimistic classification command. */
+export type ClassifyExternalActivityResult = FromSchema<
+  typeof ClassifyExternalActivityResultSchema
+>;
+
 const performedSetInputProperties = {
   weightKg: nullableWeightSchema,
   reps: {
@@ -1005,7 +1105,8 @@ export const ExternalActivitySummarySchema = {
     "averageHeartRate",
     "maximumHeartRate",
     "deviceName",
-    "garminAttributed"
+    "garminAttributed",
+    "classification"
   ],
   properties: {
     id: uuidSchema,
@@ -1064,7 +1165,10 @@ export const ExternalActivitySummarySchema = {
       ]
     },
     deviceName: nullableShortTextSchema,
-    garminAttributed: { type: "boolean" }
+    garminAttributed: { type: "boolean" },
+    classification: {
+      anyOf: [ExternalActivityProgramClassificationSchema, { type: "null" }]
+    }
   }
 } as const;
 
@@ -1096,7 +1200,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion"],
       properties: {
         state: { enum: ["no_active_program", "local_date_required", "schedule_unavailable"] },
-        policyVersion: { const: "training-next-step-v1" }
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] }
       }
     },
     {
@@ -1114,10 +1218,36 @@ export const NextTrainingStepSchema = {
     {
       type: "object",
       additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "externalActivityId", "options", "question"],
+      properties: {
+        state: { const: "needs_classification" },
+        policyVersion: { const: "training-next-step-v2" },
+        localDate: { type: "string", format: "date" },
+        externalActivityId: uuidSchema,
+        options: {
+          type: "array",
+          minItems: 1,
+          maxItems: 100,
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["workoutPosition", "workoutName"],
+            properties: {
+              workoutPosition: { type: "integer", minimum: 1, maximum: 100 },
+              workoutName: { type: "string", minLength: 1, maxLength: 256 }
+            }
+          }
+        },
+        question: { type: "string", minLength: 1, maxLength: 256 }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
       required: ["state", "policyVersion", "localDate", "reason", "evidenceIds"],
       properties: {
         state: { enum: ["complete_today", "week_complete"] },
-        policyVersion: { const: "training-next-step-v1" },
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] },
         localDate: { type: "string", format: "date" },
         reason: { enum: ["training_already_completed_today", "weekly_targets_completed"] },
         evidenceIds: { type: "array", items: uuidSchema, uniqueItems: true }
@@ -1129,7 +1259,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "programVersionId", "workoutPosition", "workoutName", "reason"],
       properties: {
         state: { const: "strength" },
-        policyVersion: { const: "training-next-step-v1" },
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] },
         localDate: { type: "string", format: "date" },
         programVersionId: uuidSchema,
         workoutPosition: { type: "integer", minimum: 1, maximum: 100 },
@@ -1143,7 +1273,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "reason", "prescription"],
       properties: {
         state: { const: "light_cardio" },
-        policyVersion: { const: "training-next-step-v1" },
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] },
         localDate: { type: "string", format: "date" },
         reason: { enum: ["between_strength_sessions", "strength_target_completed"] },
         prescription: {

@@ -3,6 +3,8 @@ import { Inject, Injectable } from "@nestjs/common";
 import type {
   AcceptProgressionCandidate,
   ActivateTrainingProgramVersion,
+  ClassifyExternalActivity,
+  ClassifyExternalActivityResult,
   CorrectWorkoutSession,
   CreateExercise,
   CreateExerciseVersion,
@@ -55,7 +57,8 @@ function toExternalActivitySummary(
     averageHeartRate: activity.averageHeartRate,
     maximumHeartRate: activity.maximumHeartRate,
     deviceName: activity.deviceName,
-    garminAttributed: activity.garminAttributed
+    garminAttributed: activity.garminAttributed,
+    classification: activity.classification ?? null
   };
 }
 
@@ -189,25 +192,39 @@ export class TrainingService {
     );
   }
 
+  /** Appends or reuses explicit classification for one imported activity. */
+  public classifyExternalActivity(
+    input: ClassifyExternalActivity
+  ): Promise<ClassifyExternalActivityResult> {
+    return this.store.classifyExternalActivity(
+      this.personContext.getPersonId(),
+      input
+    );
+  }
+
   /** Reads active plan authority with separate bounded manual and connected evidence. */
   public async getTrainingContext(
     query: TrainingContextQuery
   ): Promise<TrainingContext> {
     const personId = this.personContext.getPersonId();
     const historyLimit = query.historyLimit ?? 20;
-    const [program, recentSessions, externalActivities] = await Promise.all([
+    const localDate = query.localDate ?? null;
+    const [program, recentSessions, externalActivities, nextStep] = await Promise.all([
       this.store.findActiveProgram(personId),
       this.store.listWorkoutSessions(personId, historyLimit),
-      this.store.listExternalActivities(personId, historyLimit)
+      this.store.listExternalActivities(personId, historyLimit),
+      localDate === null
+        ? Promise.resolve(null)
+        : this.store.readNextTrainingStep(personId, localDate)
     ]);
     const recentExternalActivities = externalActivities.map(
       toExternalActivitySummary
     );
-    const nextStep = evaluateNextTrainingStep({
+    const resolvedNextStep = nextStep ?? evaluateNextTrainingStep({
       program,
-      localDate: query.localDate ?? null,
+      localDate: null,
       sessions: recentSessions.items,
-      externalActivities: recentExternalActivities
+      externalActivities: []
     });
     return program
       ? {
@@ -215,14 +232,14 @@ export class TrainingService {
           program,
           recentSessions,
           recentExternalActivities,
-          nextStep
+          nextStep: resolvedNextStep
         }
       : {
           status: "absent",
           program: null,
           recentSessions,
           recentExternalActivities,
-          nextStep
+          nextStep: resolvedNextStep
         };
   }
 

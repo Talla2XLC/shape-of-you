@@ -167,9 +167,10 @@ export function trainingProgramSnapshotMatches(
   });
 }
 
-export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v1" as const;
+export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v2" as const;
 
-function localWeekStart(localDate: string): string {
+/** Returns the Monday that bounds the shared rolling-week next-step policy. */
+export function trainingPolicyWeekStart(localDate: string): string {
   const date = new Date(`${localDate}T00:00:00.000Z`);
   const day = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() - day + 1);
@@ -198,7 +199,9 @@ export function evaluateNextTrainingStep(input: {
   readonly program: TrainingProgram | null;
   readonly localDate: string | null;
   readonly sessions: readonly WorkoutSession[];
-  readonly externalActivities: readonly ExternalActivitySummary[];
+  readonly externalActivities: readonly (ExternalActivitySummary & {
+    readonly sessionCovered?: boolean;
+  })[];
 }): NextTrainingStep {
   const policyVersion = TRAINING_NEXT_STEP_POLICY_VERSION;
   if (input.program === null || input.program.activeVersion === null) {
@@ -214,27 +217,52 @@ export function evaluateNextTrainingStep(input: {
     return { state: "schedule_unavailable", policyVersion };
   }
 
-  const weekStart = localWeekStart(localDate);
-  const linkedActivityIds = new Set(
-    input.sessions.flatMap((session) => session.externalActivityId === null ? [] : [session.externalActivityId])
+  const weekStart = trainingPolicyWeekStart(localDate);
+  const directlyLinkedActivityIds = new Set(
+    input.sessions.flatMap((session) =>
+      session.externalActivityId === null ? [] : [session.externalActivityId]
+    )
   );
-  const classified = input.sessions
+  const classifiedSessions = input.sessions
     .filter((session) =>
       session.programVersionId === active.id && session.programWorkoutPosition !== null &&
       session.localDate >= weekStart && session.localDate <= localDate
     )
+    .map((session) => ({
+      id: session.id,
+      localDate: session.localDate,
+      occurredAt: session.occurredAt ?? `${session.localDate}T23:59:59.999Z`,
+      workoutPosition: session.programWorkoutPosition!
+    }));
+  const classifiedExternal = input.externalActivities
+    .filter((activity) =>
+      !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
+      activity.classification?.programVersionId === active.id &&
+      activity.classification.classification.kind === "program_workout" &&
+      activity.localDate >= weekStart && activity.localDate <= localDate
+    )
+    .map((activity) => ({
+      id: activity.id,
+      localDate: activity.localDate,
+      occurredAt: activity.occurredAt,
+      workoutPosition: activity.classification!.classification.kind === "program_workout"
+        ? activity.classification!.classification.workoutPosition
+        : 0
+    }));
+  const classified = [...classifiedSessions, ...classifiedExternal]
     .sort((left, right) =>
-      left.localDate.localeCompare(right.localDate) ||
-      (left.occurredAt ?? left.createdAt).localeCompare(right.occurredAt ?? right.createdAt)
+      left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
     );
   const cardio = cadence.lightCardio;
   const qualifyingCardio = cardio === null ? [] : input.externalActivities
     .filter((activity) =>
-      !linkedActivityIds.has(activity.id) &&
+      !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
       activity.localDate >= weekStart && activity.localDate <= localDate &&
       qualifiesAsLightCardio(activity, cardio)
     )
-    .sort((left, right) => left.occurredAt.localeCompare(right.occurredAt));
+    .sort((left, right) =>
+      left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
+    );
   const todayEvidenceIds = [
     ...classified.filter((session) => session.localDate === localDate).map((session) => session.id),
     ...qualifyingCardio.filter((activity) => activity.localDate === localDate).map((activity) => activity.id)
@@ -252,18 +280,31 @@ export function evaluateNextTrainingStep(input: {
   const lastClassified = classified.at(-1) ?? null;
   const unclassified = input.externalActivities
     .filter((activity) =>
-      !linkedActivityIds.has(activity.id) && activity.distanceMeters === null &&
+      !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
+      activity.distanceMeters === null && activity.classification == null &&
       activity.localDate >= weekStart && activity.localDate <= localDate &&
-      (lastClassified === null || activity.occurredAt > (lastClassified.occurredAt ?? `${lastClassified.localDate}T23:59:59.999Z`))
+      (lastClassified === null || activity.occurredAt > lastClassified.occurredAt)
     )
-    .sort((left, right) => right.occurredAt.localeCompare(left.occurredAt))[0];
+    .sort((left, right) =>
+      right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
+    )[0];
   if (unclassified) {
+    const options = active.workouts.map((workout) => ({
+      workoutPosition: workout.position,
+      workoutName: workout.name
+    }));
+    const named = `Силовая ${unclassified.localDate} — ${options
+      .map((option) => `${option.workoutPosition} — ${option.workoutName}`)
+      .join(", ")} или не по этой программе?`;
     return {
       state: "needs_classification",
       policyVersion,
       localDate,
       externalActivityId: unclassified.id,
-      question: "Последняя силовая была тренировкой A или B?"
+      options,
+      question: named.length <= 256
+        ? named
+        : `Силовая ${unclassified.localDate} — какая тренировка активной программы, или не по ней?`
     };
   }
 
@@ -281,7 +322,7 @@ export function evaluateNextTrainingStep(input: {
   }
 
   const lastCardio = qualifyingCardio.at(-1) ?? null;
-  const lastStrengthInstant = lastClassified?.occurredAt ?? (lastClassified ? `${lastClassified.localDate}T23:59:59.999Z` : null);
+  const lastStrengthInstant = lastClassified?.occurredAt ?? null;
   if (
     cardio !== null && cardioCount < cardio.sessionsPerWeek &&
     (strengthCount >= cadence.strengthSessionsPerWeek ||
@@ -309,12 +350,12 @@ export function evaluateNextTrainingStep(input: {
   let nextPosition = sequence[0]!;
   let reason: Extract<NextTrainingStep, { state: "strength" }>["reason"] = "sequence_start";
   if (lastClassified !== null) {
-    const index = sequence.lastIndexOf(lastClassified.programWorkoutPosition!);
+    const index = sequence.lastIndexOf(lastClassified.workoutPosition);
     nextPosition = sequence[(index >= 0 ? index + 1 : 0) % sequence.length]!;
     const previous = classified.at(-2);
-    const previousIndex = previous ? sequence.lastIndexOf(previous.programWorkoutPosition!) : -1;
+    const previousIndex = previous ? sequence.lastIndexOf(previous.workoutPosition) : -1;
     const expectedLast = previousIndex >= 0 ? sequence[(previousIndex + 1) % sequence.length] : null;
-    reason = expectedLast !== null && expectedLast !== lastClassified.programWorkoutPosition
+    reason = expectedLast !== null && expectedLast !== lastClassified.workoutPosition
       ? "sequence_reanchored_after_deviation"
       : "sequence_continues";
   } else if (lastCardio !== null) {

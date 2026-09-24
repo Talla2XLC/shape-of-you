@@ -3,7 +3,7 @@ import {
   type StartedPostgreSqlContainer
 } from "@testcontainers/postgresql";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import type { AppConfig } from "@shape-of-you/config";
 
@@ -15,14 +15,23 @@ import {
 } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
+import { DailyAssessmentRepository } from "../src/storage/daily-assessment-repository.js";
+import {
+  DailyAssessmentService,
+  derivePersonLocalDate
+} from "../src/coaching/daily-assessment.service.js";
+import { DailyAssessmentEvidenceChangedError } from "../src/domain/errors.js";
+import type { DailyAssessmentPersonalCalculation } from "../src/domain/personalized-daily-assessment.js";
 import { TrainingService } from "../src/training/training.service.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
+let databaseUrl: string;
 const personA = "00000000-0000-4000-8000-000000000001";
 const personB = "00000000-0000-4000-8000-000000000002";
 const personC = "00000000-0000-4000-8000-000000000003";
+const personD = "00000000-0000-4000-8000-000000000004";
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:17-alpine")
@@ -30,7 +39,7 @@ beforeAll(async () => {
     .withUsername("shape_of_you")
     .withPassword("shape_of_you")
     .start();
-  const databaseUrl = container.getConnectionUri();
+  databaseUrl = container.getConnectionUri();
   process.env.PERSON_CONTEXT_MODE = "synthetic";
   process.env.SYNTHETIC_PERSON_ID = personA;
   await runMigrations(databaseUrl);
@@ -47,8 +56,8 @@ beforeAll(async () => {
   database = createDatabase(config);
   await database.pool.query(
     `insert into persons (id, kind, status)
-     values ($1, 'real', 'active'), ($2, 'real', 'active')`,
-    [personB, personC]
+     values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active')`,
+    [personB, personC, personD]
   );
   app = await buildApp({ config, database });
 });
@@ -68,15 +77,429 @@ describe("Training PostgreSQL vertical", () => {
        union all
        select to_regclass('public.workout_sessions')::text
        union all
-       select to_regclass('public.performed_sets')::text`
+       select to_regclass('public.performed_sets')::text
+       union all
+       select to_regclass('public.external_activity_program_classifications')::text`
     );
 
     expect(result.rows.map((row) => row.name)).toEqual([
       "training_exercises",
       "training_programs",
       "workout_sessions",
-      "performed_sets"
+      "performed_sets",
+      "external_activity_program_classifications"
     ]);
+  });
+
+  it("classifies one external lineage append-only across provider correction and erasure", async () => {
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(
+      repository,
+      new SyntheticPersonContext(personD)
+    );
+    const saved = await service.saveConfirmedProgram({
+      expectedActiveProgramId: null,
+      expectedLockVersion: null,
+      name: "Imported A/B",
+      note: null,
+      cadence: {
+        kind: "rolling_weekly",
+        strengthSessionsPerWeek: 4,
+        workoutSequence: [1, 2],
+        lightCardio: null
+      },
+      workouts: ["A", "B"].map((name) => ({
+        name,
+        prescriptions: [{
+          exercise: {
+            name: `TASK-0130 ${name}`,
+            category: "strength",
+            movementPattern: null,
+            equipment: null,
+            instructions: null,
+            note: null
+          },
+          loadBasis: "external_weight" as const,
+          targetWeightKg: 20,
+          targetSets: 3,
+          targetRepsMin: 8,
+          targetRepsMax: 10,
+          targetRir: 2,
+          progressionIncrementKg: 2,
+          note: null
+        }]
+      }))
+    });
+    expect(saved.outcome).toBe("created");
+    const program = saved.program!;
+    const versionId = program.activeVersionId!;
+
+    const providerId = "00000000-0000-4000-8000-000000000501";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000502";
+    const consentId = "00000000-0000-4000-8000-000000000503";
+    const connectionId = "00000000-0000-4000-8000-000000000504";
+    await database.pool.query(
+      "insert into recovery_providers (id, key, name) values ($1, $2, 'TASK-0130 provider')",
+      [providerId, "task-0130-provider"]
+    );
+    await database.pool.query(
+      "insert into recovery_connections (id, person_id, provider_id, dedupe_key) values ($1, $2, $3, $4)",
+      [recoveryConnectionId, personD, providerId, "task-0130-connection"]
+    );
+    await database.pool.query(
+      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')",
+      [consentId, personD, recoveryConnectionId]
+    );
+    await database.pool.query(
+      "insert into integration_connections (id, person_id, recovery_connection_id, consent_id, provider_key, external_user_id) values ($1, $2, $3, $4, $5, 'task-0130-user')",
+      [
+        connectionId,
+        personD,
+        recoveryConnectionId,
+        consentId,
+        "task-0130-provider"
+      ]
+    );
+    const activity = {
+      connectionId,
+      personId: personD,
+      consentId,
+      providerIdentity: "strength-1",
+      normalizedChecksum: "a".repeat(64),
+      occurredAt: "2026-09-21T06:00:00.000Z",
+      localDate: "2026-09-21",
+      timezone: "Europe/Belgrade",
+      name: "Strength",
+      durationSeconds: 3600,
+      distanceMeters: null,
+      trainingLoad: 60,
+      trainingLoadBasis: "relative_training_stress" as const,
+      trainingLoadBasisVersion: "1",
+      averageHeartRate: 120,
+      maximumHeartRate: 160,
+      deviceName: null,
+      sourceProvider: "intervals_icu",
+      garminAttributed: true
+    };
+    await expect(repository.importExternalActivity({
+      ...activity,
+      providerIdentity: "strength-old-week",
+      normalizedChecksum: "0".repeat(64),
+      occurredAt: "2026-09-20T06:00:00.000Z",
+      localDate: "2026-09-20"
+    })).resolves.toBe("created");
+    await expect(repository.importExternalActivity(activity)).resolves.toBe("created");
+    await expect(repository.importExternalActivity({
+      ...activity,
+      providerIdentity: "strength-future",
+      normalizedChecksum: "f".repeat(64),
+      occurredAt: "2026-09-23T06:00:00.000Z",
+      localDate: "2026-09-23"
+    })).resolves.toBe("created");
+    const firstActivity = (await repository.listExternalActivities(personD, 10))
+      .find((candidate) => candidate.providerIdentity === "strength-1")!;
+    await expect(service.getTrainingContext({
+      historyLimit: 10,
+      localDate: "2026-09-21"
+    })).resolves.toMatchObject({
+      nextStep: {
+        state: "needs_classification",
+        externalActivityId: firstActivity.id
+      }
+    });
+    const dailyRepository = new DailyAssessmentRepository(database);
+    const revisionBeforeClassification = await dailyRepository.getEvidenceRevision(
+      personD,
+      "2026-09-01",
+      "2026-09-30"
+    );
+    const command = {
+      expectedExternalActivityId: firstActivity.id,
+      expectedLocalDate: "2026-09-21",
+      expectedActiveProgramId: program.id,
+      expectedActiveVersionId: versionId,
+      expectedLockVersion: program.lockVersion,
+      expectedCurrentClassificationId: null,
+      classification: { kind: "program_workout" as const, workoutPosition: 1 }
+    };
+    const created = await service.classifyExternalActivity(command);
+    expect(created).toMatchObject({ outcome: "created" });
+    await expect(dailyRepository.getEvidenceRevision(
+      personD,
+      "2026-09-01",
+      "2026-09-30"
+    )).resolves.not.toBe(revisionBeforeClassification);
+    await expect(service.classifyExternalActivity({
+      ...command,
+      expectedCurrentClassificationId: created.classification!.id
+    })).resolves.toMatchObject({ outcome: "unchanged" });
+    const corrected = await service.classifyExternalActivity({
+      ...command,
+      expectedCurrentClassificationId: created.classification!.id,
+      classification: { kind: "program_workout", workoutPosition: 2 }
+    });
+    expect(corrected).toMatchObject({ outcome: "corrected" });
+    await expect(service.classifyExternalActivity(command)).resolves.toMatchObject({
+      outcome: "stale"
+    });
+    await expect(new TrainingService(
+      repository,
+      new SyntheticPersonContext(personA)
+    ).classifyExternalActivity(command)).resolves.toMatchObject({ outcome: "stale" });
+    const appendOnlyRows = await database.pool.query<{ count: string }>(
+      "select count(*)::text as count from external_activity_program_classifications where person_id = $1",
+      [personD]
+    );
+    expect(appendOnlyRows.rows[0]?.count).toBe("2");
+
+    await expect(repository.importExternalActivity({
+      ...activity,
+      providerIdentity: "strength-before-last-classified",
+      normalizedChecksum: "c".repeat(64),
+      occurredAt: "2026-09-21T05:00:00.000Z"
+    })).resolves.toBe("created");
+    await expect(service.getTrainingContext({
+      historyLimit: 1,
+      localDate: "2026-09-22"
+    })).resolves.toMatchObject({ nextStep: { state: "strength" } });
+
+    await expect(repository.importExternalActivity({
+      ...activity,
+      providerIdentity: "strength-stale-after-session",
+      normalizedChecksum: "d".repeat(64),
+      occurredAt: "2026-09-22T07:00:00.000Z",
+      localDate: "2026-09-22"
+    })).resolves.toBe("created");
+    const staleAfterSessionActivity = (await repository.listExternalActivities(personD, 10))
+      .find((candidate) => candidate.providerIdentity === "strength-stale-after-session")!;
+    await expect(service.getTrainingContext({
+      historyLimit: 1,
+      localDate: "2026-09-22"
+    })).resolves.toMatchObject({
+      nextStep: {
+        state: "needs_classification",
+        externalActivityId: staleAfterSessionActivity.id
+      }
+    });
+    const exerciseVersionId = program.activeVersion!.workouts[0]!
+      .prescriptions[0]!.exerciseVersionId;
+    await service.createWorkoutSession({
+      occurredAt: "2026-09-22T08:00:00.000Z",
+      timezone: "Europe/Belgrade",
+      programVersionId: versionId,
+      programWorkoutPosition: 2,
+      externalActivityId: null,
+      workoutName: "B detail",
+      feeling: null,
+      note: null,
+      exercises: [{
+        exerciseVersionId,
+        loadBasis: "external_weight",
+        feeling: null,
+        note: null,
+        sets: [{ weightKg: 20, reps: 8, rir: 2 }]
+      }],
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: "2026-09-22T08:00:00.000Z"
+      },
+      dedupeKey: "task-0130-new-session",
+      confidence: 1
+    });
+    await expect(service.classifyExternalActivity({
+      ...command,
+      expectedExternalActivityId: staleAfterSessionActivity.id,
+      expectedLocalDate: "2026-09-22",
+      expectedCurrentClassificationId: null
+    })).resolves.toMatchObject({ outcome: "not_pending" });
+
+    await expect(repository.importExternalActivity({
+      ...activity,
+      normalizedChecksum: "b".repeat(64),
+      name: "Strength corrected"
+    })).resolves.toBe("corrected");
+    const correctedActivity = (await repository.listExternalActivities(personD, 10))
+      .find((candidate) => candidate.providerIdentity === "strength-1")!;
+    expect(correctedActivity.id).not.toBe(firstActivity.id);
+    expect(correctedActivity.classification).toMatchObject({
+      classification: { kind: "program_workout", workoutPosition: 2 }
+    });
+
+    const linkedSession = await service.createWorkoutSession({
+      occurredAt: correctedActivity.occurredAt,
+      timezone: correctedActivity.timezone,
+      programVersionId: versionId,
+      programWorkoutPosition: 1,
+      externalActivityId: correctedActivity.id,
+      workoutName: "A detail",
+      feeling: null,
+      note: null,
+      exercises: [{
+        exerciseVersionId,
+        loadBasis: "external_weight",
+        feeling: null,
+        note: null,
+        sets: [{ weightKg: 20, reps: 8, rir: 2 }]
+      }],
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: correctedActivity.occurredAt
+      },
+      dedupeKey: "task-0130-linked-session",
+      confidence: 1
+    });
+    expect(linkedSession.created).toBe(true);
+    const covered = (await repository.listExternalActivities(personD, 10))
+      .find((candidate) => candidate.providerIdentity === "strength-1")!;
+    expect(covered.sessionCovered).toBe(true);
+    await expect(service.classifyExternalActivity({
+      ...command,
+      expectedExternalActivityId: correctedActivity.id,
+      expectedCurrentClassificationId: corrected.classification!.id,
+      classification: { kind: "not_program_workout" }
+    })).resolves.toMatchObject({ outcome: "not_pending" });
+    await expect(service.getTrainingContext({
+      historyLimit: 5,
+      localDate: correctedActivity.localDate
+    })).resolves.toMatchObject({
+      nextStep: {
+        state: "complete_today",
+        evidenceIds: [linkedSession.session.id]
+      }
+    });
+
+    const personDConfig: AppConfig = {
+      NODE_ENV: "test",
+      HOST: "127.0.0.1",
+      PORT: 3_000,
+      DATABASE_URL: databaseUrl,
+      LOG_LEVEL: "silent",
+      PERSON_CONTEXT_MODE: "synthetic",
+      SYNTHETIC_PERSON_ID: personD,
+      SHUTDOWN_TIMEOUT_MS: 1_000
+    };
+    await dailyRepository.setTimezone(personD, "Europe/Belgrade");
+    const personDApp = await buildApp({ config: personDConfig, database });
+    try {
+      const personDFastify = getFastifyInstance(personDApp);
+      const localDate = derivePersonLocalDate("Europe/Belgrade");
+      const beforeAssessment = await personDFastify.inject({
+        method: "GET",
+        url: "/v1/daily-assessment"
+      });
+      expect(beforeAssessment.statusCode, beforeAssessment.body).toBe(200);
+      expect(beforeAssessment.json().usedFacts.trainingNextStep).toMatchObject({
+        state: "needs_classification"
+      });
+      const storedBeforeAssessment = await database.pool.query<{
+        personal_baseline_calculation: DailyAssessmentPersonalCalculation;
+      }>(
+        `select personal_baseline_calculation
+           from coaching_daily_assessment_details
+          where recommendation_id = $1`,
+        [beforeAssessment.json().snapshotId]
+      );
+      const revisionBeforeFinalClassification = await dailyRepository.getEvidenceRevision(
+        personD,
+        "2026-06-01",
+        localDate
+      );
+      const futureActivity = (await repository.listExternalActivities(personD, 10))
+        .find((candidate) => candidate.providerIdentity === "strength-future")!;
+      const finalClassificationCommand = {
+        ...command,
+        expectedExternalActivityId: futureActivity.id,
+        expectedLocalDate: localDate,
+        expectedCurrentClassificationId: null,
+        classification: { kind: "program_workout", workoutPosition: 1 }
+      } as const;
+      const appTraining = personDApp.get(TrainingService);
+      const originalGetTrainingContext = appTraining.getTrainingContext.bind(appTraining);
+      let classificationTriggered = false;
+      const contextSpy = vi.spyOn(appTraining, "getTrainingContext")
+        .mockImplementation(async (query) => {
+          const context = await originalGetTrainingContext(query);
+          if (!classificationTriggered) {
+            classificationTriggered = true;
+            await expect(service.classifyExternalActivity(finalClassificationCommand))
+              .resolves.toMatchObject({ outcome: "created" });
+          }
+          return context;
+        });
+      const afterAssessment = await personDApp.get(DailyAssessmentService).read();
+      const contextReadCount = contextSpy.mock.calls.length;
+      contextSpy.mockRestore();
+      expect(classificationTriggered).toBe(true);
+      expect(contextReadCount).toBeGreaterThanOrEqual(2);
+      const contextAfterWrite = await service.getTrainingContext({
+        historyLimit: 1,
+        localDate
+      });
+      expect(contextAfterWrite.nextStep).toMatchObject({
+        state: "strength",
+        workoutPosition: 2,
+        workoutName: "B"
+      });
+      expect(afterAssessment).toMatchObject({
+        state: "available",
+        usedFacts: {
+          trainingNextStep: {
+            state: "strength",
+            workoutPosition: 2,
+            workoutName: "B"
+          }
+        }
+      });
+      if (afterAssessment.state !== "available") {
+        throw new Error("Expected an available assessment after classification");
+      }
+      expect(afterAssessment.snapshotId).not.toBe(beforeAssessment.json().snapshotId);
+      expect(afterAssessment.evidenceChecksum).not.toBe(
+        beforeAssessment.json().evidenceChecksum
+      );
+
+      const staleSnapshot = beforeAssessment.json();
+      await expect(dailyRepository.createOrGet(personD, {
+        localDate: staleSnapshot.localDate,
+        timezone: staleSnapshot.timezone,
+        status: staleSnapshot.status,
+        usedFacts: staleSnapshot.usedFacts,
+        missingImportantData: staleSnapshot.missingImportantData,
+        reasons: staleSnapshot.reasons,
+        recommendedAction: staleSnapshot.recommendedAction,
+        alternatives: staleSnapshot.alternatives,
+        limitations: staleSnapshot.limitations,
+        confidence: staleSnapshot.confidence,
+        policyVersion: staleSnapshot.policyVersion,
+        evidenceChecksum: staleSnapshot.evidenceChecksum,
+        personalBaseline: staleSnapshot.personalBaseline,
+        personalBaselineCalculation:
+          storedBeforeAssessment.rows[0]!.personal_baseline_calculation,
+        movement: staleSnapshot.movement
+      }, {
+        expectedRevision: revisionBeforeFinalClassification,
+        expectedTimezone: "Europe/Belgrade",
+        expectedPreferencesUpdatedAt: (await dailyRepository.getPreferences(personD)).updatedAt,
+        from: "2026-06-01",
+        to: localDate
+      })).rejects.toBeInstanceOf(DailyAssessmentEvidenceChangedError);
+    } finally {
+      await personDApp.close();
+    }
+
+    await database.pool.query(
+      "delete from integration_connections where id = $1",
+      [connectionId]
+    );
+    const erased = await database.pool.query<{ count: string }>(
+      "select count(*)::text as count from external_activity_program_classifications where person_id = $1",
+      [personD]
+    );
+    expect(erased.rows[0]?.count).toBe("0");
   });
 
   it("reuses shared exercises, isolates private ones, and stages sources idempotently", async () => {
@@ -465,7 +888,7 @@ describe("Training PostgreSQL vertical", () => {
         program: null,
         recentSessions: { items: [] },
         recentExternalActivities: [],
-        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v1" }
+        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v2" }
       });
     const exercise = await repository.createExercise(personA, {
       visibility: "shared",

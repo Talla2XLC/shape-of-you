@@ -57,8 +57,11 @@ limited to owner facts recorded after the recommendation on the same
 Person-local date; presentation text is never parsed as an executable rule. Its private
 immutable calculation preserves the exact policy bundle, selected evidence,
 eligibility trace, comparisons, signal groups, and chosen result. Identical
-evidence reuses the snapshot; a late or corrected fact, context exclusion, or
-active TrainingProgramVersion changes the checksum and selects a new snapshot.
+evidence reuses the snapshot; a late or corrected fact, context exclusion,
+active TrainingProgramVersion, or imported-activity classification changes the
+checksum and selects a new snapshot. Classification revisions also participate
+in the Person evidence-revision guard, so a concurrent change forces the
+assessment to recompose instead of persisting stale output.
 Historical snapshots remain readable audit evidence unless privacy erasure
 removes one derived from erased evidence. Legacy v1, v2, and v3 snapshots
 remain readable.
@@ -324,12 +327,24 @@ credentials, checksums, and raw provider payloads are not exposed through MCP.
 For a supplied Person-local date, the Training context also returns the sole
 authoritative `NextTrainingStep` for the active typed cadence. Coach never
 derives A/B order from activity names, program notes, chat history, or an
-unlinked summary. It asks the one returned classification question when exact
-workout identity is missing and adds no training after `complete_today` or
-`week_complete`. DailyAssessment consumes the same projection and turns exact
-strength or cardio output into its concrete action only after existing
-Recovery and safety precedence has been applied. Legacy programs without typed
-cadence keep the explicit schedule-unavailable limitation.
+unlinked summary. When the user has already directly and unambiguously named
+the exact displayed activity and workout, Coach uses that authority without a
+duplicate question. Otherwise it asks exactly the one short API-returned
+classification question and never infers the answer from expected sequence,
+activity name, program note, time, or exercise similarity.
+
+Coach persists the answer through the narrow Training classification command;
+the imported summary remains distinct from `WorkoutSession` and gains no
+invented exercises or sets. After `created`, `corrected`, or `unchanged`, Coach
+reads Training context and then Daily Assessment in the same turn. Only the
+fresh API-owned assessment supplies the visible next action; a stale or
+no-longer-pending result requires fresh Training context and permits at most
+its new single question. Coach adds no training after `complete_today` or
+`week_complete`. DailyAssessment applies existing Recovery and safety
+precedence before turning an exact strength or cardio step into an action.
+Legacy programs without typed cadence keep the explicit schedule-unavailable
+limitation, and historical snapshots with `training-next-step-v1` remain
+readable while current evaluation emits v2.
 
 ## Evidence
 
@@ -355,6 +370,9 @@ cadence keep the explicit schedule-unavailable limitation.
 - TASK-0122 accepted contextual exact-snapshot completion lookup, bounded
   previous-day candidate selection, state-specific Coach presentation,
   symmetric conflict handling, and unchanged DailyAssessment authority.
+- TASK-0130 accepted exact date-scoped classification authority, one-question
+  Coach behavior, same-turn Training-context and Daily-Assessment read-back,
+  new snapshot/checksum, and concrete next-workout tests.
 
 ## Decisions
 
@@ -367,6 +385,7 @@ cadence keep the explicit schedule-unavailable limitation.
 - [Confirmed TrainingProgram MCP command](../../adr/20260912-persist-confirmed-training-programs-through-one-mcp-command.md).
 - [Natural TrainingProgram acceptance](../../adr/20260922-bind-natural-training-program-acceptance-to-latest-complete-proposal.md).
 - [Atomic accepted-cadence materialization](../../adr/20260923-materialize-confirmed-training-program-cadence-atomically.md).
+- [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).

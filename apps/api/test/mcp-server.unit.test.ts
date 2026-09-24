@@ -201,6 +201,7 @@ const unavailableServices = {
     findActiveProgram: unreachable,
     saveConfirmedProgram: unreachable,
     materializeProgramCadence: unreachable,
+    classifyExternalActivity: unreachable,
     getTrainingContext: unreachable
   },
   recovery: {
@@ -512,7 +513,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(28);
+    expect(body.result.tools).toHaveLength(29);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -543,6 +544,7 @@ describe("MCP HTTP adapter", () => {
       get_training_context: MCP_READ_SCOPE,
       save_confirmed_training_program: MCP_WORKOUT_WRITE_SCOPE,
       materialize_training_program_cadence: MCP_WORKOUT_WRITE_SCOPE,
+      classify_external_activity: MCP_WORKOUT_WRITE_SCOPE,
       list_workout_sessions: MCP_READ_SCOPE,
       record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       correct_workout_session: MCP_WORKOUT_WRITE_SCOPE,
@@ -896,6 +898,7 @@ describe("MCP HTTP adapter", () => {
         branch.properties.recentExternalActivities.items.properties
       ).sort()).toEqual([
         "averageHeartRate",
+        "classification",
         "deviceName",
         "distanceMeters",
         "durationSeconds",
@@ -908,12 +911,41 @@ describe("MCP HTTP adapter", () => {
         "timezone",
         "trainingLoad"
       ]);
+      const classification = branch.properties.recentExternalActivities.items
+        .properties.classification.anyOf[0];
+      expect(Object.keys(classification.properties).sort()).toEqual([
+        "classification",
+        "createdAt",
+        "id",
+        "programId",
+        "programVersionId"
+      ]);
     }
     expect(trainingContextTool.description).toContain(
       "without requesting a screenshot or manual repeat"
     );
     expect(trainingContextTool.description).toContain(
       "never infer exercises or sets"
+    );
+    const classifyActivityTool = body.result.tools.find(
+      (tool: { name: string }) => tool.name === "classify_external_activity"
+    );
+    expect(classifyActivityTool).toMatchObject({
+      inputSchema: {
+        $id: "ClassifyExternalActivity",
+        additionalProperties: false
+      },
+      outputSchema: {
+        $id: "ClassifyExternalActivityResult",
+        additionalProperties: false
+      },
+      securitySchemes: [{ scopes: [MCP_WORKOUT_WRITE_SCOPE] }]
+    });
+    expect(classifyActivityTool.description).toContain(
+      "Never infer from sequence, activity name, program note, time, or exercise similarity"
+    );
+    expect(classifyActivityTool.description).toContain(
+      "exact activity, localDate, active program/version/lock"
     );
     const saveProgramTool = body.result.tools.find(
       (tool: { name: string }) =>
@@ -1120,6 +1152,16 @@ describe("MCP HTTP adapter", () => {
       ))
       .mockRejectedValueOnce(new ConflictError("Active program changed"))
       .mockRejectedValueOnce(new Error("Training repository unavailable"));
+    const classifyExternalActivity = vi.fn().mockResolvedValue({
+      outcome: "created",
+      classification: {
+        id: "00000000-0000-4000-8000-000000000451",
+        programId,
+        programVersionId: activeVersionId,
+        classification: { kind: "program_workout", workoutPosition: 1 },
+        createdAt: "2026-09-23T19:00:00.000Z"
+      }
+    });
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1147,7 +1189,8 @@ describe("MCP HTTP adapter", () => {
           ...unavailableServices.training,
           getTrainingContext,
           saveConfirmedProgram,
-          materializeProgramCadence
+          materializeProgramCadence,
+          classifyExternalActivity
         }
       }
     });
@@ -1232,6 +1275,15 @@ describe("MCP HTTP adapter", () => {
           cooldownSeconds: 300
         }
       }
+    };
+    const activityClassification = {
+      expectedExternalActivityId: "00000000-0000-4000-8000-000000000450",
+      expectedLocalDate: "2026-09-21",
+      expectedActiveProgramId: programId,
+      expectedActiveVersionId: activeVersionId,
+      expectedLockVersion: 1,
+      expectedCurrentClassificationId: null,
+      classification: { kind: "program_workout", workoutPosition: 1 }
     };
 
     try {
@@ -1505,6 +1557,19 @@ describe("MCP HTTP adapter", () => {
       });
       expect(retryableCadence.content[0].text).toContain(
         "never claim the cadence is active"
+      );
+
+      const classified = (
+        await call(216, "classify_external_activity", activityClassification)
+      ).json().result;
+      expect(classified).toMatchObject({
+        structuredContent: { outcome: "created" }
+      });
+      expect(classified.content[0].text).toContain(
+        "MUST call get_training_context and then get_daily_assessment"
+      );
+      expect(classifyExternalActivity).toHaveBeenCalledWith(
+        activityClassification
       );
     } finally {
       await authorizedFastify.close();

@@ -15,6 +15,8 @@ import { alias } from "drizzle-orm/pg-core";
 import type {
   AcceptProgressionCandidate,
   ActivateTrainingProgramVersion,
+  ClassifyExternalActivity,
+  ClassifyExternalActivityResult,
   CorrectWorkoutSession,
   CreateExercise,
   CreateExerciseVersion,
@@ -23,10 +25,12 @@ import type {
   CreateWorkoutSession,
   Exercise,
   ExerciseOverlay,
+  ExternalActivityProgramClassification,
   PersonalRecordList,
   ProgressionCandidateList,
   MaterializeTrainingProgramCadence,
   MaterializeTrainingProgramCadenceResult,
+  NextTrainingStep,
   SaveConfirmedTrainingProgram,
   SaveConfirmedTrainingProgramResult,
   TrainingProgramCadence,
@@ -47,6 +51,7 @@ import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import {
   performedExercises,
   performedSets,
+  externalActivityProgramClassifications,
   integrationActivityFacts,
   integrationConnections,
   sourceReferences,
@@ -76,6 +81,8 @@ import {
   canAccessTrainingExercise,
   type ResolvedTrainingProgramSnapshot,
   trainingProgramSnapshotMatches,
+  evaluateNextTrainingStep,
+  trainingPolicyWeekStart,
   validateTrainingProgramVersion
 } from "../domain/training.js";
 import { deriveLocalDate } from "../domain/weight-measurement.js";
@@ -147,6 +154,9 @@ export interface ImportExternalActivity {
 export interface ExternalActivityFact extends Omit<ImportExternalActivity, "consentId"> {
   readonly id: string;
   readonly supersedesId: string | null;
+  readonly classification: ExternalActivityProgramClassification | null;
+  /** True when any fact in this correction lineage is covered by a current real session. */
+  readonly sessionCovered: boolean;
 }
 
 /** Persistence contract for Training catalog, plans, facts, and projections. */
@@ -154,6 +164,13 @@ export interface TrainingStore {
   importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped">;
   /** Lists newest current external-activity revisions for one Person with a SQL-applied bound. */
   listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]>;
+  /** Appends or reuses explicit user classification for one exact activity lineage. */
+  classifyExternalActivity(
+    personId: string,
+    input: ClassifyExternalActivity
+  ): Promise<ClassifyExternalActivityResult>;
+  /** Recomputes the exact date-scoped next-step policy from one database snapshot. */
+  readNextTrainingStep(personId: string, localDate: string): Promise<NextTrainingStep>;
   /** Reads bounded owner-consolidated Training days for personal assessment. */
   listPersonalBaselineDays(personId: string, from: string, to: string): Promise<readonly TrainingBaselineDay[]>;
   createExercise(personId: string, input: CreateExercise): Promise<Exercise>;
@@ -335,6 +352,91 @@ function numberOrNull(value: string | null): number | null {
   return value === null ? null : Number(value);
 }
 
+type ActivityLineageClassificationRow = {
+  readonly root_id: string;
+  readonly classification_id: string | null;
+  readonly program_id: string | null;
+  readonly program_version_id: string | null;
+  readonly kind: "program_workout" | "not_program_workout" | null;
+  readonly workout_position: number | null;
+  readonly classification_created_at: Date | string | null;
+  readonly session_covered: boolean;
+};
+
+function serializeActivityClassification(
+  row: ActivityLineageClassificationRow
+): ExternalActivityProgramClassification | null {
+  if (
+    row.classification_id === null ||
+    row.program_id === null ||
+    row.program_version_id === null ||
+    row.kind === null ||
+    row.classification_created_at === null
+  ) {
+    return null;
+  }
+  return {
+    id: row.classification_id,
+    programId: row.program_id,
+    programVersionId: row.program_version_id,
+    classification: row.kind === "program_workout"
+      ? { kind: row.kind, workoutPosition: row.workout_position! }
+      : { kind: row.kind },
+    createdAt: row.classification_created_at instanceof Date
+      ? row.classification_created_at.toISOString()
+      : new Date(row.classification_created_at).toISOString()
+  };
+}
+
+async function readActivityLineageClassification(
+  executor: Pick<DatabaseContext["db"], "execute"> | DatabaseTransaction,
+  personId: string,
+  activityId: string
+): Promise<ActivityLineageClassificationRow | null> {
+  const result = await executor.execute(sql<ActivityLineageClassificationRow>`
+    with recursive lineage as (
+      select id, supersedes_id
+        from integration_activity_facts
+       where id = ${activityId} and person_id = ${personId}
+      union all
+      select parent.id, parent.supersedes_id
+        from integration_activity_facts parent
+        join lineage child on child.supersedes_id = parent.id
+       where parent.person_id = ${personId}
+    ), root as (
+      select id as root_id from lineage where supersedes_id is null
+    )
+    select root.root_id,
+           current_class.id as classification_id,
+           current_class.program_id,
+           current_class.program_version_id,
+           current_class.kind,
+           current_class.workout_position,
+           current_class.created_at as classification_created_at,
+           exists (
+             select 1
+               from lineage member
+               join training_workout_session_activity_links link
+                 on link.external_activity_id = member.id
+                and link.person_id = ${personId}
+               join workout_sessions session on session.id = link.session_id
+              where not exists (
+                select 1 from workout_sessions successor
+                 where successor.supersedes_id = session.id
+              )
+           ) as session_covered
+      from root
+      left join external_activity_program_classifications current_class
+        on current_class.person_id = ${personId}
+       and current_class.lineage_root_activity_id = root.root_id
+       and not exists (
+         select 1 from external_activity_program_classifications successor
+          where successor.supersedes_id = current_class.id
+       )
+  `);
+  return (result.rows[0] as ActivityLineageClassificationRow | undefined) ?? null;
+}
+
 function serializeExercise(
   exercise: TrainingExerciseRow,
   version: TrainingExerciseVersionRow
@@ -420,27 +522,264 @@ export class TrainingRepository implements TrainingStore {
     });
   }
 
-  public async listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]> {
+  private async readExternalActivities(
+    transaction: DatabaseTransaction,
+    personId: string,
+    options: { readonly limit?: number; readonly from?: string; readonly to?: string }
+  ): Promise<readonly ExternalActivityFact[]> {
     const successor = alias(integrationActivityFacts, "external_activity_successor");
-    const rows = await this.database.db.select().from(integrationActivityFacts).where(and(
+    const conditions = [
       eq(integrationActivityFacts.personId, personId),
-      notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, integrationActivityFacts.id)))
+      notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, integrationActivityFacts.id)))
+    ];
+    if (options.from) conditions.push(gte(integrationActivityFacts.localDate, options.from));
+    if (options.to) conditions.push(lte(integrationActivityFacts.localDate, options.to));
+    const query = transaction.select().from(integrationActivityFacts).where(and(
+      ...conditions
     )).orderBy(
       desc(integrationActivityFacts.occurredAt),
       desc(integrationActivityFacts.createdAt),
       desc(integrationActivityFacts.id)
-    ).limit(limit);
-    return rows.map((row) => ({
-      id: row.id, connectionId: row.connectionId, personId: row.personId,
-      providerIdentity: row.providerIdentity, normalizedChecksum: row.normalizedChecksum,
-      occurredAt: row.occurredAt.toISOString(), localDate: row.localDate, timezone: row.timezone,
-      name: row.name, durationSeconds: row.durationSeconds, distanceMeters: numberOrNull(row.distanceMeters),
-      trainingLoad: numberOrNull(row.trainingLoad), averageHeartRate: numberOrNull(row.averageHeartRate),
-      trainingLoadBasis: row.trainingLoadBasis as "relative_training_stress" | null,
-      trainingLoadBasisVersion: row.trainingLoadBasisVersion,
-      maximumHeartRate: numberOrNull(row.maximumHeartRate), deviceName: row.deviceName,
-      sourceProvider: row.sourceProvider, garminAttributed: row.garminAttributed, supersedesId: row.supersedesId
-    }));
+    );
+    const rows = options.limit === undefined ? await query : await query.limit(options.limit);
+    const activities: ExternalActivityFact[] = [];
+    for (const row of rows) {
+      const lineage = await readActivityLineageClassification(
+        transaction,
+        personId,
+        row.id
+      );
+      if (!lineage) {
+        throw new Error("External activity correction lineage is broken");
+      }
+      activities.push({
+        id: row.id, connectionId: row.connectionId, personId: row.personId,
+        providerIdentity: row.providerIdentity, normalizedChecksum: row.normalizedChecksum,
+        occurredAt: row.occurredAt.toISOString(), localDate: row.localDate, timezone: row.timezone,
+        name: row.name, durationSeconds: row.durationSeconds, distanceMeters: numberOrNull(row.distanceMeters),
+        trainingLoad: numberOrNull(row.trainingLoad), averageHeartRate: numberOrNull(row.averageHeartRate),
+        trainingLoadBasis: row.trainingLoadBasis as "relative_training_stress" | null,
+        trainingLoadBasisVersion: row.trainingLoadBasisVersion,
+        maximumHeartRate: numberOrNull(row.maximumHeartRate), deviceName: row.deviceName,
+        sourceProvider: row.sourceProvider, garminAttributed: row.garminAttributed,
+        supersedesId: row.supersedesId,
+        classification: serializeActivityClassification(lineage),
+        sessionCovered: lineage.session_covered
+      });
+    }
+    return activities;
+  }
+
+  public listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]> {
+    return this.database.db.transaction((transaction) =>
+      this.readExternalActivities(transaction, personId, { limit })
+    );
+  }
+
+  private async readNextTrainingStepInTransaction(
+    transaction: DatabaseTransaction,
+    personId: string,
+    localDate: string
+  ): Promise<NextTrainingStep> {
+    const [programRow] = await transaction
+      .select()
+      .from(trainingPrograms)
+      .where(and(
+        eq(trainingPrograms.personId, personId),
+        sql`${trainingPrograms.activeVersionId} IS NOT NULL`
+      ))
+      .limit(1);
+    const program = programRow
+      ? await this.serializeProgram(transaction, programRow)
+      : null;
+    const weekStart = trainingPolicyWeekStart(localDate);
+    const replacement = alias(workoutSessions, "next_step_session_successor");
+    const sessionRows = await transaction
+      .select()
+      .from(workoutSessions)
+      .where(and(
+        eq(workoutSessions.personId, personId),
+        gte(workoutSessions.localDate, weekStart),
+        lte(workoutSessions.localDate, localDate),
+        notExists(transaction.select({ id: replacement.id }).from(replacement).where(
+          eq(replacement.supersedesId, workoutSessions.id)
+        ))
+      ))
+      .orderBy(desc(workoutSessions.occurredAt), desc(workoutSessions.id));
+    const sessions: WorkoutSession[] = [];
+    for (const row of sessionRows) {
+      sessions.push(await this.serializeSession(transaction, row));
+    }
+    const externalActivities = await this.readExternalActivities(
+      transaction,
+      personId,
+      { from: weekStart, to: localDate }
+    );
+    return evaluateNextTrainingStep({
+      program,
+      localDate,
+      sessions,
+      externalActivities
+    });
+  }
+
+  public readNextTrainingStep(personId: string, localDate: string): Promise<NextTrainingStep> {
+    return this.database.db.transaction((transaction) =>
+      this.readNextTrainingStepInTransaction(transaction, personId, localDate)
+    );
+  }
+
+  public classifyExternalActivity(
+    personId: string,
+    input: ClassifyExternalActivity
+  ): Promise<ClassifyExternalActivityResult> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+
+      const activityRows = await transaction.execute(sql<{ id: string }>`
+        select current.id
+          from integration_activity_facts current
+         where current.id = ${input.expectedExternalActivityId}
+           and current.person_id = ${personId}
+           and not exists (
+             select 1 from integration_activity_facts successor
+              where successor.supersedes_id = current.id
+           )
+         limit 1
+      `);
+      if (!activityRows.rows[0]) {
+        return { outcome: "stale", classification: null };
+      }
+
+      const lineage = await readActivityLineageClassification(
+        transaction,
+        personId,
+        input.expectedExternalActivityId
+      );
+      if (!lineage) {
+        return { outcome: "stale", classification: null };
+      }
+      const currentClassification = serializeActivityClassification(lineage);
+      if (
+        (currentClassification?.id ?? null) !==
+        input.expectedCurrentClassificationId
+      ) {
+        return { outcome: "stale", classification: currentClassification };
+      }
+
+      const active = await transaction.query.trainingPrograms.findFirst({
+        columns: { id: true, activeVersionId: true, lockVersion: true },
+        where: and(
+          eq(trainingPrograms.personId, personId),
+          eq(trainingPrograms.id, input.expectedActiveProgramId)
+        )
+      });
+      if (
+        !active ||
+        active.activeVersionId !== input.expectedActiveVersionId ||
+        active.lockVersion !== input.expectedLockVersion
+      ) {
+        return { outcome: "stale", classification: currentClassification };
+      }
+
+      const linkedRows = await transaction.execute(sql<{ linked: boolean }>`
+        with recursive lineage as (
+          select id, supersedes_id
+            from integration_activity_facts
+           where id = ${input.expectedExternalActivityId} and person_id = ${personId}
+          union all
+          select parent.id, parent.supersedes_id
+            from integration_activity_facts parent
+            join lineage child on child.supersedes_id = parent.id
+           where parent.person_id = ${personId}
+        )
+        select exists (
+          select 1
+            from lineage
+            join training_workout_session_activity_links link
+              on link.external_activity_id = lineage.id and link.person_id = ${personId}
+            join workout_sessions session on session.id = link.session_id
+           where not exists (
+             select 1 from workout_sessions successor
+              where successor.supersedes_id = session.id
+           )
+        ) as linked
+      `);
+      if (linkedRows.rows[0]?.linked) {
+        return { outcome: "not_pending", classification: currentClassification };
+      }
+
+      if (input.classification.kind === "program_workout") {
+        const workout = await transaction.query.trainingProgramWorkouts.findFirst({
+          columns: { id: true },
+          where: and(
+            eq(trainingProgramWorkouts.programVersionId, input.expectedActiveVersionId),
+            eq(trainingProgramWorkouts.position, input.classification.workoutPosition)
+          )
+        });
+        if (!workout) {
+          return { outcome: "not_pending", classification: currentClassification };
+        }
+      }
+
+      if (
+        currentClassification !== null &&
+        currentClassification.programId === input.expectedActiveProgramId &&
+        currentClassification.programVersionId === input.expectedActiveVersionId &&
+        currentClassification.classification.kind === input.classification.kind &&
+        (currentClassification.classification.kind !== "program_workout" ||
+          input.classification.kind !== "program_workout" ||
+          currentClassification.classification.workoutPosition ===
+            input.classification.workoutPosition)
+      ) {
+        return { outcome: "unchanged", classification: currentClassification };
+      }
+
+      if (currentClassification === null) {
+        const nextStep = await this.readNextTrainingStepInTransaction(
+          transaction,
+          personId,
+          input.expectedLocalDate
+        );
+        if (
+          nextStep.state !== "needs_classification" ||
+          nextStep.externalActivityId !== input.expectedExternalActivityId
+        ) {
+          return { outcome: "not_pending", classification: null };
+        }
+      }
+
+      const [inserted] = await transaction
+        .insert(externalActivityProgramClassifications)
+        .values({
+          personId,
+          lineageRootActivityId: lineage.root_id,
+          activityId: input.expectedExternalActivityId,
+          programId: input.expectedActiveProgramId,
+          programVersionId: input.expectedActiveVersionId,
+          kind: input.classification.kind,
+          workoutPosition: input.classification.kind === "program_workout"
+            ? input.classification.workoutPosition
+            : null,
+          supersedesId: currentClassification?.id ?? null
+        })
+        .returning();
+      if (!inserted) {
+        throw new Error("External activity classification insert failed");
+      }
+      return {
+        outcome: currentClassification === null ? "created" : "corrected",
+        classification: {
+          id: inserted.id,
+          programId: inserted.programId,
+          programVersionId: inserted.programVersionId,
+          classification: inserted.kind === "program_workout"
+            ? { kind: "program_workout", workoutPosition: inserted.workoutPosition! }
+            : { kind: "not_program_workout" },
+          createdAt: inserted.createdAt.toISOString()
+        }
+      };
+    });
   }
 
   private accessible(

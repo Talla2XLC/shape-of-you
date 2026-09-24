@@ -15,7 +15,8 @@ tags:
 
 Provides shared versioned exercises, Person-owned immutable program versions
 with optional typed cadence, immutable sessions/sets, deterministic next-step
-projection, personal records, and progression candidates.
+projection, explicit imported-activity classification, personal records, and
+progression candidates.
 
 ## Content
 
@@ -62,6 +63,34 @@ heart-rate-qualified external cardio activity may satisfy cardio without a
 fabricated detailed session. An external activity without A/B identity never
 advances the strength sequence and may trigger one short classification
 question.
+
+The current evaluator emits `training-next-step-v2`. Its
+`needs_classification` result identifies one exact current external activity,
+the active program-workout options, and one short API-generated question. The
+date-scoped target is computed from one shared policy through the requested
+Person-local date and is independent of the recent-history display limit.
+Historical Daily Assessment snapshots containing `training-next-step-v1`
+remain readable.
+
+The narrow MCP `classify_external_activity` command uses the existing
+`workout:write` scope and stores explicit user authority as a Training-owned
+append-only classification. It binds the exact current external activity,
+requested local date, active program/version/lock, current classification
+expectation, and either one `program_workout` position or
+`not_program_workout`. Under the Person lock, an initial write recomputes the
+same date-scoped `needs_classification` policy and succeeds only when the exact
+activity is still pending. Identical retries are `unchanged`; corrections
+append a successor; stale or no-longer-pending authority writes nothing.
+
+The current safe external-activity projection includes its classification but
+not provider internals. The classification follows the stable activity
+correction lineage when a provider successor becomes current and is removed
+with connected-data erasure. A real explicitly linked `WorkoutSession` takes
+precedence and prevents both a new classification and double counting. A
+classified external activity may advance cadence, but never supplies performed
+exercises, sets, loads, personal records, or progression evidence.
+`not_program_workout` prevents the same question from recurring for that
+program version and contributes no cadence occurrence.
 
 `WorkoutSession` remains the detailed authority for performed exercises and
 sets. An external activity summary can prove that a run, ride, or other activity
@@ -125,6 +154,12 @@ nothing. Coach must then read both Training context and Daily Assessment before
 claiming an active cadence or a concrete next action; prose in `note` is never
 used as schedule authority.
 
+After a classification is created, corrected, or found unchanged, Coach must
+read `get_training_context` and then `get_daily_assessment` in the same turn.
+Only the refreshed Daily Assessment may determine the visible next action.
+The MCP implementation exists in the repository, but publication or refresh
+of a deployed action catalog and its canary remain separate operational gates.
+
 New programs/versions are inactive. Activation uses `expectedLockVersion`; one
 Person cannot have two active programs.
 
@@ -149,11 +184,14 @@ pending acceptance.
 ## Evidence
 
 - Training contracts/module/repository/integration tests.
+- TASK-0130 accepted contract, domain, PostgreSQL, MCP, Daily Assessment,
+  migration, lineage, erasure, deduplication, and concurrency tests.
 
 ## Decisions
 
 - External catalog records remain staged; no scraper/name merge. Records and
   candidates are query projections, not mutable authority.
+- [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 
 ## Open questions
 

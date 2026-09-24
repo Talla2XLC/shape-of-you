@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
+import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
 
-import type {
-  CreateTrainingProgram,
-  ExternalActivitySummary,
-  TrainingProgram,
-  TrainingProgramVersion,
-  WorkoutSession
+import {
+  NextTrainingStepSchema,
+  type CreateTrainingProgram,
+  type ExternalActivitySummary,
+  type TrainingProgram,
+  type TrainingProgramVersion,
+  type WorkoutSession
 } from "@shape-of-you/contracts";
 
 import {
@@ -174,7 +177,9 @@ describe("Training context", () => {
       deviceName: "Garmin Test",
       sourceProvider: "intervals_icu",
       garminAttributed: true,
-      supersedesId: null
+      supersedesId: null,
+      classification: null,
+      sessionCovered: false
     }]);
     const service = new TrainingService(
       {
@@ -201,9 +206,10 @@ describe("Training context", () => {
         averageHeartRate: 144,
         maximumHeartRate: 168,
         deviceName: "Garmin Test",
-        garminAttributed: true
+        garminAttributed: true,
+        classification: null
       }],
-      nextStep: { state: "no_active_program", policyVersion: "training-next-step-v1" }
+      nextStep: { state: "no_active_program", policyVersion: "training-next-step-v2" }
     });
     expect(findActiveProgram).toHaveBeenCalledWith(personId);
     expect(listWorkoutSessions).toHaveBeenCalledWith(personId, 3);
@@ -258,6 +264,26 @@ describe("next training step", () => {
     averageHeartRate: 134
   } as ExternalActivitySummary;
 
+  it("keeps persisted v1 next-step snapshots readable while accepting v2", () => {
+    const ajv = new Ajv({ strict: false });
+    const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
+    installFormats(ajv);
+    const validate = ajv.compile(NextTrainingStepSchema);
+    expect(validate({
+      state: "needs_classification",
+      policyVersion: "training-next-step-v1",
+      localDate: "2026-09-22",
+      externalActivityId: "00000000-0000-4000-8000-000000000204",
+      question: "Последняя силовая была тренировкой A или B?"
+    })).toBe(true);
+    expect(validate(evaluateNextTrainingStep({
+      program: null,
+      localDate: "2026-09-22",
+      sessions: [],
+      externalActivities: []
+    }))).toBe(true);
+  });
+
   it("does not prescribe another workout after qualifying cardio today", () => {
     expect(evaluateNextTrainingStep({
       program: activeProgram,
@@ -275,8 +301,112 @@ describe("next training step", () => {
       externalActivities: [{ ...cardio, id: "00000000-0000-4000-8000-000000000205", distanceMeters: null }]
     })).toMatchObject({
       state: "needs_classification",
-      question: "Последняя силовая была тренировкой A или B?"
+      question: "Силовая 2026-09-22 — 1 — A, 2 — B или не по этой программе?"
     });
+  });
+
+  it("uses an exact external classification as cadence evidence without session details", () => {
+    const noCardio = {
+      ...activeProgram,
+      activeVersion: {
+        ...activeProgram.activeVersion!,
+        cadence: { ...activeProgram.activeVersion!.cadence!, lightCardio: null }
+      }
+    };
+    const classifiedActivity = {
+      ...cardio,
+      id: "00000000-0000-4000-8000-000000000250",
+      occurredAt: "2026-09-21T06:00:00.000Z",
+      localDate: "2026-09-21",
+      distanceMeters: null,
+      classification: {
+        id: "00000000-0000-4000-8000-000000000251",
+        programId: activeProgram.id,
+        programVersionId: activeProgram.activeVersionId!,
+        classification: { kind: "program_workout" as const, workoutPosition: 1 },
+        createdAt: "2026-09-21T07:00:00.000Z"
+      }
+    };
+
+    expect(evaluateNextTrainingStep({
+      program: noCardio,
+      localDate: "2026-09-22",
+      sessions: [],
+      externalActivities: [classifiedActivity]
+    })).toMatchObject({
+      state: "strength",
+      policyVersion: "training-next-step-v2",
+      workoutPosition: 2,
+      workoutName: "B"
+    });
+  });
+
+  it("suppresses the question but does not advance cadence for negative or old-version classification", () => {
+    const noCardio = {
+      ...activeProgram,
+      activeVersion: {
+        ...activeProgram.activeVersion!,
+        cadence: { ...activeProgram.activeVersion!.cadence!, lightCardio: null }
+      }
+    };
+    const activity = {
+      ...cardio,
+      distanceMeters: null,
+      classification: {
+        id: "00000000-0000-4000-8000-000000000252",
+        programId: activeProgram.id,
+        programVersionId: activeProgram.activeVersionId!,
+        classification: { kind: "not_program_workout" as const },
+        createdAt: "2026-09-22T07:00:00.000Z"
+      }
+    };
+    expect(evaluateNextTrainingStep({
+      program: noCardio,
+      localDate: "2026-09-22",
+      sessions: [],
+      externalActivities: [activity]
+    })).toMatchObject({ state: "strength", workoutPosition: 1 });
+
+    expect(evaluateNextTrainingStep({
+      program: noCardio,
+      localDate: "2026-09-22",
+      sessions: [],
+      externalActivities: [{
+        ...activity,
+        classification: {
+          ...activity.classification,
+          programVersionId: "00000000-0000-4000-8000-000000000299",
+          classification: { kind: "program_workout" as const, workoutPosition: 2 }
+        }
+      }]
+    })).toMatchObject({ state: "strength", workoutPosition: 1 });
+  });
+
+  it("keeps an API-generated classification question within the contract bound", () => {
+    const longNames = {
+      ...activeProgram,
+      activeVersion: {
+        ...activeProgram.activeVersion!,
+        workouts: activeProgram.activeVersion!.workouts.map((workout) => ({
+          ...workout,
+          name: workout.name.repeat(200)
+        }))
+      }
+    };
+    const result = evaluateNextTrainingStep({
+      program: longNames,
+      localDate: "2026-09-22",
+      sessions: [],
+      externalActivities: [{ ...cardio, distanceMeters: null, classification: null }]
+    });
+    expect(result.state).toBe("needs_classification");
+    if (
+      result.state === "needs_classification" &&
+      result.policyVersion === "training-next-step-v2"
+    ) {
+      expect(result.question.length).toBeLessThanOrEqual(256);
+      expect(result.options).toHaveLength(2);
+    }
   });
 
   it("continues A/B after an explicitly linked strength session and intervening cardio", () => {
@@ -368,6 +498,6 @@ describe("next training step", () => {
       localDate: "2026-09-22",
       sessions: [],
       externalActivities: []
-    })).toEqual({ state: "schedule_unavailable", policyVersion: "training-next-step-v1" });
+    })).toEqual({ state: "schedule_unavailable", policyVersion: "training-next-step-v2" });
   });
 });

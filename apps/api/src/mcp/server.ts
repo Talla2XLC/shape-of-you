@@ -4,6 +4,8 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
   BodyMeasurementSessionListSchema,
+  ClassifyExternalActivityResultSchema,
+  ClassifyExternalActivitySchema,
   CorrectBodyMeasurementSessionSchema,
   CorrectDailyContextNoteSchema,
   CorrectMealSchema,
@@ -50,6 +52,7 @@ import {
   type CorrectRecoveryObservation,
   type CorrectWeightMeasurement,
   type CorrectWorkoutSession,
+  type ClassifyExternalActivity,
   type CreateBodyMeasurementSession,
   type CreateDailyContextNote,
   type CreateDailyRecommendationFeedback,
@@ -124,6 +127,7 @@ interface McpServices {
     | "findActiveProgram"
     | "saveConfirmedProgram"
     | "materializeProgramCadence"
+    | "classifyExternalActivity"
     | "getTrainingContext"
   >;
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
@@ -375,6 +379,23 @@ function materializedTrainingProgramCadenceResultContent(
   );
 }
 
+function classifiedExternalActivityResultContent(result: unknown): string {
+  const outcome = isRecord(result) && typeof result.outcome === "string"
+    ? result.outcome
+    : "stale";
+  if (outcome === "stale" || outcome === "not_pending") {
+    return coachResultContent(
+      "The imported activity classification was not saved because the current Training authority changed or the activity is no longer pending. Call get_training_context now and use at most its one returned classification question; never guess, retry stale identifiers, or claim persistence."
+    );
+  }
+  const persistence = outcome === "unchanged"
+    ? "The exact classification was already current; this was a semantic no-op."
+    : "The explicit imported activity classification was persisted as an immutable Training fact.";
+  return coachResultContent(
+    `${persistence} MUST call get_training_context and then get_daily_assessment in this same turn. Use only the fresh DailyAssessment for the visible next action. Never expose ids, fields, tool names, or persistence mechanics.`
+  );
+}
+
 const dailyProjectionResultContent =
   "FACTUAL-ONLY DAILY PROJECTION: Use this exact-date projection only to summarize recorded owning-domain facts. " +
   "It cannot authorize a daily status, confidence, reasons, limitations, or next action. " +
@@ -415,6 +436,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
+  "When training context returns one pending imported-strength classification, use a direct unambiguous user statement about that exact displayed activity and workout immediately; natural equivalents of the displayed workout name are sufficient. Never infer the answer from expected sequence, activity name, program note, time, or exercise similarity. If the user's statement does not identify one option, ask exactly the API-returned short question. After saving or an unchanged result, call get_training_context and then get_daily_assessment in the same turn, and use only that assessment for the visible next action. " +
   trainingProgramConfirmationPolicy + " " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For a focused question about today's sleep, HRV, resting heart rate, Body Battery, or steps, call get_current_recovery_context. Treat its typed observations as value authority and its delivery state only as availability evidence. Never infer that Garmin or another provider failed from an empty observation set, never infer zero from absence, and never promise a later autonomous recheck without a real automation. " +
@@ -796,6 +818,18 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
           input as MaterializeTrainingProgramCadence
         ),
       materializedTrainingProgramCadenceResultContent
+    ),
+    defineTool(
+      "classify_external_activity",
+      "Classify the exact imported strength activity currently returned by get_training_context. A direct unambiguous user statement naming one displayed workout or saying it was not this program authorizes the write without another question. Never infer from sequence, activity name, program note, time, or exercise similarity. Bind the exact activity, localDate, active program/version/lock, and current classification returned by the read. If identity is insufficient, ask exactly the returned question. After created, corrected, or unchanged, call get_training_context and then get_daily_assessment in the same turn and use only the assessment for the visible next action.",
+      ClassifyExternalActivitySchema,
+      ClassifyExternalActivityResultSchema,
+      true,
+      MCP_WORKOUT_WRITE_SCOPE,
+      (input) => services.training.classifyExternalActivity(
+        input as ClassifyExternalActivity
+      ),
+      classifiedExternalActivityResultContent
     ),
     defineTool(
       "list_workout_sessions",
@@ -1475,6 +1509,11 @@ function inputErrorResult(toolName: string): CallToolResult {
   }
   if (toolName === "materialize_training_program_cadence") {
     return trainingProgramCadenceErrorResult("invalid_cadence");
+  }
+  if (toolName === "classify_external_activity") {
+    return errorResult(coachFailureResultContent(
+      "The imported activity classification was not saved. Call get_training_context and use exactly its current options and one returned question; never guess or expose identifiers."
+    ));
   }
   if (toolName === "record_meal") {
     return errorResult(coachFailureResultContent(

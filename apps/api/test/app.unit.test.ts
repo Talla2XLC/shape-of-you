@@ -209,6 +209,8 @@ const nutritionStore: NutritionStore = {
 const trainingStore: TrainingStore = {
   importExternalActivity: unreachable,
   listExternalActivities: unreachable,
+  classifyExternalActivity: unreachable,
+  readNextTrainingStep: unreachable,
   listPersonalBaselineDays: unreachable,
   createExercise: unreachable,
   appendExerciseVersion: unreachable,

@@ -3374,6 +3374,90 @@ export const integrationActivityFacts = pgTable(
   ]
 );
 
+/** Append-only user authority relating one external activity lineage to a program. */
+export const externalActivityProgramClassifications = pgTable(
+  "external_activity_program_classifications",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    lineageRootActivityId: uuid("lineage_root_activity_id").notNull(),
+    activityId: uuid("activity_id").notNull(),
+    programId: uuid("program_id").notNull(),
+    programVersionId: uuid("program_version_id").notNull(),
+    kind: varchar("kind", { length: 32 }).notNull(),
+    workoutPosition: smallint("workout_position"),
+    supersedesId: uuid("supersedes_id"),
+    createdAt: timestamp("created_at", { withTimezone: true, mode: "date" })
+      .defaultNow()
+      .notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "ext_activity_class_person_fk",
+      columns: [table.personId],
+      foreignColumns: [persons.id]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ext_activity_class_root_fk",
+      columns: [table.lineageRootActivityId, table.personId],
+      foreignColumns: [integrationActivityFacts.id, integrationActivityFacts.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ext_activity_class_fact_fk",
+      columns: [table.activityId, table.personId],
+      foreignColumns: [integrationActivityFacts.id, integrationActivityFacts.personId]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ext_activity_class_version_fk",
+      columns: [table.programVersionId, table.programId, table.personId],
+      foreignColumns: [
+        trainingProgramVersions.id,
+        trainingProgramVersions.programId,
+        trainingProgramVersions.personId
+      ]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "ext_activity_class_workout_fk",
+      columns: [table.programVersionId, table.workoutPosition],
+      foreignColumns: [
+        trainingProgramWorkouts.programVersionId,
+        trainingProgramWorkouts.position
+      ]
+    }),
+    foreignKey({
+      name: "ext_activity_class_supersedes_fk",
+      columns: [table.supersedesId, table.personId, table.lineageRootActivityId],
+      foreignColumns: [table.id, table.personId, table.lineageRootActivityId]
+    }),
+    unique("ext_activity_class_id_person_uq").on(table.id, table.personId),
+    unique("ext_activity_class_id_owner_root_uq").on(
+      table.id,
+      table.personId,
+      table.lineageRootActivityId
+    ),
+    uniqueIndex("ext_activity_class_initial_uq")
+      .on(table.lineageRootActivityId)
+      .where(sql`${table.supersedesId} IS NULL`),
+    uniqueIndex("ext_activity_class_supersedes_uq")
+      .on(table.supersedesId)
+      .where(sql`${table.supersedesId} IS NOT NULL`),
+    index("ext_activity_class_current_idx").on(
+      table.personId,
+      table.lineageRootActivityId,
+      table.createdAt
+    ),
+    check(
+      "ext_activity_class_shape",
+      sql`(${table.kind} = 'program_workout' AND ${table.workoutPosition} IS NOT NULL)
+        OR (${table.kind} = 'not_program_workout' AND ${table.workoutPosition} IS NULL)`
+    ),
+    check(
+      "ext_activity_class_no_self_supersession",
+      sql`${table.supersedesId} IS NULL OR ${table.supersedesId} <> ${table.id}`
+    )
+  ]
+);
+
 export const recoveryAssessmentPolicies = pgTable(
   "recovery_assessment_policies",
   {
@@ -4372,6 +4456,9 @@ export type RecoveryErasureRequestRow = typeof recoveryErasureRequests.$inferSel
 export type IntegrationConnectionRow = typeof integrationConnections.$inferSelect;
 /** Persisted typed external activity summary. */
 export type IntegrationActivityFactRow = typeof integrationActivityFacts.$inferSelect;
+/** Persisted append-only external activity program classification. */
+export type ExternalActivityProgramClassificationRow =
+  typeof externalActivityProgramClassifications.$inferSelect;
 /** Persisted shared or private Nutrition Brand identity. */
 export type NutritionBrandRow = typeof nutritionBrands.$inferSelect;
 /** Persisted immutable Nutrition Brand version. */

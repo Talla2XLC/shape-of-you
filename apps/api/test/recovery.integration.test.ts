@@ -965,6 +965,7 @@ describe("Recovery PostgreSQL vertical", () => {
     });
     expect(Object.keys(trainingContext.recentExternalActivities[0]!).sort()).toEqual([
       "averageHeartRate",
+      "classification",
       "deviceName",
       "distanceMeters",
       "durationSeconds",
