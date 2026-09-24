@@ -98,6 +98,7 @@ export interface IntegrationStore {
   status(personId: string): Promise<GarminIntervalsConnection | null>;
   connectedRecoveryDelivery(personId: string, localDate: string): Promise<ConnectedRecoveryDeliveryEvidence | null>;
   findActive(personId: string): Promise<ActiveIntegrationConnection | null>;
+  personTimezone(personId: string): Promise<string | null>;
   findForErasure(personId: string, recoveryConnectionId: string): Promise<ActiveIntegrationConnection | null>;
   claimDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null>;
   claimRemoteDisconnectDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null>;
@@ -106,10 +107,12 @@ export interface IntegrationStore {
   startHistoricalImport(personId: string): Promise<boolean>;
   claimHistoricalWindow(id: string, expectedConsentId: string, expectedCursorBefore: string | null, claimToken: string, leaseMs: number): Promise<HistoricalImportClaim | null>;
   markHistoricalWindowSucceeded(id: string, claimToken: string, processedThroughDate: string, completed: boolean): Promise<boolean>;
+  deferHistoricalWindow(id: string, claimToken: string): Promise<boolean>;
   markHistoricalImportFailed(id: string, claimToken: string, failureCode: IntegrationFailureCode, retryable: boolean): Promise<boolean>;
   completeRemoteDisconnect(id: string): Promise<void>;
   failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode): Promise<void>;
   markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void>;
+  markSyncPartial(id: string, consentId: string): Promise<void>;
   markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void>;
   recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<IntegrationInboxOutcome>;
   completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean>;

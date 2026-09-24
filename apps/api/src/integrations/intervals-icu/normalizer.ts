@@ -63,6 +63,7 @@ export function normalizeIntervalsActivity(value: unknown): ProviderActivityReco
   const trainingLoad = optionalNumber(record, "icu_training_load", 0, 100_000);
   return {
     identity,
+    fileType: optionalString(record, "file_type", 32)?.toLowerCase() ?? null,
     occurredAt: instant.toISOString(),
     localDate,
     timezone: optionalString(record, "timezone", 64) ?? "UTC",

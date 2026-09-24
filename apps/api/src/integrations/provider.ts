@@ -33,6 +33,7 @@ export interface ProviderWellnessRecord {
 /** Narrow provider-neutral activity summary; detailed routes/FIT remain excluded. */
 export interface ProviderActivityRecord {
   readonly identity: string;
+  readonly fileType?: string | null;
   readonly occurredAt: string;
   readonly localDate: string;
   readonly timezone: string;
@@ -59,6 +60,7 @@ export interface HealthDataProvider {
   authorizationUrl(state: string): string;
   exchangeAuthorizationCode(code: string): Promise<ProviderAuthorization>;
   reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string): Promise<ProviderReconciliation>;
+  originalActivityFile(accessToken: string, activityId: string): Promise<Uint8Array | null>;
   disconnect(accessToken: string): Promise<void>;
 }
 

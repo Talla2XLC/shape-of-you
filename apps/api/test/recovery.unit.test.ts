@@ -78,6 +78,22 @@ describe("Recovery domain", () => {
     })).toThrow("unit is incompatible");
   });
 
+  it("requires account FIT provenance for the Garmin post-activity metric", () => {
+    const detail = { type: "metric" as const, metric: "garmin_post_activity_recovery_time" as const,
+      value: 120, unit: "minute" as const };
+    expect(() => validateRecoveryObservation({ ...manualMetric, detail })).toThrow("requires verified FIT provenance");
+    expect(validateRecoveryObservation({
+      ...manualMetric,
+      detail,
+      connectionId: "00000000-0000-4000-8000-000000000301",
+      consentId: "00000000-0000-4000-8000-000000000302",
+      sourceReference: {
+        channel: "account", externalSystem: "intervals_icu_activity_fit:garmin_140_9_v1",
+        externalRecordId: "i123:140.9:checksum", occurredAt: manualMetric.observedUntil
+      }
+    })).toMatchObject({ temporalPrecision: "instant" });
+  });
+
   it.each(["body_battery_min", "body_battery_max"] as const)(
     "keeps %s as a distinct score metric",
     (metric) => {

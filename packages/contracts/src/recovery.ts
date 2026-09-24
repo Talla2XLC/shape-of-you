@@ -35,13 +35,14 @@ export const RecoveryMetricSchema = {
     "body_battery_min",
     "body_battery_max",
     "sleep_score",
+    "garmin_post_activity_recovery_time",
     "steps"
   ]
 } as const;
 
 export const RecoveryMetricUnitSchema = {
   type: "string",
-  enum: ["ms", "bpm", "percent", "celsius", "breaths_per_minute", "score", "count"]
+  enum: ["ms", "bpm", "percent", "celsius", "breaths_per_minute", "score", "count", "minute"]
 } as const;
 
 export const RecoveryRiskLevelSchema = {
@@ -68,6 +69,7 @@ export type RecoveryMetric =
   | "body_battery_min"
   | "body_battery_max"
   | "sleep_score"
+  | "garmin_post_activity_recovery_time"
   | "steps";
 export type RecoveryMetricUnit =
   | "ms"
@@ -76,7 +78,8 @@ export type RecoveryMetricUnit =
   | "celsius"
   | "breaths_per_minute"
   | "score"
-  | "count";
+  | "count"
+  | "minute";
 export type RecoveryRiskLevel = "low" | "moderate" | "high" | "blocked";
 export type RecoveryAssessmentDataQuality = "insufficient" | "limited" | "sufficient";
 
@@ -379,7 +382,8 @@ export const MetricObservationDetailSchema = {
     { if: { properties: { metric: { const: "temperature_deviation" } } }, then: { properties: { value: { minimum: -20, maximum: 20 }, unit: { const: "celsius" } } } },
     { if: { properties: { metric: { const: "respiration_rate" } } }, then: { properties: { value: { exclusiveMinimum: 0, maximum: 100 }, unit: { const: "breaths_per_minute" } } } },
     { if: { properties: { metric: { enum: ["body_battery", "body_battery_min", "body_battery_max", "sleep_score"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } },
-    { if: { properties: { metric: { const: "steps" } } }, then: { properties: { value: { type: "integer", minimum: 0, maximum: 1000000 }, unit: { const: "count" } } } }
+    { if: { properties: { metric: { const: "steps" } } }, then: { properties: { value: { type: "integer", minimum: 0, maximum: 1000000 }, unit: { const: "count" } } } },
+    { if: { properties: { metric: { const: "garmin_post_activity_recovery_time" } } }, then: { properties: { value: { type: "integer", minimum: 0, maximum: 65534 }, unit: { const: "minute" } } } }
   ]
 } as const;
 
@@ -502,6 +506,7 @@ export const ListRecoveryObservationsQuerySchema = {
   properties: {
     limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
     kind: RecoveryObservationKindSchema,
+    metric: RecoveryMetricSchema,
     localDate
   }
 } as const;
@@ -509,6 +514,7 @@ export const ListRecoveryObservationsQuerySchema = {
 export interface ListRecoveryObservationsQuery {
   readonly limit?: number;
   readonly kind?: RecoveryObservationKind;
+  readonly metric?: RecoveryMetric;
   readonly localDate?: string;
 }
 

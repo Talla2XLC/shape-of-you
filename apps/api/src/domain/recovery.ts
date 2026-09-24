@@ -113,6 +113,7 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
     body_battery_min: "score",
     body_battery_max: "score",
     sleep_score: "score",
+    garmin_post_activity_recovery_time: "minute",
     steps: "count"
   } as const;
   if (input.detail.type === "metric" && input.detail.unit !== expectedUnits[input.detail.metric]) {
@@ -123,6 +124,20 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
     (!Number.isInteger(input.detail.value) || input.detail.value < 0 || input.detail.value > 1_000_000)
   ) {
     throw new DomainValidationError("Recovery steps count is invalid");
+  }
+  if (
+    input.detail.type === "metric" && input.detail.metric === "garmin_post_activity_recovery_time" &&
+    (!Number.isInteger(input.detail.value) || input.detail.value < 0 || input.detail.value > 65_534)
+  ) {
+    throw new DomainValidationError("Garmin post-activity recovery time is invalid");
+  }
+  if (
+    input.detail.type === "metric" && input.detail.metric === "garmin_post_activity_recovery_time" &&
+    (input.sourceReference.channel !== "account" ||
+      input.sourceReference.externalSystem !== "intervals_icu_activity_fit:garmin_140_9_v1" ||
+      input.sourceReference.occurredAt !== input.observedUntil)
+  ) {
+    throw new DomainValidationError("Garmin post-activity recovery time requires verified FIT provenance");
   }
 }
 

@@ -467,7 +467,7 @@ describe("MCP HTTP adapter", () => {
       "A voluntarily supplied Garmin report is manual evidence, not connected-device data"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "When asked specifically for either Garmin value, give only a verified value with its known time or say it is unavailable"
+      "call list_recovery_observations with metric=garmin_post_activity_recovery_time"
     );
     const forbiddenRoutineReplyTerms = [
       "amountKind",
@@ -2321,6 +2321,7 @@ describe("MCP HTTP adapter", () => {
       ["record_workout_session", workout, "record_workout_session"],
       ["correct_workout_session", { id, ...workout, dedupeKey: "coach-policy-workout-correction", correctionReason: "Correction" }, "correct_workout_session"],
       ["list_recovery_observations", { localDate: "2026-09-02" }, "list_recovery_observations"],
+      ["list_recovery_observations", { metric: "garmin_post_activity_recovery_time" }, "list_recovery_observations"],
       ["get_current_recovery_context", {}, "supported_facts_present"],
       ["record_recovery_observation", recovery, "record_recovery_observation"],
       ["correct_recovery_observation", { id, ...recovery, dedupeKey: "coach-policy-recovery-correction", reason: "Correction" }, "correct_recovery_observation"],
@@ -2658,7 +2659,7 @@ describe("MCP HTTP adapter", () => {
         "PREVIOUS RECOMMENDATION CANDIDATE"
       );
       expect(directDailyAssessment.json().result.content[0].text).toContain(
-        "When asked specifically for either Garmin value, give only a verified value with its known time or say it is unavailable"
+        "call list_recovery_observations with metric=garmin_post_activity_recovery_time"
       );
       expect(directDailyAssessment.json().result.content[0].text).toContain(
         previousRecommendation.snapshotId

@@ -189,7 +189,7 @@ export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
 export const MCP_COACH_REPLY_POLICY =
   "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
   "For every meaningful nutrition, training, recovery, body, or daily-summary interaction, one useful evidence-grounded observation and one concrete next step are mandatory. " +
-  "Never require Garmin Training Readiness or Recovery Time screenshots for routine recovery or daily guidance. Base advice on the Shape of You assessment and available recovery observations; an absent Garmin value is unknown, not a reason to withhold advice. When asked specifically for either Garmin value, give only a verified value with its known time or say it is unavailable; do not ask for a screenshot to make routine guidance possible. Do not infer Garmin Training Readiness from a generic readiness field or present an activity-associated Recovery Time as current. A voluntarily supplied Garmin report is manual evidence, not connected-device data; do not record an unsupported Garmin score under another metric. " +
+  "Never require Garmin Training Readiness or Recovery Time screenshots for routine recovery or daily guidance. Base advice on the Shape of You assessment and available recovery observations; an absent Garmin value is unknown, not a reason to withhold advice. When asked specifically for Recovery Time, call list_recovery_observations with metric=garmin_post_activity_recovery_time. Only a returned observation with sourceReference.channel=account and externalSystem=intervals_icu_activity_fit:garmin_140_9_v1 is an Intervals.icu activity FIT snapshot; state its estimated minute value and observation time. Never calculate a current countdown from it or let it replace the Shape of You assessment. When asked for Garmin Training Readiness, give only a verified value with its known time or say it is unavailable; do not infer it from a generic readiness field. Do not ask for a screenshot to make routine guidance possible. A voluntarily supplied Garmin report is manual evidence, not connected-device data; do not record an unsupported Garmin score under another metric. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
   "Keep planned facts, proposed guidance, and verified completed facts distinct. Use the structured completion assessment for completion claims; neither it nor manual feedback creates an owning-domain fact.";
 
@@ -874,7 +874,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "list_recovery_observations",
-      "Read the authorized person's current raw recovery observations. For one-day set read-back pass localDate only.",
+      "Read the authorized person's current raw recovery observations. For a Garmin post-activity Recovery Time question pass metric=garmin_post_activity_recovery_time; this is a historical estimate, not a current timer. For one-day set read-back pass localDate only.",
       ListRecoveryObservationsQuerySchema,
       RecoveryObservationListSchema,
       false,

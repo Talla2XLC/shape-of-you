@@ -112,11 +112,23 @@ current-consent normalization.
 Intervals can return only values it has received and exposed. Sleep stages,
 overnight minimum SpO2, Garmin readiness or stress, skin temperature, and
 Garmin nightly respiration remain unsupported until a documented Intervals
-field and verified transport fixture exist. Garmin Training Readiness and
-Recovery Time are not current typed Recovery metrics. A user may volunteer
-either value for discussion, but it cannot be saved under another metric.
-Coach does not require a screenshot for routine guidance. Automatic Recovery
-Time extraction from original activity FIT remains unverified.
+field and verified transport fixture exist. Garmin Training Readiness has no
+verified connected metric. The API defines `garmin_post_activity_recovery_time`
+as a typed `RecoveryObservation` in minutes, sourced from the original Garmin
+FIT via the existing Intervals.icu activity endpoint. Its value is an estimated
+historical snapshot at FIT message `140.253` UTC, with activity identity and
+parser version in provenance. Garmin does not document message `140` in the
+public FIT Profile, so this mapping is empirical. The importer requires a
+valid Garmin Activity FIT and does not store the binary file. Missing or
+invalid evidence stays unavailable; it is never treated as zero. The new API
+migration is authored but has not been applied by this task, so connected
+delivery is pending migration and rollout. Coach does not require a screenshot
+for routine guidance and never treats this snapshot as a current countdown or
+as Shape of You's own RecoveryAssessment. The Recovery observation list accepts
+an optional metric filter so Coach can retrieve this sparse historical metric
+without it being displaced by more frequent wellness observations.
+See [the FIT snapshot ADR](../../adr/20260924-import-garmin-post-activity-recovery-snapshot-from-intervals-fit.md)
+for the evidence boundary and accepted interpretation.
 
 Connection erasure uses an API-owned durable request.
 Fresh passkey authentication quarantines the connection immediately, while an

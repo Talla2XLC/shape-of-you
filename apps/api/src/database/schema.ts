@@ -213,6 +213,7 @@ export const recoveryMetric = pgEnum("recovery_metric", [
   "body_battery_min",
   "body_battery_max",
   "sleep_score",
+  "garmin_post_activity_recovery_time",
   "steps"
 ]);
 export const recoveryMetricUnit = pgEnum("recovery_metric_unit", [
@@ -222,7 +223,8 @@ export const recoveryMetricUnit = pgEnum("recovery_metric_unit", [
   "celsius",
   "breaths_per_minute",
   "score",
-  "count"
+  "count",
+  "minute"
 ]);
 export const recoveryConnectionStatus = pgEnum("recovery_connection_status", [
   "active",
@@ -3040,7 +3042,8 @@ export const recoveryMetricDetails = pgTable(
             OR (${table.metric} = 'temperature_deviation' AND ${table.value} >= -20 AND ${table.value} <= 20 AND ${table.unit} = 'celsius')
             OR (${table.metric} = 'respiration_rate' AND ${table.value} > 0 AND ${table.value} <= 100 AND ${table.unit} = 'breaths_per_minute')
             OR (${table.metric} IN ('body_battery', 'body_battery_min', 'body_battery_max', 'sleep_score') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'score')
-            OR (${table.metric} = 'steps' AND ${table.value} >= 0 AND ${table.value} <= 1000000 AND trunc(${table.value}) = ${table.value} AND ${table.unit} = 'count'))`
+            OR (${table.metric} = 'steps' AND ${table.value} >= 0 AND ${table.value} <= 1000000 AND trunc(${table.value}) = ${table.value} AND ${table.unit} = 'count')
+            OR (${table.metric}::text = 'garmin_post_activity_recovery_time' AND ${table.value} >= 0 AND ${table.value} <= 65534 AND trunc(${table.value}) = ${table.value} AND ${table.unit}::text = 'minute'))`
     )
   ]
 );

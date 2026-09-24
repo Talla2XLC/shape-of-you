@@ -5,6 +5,7 @@ import {
   asc,
   desc,
   eq,
+  exists,
   gte,
   isNull,
   lte,
@@ -595,6 +596,11 @@ export class RecoveryRepository implements RecoveryStore {
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       ];
       if (query.kind) filters.push(eq(recoveryObservations.kind, query.kind));
+      if (query.metric) filters.push(exists(transaction.select({ id: recoveryMetricDetails.observationId })
+        .from(recoveryMetricDetails).where(and(
+          eq(recoveryMetricDetails.observationId, recoveryObservations.id),
+          eq(recoveryMetricDetails.metric, query.metric)
+        ))));
       if (query.localDate) filters.push(eq(recoveryObservations.localDate, query.localDate));
       const rows = await transaction.select().from(recoveryObservations)
         .where(and(...filters)).orderBy(desc(recoveryObservations.observedUntil), desc(recoveryObservations.id))
@@ -848,7 +854,8 @@ export class RecoveryRepository implements RecoveryStore {
           notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id))),
           or(isNull(recoveryObservations.consentId), isNull(recoveryConsents.retainUntil), gte(recoveryConsents.retainUntil, asOf))
         )).orderBy(asc(recoveryObservations.observedUntil));
-      const observations = await Promise.all(roots.map((item) => this.hydrateObservation(transaction, item.observation)));
+      const observations = (await Promise.all(roots.map((item) => this.hydrateObservation(transaction, item.observation))))
+        .filter((item) => item.detail.type !== "metric" || item.detail.metric !== "garmin_post_activity_recovery_time");
       const observationEvidence: RecoveryObservationEvidence[] = observations.map((item) => ({ id: item.id, quality: item.quality, detail: item.detail }));
 
       const workoutSuccessor = alias(workoutSessions, "recovery_workout_successor");

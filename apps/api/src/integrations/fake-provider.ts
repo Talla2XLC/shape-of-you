@@ -11,6 +11,8 @@ export class FakeHealthDataProvider implements HealthDataProvider {
   public nextFailure: IntegrationFailureCode | null = null;
   public disconnectedTokens: string[] = [];
   public reconcileCalls: Array<{ accessToken: string; oldest: string; newest: string }> = [];
+  public activityFiles = new Map<string, Uint8Array | null>();
+  public activityFileCalls: string[] = [];
 
   public authorizationUrl(state: string): string {
     return `https://provider.invalid/oauth/authorize?state=${encodeURIComponent(state)}`;
@@ -31,6 +33,12 @@ export class FakeHealthDataProvider implements HealthDataProvider {
   public async disconnect(accessToken: string): Promise<void> {
     this.failIfRequested();
     this.disconnectedTokens.push(accessToken);
+  }
+
+  public async originalActivityFile(_accessToken: string, activityId: string): Promise<Uint8Array | null> {
+    this.failIfRequested();
+    this.activityFileCalls.push(activityId);
+    return this.activityFiles.get(activityId) ?? null;
   }
 
   private failIfRequested(): void {

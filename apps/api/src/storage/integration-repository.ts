@@ -7,6 +7,7 @@ import {
   integrationConnections,
   integrationInbox,
   integrationRecoveryFacts,
+  persons,
   recoveryConnections,
   recoveryConsentKinds,
   recoveryConsents,
@@ -267,6 +268,11 @@ export class IntegrationRepository implements IntegrationStore {
     };
   }
 
+  public async personTimezone(personId: string): Promise<string | null> {
+    const row = await this.database.db.query.persons.findFirst({ where: eq(persons.id, personId) });
+    return row?.timezone ?? null;
+  }
+
   public async findForErasure(personId: string, recoveryConnectionId: string): Promise<ActiveIntegrationConnection | null> {
     const row = await this.database.db.query.integrationConnections.findFirst({
       where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.recoveryConnectionId, recoveryConnectionId))
@@ -451,6 +457,22 @@ export class IntegrationRepository implements IntegrationStore {
     return rows.length > 0;
   }
 
+  public async deferHistoricalWindow(id: string, claimToken: string): Promise<boolean> {
+    const now = new Date();
+    const rows = await this.database.db.update(integrationConnections).set({
+      historicalNextAttemptAt: new Date(now.valueOf() + 15 * 60_000),
+      historicalClaimToken: null,
+      historicalClaimUntil: null,
+      updatedAt: now
+    }).where(and(
+      eq(integrationConnections.id, id),
+      eq(integrationConnections.importEnabled, true),
+      eq(integrationConnections.historicalImportStatus, "running"),
+      eq(integrationConnections.historicalClaimToken, claimToken)
+    )).returning({ id: integrationConnections.id });
+    return rows.length > 0;
+  }
+
   public async markHistoricalImportFailed(
     id: string,
     claimToken: string,
@@ -486,6 +508,17 @@ export class IntegrationRepository implements IntegrationStore {
   public async markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void> {
     const now = new Date();
     await this.database.db.update(integrationConnections).set({ lifecycle: "active", failureCode: null, lastAttemptAt: now, lastSuccessfulSyncAt: now, ...(hasData ? { lastDataAt: now } : {}), nextAttemptAt: new Date(now.valueOf() + 300_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
+  }
+  public async markSyncPartial(id: string, consentId: string): Promise<void> {
+    const now = new Date();
+    await this.database.db.update(integrationConnections).set({
+      lastAttemptAt: now,
+      nextAttemptAt: new Date(now.valueOf() + 300_000),
+      updatedAt: now
+    }).where(and(
+      eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId),
+      eq(integrationConnections.importEnabled, true)
+    ));
   }
   public async markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void> {
     const now = new Date();
@@ -546,7 +579,7 @@ export class IntegrationRepository implements IntegrationStore {
           eq(integrationInbox.id, receiptId),
           eq(integrationInbox.connectionId, id),
           eq(integrationInbox.consentId, consentId),
-          eq(integrationInbox.kind, "wellness"),
+          sql`${integrationInbox.kind} IN ('wellness', 'activity')`,
           eq(integrationInbox.providerIdentity, identity)
         )
       });

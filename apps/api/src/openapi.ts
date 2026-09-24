@@ -1046,6 +1046,7 @@ function recoveryPaths(): Record<string, object> {
         parameters: [
           schemaParameter("limit", "query", false, ListRecoveryObservationsQuerySchema.properties.limit),
           schemaParameter("kind", "query", false, ListRecoveryObservationsQuerySchema.properties.kind),
+          schemaParameter("metric", "query", false, ListRecoveryObservationsQuerySchema.properties.metric),
           schemaParameter("localDate", "query", false, ListRecoveryObservationsQuerySchema.properties.localDate)
         ],
         responses: { "200": response(RecoveryObservationListSchema, "Current observations") }

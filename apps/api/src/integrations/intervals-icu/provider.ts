@@ -6,6 +6,7 @@ import type {
   ProviderReconciliation
 } from "../provider.js";
 import { IntegrationProviderError } from "../provider.js";
+import { gunzipSync } from "node:zlib";
 import {
   normalizeIntervalsActivity,
   normalizeIntervalsWellness
@@ -119,6 +120,53 @@ export class IntervalsIcuProvider implements HealthDataProvider {
       method: "DELETE",
       headers: { authorization: `Bearer ${accessToken}`, accept: "application/json" }
     }, true);
+  }
+
+  /** Fetches one original provider activity file without retaining its other contents. */
+  public async originalActivityFile(accessToken: string, activityId: string): Promise<Uint8Array | null> {
+    if (!activityId || activityId.length > 128) invalid();
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await this.request(`${apiOrigin}/api/v1/activity/${encodeURIComponent(activityId)}/file`, {
+        headers: { authorization: `Bearer ${accessToken}`, accept: "application/octet-stream" },
+        redirect: "error",
+        signal: controller.signal
+      });
+      if (response.status === 404) return null;
+      if (!response.ok) throw new IntegrationProviderError(classifyHttpFailure(response.status));
+      const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+      if (contentType && (
+        contentType.startsWith("text/") || contentType === "application/json" ||
+        contentType === "application/xml" || contentType === "application/xhtml+xml"
+      )) invalid();
+      const declared = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declared) && declared > maxResponseBytes) invalid();
+      if (!response.body) invalid();
+      const chunks: Uint8Array[] = [];
+      let length = 0;
+      for await (const chunk of response.body) {
+        length += chunk.byteLength;
+        if (length > maxResponseBytes) invalid();
+        chunks.push(chunk);
+      }
+      const body = Buffer.concat(chunks);
+      if (body.length < 2) invalid();
+      let file: Buffer;
+      try {
+        file = body[0] === 0x1f && body[1] === 0x8b
+          ? gunzipSync(body, { maxOutputLength: maxResponseBytes })
+          : body;
+      } catch { invalid(); }
+      if (file.length > maxResponseBytes) invalid();
+      return file;
+    } catch (error) {
+      if (error instanceof IntegrationProviderError) throw error;
+      if (error instanceof Error && error.name === "AbortError") throw new IntegrationProviderError("provider_timeout");
+      throw new IntegrationProviderError("provider_unavailable");
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   private async fetchJson(

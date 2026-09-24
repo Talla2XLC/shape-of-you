@@ -19,6 +19,7 @@ import type { ActiveIntegrationConnection, IntegrationStore } from "./integratio
 import type { HealthDataProvider, ProviderWellnessRecord } from "./provider.js";
 import { IntegrationProviderError } from "./provider.js";
 import { normalizedChecksum } from "./intervals-icu/normalizer.js";
+import { parseGarminRecoverySnapshot } from "./intervals-icu/fit-recovery.js";
 import { ConflictError, DomainValidationError } from "../domain/errors.js";
 
 const transactionTtlMs = 10 * 60_000;
@@ -26,6 +27,8 @@ const reconciliationWindowDays = 14;
 const historicalWindowDays = 180;
 const historicalLowerBound = "2000-01-01";
 const historicalClaimLeaseMs = 30 * 60_000;
+const maxFitDownloadsPerPass = 20;
+const fitFactKey = "garmin_post_activity_recovery_time";
 
 /** Coordinates OAuth, typed import, disconnect and sync state inside the API. */
 @Injectable()
@@ -148,14 +151,21 @@ export class IntegrationService {
       const today = new Date();
       const from = new Date(today.valueOf() - reconciliationWindowDays * 86_400_000);
       const rollingFrom = isoDate(from);
-      const changed = await this.reconcileRange(connection, token, rollingFrom, isoDate(today));
-      await this.store!.markSyncSucceeded(connection.id, connection.consentId, changed);
+      const fitBudget = { remaining: maxFitDownloadsPerPass };
+      const rolling = await this.reconcileRange(connection, token, rollingFrom, isoDate(today), fitBudget);
+      if (rolling.complete) {
+        await this.store!.markSyncSucceeded(connection.id, connection.consentId, rolling.changed);
+      } else {
+        await this.store!.markSyncPartial(connection.id, connection.consentId);
+      }
 
       if (
+        rolling.complete
+        &&
         connection.historicalImportStatus === "running"
         && (!connection.historicalNextAttemptAt || connection.historicalNextAttemptAt <= today)
       ) {
-        await this.reconcileHistoricalWindow(connection, token, rollingFrom);
+        await this.reconcileHistoricalWindow(connection, token, rollingFrom, fitBudget);
       }
     } catch (error) {
       const failure = error instanceof IntegrationProviderError ? error.failureCode : "provider_unavailable";
@@ -168,7 +178,8 @@ export class IntegrationService {
   private async reconcileHistoricalWindow(
     connection: ActiveIntegrationConnection,
     token: string,
-    rollingFrom: string
+    rollingFrom: string,
+    fitBudget: { remaining: number }
   ): Promise<void> {
     const claimToken = randomUUID();
     const claim = await this.store!.claimHistoricalWindow(
@@ -188,8 +199,12 @@ export class IntegrationService {
     const candidateOldest = addDays(newest, -(historicalWindowDays - 1));
     const oldest = candidateOldest < historicalLowerBound ? historicalLowerBound : candidateOldest;
     try {
-      await this.reconcileRange(connection, token, oldest, newest);
-      await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, oldest, oldest === historicalLowerBound);
+      const result = await this.reconcileRange(connection, token, oldest, newest, fitBudget);
+      if (result.complete) {
+        await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, oldest, oldest === historicalLowerBound);
+      } else {
+        await this.store!.deferHistoricalWindow(connection.id, claimToken);
+      }
     } catch (error) {
       const failure = error instanceof IntegrationProviderError ? error.failureCode : "provider_unavailable";
       await this.store!.markHistoricalImportFailed(connection.id, claimToken, failure, isRetryableHistoryFailure(failure));
@@ -200,18 +215,30 @@ export class IntegrationService {
     connection: ActiveIntegrationConnection,
     token: string,
     oldest: string,
-    newest: string
-  ): Promise<boolean> {
+    newest: string,
+    fitBudget: { remaining: number }
+  ): Promise<{ readonly changed: boolean; readonly complete: boolean }> {
     const result = await this.provider!.reconcile(token, oldest, newest);
     let changed = false;
+    let timezone: string | null | undefined;
     for (const wellness of result.wellness) changed = await this.importWellness(connection, wellness) || changed;
     for (const activity of result.activities) {
-      const checksum = normalizedChecksum(activity);
-      const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "activity", activity.identity, checksum);
+      const activityChecksum = normalizedChecksum(Object.fromEntries(
+        Object.entries(activity).filter(([key]) => key !== "fileType")
+      ));
+      // Recheck FIT once per UTC day because the original file can change without summary changes.
+      const inboxChecksum = activity.fileType === "fit"
+        ? normalizedChecksum({ activityChecksum, fitImportVersion: 1, fitReviewDate: isoDate(new Date()) })
+        : activityChecksum;
+      const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "activity", activity.identity, inboxChecksum);
       if (inbox.state !== "process") continue;
+      const needsFit = activity.fileType === "fit";
+      if (needsFit && timezone === undefined) timezone = await this.store!.personTimezone(connection.personId);
+      if (needsFit && timezone === null) return { changed, complete: false };
+      if (needsFit && fitBudget.remaining === 0) return { changed, complete: false };
       const outcome = await this.training.importExternalActivity({
         connectionId: connection.id, personId: connection.personId, consentId: connection.consentId,
-        providerIdentity: activity.identity, normalizedChecksum: checksum,
+        providerIdentity: activity.identity, normalizedChecksum: activityChecksum,
         occurredAt: activity.occurredAt, localDate: activity.localDate, timezone: activity.timezone,
         name: activity.name, durationSeconds: activity.durationSeconds, distanceMeters: activity.distanceMeters,
         trainingLoad: activity.trainingLoad,
@@ -222,10 +249,66 @@ export class IntegrationService {
         sourceProvider: "intervals_icu", garminAttributed: activity.garminAttributed
       });
       if (outcome === "stopped") continue;
+      if (needsFit) {
+        fitBudget.remaining--;
+        changed = await this.importActivityRecovery(connection, token, activity.identity, inbox.receiptId, timezone!) || changed;
+      }
       await this.store!.completeInbox(connection.id, connection.consentId, inbox.receiptId);
       changed = outcome !== "unchanged" || changed;
     }
-    return changed;
+    return { changed, complete: true };
+  }
+
+  private async importActivityRecovery(
+    connection: ActiveIntegrationConnection,
+    token: string,
+    activityId: string,
+    receiptId: string,
+    timezone: string
+  ): Promise<boolean> {
+    const file = await this.provider!.originalActivityFile(token, activityId);
+    if (file === null) return false;
+    let snapshot: ReturnType<typeof parseGarminRecoverySnapshot>;
+    try {
+      snapshot = parseGarminRecoverySnapshot(file);
+    } catch (error) {
+      if (error instanceof IntegrationProviderError && error.failureCode === "provider_response_invalid") return false;
+      throw error;
+    }
+    const current = await this.store!.recoveryFact(connection.id, activityId, fitFactKey);
+    if (!snapshot) {
+      if (!current || current.checksum === "removed") return false;
+      const withdrawn = await this.recovery.withdrawObservation(
+        connection.personId, current.observationId,
+        `intervals:${activityId}:${fitFactKey}:removed:${current.observationId}`,
+        "provider_field_removed",
+        { connectionId: connection.recoveryConnectionId, consentId: connection.consentId }
+      );
+      await this.store!.linkRecoveryFact(connection.id, connection.consentId, activityId, receiptId, fitFactKey, "removed", withdrawn.observation.id);
+      return withdrawn.created;
+    }
+    const fileChecksum = createHash("sha256").update(file).digest("hex");
+    const checksum = normalizedChecksum({ fileChecksum, snapshot });
+    if (current?.checksum === checksum) {
+      await this.store!.linkRecoveryFact(connection.id, connection.consentId, activityId, receiptId, fitFactKey, checksum, current.observationId);
+      return false;
+    }
+    const base: CreateRecoveryObservation = {
+      kind: "metric", observedFrom: snapshot.observedAt, observedUntil: snapshot.observedAt,
+      temporalPrecision: "instant", localDate: null, timezone, quality: "estimated",
+      connectionId: connection.recoveryConnectionId, consentId: connection.consentId,
+      dedupeKey: `intervals:${activityId}:${fitFactKey}:${checksum.slice(0, 16)}${current ? `:${current.observationId}` : ""}`,
+      sourceReference: {
+        channel: "account", externalSystem: "intervals_icu_activity_fit:garmin_140_9_v1",
+        externalRecordId: `${activityId}:140.9:${fileChecksum}`, occurredAt: snapshot.observedAt
+      },
+      detail: { type: "metric", metric: fitFactKey, value: snapshot.minutes, unit: "minute" }
+    };
+    const persisted = current && current.checksum !== "removed"
+      ? await this.recovery.correctObservation(connection.personId, current.observationId, { ...base, reason: "provider_record_changed" })
+      : await this.recovery.createObservation(connection.personId, base);
+    await this.store!.linkRecoveryFact(connection.id, connection.consentId, activityId, receiptId, fitFactKey, checksum, persisted.observation.id);
+    return persisted.created;
   }
 
   private async importWellness(connection: ActiveIntegrationConnection, wellness: ProviderWellnessRecord): Promise<boolean> {
