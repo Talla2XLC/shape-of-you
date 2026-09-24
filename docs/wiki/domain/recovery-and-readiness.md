@@ -112,8 +112,11 @@ current-consent normalization.
 Intervals can return only values it has received and exposed. Sleep stages,
 overnight minimum SpO2, Garmin readiness or stress, skin temperature, and
 Garmin nightly respiration remain unsupported until a documented Intervals
-field and verified transport fixture exist. Screenshot capture remains a
-manual fallback, not the normal ingestion path for the supported metrics.
+field and verified transport fixture exist. Garmin Training Readiness and
+Recovery Time are not current typed Recovery metrics. A user may volunteer
+either value for discussion, but it cannot be saved under another metric.
+Coach does not require a screenshot for routine guidance. Automatic Recovery
+Time extraction from original activity FIT remains unverified.
 
 Connection erasure uses an API-owned durable request.
 Fresh passkey authentication quarantines the connection immediately, while an
@@ -222,6 +225,7 @@ reconstruction of the observation ordering used by a historical live v1 read.
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
 - [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
 - [Consent-scoped Recovery delivery evidence](../../adr/20260919-bind-recovery-delivery-to-consent-generation.md).
+- [Garmin screenshots are not required for Coach recovery](../../adr/20260924-do-not-require-garmin-screenshots-for-coach-recovery.md).
 
 ## Open questions
 

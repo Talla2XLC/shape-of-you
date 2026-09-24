@@ -206,6 +206,15 @@ it was saved earlier and that current freshness is not yet confirmed. It does
 not claim that reconnect, migration, or another unverified event caused the
 state.
 
+Coach does not require Garmin Training Readiness or Recovery Time screenshots
+for ordinary recovery or daily guidance. It uses the Shape of You assessment
+and available Recovery observations. When asked for either Garmin value, Coach
+reports only a verified value with its known time or says it is unavailable;
+it does not infer Garmin Training Readiness from a generic readiness field or
+present an activity-linked Recovery Time as current. A voluntary Garmin report
+is manual conversation evidence, not a connected-device observation, and an
+unsupported score is not recorded under another metric.
+
 `confirmed_absent` means only that the current normalized delivery omitted the
 field. Coach never converts absence into zero or invents a provider-side or
 physiological explanation. Current-day steps with `partial_day` and `asOf` are
@@ -394,6 +403,7 @@ readable while current evaluation emits v2.
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md).
 - [Connected Recovery freshness for Coach](../../adr/20260918-expose-connected-recovery-freshness-to-coach.md).
+- [Garmin screenshots are not required for Coach recovery](../../adr/20260924-do-not-require-garmin-screenshots-for-coach-recovery.md).
 - [Consent-scoped Recovery delivery evidence](../../adr/20260919-bind-recovery-delivery-to-consent-generation.md).
 - [Typed feedback for daily recommendations](../../adr/20260918-record-typed-daily-recommendation-feedback.md).
 - [Domain-fact completion for daily recommendations](../../adr/20260921-determine-daily-recommendation-completion-from-domain-facts.md).

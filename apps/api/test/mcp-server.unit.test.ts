@@ -466,6 +466,9 @@ describe("MCP HTTP adapter", () => {
     expect(MCP_COACH_REPLY_POLICY).toContain(
       "A voluntarily supplied Garmin report is manual evidence, not connected-device data"
     );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "When asked specifically for either Garmin value, give only a verified value with its known time or say it is unavailable"
+    );
     const forbiddenRoutineReplyTerms = [
       "amountKind",
       "list_meals",
@@ -2200,10 +2203,17 @@ describe("MCP HTTP adapter", () => {
             localDate: "2026-09-02",
             timezone: "Europe/Moscow",
             syncState: "fresh_success",
-            targetDateDelivery: "record_without_supported_facts",
+            targetDateDelivery: "supported_facts_present",
             checkedAt: "2026-09-02T08:59:00.000Z",
-            metricDelivery: confirmedAbsentRecoveryMetrics,
-            observations: { items: [safeCurrentRecoveryObservation] }
+            metricDelivery: confirmedAbsentRecoveryMetrics.map((item) => item.metric === "hrv_rmssd"
+              ? { ...item, state: "confirmed_present" }
+              : item),
+            observations: { items: [{
+              ...safeCurrentRecoveryObservation,
+              localDate: "2026-09-02",
+              timezone: "Europe/Moscow",
+              detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" }
+            }] }
           })
         },
         dailyContextNotes: {
@@ -2311,7 +2321,7 @@ describe("MCP HTTP adapter", () => {
       ["record_workout_session", workout, "record_workout_session"],
       ["correct_workout_session", { id, ...workout, dedupeKey: "coach-policy-workout-correction", correctionReason: "Correction" }, "correct_workout_session"],
       ["list_recovery_observations", { localDate: "2026-09-02" }, "list_recovery_observations"],
-      ["get_current_recovery_context", {}, "record_without_supported_facts"],
+      ["get_current_recovery_context", {}, "supported_facts_present"],
       ["record_recovery_observation", recovery, "record_recovery_observation"],
       ["correct_recovery_observation", { id, ...recovery, dedupeKey: "coach-policy-recovery-correction", reason: "Correction" }, "correct_recovery_observation"],
       ["list_daily_context_notes", { localDate: "2026-09-02" }, "list_daily_context_notes"],
@@ -2383,6 +2393,10 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.content[0].text, name).toContain(
             "Never call it a final, complete, or end-of-day total"
           );
+          expect(toolResult.structuredContent.observations.items).toMatchObject([{
+            detail: { metric: "hrv_rmssd", value: 48, unit: "ms" }
+          }]);
+          expect(JSON.stringify(toolResult.structuredContent)).not.toMatch(/Training Readiness|Recovery Time/u);
           expectNoCurrentRecoveryIdentity(toolResult.structuredContent);
         } else if (name === "get_daily_assessment") {
           expect(toolResult.structuredContent, name).toEqual({
@@ -2644,7 +2658,33 @@ describe("MCP HTTP adapter", () => {
         "PREVIOUS RECOMMENDATION CANDIDATE"
       );
       expect(directDailyAssessment.json().result.content[0].text).toContain(
+        "When asked specifically for either Garmin value, give only a verified value with its known time or say it is unavailable"
+      );
+      expect(directDailyAssessment.json().result.content[0].text).toContain(
         previousRecommendation.snapshotId
+      );
+
+      readCoachContext.mockRejectedValueOnce(new Error("assessment read unavailable"));
+      const unavailableDailyAssessment = await authorizedFastify.inject({
+        method: "POST",
+        url: "/mcp",
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: `Bearer ${token}`
+        },
+        payload: {
+          jsonrpc: "2.0",
+          id: "unavailable-daily-assessment-garmin-policy",
+          method: "tools/call",
+          params: { name: "get_daily_assessment", arguments: {} }
+        }
+      });
+      expect(unavailableDailyAssessment.json().result).toMatchObject({ isError: true });
+      expect(unavailableDailyAssessment.json().result.content[0].text).toContain(
+        "do not require Garmin Training Readiness or Recovery Time screenshots"
+      );
+      expect(unavailableDailyAssessment.json().result.content[0].text).toContain(
+        "do not base guidance on unavailable or unverified facts"
       );
 
       readCoachContext.mockResolvedValueOnce({
@@ -3405,6 +3445,15 @@ describe("MCP HTTP adapter", () => {
         isError: true,
         content: [{ text: expect.stringContaining("Continue saving the other independent facts") }]
       });
+      expect(createObservation).not.toHaveBeenCalled();
+      const unsupportedGarminResult = (await call(150, "record_recovery_observation", {
+        kind: "metric",
+        localDate: "2026-08-31",
+        timezone: "Europe/Moscow",
+        dedupeKey: "chatgpt:recovery:garmin-recovery-time:2026-08-31",
+        detail: { type: "metric", metric: "recovery_time_remaining", value: 120, unit: "minutes" }
+      })).json().result;
+      expect(unsupportedGarminResult.isError).toBe(true);
       expect(createObservation).not.toHaveBeenCalled();
       const recoveryFacts = [
         {
