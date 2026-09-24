@@ -123,8 +123,14 @@ valid Garmin Activity FIT and does not store the binary file. Missing or
 invalid evidence stays unavailable; it is never treated as zero. The new API
 migration was applied to staging by the approved promotion of
 `c89927907b5194e22400684aea0042b366b7215c`; API and edge readiness and
-generic staging smoke passed. Production rollout and user-specific provider
-validation remain pending. Coach does not require a screenshot
+generic staging smoke passed. Read-only owner-account verification confirmed
+that a post-promotion sync imported the historical FIT fact with the expected
+minute value, activity provenance, observation time, and separate ingestion
+time. The first hosted Coach reply correctly explained Garmin's historical
+estimate for readiness for the next hard workout. Its comparison with the
+operator-reported Morning Report rest day is a plausible interpretation, not
+verified evidence of that report's internal decision path. Production rollout
+remains unverified. Coach does not require a screenshot
 for routine guidance and never treats this snapshot as a current countdown or
 as Shape of You's own RecoveryAssessment. The Recovery observation list accepts
 an optional metric filter so Coach can retrieve this sparse historical metric

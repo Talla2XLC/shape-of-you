@@ -41,6 +41,13 @@ wellness-дне числового `readiness` нет. Отдельное пол
 Readiness не идентифицировано; его нельзя выводить из generic `readiness`
 или случайных FIT-полей.
 
+Руководство Forerunner 970 описывает Recovery Time как оценку времени до
+готовности к следующей тяжёлой тренировке; после активности значение
+обновляется в течение дня. Поэтому исторический снимок можно объяснять в
+этом смысле на момент измерения, не превращая его в текущий таймер или
+собственное решение Shape of You о нагрузке. Это описание функции Garmin не
+делает частное поле FIT `140.9` официально документированным контрактом.
+
 ## Decision
 
 Оператор одобрил архитектуру для TASK-0131 ответом «ок го» 2026-09-24.
@@ -157,6 +164,7 @@ Recovery. Ссылка на activity ID в `SourceReference` сохраняет 
 - [ADR: Coach без Garmin-скриншотов](./20260924-do-not-require-garmin-screenshots-for-coach-recovery.md)
 - [ADR: типизированный Intervals wellness](./20260912-import-supported-intervals-wellness-as-typed-recovery.md)
 - [Garmin FIT timestamp documentation](https://developer.garmin.com/fit/articles/cookbook/decoding_activity_files.html)
+- [Forerunner 970 Recovery Time owner manual](https://www8.garmin.com/manuals/webhelp/GUID-025D75CF-3445-49E1-8D81-1AA74AB4E00F/RU-RU/GUID-DAC27D10-886A-4EA8-8339-674479E9574A.html)
 - [Garmin FIT Profile](https://github.com/garmin/fit-sdk-tools/blob/main/Profile.xlsx)
 - [fit4ruby reverse-engineered message 140](https://github.com/scrapper/fit4ruby/blob/master/lib/fit4ruby/GlobalFitMessages.rb)
 - [Garmin FIT community analysis](https://forums.garmin.com/developer/fit-sdk/f/discussion/254469/list-of-undocumented-mesg_num)
