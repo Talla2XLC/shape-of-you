@@ -121,8 +121,10 @@ parser version in provenance. Garmin does not document message `140` in the
 public FIT Profile, so this mapping is empirical. The importer requires a
 valid Garmin Activity FIT and does not store the binary file. Missing or
 invalid evidence stays unavailable; it is never treated as zero. The new API
-migration is authored but has not been applied by this task, so connected
-delivery is pending migration and rollout. Coach does not require a screenshot
+migration was applied to staging by the approved promotion of
+`c89927907b5194e22400684aea0042b366b7215c`; API and edge readiness and
+generic staging smoke passed. Production rollout and user-specific provider
+validation remain pending. Coach does not require a screenshot
 for routine guidance and never treats this snapshot as a current countdown or
 as Shape of You's own RecoveryAssessment. The Recovery observation list accepts
 an optional metric filter so Coach can retrieve this sparse historical metric
