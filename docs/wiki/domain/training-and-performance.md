@@ -56,12 +56,18 @@ automatically.
   target for the expected active program/version/lock. Stale authority, a
   different pending activity, a future or old-week activity, or a newly created
   session fails closed without a partial write.
-- A separate Person-scoped relational association can identify one external
-  activity as evidence for a detailed WorkoutSession. The aggregates stay
-  distinct, and only the explicit association prevents double counting.
-  A real linked session takes precedence over an external classification.
+- A separate Person-scoped association identifies one external activity as
+  evidence for a detailed WorkoutSession. Training creates it for an explicit
+  link, exact shared source identity, or a previously confirmed external title
+  for the session's exact program version/workout position plus compatible
+  type, date, close start, and mutual uniqueness. Arbitrary names and nearby
+  times do not authorize a link. Title trust is a revocable Person-owned
+  overlay, never an implicit program edit or activity classification. Current
+  corrections recheck automatic links. One linked pair counts as one training
+  occurrence; external load remains external, while performed sets remain in
+  the session. A linked session takes precedence over external classification.
   Provider correction retains classification through the stable lineage;
-  connected-data erasure removes both association and classification without
+  connected-data erasure removes association and classification without
   mutating the session.
 - `NextTrainingStep` is a deterministic read projection over the active cadence
   and current Training facts. Missed days do not move its sequence; explicit
@@ -109,6 +115,7 @@ automatically.
 - [Atomic exercise resolution during confirmed program save](../../adr/20260922-resolve-training-program-exercises-atomically.md).
 - [Rolling cadence and Training-owned next step](../../adr/20260922-own-rolling-training-cadence-and-next-step-in-training.md).
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
+- [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
 
 ## Open questions
 

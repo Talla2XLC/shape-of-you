@@ -15,8 +15,8 @@ tags:
 
 Provides shared versioned exercises, Person-owned immutable program versions
 with optional typed cadence, immutable sessions/sets, deterministic next-step
-projection, explicit imported-activity classification, personal records, and
-progression candidates.
+projection, explicit imported-activity classification, title trust for
+automatic activity matching, personal records, and progression candidates.
 
 ## Content
 
@@ -30,7 +30,9 @@ Programs:
 
 - `POST /v1/training/programs`, `GET /:id`, `GET /active`;
 - `POST /v1/training/programs/:id/versions`;
-- `POST /v1/training/programs/:id/versions/:versionId/activate`.
+- `POST /v1/training/programs/:id/versions/:versionId/activate`;
+- `GET /v1/training/programs/:id/versions/:versionId/external-titles`;
+- `PUT /v1/training/programs/external-title-trust`.
 
 The HTTP `GET /active` endpoint returns `404` when no active program exists.
 The MCP `get_active_training_program` adapter preserves that domain distinction
@@ -46,6 +48,8 @@ may support a proposal but are not a plan. Connected activity summaries expose
 only safe typed occurrence, duration, distance, load, heart-rate, device, and
 normalized Garmin-attribution fields; provider identities, connection or
 consent identifiers, checksums, credentials, and raw payloads stay internal.
+It also exposes Person-confirmed external titles for the exact active program
+version, separately from the immutable workout snapshot.
 
 New immutable versions may carry a closed `rolling_weekly` cadence: strength
 sessions per local week, an ordered cycle of program-workout positions, and an
@@ -85,7 +89,7 @@ append a successor; stale or no-longer-pending authority writes nothing.
 The current safe external-activity projection includes its classification but
 not provider internals. The classification follows the stable activity
 correction lineage when a provider successor becomes current and is removed
-with connected-data erasure. A real explicitly linked `WorkoutSession` takes
+with connected-data erasure. A linked `WorkoutSession` takes
 precedence and prevents both a new classification and double counting. A
 classified external activity may advance cadence, but never supplies performed
 exercises, sets, loads, personal records, or progression evidence.
@@ -100,10 +104,16 @@ screenshot and does not count a plausible cross-source match as two workouts
 without sufficient evidence.
 
 A `WorkoutSession` may pin the exact workout position in its immutable program
-version. It may also expose an exact external-activity correlation through a
-separate Person-scoped relational association. Only this explicit association
-deduplicates detailed and connected evidence. Deleting connected evidence
-removes the association without mutating the immutable session.
+version. Its `externalActivityId` exposes the current external correlation from
+a separate Person-scoped association. Training creates an automatic association
+for exact shared source identity, or for a previously confirmed external title
+of that exact program workout with compatible type, date, close start, and a
+unique candidate pair. Arbitrary matching names are insufficient. The MCP
+`set_trusted_external_activity_title` command confirms, replaces, or revokes
+one title under `workout:write`; it does not classify an individual activity.
+Title trust is scoped to one program version. Corrections recheck automatic
+associations; explicit links retain priority. Deleting connected evidence
+removes its association without mutating the immutable session.
 
 After the user explicitly confirms a complete program snapshot, MCP
 `save_confirmed_training_program` atomically creates and activates its first
@@ -192,6 +202,7 @@ pending acceptance.
 - External catalog records remain staged; no scraper/name merge. Records and
   candidates are query projections, not mutable authority.
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
+- [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
 
 ## Open questions
 

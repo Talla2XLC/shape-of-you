@@ -153,6 +153,7 @@ export class IntegrationService {
       const rollingFrom = isoDate(from);
       const fitBudget = { remaining: maxFitDownloadsPerPass };
       const rolling = await this.reconcileRange(connection, token, rollingFrom, isoDate(today), fitBudget);
+      await this.training.reconcileRecentActivityLinks(connection.personId, rollingFrom, isoDate(today));
       if (rolling.complete) {
         await this.store!.markSyncSucceeded(connection.id, connection.consentId, rolling.changed);
       } else {

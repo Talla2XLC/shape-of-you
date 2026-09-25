@@ -58,13 +58,19 @@ Person-local date; presentation text is never parsed as an executable rule. Its 
 immutable calculation preserves the exact policy bundle, selected evidence,
 eligibility trace, comparisons, signal groups, and chosen result. Identical
 evidence reuses the snapshot; a late or corrected fact, context exclusion,
-active TrainingProgramVersion, or imported-activity classification changes the
-checksum and selects a new snapshot. Classification revisions also participate
-in the Person evidence-revision guard, so a concurrent change forces the
+active TrainingProgramVersion, imported-activity classification, or a current
+session/activity link changes the checksum and selects a new snapshot.
+Classification and link revisions also participate in the Person
+evidence-revision guard, so a concurrent change forces the
 assessment to recompose instead of persisting stale output.
 Historical snapshots remain readable audit evidence unless privacy erasure
 removes one derived from erased evidence. Legacy v1, v2, and v3 snapshots
 remain readable.
+
+Daily Assessment counts a linked detailed session and imported activity as one
+training occurrence. External activity remains the source of its numeric
+training load; the link does not add a second load. Both fact IDs remain in
+evidence provenance.
 
 `DailyRecommendationCompletionAssessment` is a separate immutable Coaching
 conclusion for one exact V4 snapshot and completion-policy version. It keeps
@@ -395,6 +401,7 @@ readable while current evaluation emits v2.
 - [Natural TrainingProgram acceptance](../../adr/20260922-bind-natural-training-program-acceptance-to-latest-complete-proposal.md).
 - [Atomic accepted-cadence materialization](../../adr/20260923-materialize-confirmed-training-program-cadence-atomically.md).
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
+- [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).

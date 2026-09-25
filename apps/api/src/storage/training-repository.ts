@@ -33,6 +33,9 @@ import type {
   NextTrainingStep,
   SaveConfirmedTrainingProgram,
   SaveConfirmedTrainingProgramResult,
+  SetTrustedExternalActivityTitle,
+  SetTrustedExternalActivityTitleResult,
+  TrustedExternalActivityTitle,
   TrainingProgramCadence,
   TrainingProgram,
   TrainingProgramVersion,
@@ -66,6 +69,7 @@ import {
   trainingPrograms,
   trainingProgramVersions,
   trainingProgramWorkouts,
+  trainingProgramWorkoutActivityTitles,
   trainingWorkoutSessionActivityLinks,
   workoutSessions,
   type SourceReferenceRow,
@@ -87,7 +91,13 @@ import {
 } from "../domain/training.js";
 import { deriveLocalDate } from "../domain/weight-measurement.js";
 import {
+  findAutomaticActivityLinks,
+  type ActivityLinkExternalCandidate,
+  type ActivityLinkSessionCandidate
+} from "../domain/automatic-activity-link.js";
+import {
   ConflictError,
+  DomainValidationError,
   NotFoundError
 } from "../domain/errors.js";
 import { toSourceReference } from "../domain/source-reference.js";
@@ -159,9 +169,43 @@ export interface ExternalActivityFact extends Omit<ImportExternalActivity, "cons
   readonly sessionCovered: boolean;
 }
 
+interface ActivityLinkSessionRow {
+  readonly id: string;
+  readonly local_date: string;
+  readonly occurred_at: Date | string | null;
+  readonly workout_name: string;
+  readonly program_version_id: string | null;
+  readonly program_workout_position: number | null;
+  readonly program_workout_name: string | null;
+  readonly trusted_external_title: string | null;
+  readonly has_strength_sets: boolean;
+  readonly source_channel: string;
+  readonly external_system: string | null;
+  readonly external_record_id: string | null;
+  readonly linked_activity_id: string | null;
+  readonly match_basis: string | null;
+  readonly match_policy_version: string | null;
+}
+
+interface ActivityLinkExternalRow {
+  readonly id: string;
+  readonly local_date: string;
+  readonly occurred_at: Date | string;
+  readonly name: string;
+  readonly distance_meters: string | null;
+  readonly garmin_attributed: boolean;
+  readonly provider_identity: string;
+}
+
 /** Persistence contract for Training catalog, plans, facts, and projections. */
 export interface TrainingStore {
   importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped">;
+  /** Rechecks recent current session/activity pairs after an otherwise unchanged sync. */
+  reconcileRecentActivityLinks(personId: string, from: string, to: string): Promise<void>;
+  /** Reads user-confirmed external titles for one exact program version. */
+  listTrustedExternalActivityTitles(personId: string, programId: string, versionId: string): Promise<readonly TrustedExternalActivityTitle[]>;
+  /** Applies an explicit title-authority change and rechecks affected current sessions. */
+  setTrustedExternalActivityTitle(personId: string, input: SetTrustedExternalActivityTitle): Promise<SetTrustedExternalActivityTitleResult>;
   /** Lists newest current external-activity revisions for one Person with a SQL-applied bound. */
   listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]>;
   /** Appends or reuses explicit user classification for one exact activity lineage. */
@@ -491,6 +535,285 @@ export class TrainingRepository implements TrainingStore {
     return readTrainingBaselineDays(this.database.pool, personId, from, to);
   }
 
+  public async listTrustedExternalActivityTitles(
+    personId: string,
+    programId: string,
+    versionId: string
+  ): Promise<readonly TrustedExternalActivityTitle[]> {
+    return this.database.db.select({
+      programVersionId: trainingProgramWorkoutActivityTitles.programVersionId,
+      workoutPosition: trainingProgramWorkoutActivityTitles.workoutPosition,
+      title: trainingProgramWorkoutActivityTitles.title
+    }).from(trainingProgramWorkoutActivityTitles)
+      .innerJoin(trainingProgramVersions, eq(
+        trainingProgramWorkoutActivityTitles.programVersionId, trainingProgramVersions.id
+      )).where(and(
+      eq(trainingProgramWorkoutActivityTitles.personId, personId),
+      eq(trainingProgramVersions.programId, programId),
+      eq(trainingProgramWorkoutActivityTitles.programVersionId, versionId)
+    )).orderBy(asc(trainingProgramWorkoutActivityTitles.workoutPosition));
+  }
+
+  public async setTrustedExternalActivityTitle(
+    personId: string,
+    input: SetTrustedExternalActivityTitle
+  ): Promise<SetTrustedExternalActivityTitleResult> {
+    const title = input.title?.normalize("NFKC").trim().replace(/\s+/gu, " ") ?? null;
+    const normalizedTitle = title?.toLocaleLowerCase("und") ?? null;
+    if (title !== null && (title.length === 0 || title.length > 256 || normalizedTitle!.length > 256)) {
+      throw new DomainValidationError("Trusted external activity title must be 1..256 characters");
+    }
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const [program] = await transaction.select().from(trainingPrograms).where(and(
+        eq(trainingPrograms.id, input.expectedProgramId),
+        eq(trainingPrograms.personId, personId)
+      )).limit(1);
+      if (!program || program.lockVersion !== input.expectedLockVersion ||
+        (input.title !== null && program.activeVersionId !== input.expectedProgramVersionId)) {
+        return { outcome: "stale", currentTitle: null };
+      }
+      const [version] = await transaction.select({ id: trainingProgramVersions.id })
+        .from(trainingProgramVersions).where(and(
+          eq(trainingProgramVersions.id, input.expectedProgramVersionId),
+          eq(trainingProgramVersions.programId, input.expectedProgramId),
+          eq(trainingProgramVersions.personId, personId)
+        )).limit(1);
+      if (!version) return { outcome: "stale", currentTitle: null };
+      const [workout] = await transaction.select({ id: trainingProgramWorkouts.id })
+        .from(trainingProgramWorkouts).where(and(
+          eq(trainingProgramWorkouts.programVersionId, input.expectedProgramVersionId),
+          eq(trainingProgramWorkouts.position, input.workoutPosition)
+        )).limit(1);
+      if (!workout) return { outcome: "stale", currentTitle: null };
+      const [current] = await transaction.select().from(trainingProgramWorkoutActivityTitles).where(and(
+        eq(trainingProgramWorkoutActivityTitles.programVersionId, input.expectedProgramVersionId),
+        eq(trainingProgramWorkoutActivityTitles.workoutPosition, input.workoutPosition)
+      )).limit(1);
+      const currentTitle = current?.title ?? null;
+      if (currentTitle === title) return { outcome: "unchanged", currentTitle };
+      if (currentTitle !== input.expectedCurrentTitle) return { outcome: "stale", currentTitle };
+      if (normalizedTitle !== null) {
+        const [other] = await transaction.select({
+          workoutPosition: trainingProgramWorkoutActivityTitles.workoutPosition
+        }).from(trainingProgramWorkoutActivityTitles).where(and(
+          eq(trainingProgramWorkoutActivityTitles.programVersionId, input.expectedProgramVersionId),
+          eq(trainingProgramWorkoutActivityTitles.normalizedTitle, normalizedTitle)
+        )).limit(1);
+        if (other && other.workoutPosition !== input.workoutPosition) {
+          throw new ConflictError("Trusted external activity title belongs to another workout");
+        }
+        await transaction.insert(trainingProgramWorkoutActivityTitles).values({
+          programVersionId: input.expectedProgramVersionId,
+          workoutPosition: input.workoutPosition,
+          personId,
+          title: title!,
+          normalizedTitle
+        }).onConflictDoUpdate({
+          target: [trainingProgramWorkoutActivityTitles.programVersionId,
+            trainingProgramWorkoutActivityTitles.workoutPosition],
+          set: { title: title!, normalizedTitle, updatedAt: new Date() }
+        });
+      } else {
+        await transaction.delete(trainingProgramWorkoutActivityTitles).where(and(
+          eq(trainingProgramWorkoutActivityTitles.programVersionId, input.expectedProgramVersionId),
+          eq(trainingProgramWorkoutActivityTitles.workoutPosition, input.workoutPosition)
+        ));
+      }
+      const dates = await transaction.execute(sql<{ local_date: string }>`
+        select distinct session.local_date::text as local_date
+          from workout_sessions session
+         where session.person_id = ${personId}
+           and session.program_version_id = ${input.expectedProgramVersionId}
+           and session.program_workout_position = ${input.workoutPosition}
+           and not exists (
+             select 1 from workout_sessions successor
+              where successor.supersedes_id = session.id
+           )
+         order by local_date
+      `);
+      for (const row of dates.rows as unknown as Array<{ local_date: string }>) {
+        await this.reconcileActivityLinksForDate(transaction, personId, row.local_date);
+      }
+      return {
+        outcome: title === null ? "revoked" : current === undefined ? "created" : "replaced",
+        currentTitle: title
+      };
+    });
+  }
+
+  private async reconcileActivityLinksForDate(
+    transaction: DatabaseTransaction,
+    personId: string,
+    localDate: string
+  ): Promise<void> {
+    const sessionRows = await transaction.execute(sql<ActivityLinkSessionRow>`
+      select session.id, session.local_date::text, session.occurred_at,
+             session.workout_name, session.program_version_id,
+             session.program_workout_position,
+             program_workout.name as program_workout_name,
+             trusted_title.title as trusted_external_title,
+             source.channel as source_channel,
+             source.external_system, source.external_record_id,
+             link.external_activity_id as linked_activity_id,
+             link.match_basis, link.match_policy_version,
+             exists (
+               select 1 from performed_exercises exercise
+               join performed_sets performed_set
+                 on performed_set.performed_exercise_id = exercise.id
+               where exercise.session_id = session.id
+                 and (performed_set.reps is not null or performed_set.weight_kg > 0)
+             ) as has_strength_sets
+        from workout_sessions session
+        join source_references source on source.id = session.source_reference_id
+        left join training_program_workouts program_workout
+          on program_workout.program_version_id = session.program_version_id
+         and program_workout.position = session.program_workout_position
+        left join training_program_workout_activity_titles trusted_title
+          on trusted_title.program_version_id = session.program_version_id
+         and trusted_title.workout_position = session.program_workout_position
+        left join training_workout_session_activity_links link
+          on link.session_id = session.id
+       where session.person_id = ${personId}
+         and session.local_date = ${localDate}
+         and not exists (
+           select 1 from workout_sessions successor
+            where successor.supersedes_id = session.id
+         )
+    `);
+    const activityRows = await transaction.execute(sql<ActivityLinkExternalRow>`
+      select activity.id, activity.local_date::text, activity.occurred_at,
+             activity.name, activity.distance_meters,
+             activity.garmin_attributed, activity.provider_identity
+        from integration_activity_facts activity
+       where activity.person_id = ${personId}
+         and activity.local_date = ${localDate}
+         and not exists (
+           select 1 from integration_activity_facts successor
+            where successor.supersedes_id = activity.id
+         )
+    `);
+    const currentSessions = sessionRows.rows as unknown as ActivityLinkSessionRow[];
+    const currentActivities = activityRows.rows as unknown as ActivityLinkExternalRow[];
+    const candidateSessionIds = new Set(currentSessions.map((row) => row.id));
+    const occupancyRows = await transaction.execute(sql<{
+      current_id: string; session_id: string; match_policy_version: string | null;
+    }>`
+      with recursive current_activity as (
+        select activity.id
+          from integration_activity_facts activity
+         where activity.person_id = ${personId}
+           and activity.local_date = ${localDate}
+           and not exists (
+             select 1 from integration_activity_facts successor
+              where successor.supersedes_id = activity.id
+           )
+      ), ancestors as (
+        select id as current_id, id as member_id from current_activity
+        union all
+        select ancestors.current_id, parent.supersedes_id
+          from ancestors
+          join integration_activity_facts parent on parent.id = ancestors.member_id
+         where parent.supersedes_id is not null
+      )
+      select ancestors.current_id, link.session_id, link.match_policy_version
+        from ancestors
+        join training_workout_session_activity_links link
+          on link.external_activity_id = ancestors.member_id
+         and link.person_id = ${personId}
+        join workout_sessions session on session.id = link.session_id
+       where not exists (
+         select 1 from workout_sessions successor
+          where successor.supersedes_id = session.id
+       )
+    `);
+    const occupied = new Map<string, Array<{ sessionId: string; policy: string | null }>>();
+    for (const row of occupancyRows.rows as unknown as Array<{
+      current_id: string; session_id: string; match_policy_version: string | null
+    }>) {
+      occupied.set(row.current_id, [
+        ...(occupied.get(row.current_id) ?? []),
+        { sessionId: row.session_id, policy: row.match_policy_version }
+      ]);
+    }
+    const sessions: ActivityLinkSessionCandidate[] = currentSessions
+      .filter((row) => row.linked_activity_id === null || row.match_policy_version !== null)
+      .map((row) => ({
+        id: row.id, localDate: row.local_date,
+        occurredAt: row.occurred_at === null ? null : new Date(row.occurred_at).toISOString(),
+        workoutName: row.workout_name,
+        programVersionId: row.program_version_id,
+        programWorkoutPosition: row.program_workout_position,
+        programWorkoutName: row.program_workout_name,
+        trustedExternalTitle: row.trusted_external_title,
+        hasStrengthSets: row.has_strength_sets,
+        sourceChannel: row.source_channel,
+        sourceExternalSystem: row.external_system,
+        sourceExternalRecordId: row.external_record_id
+      }));
+    const activities: ActivityLinkExternalCandidate[] = [];
+    for (const row of currentActivities) {
+      if ((occupied.get(row.id) ?? []).some((link) =>
+        link.policy === null || !candidateSessionIds.has(link.sessionId)
+      )) continue;
+      const lineage = await readActivityLineageClassification(transaction, personId, row.id);
+      if (!lineage) throw new Error("External activity correction lineage is broken");
+      activities.push({
+        id: row.id, localDate: row.local_date,
+        occurredAt: new Date(row.occurred_at).toISOString(),
+        name: row.name,
+        distanceMeters: row.distance_meters === null ? null : Number(row.distance_meters),
+        garminAttributed: row.garmin_attributed,
+        providerIdentity: row.provider_identity,
+        classification: lineage.classification_id === null ? null : {
+          kind: lineage.kind!,
+          programVersionId: lineage.program_version_id!,
+          workoutPosition: lineage.workout_position
+        }
+      });
+    }
+    const expected = new Map(findAutomaticActivityLinks(sessions, activities)
+      .map((link) => [link.sessionId, link] as const));
+    for (const row of currentSessions) {
+      if (row.match_policy_version === null) continue;
+      const match = expected.get(row.id);
+      if (match?.externalActivityId === row.linked_activity_id && match.basis === row.match_basis) continue;
+      await transaction.delete(trainingWorkoutSessionActivityLinks).where(and(
+        eq(trainingWorkoutSessionActivityLinks.sessionId, row.id),
+        eq(trainingWorkoutSessionActivityLinks.personId, personId),
+        sql`${trainingWorkoutSessionActivityLinks.matchPolicyVersion} IS NOT NULL`
+      ));
+    }
+    for (const match of expected.values()) {
+      const existing = currentSessions.find((row) => row.id === match.sessionId);
+      if (existing?.linked_activity_id === match.externalActivityId && existing.match_basis === match.basis) continue;
+      await transaction.insert(trainingWorkoutSessionActivityLinks).values({
+        sessionId: match.sessionId, personId,
+        externalActivityId: match.externalActivityId,
+        matchBasis: match.basis,
+        matchPolicyVersion: "automatic-activity-link-v2"
+      });
+    }
+  }
+
+  public async reconcileRecentActivityLinks(personId: string, from: string, to: string): Promise<void> {
+    await this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const dates = await transaction.execute(sql<{ local_date: string }>`
+        select distinct local_date::text from (
+          select local_date from workout_sessions where person_id = ${personId}
+            and local_date between ${from} and ${to}
+          union
+          select local_date from integration_activity_facts where person_id = ${personId}
+            and local_date between ${from} and ${to}
+        ) candidate_dates order by local_date
+      `);
+      for (const row of dates.rows as unknown as Array<{ local_date: string }>) {
+        await this.reconcileActivityLinksForDate(transaction, personId, row.local_date);
+      }
+    });
+  }
+
   public importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped"> {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, input.personId);
@@ -504,9 +827,16 @@ export class TrainingRepository implements TrainingStore {
         )
       });
       if (!enabled) return "stopped";
-      const currentRows = await transaction.execute(sql<{ id: string; normalized_checksum: string }>`select id, normalized_checksum from integration_activity_facts current where current.connection_id = ${input.connectionId} and current.provider_identity = ${input.providerIdentity} and not exists (select 1 from integration_activity_facts successor where successor.supersedes_id = current.id) limit 1`);
-      const current = currentRows.rows[0] as { readonly id: string; readonly normalized_checksum: string } | undefined;
+      const currentRows = await transaction.execute(sql<{ id: string; normalized_checksum: string; local_date: string }>`select id, normalized_checksum, local_date::text from integration_activity_facts current where current.connection_id = ${input.connectionId} and current.provider_identity = ${input.providerIdentity} and not exists (select 1 from integration_activity_facts successor where successor.supersedes_id = current.id) limit 1`);
+      const current = currentRows.rows[0] as { readonly id: string; readonly normalized_checksum: string; readonly local_date: string } | undefined;
       if (current?.normalized_checksum === input.normalizedChecksum) return "unchanged";
+      if (current) {
+        await transaction.delete(trainingWorkoutSessionActivityLinks).where(and(
+          eq(trainingWorkoutSessionActivityLinks.personId, input.personId),
+          eq(trainingWorkoutSessionActivityLinks.externalActivityId, current.id),
+          sql`${trainingWorkoutSessionActivityLinks.matchPolicyVersion} IS NOT NULL`
+        ));
+      }
       await transaction.insert(integrationActivityFacts).values({
         connectionId: input.connectionId, personId: input.personId, providerIdentity: input.providerIdentity,
         normalizedChecksum: input.normalizedChecksum, occurredAt: new Date(input.occurredAt), localDate: input.localDate,
@@ -518,6 +848,10 @@ export class TrainingRepository implements TrainingStore {
         deviceName: input.deviceName, sourceProvider: input.sourceProvider, garminAttributed: input.garminAttributed,
         supersedesId: current?.id ?? null, correctionReason: current ? "provider_record_changed" : null
       });
+      if (current?.local_date && current.local_date !== input.localDate) {
+        await this.reconcileActivityLinksForDate(transaction, input.personId, current.local_date);
+      }
+      await this.reconcileActivityLinksForDate(transaction, input.personId, input.localDate);
       return current ? "corrected" : "created";
     });
   }
@@ -2053,11 +2387,23 @@ export class TrainingRepository implements TrainingStore {
     if (!source) {
       throw new Error("WorkoutSession SourceReference was not found");
     }
-    const [activityLink] = await transaction
-      .select({ externalActivityId: trainingWorkoutSessionActivityLinks.externalActivityId })
-      .from(trainingWorkoutSessionActivityLinks)
-      .where(eq(trainingWorkoutSessionActivityLinks.sessionId, session.id))
-      .limit(1);
+    const currentLink = await transaction.execute(sql<{ external_activity_id: string }>`
+      with recursive linked_activity as (
+        select activity.id
+          from training_workout_session_activity_links link
+          join integration_activity_facts activity on activity.id = link.external_activity_id
+         where link.session_id = ${session.id} and link.person_id = ${session.personId}
+        union all
+        select successor.id from integration_activity_facts successor
+          join linked_activity parent on successor.supersedes_id = parent.id
+      )
+      select linked_activity.id as external_activity_id from linked_activity
+       where not exists (
+         select 1 from integration_activity_facts successor
+          where successor.supersedes_id = linked_activity.id
+       )
+      limit 1
+    `);
     const exercises = await transaction
       .select()
       .from(performedExercises)
@@ -2099,7 +2445,7 @@ export class TrainingRepository implements TrainingStore {
       timezone: session.timezone,
       programVersionId: session.programVersionId,
       programWorkoutPosition: session.programWorkoutPosition,
-      externalActivityId: activityLink?.externalActivityId ?? null,
+      externalActivityId: (currentLink.rows[0] as { external_activity_id: string } | undefined)?.external_activity_id ?? null,
       workoutName: session.workoutName,
       feeling: session.feeling,
       note: session.note,
@@ -2125,6 +2471,9 @@ export class TrainingRepository implements TrainingStore {
         null,
         null
       );
+      if (result.created) {
+        await this.reconcileActivityLinksForDate(transaction, personId, result.row.localDate);
+      }
       return {
         created: result.created,
         session: await this.serializeSession(transaction, result.row)
@@ -2186,6 +2535,16 @@ export class TrainingRepository implements TrainingStore {
       );
       if (!result.created && result.row.supersedesId !== id) {
         throw new ConflictError("dedupeKey belongs to another WorkoutSession");
+      }
+      if (result.created) {
+        await transaction.delete(trainingWorkoutSessionActivityLinks).where(and(
+          eq(trainingWorkoutSessionActivityLinks.sessionId, id),
+          sql`${trainingWorkoutSessionActivityLinks.matchPolicyVersion} IS NOT NULL`
+        ));
+        await this.reconcileActivityLinksForDate(transaction, personId, original.localDate);
+        if (result.row.localDate !== original.localDate) {
+          await this.reconcileActivityLinksForDate(transaction, personId, result.row.localDate);
+        }
       }
       return {
         created: result.created,

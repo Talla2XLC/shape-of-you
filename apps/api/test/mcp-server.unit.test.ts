@@ -202,6 +202,7 @@ const unavailableServices = {
     saveConfirmedProgram: unreachable,
     materializeProgramCadence: unreachable,
     classifyExternalActivity: unreachable,
+    setTrustedExternalActivityTitle: unreachable,
     getTrainingContext: unreachable
   },
   recovery: {
@@ -525,7 +526,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(29);
+    expect(body.result.tools).toHaveLength(30);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -557,6 +558,7 @@ describe("MCP HTTP adapter", () => {
       save_confirmed_training_program: MCP_WORKOUT_WRITE_SCOPE,
       materialize_training_program_cadence: MCP_WORKOUT_WRITE_SCOPE,
       classify_external_activity: MCP_WORKOUT_WRITE_SCOPE,
+      set_trusted_external_activity_title: MCP_WORKOUT_WRITE_SCOPE,
       list_workout_sessions: MCP_READ_SCOPE,
       record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       correct_workout_session: MCP_WORKOUT_WRITE_SCOPE,
@@ -1174,6 +1176,9 @@ describe("MCP HTTP adapter", () => {
         createdAt: "2026-09-23T19:00:00.000Z"
       }
     });
+    const setTrustedExternalActivityTitle = vi.fn().mockResolvedValue({
+      outcome: "created", currentTitle: "Ahilej B"
+    });
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1202,7 +1207,8 @@ describe("MCP HTTP adapter", () => {
           getTrainingContext,
           saveConfirmedProgram,
           materializeProgramCadence,
-          classifyExternalActivity
+          classifyExternalActivity,
+          setTrustedExternalActivityTitle
         }
       }
     });
@@ -1583,6 +1589,21 @@ describe("MCP HTTP adapter", () => {
       expect(classifyExternalActivity).toHaveBeenCalledWith(
         activityClassification
       );
+      const trustedTitle = {
+        expectedProgramId: programId,
+        expectedProgramVersionId: activeVersionId,
+        expectedLockVersion: 1,
+        workoutPosition: 1,
+        expectedCurrentTitle: null,
+        title: "Ahilej B"
+      };
+      const trusted = (
+        await call(217, "set_trusted_external_activity_title", trustedTitle)
+      ).json().result;
+      expect(trusted).toMatchObject({
+        structuredContent: { outcome: "created", currentTitle: "Ahilej B" }
+      });
+      expect(setTrustedExternalActivityTitle).toHaveBeenCalledWith(trustedTitle);
     } finally {
       await authorizedFastify.close();
     }

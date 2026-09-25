@@ -400,9 +400,11 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     const provider = {
       reconcile
     } as unknown as FakeHealthDataProvider;
+    const reconcileRecentActivityLinks = vi.fn(async () => {});
     const service = new IntegrationService(
       new SyntheticPersonContext(personId), store, provider, cipher,
-      {} as RecoveryStore, {} as TrainingStore
+      {} as RecoveryStore,
+      { reconcileRecentActivityLinks } as unknown as TrainingStore
     );
     const base = {
       id: connectionId,
@@ -421,6 +423,7 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     expect(historicalNewest < reconcile.mock.calls[0]![1]).toBe(true);
     expect((Date.parse(`${historicalNewest}T00:00:00.000Z`) - Date.parse(`${historicalOldest}T00:00:00.000Z`)) / 86_400_000 + 1).toBeLessThanOrEqual(180);
     expect(markSyncSucceeded).toHaveBeenCalledOnce();
+    expect(reconcileRecentActivityLinks).toHaveBeenCalledOnce();
     expect(markHistoricalImportFailed).toHaveBeenCalledWith(connectionId, expect.any(String), "provider_timeout", true);
     expect(markSyncFailed).not.toHaveBeenCalled();
     expect(releaseClaim).toHaveBeenCalledWith(connectionId);

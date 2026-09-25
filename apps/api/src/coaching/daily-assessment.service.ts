@@ -34,6 +34,7 @@ import {
   type PersonalAssessmentEvidenceDay
 } from "../domain/personalized-daily-assessment.js";
 import { activePersonalBaselinePolicy } from "../domain/personal-baseline.js";
+import { countUncoveredExternalActivities } from "../domain/training.js";
 import { buildCoverageDirection, shiftLocalDate } from "../progress-overview/progress-data-coverage.policy.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
 import { RecoveryService } from "../recovery/recovery.service.js";
@@ -338,7 +339,7 @@ export class DailyAssessmentService {
         bodyBatteryMin: latestMetric(currentRecovery, "body_battery_min"),
         bodyBatteryMax: latestMetric(currentRecovery, "body_battery_max"),
         recentWorkoutCount: recentSessions.length,
-        recentExternalActivityCount: recentExternal.length,
+        recentExternalActivityCount: countUncoveredExternalActivities(recentSessions, recentExternal),
         recentTrainingLoad: recentExternal.some((item) => item.trainingLoad !== null) ? recentExternal.reduce((sum, item) => sum + (item.trainingLoad ?? 0), 0) : null,
         nutritionCompleteness: totals.nutritionCompleteness,
         mealCount: totals.mealCount,

@@ -28,6 +28,9 @@ import {
   ProgressionCandidateListSchema,
   TrainingIdParamsSchema,
   TrainingProgramSchema,
+  TrustedExternalActivityTitleListSchema,
+  SetTrustedExternalActivityTitleSchema,
+  SetTrustedExternalActivityTitleResultSchema,
   TrainingVersionParamsSchema,
   UpsertExerciseOverlaySchema,
   WorkoutSessionHistorySchema,
@@ -48,6 +51,9 @@ import {
   type ProgressionCandidateList,
   type TrainingIdParams,
   type TrainingProgram,
+  type TrustedExternalActivityTitle,
+  type SetTrustedExternalActivityTitle,
+  type SetTrustedExternalActivityTitleResult,
   type TrainingVersionParams,
   type UpsertExerciseOverlay,
   type WorkoutSession,
@@ -125,6 +131,26 @@ export class TrainingProgramController {
   public constructor(
     @Inject(TrainingService) private readonly service: TrainingService
   ) {}
+
+  /** Reads trusted Garmin/Intervals title aliases for one Person-owned version. */
+  @Get(":id/versions/:versionId/external-titles")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(TrustedExternalActivityTitleListSchema))
+  public trustedExternalTitles(
+    @Param(new JsonSchemaPipe<TrainingVersionParams>(TrainingVersionParamsSchema, true))
+    params: TrainingVersionParams
+  ): Promise<readonly TrustedExternalActivityTitle[]> {
+    return this.service.listTrustedExternalActivityTitles(params.id, params.versionId);
+  }
+
+  /** Applies one explicit title trust decision without changing the program version. */
+  @Put("external-title-trust")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(SetTrustedExternalActivityTitleResultSchema))
+  public setTrustedExternalTitle(
+    @Body(new JsonSchemaPipe<SetTrustedExternalActivityTitle>(SetTrustedExternalActivityTitleSchema))
+    input: SetTrustedExternalActivityTitle
+  ): Promise<SetTrustedExternalActivityTitleResult> {
+    return this.service.setTrustedExternalActivityTitle(input);
+  }
 
   /** Creates a program and its first inactive draft version. */
   @Post()

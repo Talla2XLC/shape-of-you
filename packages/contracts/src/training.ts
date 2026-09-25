@@ -498,6 +498,65 @@ export const TrainingProgramSchema = {
 /** Person-owned training program and its current immutable draft version. */
 export type TrainingProgram = FromSchema<typeof TrainingProgramSchema>;
 
+export const TrustedExternalActivityTitleSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["programVersionId", "workoutPosition", "title"],
+  properties: {
+    programVersionId: uuidSchema,
+    workoutPosition: { type: "integer", minimum: 1 },
+    title: { type: "string", minLength: 1, maxLength: 256 }
+  }
+} as const;
+
+/** Person-confirmed title authority for one exact immutable program workout. */
+export type TrustedExternalActivityTitle = FromSchema<typeof TrustedExternalActivityTitleSchema>;
+
+export const TrustedExternalActivityTitleListSchema = {
+  $id: "TrustedExternalActivityTitleList",
+  type: "array",
+  items: TrustedExternalActivityTitleSchema
+} as const;
+
+export const SetTrustedExternalActivityTitleSchema = {
+  $id: "SetTrustedExternalActivityTitle",
+  type: "object",
+  additionalProperties: false,
+  required: ["expectedProgramId", "expectedProgramVersionId", "expectedLockVersion",
+    "workoutPosition", "expectedCurrentTitle", "title"],
+  properties: {
+    expectedProgramId: uuidSchema,
+    expectedProgramVersionId: uuidSchema,
+    expectedLockVersion: { type: "integer", minimum: 0 },
+    workoutPosition: { type: "integer", minimum: 1 },
+    expectedCurrentTitle: { anyOf: [
+      { type: "string", minLength: 1, maxLength: 256 }, { type: "null" }
+    ] },
+    title: { anyOf: [
+      { type: "string", minLength: 1, maxLength: 256 }, { type: "null" }
+    ] }
+  }
+} as const;
+
+/** Optimistic explicit confirmation, replacement, or revocation of a title. */
+export type SetTrustedExternalActivityTitle = FromSchema<typeof SetTrustedExternalActivityTitleSchema>;
+
+export const SetTrustedExternalActivityTitleResultSchema = {
+  $id: "SetTrustedExternalActivityTitleResult",
+  type: "object",
+  additionalProperties: false,
+  required: ["outcome", "currentTitle"],
+  properties: {
+    outcome: { type: "string", enum: ["created", "replaced", "revoked", "unchanged", "stale"] },
+    currentTitle: { anyOf: [
+      { type: "string", minLength: 1, maxLength: 256 }, { type: "null" }
+    ] }
+  }
+} as const;
+
+/** Current title state and closed result of one title-authority command. */
+export type SetTrustedExternalActivityTitleResult = FromSchema<typeof SetTrustedExternalActivityTitleResultSchema>;
+
 export const ActivateTrainingProgramVersionSchema = {
   $id: "ActivateTrainingProgramVersion",
   type: "object",
@@ -1319,6 +1378,7 @@ export const TrainingContextSchema = {
           type: "array",
           items: ExternalActivitySummarySchema
         },
+        trustedExternalTitles: TrustedExternalActivityTitleListSchema,
         nextStep: NextTrainingStepSchema
       }
     },
@@ -1340,6 +1400,7 @@ export const TrainingContextSchema = {
           type: "array",
           items: ExternalActivitySummarySchema
         },
+        trustedExternalTitles: TrustedExternalActivityTitleListSchema,
         nextStep: NextTrainingStepSchema
       }
     }

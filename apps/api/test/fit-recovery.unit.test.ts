@@ -152,7 +152,10 @@ describe("bounded Garmin FIT recovery evidence", () => {
     const correctObservation = vi.fn(async () => ({ created: true, observation: { id: `fact-${++nextId}` } }));
     const withdrawObservation = vi.fn(async () => ({ created: true, observation: { id: `fact-${++nextId}` } }));
     const recovery = { createObservation, correctObservation, withdrawObservation } as unknown as RecoveryStore;
-    const training = { importExternalActivity: vi.fn(async () => "unchanged") } as unknown as TrainingStore;
+    const training = {
+      importExternalActivity: vi.fn(async () => "unchanged"),
+      reconcileRecentActivityLinks: vi.fn(async () => {})
+    } as unknown as TrainingStore;
     const service = new IntegrationService(new SyntheticPersonContext(personId), store, provider, cipher, recovery, training);
     const connection = {
       id: connectionId, personId, recoveryConnectionId: "00000000-0000-4000-8000-000000000203",
@@ -240,7 +243,10 @@ describe("bounded Garmin FIT recovery evidence", () => {
       recoveryFact: vi.fn(async () => null),
       markSyncPartial, markSyncSucceeded, releaseClaim: vi.fn()
     } as unknown as IntegrationStore;
-    const training = { importExternalActivity: vi.fn(async () => "unchanged") } as unknown as TrainingStore;
+    const training = {
+      importExternalActivity: vi.fn(async () => "unchanged"),
+      reconcileRecentActivityLinks: vi.fn(async () => {})
+    } as unknown as TrainingStore;
     const service = new IntegrationService(new SyntheticPersonContext(personId), store, provider, cipher,
       {} as RecoveryStore, training);
     const connection = {

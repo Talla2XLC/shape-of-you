@@ -63,6 +63,9 @@ import {
   ProgressionCandidateListSchema,
   TrainingIdParamsSchema,
   TrainingProgramSchema,
+  SetTrustedExternalActivityTitleSchema,
+  SetTrustedExternalActivityTitleResultSchema,
+  TrustedExternalActivityTitleListSchema,
   TrainingVersionParamsSchema,
   UpsertExerciseOverlaySchema,
   WeightMeasurementHistorySchema,
@@ -861,6 +864,25 @@ function trainingPaths(): Record<string, object> {
         requestBody: request(CreateTrainingProgramVersionSchema),
         responses: {
           "200": response(TrainingProgramSchema, "Program version appended")
+        }
+      }
+    },
+    "/v1/training/programs/{id}/versions/{versionId}/external-titles": {
+      get: {
+        tags: ["training-programs"],
+        summary: "Read confirmed external activity titles for one program version",
+        parameters: [idParameter, versionIdParameter],
+        responses: { "200": response(TrustedExternalActivityTitleListSchema, "Trusted titles") }
+      }
+    },
+    "/v1/training/programs/external-title-trust": {
+      put: {
+        tags: ["training-programs"],
+        summary: "Confirm, replace, or revoke one external activity title",
+        requestBody: request(SetTrustedExternalActivityTitleSchema),
+        responses: {
+          "200": response(SetTrustedExternalActivityTitleResultSchema, "Current title authority"),
+          "409": response(ErrorResponseSchema, "Title already belongs to another workout")
         }
       }
     },

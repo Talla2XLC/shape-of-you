@@ -40,6 +40,8 @@ import {
   RecoveryObservationListSchema,
   SaveConfirmedTrainingProgramResultSchema,
   SaveConfirmedTrainingProgramSchema,
+  SetTrustedExternalActivityTitleResultSchema,
+  SetTrustedExternalActivityTitleSchema,
   TrainingContextQuerySchema,
   TrainingContextSchema,
   TrainingProgramSchema,
@@ -72,6 +74,7 @@ import {
   type MaterializeTrainingProgramCadence,
   type UpdatePersonPreferences,
   type SaveConfirmedTrainingProgram,
+  type SetTrustedExternalActivityTitle,
   type TrainingContextQuery,
 } from "@shape-of-you/contracts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -128,6 +131,7 @@ interface McpServices {
     | "saveConfirmedProgram"
     | "materializeProgramCadence"
     | "classifyExternalActivity"
+    | "setTrustedExternalActivityTitle"
     | "getTrainingContext"
   >;
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
@@ -831,6 +835,17 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
         input as ClassifyExternalActivity
       ),
       classifiedExternalActivityResultContent
+    ),
+    defineTool(
+      "set_trusted_external_activity_title",
+      "Confirm, replace, or revoke one external activity title for an exact active program workout. Use only when the user explicitly says that this title identifies this program workout, or explicitly withdraws that trust; never infer trust from a matching activity, a program name, or nearby time. Bind the active program id, version id, lock version, exact workout position, and current trusted title from get_training_context. A null title revokes trust. After success, read get_training_context and get_daily_assessment before describing a changed training decision. Unconfirmed activity titles remain unlinked unless they share exact source identity.",
+      SetTrustedExternalActivityTitleSchema,
+      SetTrustedExternalActivityTitleResultSchema,
+      true,
+      MCP_WORKOUT_WRITE_SCOPE,
+      (input) => services.training.setTrustedExternalActivityTitle(
+        input as SetTrustedExternalActivityTitle
+      )
     ),
     defineTool(
       "list_workout_sessions",

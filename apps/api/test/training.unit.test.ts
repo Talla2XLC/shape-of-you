@@ -185,7 +185,8 @@ describe("Training context", () => {
       {
         findActiveProgram,
         listWorkoutSessions,
-        listExternalActivities
+        listExternalActivities,
+        listTrustedExternalActivityTitles: vi.fn().mockResolvedValue([])
       } as unknown as TrainingStore,
       new SyntheticPersonContext(personId)
     );
@@ -194,6 +195,7 @@ describe("Training context", () => {
       status: "absent",
       program: null,
       recentSessions: { items: [] },
+      trustedExternalTitles: [],
       recentExternalActivities: [{
         id: "00000000-0000-4000-8000-000000000021",
         occurredAt: "2026-09-13T06:00:00.000Z",

@@ -2245,6 +2245,37 @@ export const trainingProgramWorkouts = pgTable(
   ]
 );
 
+export const trainingProgramWorkoutActivityTitles = pgTable(
+  "training_program_workout_activity_titles",
+  {
+    programVersionId: uuid("program_version_id").notNull(),
+    workoutPosition: smallint("workout_position").notNull(),
+    personId: uuid("person_id").notNull(),
+    title: varchar("title", { length: 256 }).notNull(),
+    normalizedTitle: varchar("normalized_title", { length: 256 }).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => [
+    primaryKey({
+      name: "training_program_workout_activity_titles_pk",
+      columns: [table.programVersionId, table.workoutPosition]
+    }),
+    foreignKey({
+      name: "training_program_workout_activity_titles_workout_fk",
+      columns: [table.programVersionId, table.workoutPosition],
+      foreignColumns: [trainingProgramWorkouts.programVersionId, trainingProgramWorkouts.position]
+    }).onDelete("cascade"),
+    foreignKey({
+      name: "training_program_workout_activity_titles_person_fk",
+      columns: [table.programVersionId, table.personId],
+      foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.personId]
+    }).onDelete("cascade"),
+    unique("training_program_workout_activity_titles_name_uq").on(
+      table.programVersionId, table.normalizedTitle
+    )
+  ]
+);
+
 export const trainingProgramCadences = pgTable(
   "training_program_cadences",
   {
@@ -2477,7 +2508,9 @@ export const trainingWorkoutSessionActivityLinks = pgTable(
   {
     sessionId: uuid("session_id").primaryKey(),
     personId: uuid("person_id").notNull(),
-    externalActivityId: uuid("external_activity_id").notNull()
+    externalActivityId: uuid("external_activity_id").notNull(),
+    matchBasis: varchar("match_basis", { length: 32 }),
+    matchPolicyVersion: varchar("match_policy_version", { length: 32 })
   },
   (table) => [
     foreignKey({
@@ -2493,6 +2526,12 @@ export const trainingWorkoutSessionActivityLinks = pgTable(
     index("training_workout_activity_link_external_idx").on(
       table.personId,
       table.externalActivityId
+    ),
+    check(
+      "training_workout_activity_link_match_shape",
+      sql`(${table.matchBasis} IS NULL AND ${table.matchPolicyVersion} IS NULL)
+          OR (${table.matchBasis} IN ('source_identity', 'trusted_title_and_time')
+              AND ${table.matchPolicyVersion} = 'automatic-activity-link-v2')`
     )
   ]
 );

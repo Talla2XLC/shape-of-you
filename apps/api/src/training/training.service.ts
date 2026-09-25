@@ -21,9 +21,12 @@ import type {
   ProgressionCandidateList,
   SaveConfirmedTrainingProgram,
   SaveConfirmedTrainingProgramResult,
+  SetTrustedExternalActivityTitle,
+  SetTrustedExternalActivityTitleResult,
   TrainingContext,
   TrainingContextQuery,
   TrainingProgram,
+  TrustedExternalActivityTitle,
   UpsertExerciseOverlay,
   WorkoutSession,
   WorkoutSessionHistory,
@@ -192,6 +195,18 @@ export class TrainingService {
     );
   }
 
+  /** Reads explicit external-title trust for one exact program version. */
+  public listTrustedExternalActivityTitles(programId: string, versionId: string): Promise<readonly TrustedExternalActivityTitle[]> {
+    return this.store.listTrustedExternalActivityTitles(this.personContext.getPersonId(), programId, versionId);
+  }
+
+  /** Confirms, replaces, or revokes one program workout external title. */
+  public setTrustedExternalActivityTitle(
+    input: SetTrustedExternalActivityTitle
+  ): Promise<SetTrustedExternalActivityTitleResult> {
+    return this.store.setTrustedExternalActivityTitle(this.personContext.getPersonId(), input);
+  }
+
   /** Appends or reuses explicit classification for one imported activity. */
   public classifyExternalActivity(
     input: ClassifyExternalActivity
@@ -217,6 +232,9 @@ export class TrainingService {
         ? Promise.resolve(null)
         : this.store.readNextTrainingStep(personId, localDate)
     ]);
+    const trustedExternalTitles = program?.activeVersionId
+      ? await this.store.listTrustedExternalActivityTitles(personId, program.id, program.activeVersionId)
+      : [];
     const recentExternalActivities = externalActivities.map(
       toExternalActivitySummary
     );
@@ -232,6 +250,7 @@ export class TrainingService {
           program,
           recentSessions,
           recentExternalActivities,
+          trustedExternalTitles: [...trustedExternalTitles],
           nextStep: resolvedNextStep
         }
       : {
@@ -239,6 +258,7 @@ export class TrainingService {
           program: null,
           recentSessions,
           recentExternalActivities,
+          trustedExternalTitles: [...trustedExternalTitles],
           nextStep: resolvedNextStep
         };
   }

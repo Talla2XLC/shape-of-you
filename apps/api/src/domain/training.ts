@@ -191,6 +191,17 @@ function qualifiesAsLightCardio(
     activity.averageHeartRate <= cardio.targetAverageHeartRateMax + 5;
 }
 
+/** Counts connected activities without a corresponding detailed session in the same evidence window. */
+export function countUncoveredExternalActivities(
+  sessions: readonly Pick<WorkoutSession, "externalActivityId">[],
+  activities: readonly Pick<ExternalActivitySummary, "id">[]
+): number {
+  const linked = new Set(sessions.flatMap((session) =>
+    session.externalActivityId === null ? [] : [session.externalActivityId]
+  ));
+  return activities.filter((activity) => !linked.has(activity.id)).length;
+}
+
 /**
  * Computes the next rolling program step from immutable plan and current facts.
  * It never parses labels and only merges detailed/external evidence by exact id.
