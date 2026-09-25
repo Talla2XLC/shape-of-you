@@ -2,10 +2,10 @@
 id: "decisions-20260925-link-proven-workout-sessions-to-external-activities"
 kind: adr
 title: "Автоматически связывать только доказанные совпадения WorkoutSession и ExternalActivity"
-status: accepted
+status: superseded
 date: 2026-09-25
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20260925-link-garmin-strength-with-recording-context
 tags:
   - architecture
   - training

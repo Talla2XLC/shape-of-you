@@ -59,16 +59,22 @@ automatically.
 - A separate Person-scoped association identifies one external activity as
   evidence for a detailed WorkoutSession. Training creates it for an explicit
   link, exact shared source identity, or a previously confirmed external title
-  for the session's exact program version/workout position plus compatible
-  type, date, close start, and mutual uniqueness. Arbitrary names and nearby
-  times do not authorize a link. Title trust is a revocable Person-owned
-  overlay, never an implicit program edit or activity classification. Current
-  corrections recheck automatic links. One linked pair counts as one training
-  occurrence; external load remains external, while performed sets remain in
-  the session. A linked session takes precedence over external classification.
+  for the session's exact program version/workout position. A Person-confirmed
+  generic Garmin strength recording mode can also link a detailed session,
+  including one outside the active program, when type, exact date, close start,
+  and reciprocal uniqueness agree. The generic title never identifies A/B.
+  Nearby times or venue alone do not authorize a link. Title trust and the
+  recording mode are revocable Person-owned authority, never an implicit
+  program edit or activity classification. Training asks about the exact pair
+  when evidence is ambiguous; a direct answer creates an explicit association.
+  Current corrections and late imports recheck automatic links. One linked
+  pair counts as one training occurrence; external load remains external,
+  while performed sets remain in the session. A linked session takes
+  precedence over external classification.
   Provider correction retains classification through the stable lineage;
   connected-data erasure removes association and classification without
-  mutating the session.
+  mutating the session. See the
+  [recording-context ADR](../../adr/20260925-link-garmin-strength-with-recording-context.md).
 - `NextTrainingStep` is a deterministic read projection over the active cadence
   and current Training facts. Missed days do not move its sequence; explicit
   repeats or reordering become the next anchor. Qualified external cardio may

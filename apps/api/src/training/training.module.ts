@@ -2,6 +2,7 @@ import { Module } from "@nestjs/common";
 
 import {
   TrainingCatalogController,
+  TrainingActivityRecordingModeController,
   TrainingProgramController,
   WorkoutSessionController
 } from "./training.controller.js";
@@ -11,6 +12,7 @@ import { TrainingService } from "./training.service.js";
 @Module({
   controllers: [
     TrainingCatalogController,
+    TrainingActivityRecordingModeController,
     TrainingProgramController,
     WorkoutSessionController
   ],

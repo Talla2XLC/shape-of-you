@@ -12,6 +12,8 @@ import {
   CorrectRecoveryObservationSchema,
   CorrectWeightMeasurementSchema,
   CorrectWorkoutSessionSchema,
+  ConfirmWorkoutActivityLinkSchema,
+  ConfirmWorkoutActivityLinkResultSchema,
   CreateBodyMeasurementSessionSchema,
   CreateDailyContextNoteSchema,
   CreateDailyRecommendationFeedbackSchema,
@@ -42,6 +44,8 @@ import {
   SaveConfirmedTrainingProgramSchema,
   SetTrustedExternalActivityTitleResultSchema,
   SetTrustedExternalActivityTitleSchema,
+  SetActivityRecordingModeResultSchema,
+  SetActivityRecordingModeSchema,
   TrainingContextQuerySchema,
   TrainingContextSchema,
   TrainingProgramSchema,
@@ -54,6 +58,7 @@ import {
   type CorrectRecoveryObservation,
   type CorrectWeightMeasurement,
   type CorrectWorkoutSession,
+  type ConfirmWorkoutActivityLink,
   type ClassifyExternalActivity,
   type CreateBodyMeasurementSession,
   type CreateDailyContextNote,
@@ -75,6 +80,7 @@ import {
   type UpdatePersonPreferences,
   type SaveConfirmedTrainingProgram,
   type SetTrustedExternalActivityTitle,
+  type SetActivityRecordingMode,
   type TrainingContextQuery,
 } from "@shape-of-you/contracts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -132,6 +138,8 @@ interface McpServices {
     | "materializeProgramCadence"
     | "classifyExternalActivity"
     | "setTrustedExternalActivityTitle"
+    | "setActivityRecordingMode"
+    | "confirmWorkoutActivityLink"
     | "getTrainingContext"
   >;
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
@@ -789,7 +797,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_training_context",
-      "Read the authorized person's active training authority, deterministic next step for an optional Person-local date, and separate bounded recent detailed sessions and connected activity summaries. Supply the known local date when asking what to do now. Treat the returned next step as authoritative: never infer A/B order from text or unlinked activity, never bypass a classification question, and never add training after a completed-today or completed-week result. Use imported activities without requesting a screenshot or manual repeat, never infer exercises or sets from a summary, and do not double-count a possible match. When the active program is absent, historical evidence remains proposal input and is never a plan.",
+      "Read the authorized person's active training authority, deterministic next step for an optional Person-local date, and separate bounded recent detailed sessions and connected activity summaries. Supply the known local date when asking what to do now. Treat the returned next step as authoritative: never infer A/B order from text or unlinked activity, never bypass a classification question, and never add training after a completed-today or completed-week result. If pendingActivityLinkQuestion exists, ask exactly that concrete pair question; only a direct Person answer authorizes confirm_workout_activity_link, then reread get_training_context and get_daily_assessment. Never infer the pair from time or a generic activity name alone. Use imported activities without requesting a screenshot or manual repeat, never infer exercises or sets from a summary, and do not double-count a possible match. When the active program is absent, historical evidence remains proposal input and is never a plan.",
       TrainingContextQuerySchema,
       TrainingContextSchema,
       false,
@@ -848,6 +856,24 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       )
     ),
     defineTool(
+      "set_activity_recording_mode",
+      "Confirm, replace, or revoke the Person's generic Garmin strength recording-mode title. Use only after an explicit Person statement that this title is the Garmin mode they use for strength workouts, independent of program or venue. Never infer this authority from an imported activity or one close time. Bind expectedLockVersion from get_training_context.activityRecordingMode; null title revokes. After a non-stale result, read get_training_context and get_daily_assessment before reporting a changed training decision. Do not use this tool to classify one activity as Ahilej A or B.",
+      SetActivityRecordingModeSchema,
+      SetActivityRecordingModeResultSchema,
+      true,
+      MCP_WORKOUT_WRITE_SCOPE,
+      (input) => services.training.setActivityRecordingMode(input as SetActivityRecordingMode)
+    ),
+    defineTool(
+      "confirm_workout_activity_link",
+      "Record the Person's direct answer confirming the exact current WorkoutSession and imported ExternalActivity pair shown in get_training_context.pendingActivityLinkQuestion. Bind both exact ids and expectedExternalActivityId:null; do not infer this pair from time, generic title, or venue. A stale outcome means no link was written: read get_training_context again. After created or unchanged, reread get_training_context and get_daily_assessment before describing the training decision. This explicit pair does not authorize a general recording-mode rule or activity classification.",
+      ConfirmWorkoutActivityLinkSchema,
+      ConfirmWorkoutActivityLinkResultSchema,
+      true,
+      MCP_WORKOUT_WRITE_SCOPE,
+      (input) => services.training.confirmWorkoutActivityLink(input as ConfirmWorkoutActivityLink)
+    ),
+    defineTool(
       "list_workout_sessions",
       "Read the authorized person's current workout sessions. For one-day Workout read-back pass localDate.",
       ListWorkoutSessionsQuerySchema,
@@ -859,7 +885,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_workout_session",
-      "Immediately record one idempotent workout session when the user directly reports performed exercises or sets, or clearly says the workout is finished. Assemble the session from the current message and accumulated conversation context; never ask whether to save it and never require the user to restate known work. Use get_active_training_program when exact exercise version references are needed, preserve genuinely unknown optional set values, then read back with list_workout_sessions using localDate and reply in natural coach language without exposing tool mechanics.",
+      "Immediately record one idempotent workout session when the user directly reports performed exercises or sets, or clearly says the workout is finished. Assemble the session from the current message and accumulated conversation context; preserve the user's reported exact start time and venueLabel when known, never invent them, and never ask whether to save it or require the user to restate known work. Use get_active_training_program when exact exercise version references are needed, preserve genuinely unknown optional set values, then read back with list_workout_sessions using localDate and reply in natural coach language without exposing tool mechanics.",
       createWorkoutSessionToolInputSchema,
       undefined,
       true,
@@ -873,7 +899,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_workout_session",
-      "Immediately append one idempotent correction to a uniquely identified workout session when the user supplies a routine clarification. Do not ask for duplicate confirmation; follow with list_workout_sessions date-scoped read-back and reply in natural coach language without exposing tool mechanics.",
+      "Immediately append one idempotent full-replacement correction to a uniquely identified workout session when the user supplies a routine clarification. Preserve its existing exercises, sets, exact start time and venueLabel unless the user changes them. Do not ask for duplicate confirmation; follow with list_workout_sessions date-scoped read-back and reply in natural coach language without exposing tool mechanics.",
       withIdSchema(
         "CorrectWorkoutSessionToolInput",
         correctWorkoutSessionToolInputSchema

@@ -15,7 +15,8 @@ const session: ActivityLinkSessionCandidate = {
 };
 const activity: ActivityLinkExternalCandidate = {
   id: "activity-a", localDate: "2026-09-23", occurredAt: "2026-09-23T16:07:00.000Z",
-  name: "Ahilej B", distanceMeters: null, garminAttributed: true,
+  name: "Ahilej B", durationSeconds: 2765, distanceMeters: null, garminAttributed: true,
+  sourceProvider: "intervals_icu",
   providerIdentity: "intervals-activity-a"
 };
 
@@ -65,6 +66,40 @@ describe("automatic activity association", () => {
     expect(findAutomaticActivityLinks([trusted], [{ ...activity, occurredAt: "2026-09-23T17:00:00.000Z" }])).toEqual([]);
     expect(findAutomaticActivityLinks([trusted, { ...trusted, id: "session-b" }], [activity])).toEqual([]);
     expect(findAutomaticActivityLinks([trusted], [activity, { ...activity, id: "activity-b" }])).toEqual([]);
+  });
+
+  it("links a generic confirmed Garmin mode to A, B, or an unprogrammed detailed workout", () => {
+    const garmin = { ...activity, name: "Силовая тренировка" };
+    expect(findAutomaticActivityLinks([session], [garmin])).toEqual([]);
+    expect(findAutomaticActivityLinks([session], [garmin], garmin.name)).toEqual([{
+      sessionId: session.id, externalActivityId: garmin.id, basis: "confirmed_recording_context"
+    }]);
+    expect(findAutomaticActivityLinks([{
+      ...session, workoutName: "Ahilej A", programWorkoutName: "Ahilej A", programWorkoutPosition: 1
+    }], [garmin], garmin.name)).toHaveLength(1);
+    expect(findAutomaticActivityLinks([{
+      ...session, workoutName: "Other gym", programVersionId: null,
+      programWorkoutPosition: null, programWorkoutName: null
+    }], [garmin], garmin.name)).toHaveLength(1);
+  });
+
+  it("fails closed on contextual ambiguity and incompatible Garmin evidence", () => {
+    const garmin = { ...activity, name: "Силовая тренировка" };
+    const match = (candidateSession: ActivityLinkSessionCandidate, candidateActivity = garmin) =>
+      findAutomaticActivityLinks([candidateSession], [candidateActivity], garmin.name);
+    expect(match({ ...session, occurredAt: null })).toEqual([]);
+    expect(match({ ...session, workoutName: "Other" })).toEqual([]);
+    expect(match(session, { ...garmin, durationSeconds: 300 })).toEqual([]);
+    expect(match(session, { ...garmin, sourceProvider: "other" })).toEqual([]);
+    expect(match(session, { ...garmin, distanceMeters: 1000 })).toEqual([]);
+    expect(match(session, { ...garmin, garminAttributed: false })).toEqual([]);
+    expect(match(session, { ...garmin, occurredAt: "2026-09-23T16:16:00.000Z" })).toEqual([]);
+    expect(findAutomaticActivityLinks([session, { ...session, id: "session-b" }], [garmin], garmin.name)).toEqual([]);
+    expect(findAutomaticActivityLinks([session], [garmin, { ...garmin, id: "activity-b" }], garmin.name)).toEqual([]);
+    expect(match(session, {
+      ...garmin,
+      classification: { kind: "not_program_workout", programVersionId: "version-a", workoutPosition: null }
+    })).toEqual([]);
   });
 
   it("does not suppress independent user classification with a conflicting session", () => {

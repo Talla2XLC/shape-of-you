@@ -2276,6 +2276,25 @@ export const trainingProgramWorkoutActivityTitles = pgTable(
   ]
 );
 
+/** Person-owned confirmation of a generic Garmin strength recording mode. */
+export const trainingActivityRecordingModes = pgTable(
+  "training_activity_recording_modes",
+  {
+    personId: uuid("person_id").primaryKey(),
+    title: varchar("title", { length: 256 }),
+    normalizedTitle: varchar("normalized_title", { length: 256 }),
+    lockVersion: integer("lock_version").default(0).notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => [
+    foreignKey({ name: "training_activity_recording_modes_person_fk",
+      columns: [table.personId], foreignColumns: [persons.id] }),
+    check("training_activity_recording_modes_title_shape",
+      sql`(${table.title} IS NULL AND ${table.normalizedTitle} IS NULL) OR (${table.title} IS NOT NULL AND ${table.normalizedTitle} IS NOT NULL)`),
+    check("training_activity_recording_modes_lock_positive", sql`${table.lockVersion} >= 0`)
+  ]
+);
+
 export const trainingProgramCadences = pgTable(
   "training_program_cadences",
   {
@@ -2422,6 +2441,7 @@ export const workoutSessions = pgTable(
     timezone: varchar("timezone", { length: 64 }).notNull(),
     programVersionId: uuid("program_version_id"),
     programWorkoutPosition: smallint("program_workout_position"),
+    venueLabel: varchar("venue_label", { length: 256 }),
     workoutName: varchar("workout_name", { length: 256 }).notNull(),
     feeling: varchar("feeling", { length: 256 }),
     note: text("note"),
@@ -2531,7 +2551,9 @@ export const trainingWorkoutSessionActivityLinks = pgTable(
       "training_workout_activity_link_match_shape",
       sql`(${table.matchBasis} IS NULL AND ${table.matchPolicyVersion} IS NULL)
           OR (${table.matchBasis} IN ('source_identity', 'trusted_title_and_time')
-              AND ${table.matchPolicyVersion} = 'automatic-activity-link-v2')`
+              AND ${table.matchPolicyVersion} = 'automatic-activity-link-v2')
+          OR (${table.matchBasis} = 'confirmed_recording_context'
+              AND ${table.matchPolicyVersion} = 'automatic-activity-link-v3')`
     )
   ]
 );

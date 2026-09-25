@@ -186,6 +186,7 @@ describe("Training context", () => {
         findActiveProgram,
         listWorkoutSessions,
         listExternalActivities,
+        readActivityRecordingMode: vi.fn().mockResolvedValue({ title: null, lockVersion: 0, updatedAt: null }),
         listTrustedExternalActivityTitles: vi.fn().mockResolvedValue([])
       } as unknown as TrainingStore,
       new SyntheticPersonContext(personId)
@@ -196,6 +197,7 @@ describe("Training context", () => {
       program: null,
       recentSessions: { items: [] },
       trustedExternalTitles: [],
+      activityRecordingMode: { title: null, lockVersion: 0, updatedAt: null },
       recentExternalActivities: [{
         id: "00000000-0000-4000-8000-000000000021",
         occurredAt: "2026-09-13T06:00:00.000Z",

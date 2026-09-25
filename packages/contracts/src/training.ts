@@ -557,6 +557,79 @@ export const SetTrustedExternalActivityTitleResultSchema = {
 /** Current title state and closed result of one title-authority command. */
 export type SetTrustedExternalActivityTitleResult = FromSchema<typeof SetTrustedExternalActivityTitleResultSchema>;
 
+export const ActivityRecordingModeSchema = {
+  $id: "ActivityRecordingMode",
+  type: "object",
+  additionalProperties: false,
+  required: ["title", "lockVersion", "updatedAt"],
+  properties: {
+    title: nullableShortTextSchema,
+    lockVersion: { type: "integer", minimum: 0 },
+    updatedAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] }
+  }
+} as const;
+
+/** Person-confirmed generic Garmin recording mode, independent of any workout. */
+export type ActivityRecordingMode = FromSchema<typeof ActivityRecordingModeSchema>;
+
+export const SetActivityRecordingModeSchema = {
+  $id: "SetActivityRecordingMode",
+  type: "object",
+  additionalProperties: false,
+  required: ["expectedLockVersion", "title"],
+  properties: {
+    expectedLockVersion: { type: "integer", minimum: 0 },
+    title: nullableShortTextSchema
+  }
+} as const;
+
+/** Explicit Person confirmation, replacement, or revocation of a recording mode. */
+export type SetActivityRecordingMode = FromSchema<typeof SetActivityRecordingModeSchema>;
+
+export const SetActivityRecordingModeResultSchema = {
+  $id: "SetActivityRecordingModeResult",
+  type: "object",
+  additionalProperties: false,
+  required: ["outcome", "current"],
+  properties: {
+    outcome: { type: "string", enum: ["created", "replaced", "revoked", "unchanged", "stale"] },
+    current: ActivityRecordingModeSchema
+  }
+} as const;
+
+/** Closed optimistic outcome with current recording-mode authority. */
+export type SetActivityRecordingModeResult = FromSchema<typeof SetActivityRecordingModeResultSchema>;
+
+export const ConfirmWorkoutActivityLinkSchema = {
+  $id: "ConfirmWorkoutActivityLink",
+  type: "object",
+  additionalProperties: false,
+  required: ["sessionId", "externalActivityId", "expectedExternalActivityId"],
+  properties: {
+    sessionId: uuidSchema,
+    externalActivityId: uuidSchema,
+    expectedExternalActivityId: { type: "null" }
+  }
+} as const;
+
+/** Explicit Person answer binding one exact current session and external activity. */
+export type ConfirmWorkoutActivityLink = FromSchema<typeof ConfirmWorkoutActivityLinkSchema>;
+
+export const ConfirmWorkoutActivityLinkResultSchema = {
+  $id: "ConfirmWorkoutActivityLinkResult",
+  type: "object",
+  additionalProperties: false,
+  required: ["outcome", "sessionId", "externalActivityId"],
+  properties: {
+    outcome: { type: "string", enum: ["created", "unchanged", "stale"] },
+    sessionId: uuidSchema,
+    externalActivityId: uuidSchema
+  }
+} as const;
+
+/** Closed result of one Person-confirmed exact occurrence association. */
+export type ConfirmWorkoutActivityLinkResult = FromSchema<typeof ConfirmWorkoutActivityLinkResultSchema>;
+
 export const ActivateTrainingProgramVersionSchema = {
   $id: "ActivateTrainingProgramVersion",
   type: "object",
@@ -929,6 +1002,7 @@ const workoutSessionInputProperties = {
     anyOf: [{ type: "integer", minimum: 1, maximum: 100 }, { type: "null" }]
   },
   externalActivityId: nullableUuidSchema,
+  venueLabel: nullableShortTextSchema,
   workoutName: { type: "string", minLength: 1, maxLength: 256 },
   feeling: nullableShortTextSchema,
   note: nullableTextSchema,
@@ -1059,6 +1133,7 @@ export const WorkoutSessionSchema = {
     "programVersionId",
     "programWorkoutPosition",
     "externalActivityId",
+    "venueLabel",
     "workoutName",
     "feeling",
     "note",
@@ -1087,6 +1162,7 @@ export const WorkoutSessionSchema = {
       anyOf: [{ type: "integer", minimum: 1, maximum: 100 }, { type: "null" }]
     },
     externalActivityId: nullableUuidSchema,
+    venueLabel: nullableShortTextSchema,
     workoutName: { type: "string", minLength: 1, maxLength: 256 },
     feeling: nullableShortTextSchema,
     note: nullableTextSchema,
@@ -1356,6 +1432,37 @@ export const NextTrainingStepSchema = {
 /** Deterministic Training-owned projection of the next program step. */
 export type NextTrainingStep = FromSchema<typeof NextTrainingStepSchema>;
 
+export const PendingActivityLinkQuestionSchema = {
+  $id: "PendingActivityLinkQuestion",
+  type: "object",
+  additionalProperties: false,
+  required: ["localDate", "question", "options"],
+  properties: {
+    localDate: { type: "string", format: "date" },
+    question: { type: "string", minLength: 1, maxLength: 256 },
+    options: {
+      type: "array", minItems: 1, maxItems: 20,
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["sessionId", "workoutName", "sessionOccurredAt", "venueLabel",
+          "externalActivityId", "activityName", "activityOccurredAt"],
+        properties: {
+          sessionId: uuidSchema,
+          workoutName: { type: "string", minLength: 1, maxLength: 256 },
+          sessionOccurredAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+          venueLabel: nullableShortTextSchema,
+          externalActivityId: uuidSchema,
+          activityName: { type: "string", minLength: 1, maxLength: 256 },
+          activityOccurredAt: { type: "string", format: "date-time" }
+        }
+      }
+    }
+  }
+} as const;
+
+/** Exact candidate pairs requiring a Person answer instead of an automatic guess. */
+export type PendingActivityLinkQuestion = FromSchema<typeof PendingActivityLinkQuestionSchema>;
+
 export const TrainingContextSchema = {
   $id: "TrainingContext",
   type: "object",
@@ -1379,6 +1486,8 @@ export const TrainingContextSchema = {
           items: ExternalActivitySummarySchema
         },
         trustedExternalTitles: TrustedExternalActivityTitleListSchema,
+        activityRecordingMode: ActivityRecordingModeSchema,
+        pendingActivityLinkQuestion: PendingActivityLinkQuestionSchema,
         nextStep: NextTrainingStepSchema
       }
     },
@@ -1401,6 +1510,8 @@ export const TrainingContextSchema = {
           items: ExternalActivitySummarySchema
         },
         trustedExternalTitles: TrustedExternalActivityTitleListSchema,
+        activityRecordingMode: ActivityRecordingModeSchema,
+        pendingActivityLinkQuestion: PendingActivityLinkQuestionSchema,
         nextStep: NextTrainingStepSchema
       }
     }

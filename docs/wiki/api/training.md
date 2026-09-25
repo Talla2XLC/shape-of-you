@@ -16,7 +16,8 @@ tags:
 Provides shared versioned exercises, Person-owned immutable program versions
 with optional typed cadence, immutable sessions/sets, deterministic next-step
 projection, explicit imported-activity classification, title trust for
-automatic activity matching, personal records, and progression candidates.
+automatic activity matching, Person-confirmed Garmin recording context,
+personal records, and progression candidates.
 
 ## Content
 
@@ -108,12 +109,26 @@ version. Its `externalActivityId` exposes the current external correlation from
 a separate Person-scoped association. Training creates an automatic association
 for exact shared source identity, or for a previously confirmed external title
 of that exact program workout with compatible type, date, close start, and a
-unique candidate pair. Arbitrary matching names are insufficient. The MCP
+unique candidate pair. A confirmed Person-wide generic Garmin strength mode
+can also link a detailed strength session when the exact local date, start
+window, type, and reciprocal uniqueness agree; it does not assign A/B from
+the imported title. `venueLabel` is optional session context for a concrete
+question, not matching evidence. Arbitrary matching names are insufficient.
+The MCP
 `set_trusted_external_activity_title` command confirms, replaces, or revokes
 one title under `workout:write`; it does not classify an individual activity.
-Title trust is scoped to one program version. Corrections recheck automatic
-associations; explicit links retain priority. Deleting connected evidence
-removes its association without mutating the immutable session.
+`set_activity_recording_mode` confirms or revokes the generic mode under an
+optimistic lock. `get_training_context` returns a date-scoped
+`pendingActivityLinkQuestion` when multiple current pairs remain plausible;
+it uses the exact immutable program version even for historical sessions and
+does not depend on the bounded display history. A direct Person answer to
+that question authorizes `confirm_workout_activity_link` for the exact pair.
+Title trust is scoped to one program version. Late imports and corrections
+recheck automatic associations; explicit links retain priority. Deleting
+connected evidence removes its association without mutating the immutable
+session.
+See the
+[recording-context ADR](../../adr/20260925-link-garmin-strength-with-recording-context.md).
 
 After the user explicitly confirms a complete program snapshot, MCP
 `save_confirmed_training_program` atomically creates and activates its first

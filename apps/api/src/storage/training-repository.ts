@@ -14,9 +14,12 @@ import { alias } from "drizzle-orm/pg-core";
 
 import type {
   AcceptProgressionCandidate,
+  ActivityRecordingMode,
   ActivateTrainingProgramVersion,
   ClassifyExternalActivity,
   ClassifyExternalActivityResult,
+  ConfirmWorkoutActivityLink,
+  ConfirmWorkoutActivityLinkResult,
   CorrectWorkoutSession,
   CreateExercise,
   CreateExerciseVersion,
@@ -33,6 +36,8 @@ import type {
   NextTrainingStep,
   SaveConfirmedTrainingProgram,
   SaveConfirmedTrainingProgramResult,
+  SetActivityRecordingMode,
+  SetActivityRecordingModeResult,
   SetTrustedExternalActivityTitle,
   SetTrustedExternalActivityTitleResult,
   TrustedExternalActivityTitle,
@@ -70,6 +75,7 @@ import {
   trainingProgramVersions,
   trainingProgramWorkouts,
   trainingProgramWorkoutActivityTitles,
+  trainingActivityRecordingModes,
   trainingWorkoutSessionActivityLinks,
   workoutSessions,
   type SourceReferenceRow,
@@ -192,9 +198,18 @@ interface ActivityLinkExternalRow {
   readonly local_date: string;
   readonly occurred_at: Date | string;
   readonly name: string;
+  readonly duration_seconds: number;
   readonly distance_meters: string | null;
   readonly garmin_attributed: boolean;
+  readonly source_provider: string;
   readonly provider_identity: string;
+}
+
+/** Immutable program metadata used when explaining possible activity links. */
+export interface ActivityLinkProgramContext {
+  readonly sessionId: string;
+  readonly programWorkoutName: string | null;
+  readonly trustedExternalTitle: string | null;
 }
 
 /** Persistence contract for Training catalog, plans, facts, and projections. */
@@ -206,8 +221,20 @@ export interface TrainingStore {
   listTrustedExternalActivityTitles(personId: string, programId: string, versionId: string): Promise<readonly TrustedExternalActivityTitle[]>;
   /** Applies an explicit title-authority change and rechecks affected current sessions. */
   setTrustedExternalActivityTitle(personId: string, input: SetTrustedExternalActivityTitle): Promise<SetTrustedExternalActivityTitleResult>;
+  /** Reads the current Person-wide generic Garmin strength recording mode. */
+  readActivityRecordingMode(personId: string): Promise<ActivityRecordingMode>;
+  /** Applies explicit recording-mode authority under an optimistic lock and rechecks recent links. */
+  setActivityRecordingMode(personId: string, input: SetActivityRecordingMode): Promise<SetActivityRecordingModeResult>;
+  /** Persists an explicit Person-confirmed association between two current unoccupied facts. */
+  confirmWorkoutActivityLink(personId: string, input: ConfirmWorkoutActivityLink): Promise<ConfirmWorkoutActivityLinkResult>;
   /** Lists newest current external-activity revisions for one Person with a SQL-applied bound. */
   listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]>;
+  /** Lists every current external-activity revision for one Person-local date. */
+  listExternalActivitiesForLocalDate(personId: string, localDate: string): Promise<readonly ExternalActivityFact[]>;
+  /** Reads immutable workout names and title authority for current sessions on one date. */
+  listActivityLinkProgramContextForLocalDate(
+    personId: string, localDate: string
+  ): Promise<readonly ActivityLinkProgramContext[]>;
   /** Appends or reuses explicit user classification for one exact activity lineage. */
   classifyExternalActivity(
     personId: string,
@@ -642,11 +669,161 @@ export class TrainingRepository implements TrainingStore {
     });
   }
 
+  public async readActivityRecordingMode(personId: string): Promise<ActivityRecordingMode> {
+    const [current] = await this.database.db.select().from(trainingActivityRecordingModes)
+      .where(eq(trainingActivityRecordingModes.personId, personId)).limit(1);
+    return current ? {
+      title: current.title,
+      lockVersion: current.lockVersion,
+      updatedAt: current.updatedAt.toISOString()
+    } : { title: null, lockVersion: 0, updatedAt: null };
+  }
+
+  public async setActivityRecordingMode(
+    personId: string,
+    input: SetActivityRecordingMode
+  ): Promise<SetActivityRecordingModeResult> {
+    const title = input.title?.normalize("NFKC").trim().replace(/\s+/gu, " ") ?? null;
+    const normalizedTitle = title?.toLocaleLowerCase("und") ?? null;
+    if (title !== null && (title.length === 0 || title.length > 256 || normalizedTitle!.length > 256)) {
+      throw new DomainValidationError("Activity recording mode title must be 1..256 characters");
+    }
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const [row] = await transaction.select().from(trainingActivityRecordingModes)
+        .where(eq(trainingActivityRecordingModes.personId, personId)).limit(1);
+      const current: ActivityRecordingMode = row ? {
+        title: row.title,
+        lockVersion: row.lockVersion,
+        updatedAt: row.updatedAt.toISOString()
+      } : { title: null, lockVersion: 0, updatedAt: null };
+      if (current.lockVersion !== input.expectedLockVersion) {
+        return { outcome: "stale", current };
+      }
+      if (current.title === title) {
+        return { outcome: "unchanged", current };
+      }
+      const updatedAt = new Date();
+      const lockVersion = current.lockVersion + 1;
+      await transaction.insert(trainingActivityRecordingModes).values({
+        personId,
+        title,
+        normalizedTitle,
+        lockVersion,
+        updatedAt
+      }).onConflictDoUpdate({
+        target: trainingActivityRecordingModes.personId,
+        set: { title, normalizedTitle, lockVersion, updatedAt }
+      });
+      const cutoff = new Date(updatedAt.getTime() - 30 * 86_400_000).toISOString().slice(0, 10);
+      const dates = await transaction.execute(sql<{ local_date: string }>`
+        select distinct session.local_date::text as local_date
+          from workout_sessions session
+         where session.person_id = ${personId}
+           and (session.local_date >= ${cutoff}
+             or exists (
+               select 1 from training_workout_session_activity_links link
+                where link.session_id = session.id
+                  and link.person_id = ${personId}
+                  and link.match_basis = 'confirmed_recording_context'
+             ))
+           and not exists (
+             select 1 from workout_sessions successor
+              where successor.supersedes_id = session.id
+           )
+         order by local_date
+      `);
+      for (const date of dates.rows as Array<{ local_date: string }>) {
+        await this.reconcileActivityLinksForDate(transaction, personId, date.local_date);
+      }
+      return {
+        outcome: title === null ? "revoked" : row === undefined || row.title === null ? "created" : "replaced",
+        current: { title, lockVersion, updatedAt: updatedAt.toISOString() }
+      };
+    });
+  }
+
+  public async confirmWorkoutActivityLink(
+    personId: string,
+    input: ConfirmWorkoutActivityLink
+  ): Promise<ConfirmWorkoutActivityLinkResult> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const stale = (): ConfirmWorkoutActivityLinkResult => ({
+        outcome: "stale", sessionId: input.sessionId,
+        externalActivityId: input.externalActivityId
+      });
+      const sessionSuccessor = alias(workoutSessions, "confirmed_link_session_successor");
+      const activitySuccessor = alias(integrationActivityFacts, "confirmed_link_activity_successor");
+      const [session] = await transaction.select().from(workoutSessions).where(and(
+        eq(workoutSessions.id, input.sessionId),
+        eq(workoutSessions.personId, personId),
+        notExists(transaction.select({ id: sessionSuccessor.id }).from(sessionSuccessor)
+          .where(eq(sessionSuccessor.supersedesId, workoutSessions.id)))
+      )).limit(1);
+      const [activity] = await transaction.select().from(integrationActivityFacts).where(and(
+        eq(integrationActivityFacts.id, input.externalActivityId),
+        eq(integrationActivityFacts.personId, personId),
+        notExists(transaction.select({ id: activitySuccessor.id }).from(activitySuccessor)
+          .where(eq(activitySuccessor.supersedesId, integrationActivityFacts.id)))
+      )).limit(1);
+      if (!session || !activity || session.localDate !== activity.localDate) return stale();
+      const [currentLink] = await transaction.select().from(trainingWorkoutSessionActivityLinks)
+        .where(and(eq(trainingWorkoutSessionActivityLinks.sessionId, session.id),
+          eq(trainingWorkoutSessionActivityLinks.personId, personId))).limit(1);
+      const lineageLinks = await transaction.execute(sql<{
+        session_id: string; linked_activity_id: string;
+      }>`
+        with recursive lineage as (
+          select id, supersedes_id from integration_activity_facts
+           where id = ${activity.id} and person_id = ${personId}
+          union all
+          select predecessor.id, predecessor.supersedes_id
+            from integration_activity_facts predecessor
+            join lineage successor on successor.supersedes_id = predecessor.id
+           where predecessor.person_id = ${personId}
+        )
+        select link.session_id, link.external_activity_id as linked_activity_id
+          from training_workout_session_activity_links link
+          join workout_sessions linked_session on linked_session.id = link.session_id
+         where link.person_id = ${personId}
+           and link.external_activity_id in (select id from lineage)
+           and not exists (
+             select 1 from workout_sessions successor
+              where successor.supersedes_id = linked_session.id
+           )
+      `);
+      const occupiedLinks = lineageLinks.rows as Array<{
+        session_id: string; linked_activity_id: string;
+      }>;
+      if (occupiedLinks.some((link) => link.session_id !== session.id)) return stale();
+      const currentLinkInLineage = currentLink === undefined ||
+        occupiedLinks.some((link) => link.session_id === session.id &&
+          link.linked_activity_id === currentLink.externalActivityId);
+      if (!currentLinkInLineage) return stale();
+      if (currentLink && currentLink.matchBasis === null &&
+        currentLink.matchPolicyVersion === null) {
+        return { outcome: "unchanged", sessionId: session.id, externalActivityId: activity.id };
+      }
+      if (currentLink) return stale();
+      await transaction.insert(trainingWorkoutSessionActivityLinks).values({
+        sessionId: session.id, personId, externalActivityId: activity.id,
+        matchBasis: null, matchPolicyVersion: null
+      });
+      return { outcome: "created", sessionId: session.id, externalActivityId: activity.id };
+    });
+  }
+
   private async reconcileActivityLinksForDate(
     transaction: DatabaseTransaction,
     personId: string,
     localDate: string
   ): Promise<void> {
+    const [recordingMode] = await transaction.select({
+      title: trainingActivityRecordingModes.title
+    }).from(trainingActivityRecordingModes).where(eq(
+      trainingActivityRecordingModes.personId, personId
+    )).limit(1);
     const sessionRows = await transaction.execute(sql<ActivityLinkSessionRow>`
       select session.id, session.local_date::text, session.occurred_at,
              session.workout_name, session.program_version_id,
@@ -683,8 +860,9 @@ export class TrainingRepository implements TrainingStore {
     `);
     const activityRows = await transaction.execute(sql<ActivityLinkExternalRow>`
       select activity.id, activity.local_date::text, activity.occurred_at,
-             activity.name, activity.distance_meters,
-             activity.garmin_attributed, activity.provider_identity
+             activity.name, activity.duration_seconds, activity.distance_meters,
+             activity.garmin_attributed, activity.source_provider,
+             activity.provider_identity
         from integration_activity_facts activity
        where activity.person_id = ${personId}
          and activity.local_date = ${localDate}
@@ -761,9 +939,10 @@ export class TrainingRepository implements TrainingStore {
       activities.push({
         id: row.id, localDate: row.local_date,
         occurredAt: new Date(row.occurred_at).toISOString(),
-        name: row.name,
+        name: row.name, durationSeconds: row.duration_seconds,
         distanceMeters: row.distance_meters === null ? null : Number(row.distance_meters),
         garminAttributed: row.garmin_attributed,
+        sourceProvider: row.source_provider,
         providerIdentity: row.provider_identity,
         classification: lineage.classification_id === null ? null : {
           kind: lineage.kind!,
@@ -772,7 +951,7 @@ export class TrainingRepository implements TrainingStore {
         }
       });
     }
-    const expected = new Map(findAutomaticActivityLinks(sessions, activities)
+    const expected = new Map(findAutomaticActivityLinks(sessions, activities, recordingMode?.title ?? null)
       .map((link) => [link.sessionId, link] as const));
     for (const row of currentSessions) {
       if (row.match_policy_version === null) continue;
@@ -791,7 +970,8 @@ export class TrainingRepository implements TrainingStore {
         sessionId: match.sessionId, personId,
         externalActivityId: match.externalActivityId,
         matchBasis: match.basis,
-        matchPolicyVersion: "automatic-activity-link-v2"
+        matchPolicyVersion: match.basis === "confirmed_recording_context"
+          ? "automatic-activity-link-v3" : "automatic-activity-link-v2"
       });
     }
   }
@@ -908,6 +1088,50 @@ export class TrainingRepository implements TrainingStore {
     return this.database.db.transaction((transaction) =>
       this.readExternalActivities(transaction, personId, { limit })
     );
+  }
+
+  /** {@inheritDoc TrainingStore.listExternalActivitiesForLocalDate} */
+  public listExternalActivitiesForLocalDate(personId: string, localDate: string): Promise<readonly ExternalActivityFact[]> {
+    return this.database.db.transaction((transaction) =>
+      this.readExternalActivities(transaction, personId, { from: localDate, to: localDate })
+    );
+  }
+
+  /** {@inheritDoc TrainingStore.listActivityLinkProgramContextForLocalDate} */
+  public async listActivityLinkProgramContextForLocalDate(
+    personId: string, localDate: string
+  ): Promise<readonly ActivityLinkProgramContext[]> {
+    const result = await this.database.db.execute(sql<{
+      session_id: string;
+      program_workout_name: string | null;
+      trusted_external_title: string | null;
+    }>`
+      select session.id as session_id,
+             program_workout.name as program_workout_name,
+             trusted_title.title as trusted_external_title
+        from workout_sessions session
+        left join training_program_workouts program_workout
+          on program_workout.program_version_id = session.program_version_id
+         and program_workout.position = session.program_workout_position
+        left join training_program_workout_activity_titles trusted_title
+          on trusted_title.program_version_id = session.program_version_id
+         and trusted_title.workout_position = session.program_workout_position
+       where session.person_id = ${personId}
+         and session.local_date = ${localDate}
+         and not exists (
+           select 1 from workout_sessions successor
+            where successor.supersedes_id = session.id
+         )
+    `);
+    return (result.rows as unknown as Array<{
+      session_id: string;
+      program_workout_name: string | null;
+      trusted_external_title: string | null;
+    }>).map((row) => ({
+      sessionId: row.session_id,
+      programWorkoutName: row.program_workout_name,
+      trustedExternalTitle: row.trusted_external_title
+    }));
   }
 
   private async readNextTrainingStepInTransaction(
@@ -2299,6 +2523,7 @@ export class TrainingRepository implements TrainingStore {
         timezone: input.timezone,
         programVersionId: input.programVersionId,
         programWorkoutPosition: input.programWorkoutPosition ?? null,
+        venueLabel: input.venueLabel ?? null,
         workoutName: input.workoutName,
         feeling: input.feeling,
         note: input.note,
@@ -2445,6 +2670,7 @@ export class TrainingRepository implements TrainingStore {
       timezone: session.timezone,
       programVersionId: session.programVersionId,
       programWorkoutPosition: session.programWorkoutPosition,
+      venueLabel: session.venueLabel,
       externalActivityId: (currentLink.rows[0] as { external_activity_id: string } | undefined)?.external_activity_id ?? null,
       workoutName: session.workoutName,
       feeling: session.feeling,

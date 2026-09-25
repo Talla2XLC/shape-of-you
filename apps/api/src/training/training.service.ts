@@ -2,9 +2,12 @@ import { Inject, Injectable } from "@nestjs/common";
 
 import type {
   AcceptProgressionCandidate,
+  ActivityRecordingMode,
   ActivateTrainingProgramVersion,
   ClassifyExternalActivity,
   ClassifyExternalActivityResult,
+  ConfirmWorkoutActivityLink,
+  ConfirmWorkoutActivityLinkResult,
   CorrectWorkoutSession,
   CreateExercise,
   CreateExerciseVersion,
@@ -18,9 +21,12 @@ import type {
   MaterializeTrainingProgramCadence,
   MaterializeTrainingProgramCadenceResult,
   PersonalRecordList,
+  PendingActivityLinkQuestion,
   ProgressionCandidateList,
   SaveConfirmedTrainingProgram,
   SaveConfirmedTrainingProgramResult,
+  SetActivityRecordingMode,
+  SetActivityRecordingModeResult,
   SetTrustedExternalActivityTitle,
   SetTrustedExternalActivityTitleResult,
   TrainingContext,
@@ -38,7 +44,9 @@ import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import { PERSON_CONTEXT, TRAINING_STORE } from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
 import { evaluateNextTrainingStep } from "../domain/training.js";
+import { findActivityLinkCandidates } from "../domain/automatic-activity-link.js";
 import type {
+  ActivityLinkProgramContext,
   CreateWorkoutSessionResult,
   ExternalActivityFact,
   TrainingStore
@@ -62,6 +70,103 @@ function toExternalActivitySummary(
     deviceName: activity.deviceName,
     garminAttributed: activity.garminAttributed,
     classification: activity.classification ?? null
+  };
+}
+
+function pendingActivityLinkQuestion(
+  sessions: WorkoutSessionList,
+  activities: readonly ExternalActivityFact[],
+  programContext: readonly ActivityLinkProgramContext[],
+  recordingModeTitle: string | null,
+  localDate: string | null
+): PendingActivityLinkQuestion | null {
+  if (recordingModeTitle === null || localDate === null) return null;
+  const contextBySessionId = new Map(programContext.map((context) => [context.sessionId, context]));
+  const candidates = findActivityLinkCandidates(
+    sessions.items.filter((session) => session.localDate === localDate &&
+      session.externalActivityId === null).map((session) => ({
+      id: session.id,
+      localDate: session.localDate,
+      occurredAt: session.occurredAt,
+      workoutName: session.workoutName,
+      programVersionId: session.programVersionId,
+      programWorkoutPosition: session.programWorkoutPosition,
+      programWorkoutName: contextBySessionId.get(session.id)?.programWorkoutName ?? null,
+      trustedExternalTitle: contextBySessionId.get(session.id)?.trustedExternalTitle ?? null,
+      hasStrengthSets: session.exercises.some((exercise) => exercise.sets.some((set) =>
+        set.reps !== null || (set.weightKg ?? 0) > 0)),
+      sourceChannel: session.sourceReference.channel,
+      sourceExternalSystem: session.sourceReference.externalSystem,
+      sourceExternalRecordId: session.sourceReference.externalRecordId
+    })),
+    activities.filter((activity) => activity.localDate === localDate &&
+      !activity.sessionCovered).map((activity) => ({
+      id: activity.id,
+      localDate: activity.localDate,
+      occurredAt: activity.occurredAt,
+      name: activity.name,
+      durationSeconds: activity.durationSeconds,
+      distanceMeters: activity.distanceMeters,
+      garminAttributed: activity.garminAttributed,
+      sourceProvider: activity.sourceProvider,
+      providerIdentity: activity.providerIdentity,
+      classification: activity.classification === null ? null : {
+        kind: activity.classification.classification.kind,
+        programVersionId: activity.classification.programVersionId,
+        workoutPosition: activity.classification.classification.kind === "program_workout"
+          ? activity.classification.classification.workoutPosition : null
+      }
+    })),
+    recordingModeTitle
+  );
+  const sessionCounts = new Map<string, number>();
+  const activityCounts = new Map<string, number>();
+  for (const candidate of candidates) {
+    sessionCounts.set(candidate.sessionId, (sessionCounts.get(candidate.sessionId) ?? 0) + 1);
+    activityCounts.set(candidate.externalActivityId,
+      (activityCounts.get(candidate.externalActivityId) ?? 0) + 1);
+  }
+  const ambiguous = candidates.filter((candidate) =>
+    (sessionCounts.get(candidate.sessionId) ?? 0) > 1 ||
+    (activityCounts.get(candidate.externalActivityId) ?? 0) > 1);
+  const normalizedMode = recordingModeTitle.normalize("NFKC").trim()
+    .replace(/\s+/gu, " ").toLocaleLowerCase("und");
+  const dateOnlyPairs = sessions.items.filter((session) =>
+    session.localDate === localDate && session.occurredAt === null &&
+    session.externalActivityId === null &&
+    session.exercises.some((exercise) => exercise.sets.some((set) =>
+      set.reps !== null || (set.weightKg ?? 0) > 0))
+  ).flatMap((session) => activities.filter((activity) =>
+    activity.localDate === localDate && !activity.sessionCovered &&
+    activity.garminAttributed && activity.sourceProvider === "intervals_icu" &&
+    activity.distanceMeters === null && activity.durationSeconds >= 600 &&
+    activity.classification === null &&
+    activity.name.normalize("NFKC").trim().replace(/\s+/gu, " ")
+      .toLocaleLowerCase("und") === normalizedMode
+  ).map((activity) => ({ sessionId: session.id, externalActivityId: activity.id })));
+  const questionPairs = ambiguous.length >= 2 ? ambiguous : dateOnlyPairs;
+  if (questionPairs.length === 0) return null;
+  const displayedPairs = questionPairs.slice(0, 20);
+  return {
+    localDate,
+    question: questionPairs.length > displayedPairs.length
+      ? `На эту дату найдено ${questionPairs.length} возможных пар. Показаны первые 20; назовите точную пару или уточните время тренировки.`
+      : ambiguous.length >= 2
+        ? "Какая из этих пар описывает одну и ту же тренировку?"
+        : "Это подробная тренировка и запись Garmin одного занятия?",
+    options: displayedPairs.map((candidate) => {
+      const session = sessions.items.find((item) => item.id === candidate.sessionId)!;
+      const activity = activities.find((item) => item.id === candidate.externalActivityId)!;
+      return {
+        sessionId: session.id,
+        workoutName: session.workoutName,
+        sessionOccurredAt: session.occurredAt,
+        venueLabel: session.venueLabel ?? null,
+        externalActivityId: activity.id,
+        activityName: activity.name,
+        activityOccurredAt: activity.occurredAt
+      };
+    })
   };
 }
 
@@ -207,6 +312,21 @@ export class TrainingService {
     return this.store.setTrustedExternalActivityTitle(this.personContext.getPersonId(), input);
   }
 
+  /** Reads Person-wide authority for a generic Garmin strength recording mode. */
+  public readActivityRecordingMode(): Promise<ActivityRecordingMode> {
+    return this.store.readActivityRecordingMode(this.personContext.getPersonId());
+  }
+
+  /** Applies one explicit mode confirmation, replacement, or revocation. */
+  public setActivityRecordingMode(input: SetActivityRecordingMode): Promise<SetActivityRecordingModeResult> {
+    return this.store.setActivityRecordingMode(this.personContext.getPersonId(), input);
+  }
+
+  /** Associates one exact current session and activity after a direct Person answer. */
+  public confirmWorkoutActivityLink(input: ConfirmWorkoutActivityLink): Promise<ConfirmWorkoutActivityLinkResult> {
+    return this.store.confirmWorkoutActivityLink(this.personContext.getPersonId(), input);
+  }
+
   /** Appends or reuses explicit classification for one imported activity. */
   public classifyExternalActivity(
     input: ClassifyExternalActivity
@@ -224,19 +344,28 @@ export class TrainingService {
     const personId = this.personContext.getPersonId();
     const historyLimit = query.historyLimit ?? 20;
     const localDate = query.localDate ?? null;
-    const [program, recentSessions, externalActivities, nextStep] = await Promise.all([
+    const [program, recentSessions, externalActivities, nextStep, activityRecordingMode,
+      dateSessions, dateActivities, dateProgramContext] = await Promise.all([
       this.store.findActiveProgram(personId),
       this.store.listWorkoutSessions(personId, historyLimit),
       this.store.listExternalActivities(personId, historyLimit),
       localDate === null
         ? Promise.resolve(null)
-        : this.store.readNextTrainingStep(personId, localDate)
+        : this.store.readNextTrainingStep(personId, localDate),
+      this.store.readActivityRecordingMode(personId),
+      localDate === null ? Promise.resolve([]) : this.store.listWorkoutSessionsForLocalDate(personId, localDate),
+      localDate === null ? Promise.resolve([]) : this.store.listExternalActivitiesForLocalDate(personId, localDate),
+      localDate === null ? Promise.resolve([]) : this.store.listActivityLinkProgramContextForLocalDate(personId, localDate)
     ]);
     const trustedExternalTitles = program?.activeVersionId
       ? await this.store.listTrustedExternalActivityTitles(personId, program.id, program.activeVersionId)
       : [];
     const recentExternalActivities = externalActivities.map(
       toExternalActivitySummary
+    );
+    const pendingQuestion = pendingActivityLinkQuestion(
+      { items: [...dateSessions] }, dateActivities, dateProgramContext,
+      activityRecordingMode.title, localDate
     );
     const resolvedNextStep = nextStep ?? evaluateNextTrainingStep({
       program,
@@ -251,6 +380,8 @@ export class TrainingService {
           recentSessions,
           recentExternalActivities,
           trustedExternalTitles: [...trustedExternalTitles],
+          activityRecordingMode,
+          ...(pendingQuestion === null ? {} : { pendingActivityLinkQuestion: pendingQuestion }),
           nextStep: resolvedNextStep
         }
       : {
@@ -259,6 +390,8 @@ export class TrainingService {
           recentSessions,
           recentExternalActivities,
           trustedExternalTitles: [...trustedExternalTitles],
+          activityRecordingMode,
+          ...(pendingQuestion === null ? {} : { pendingActivityLinkQuestion: pendingQuestion }),
           nextStep: resolvedNextStep
         };
   }

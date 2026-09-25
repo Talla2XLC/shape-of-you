@@ -1,5 +1,6 @@
 import {
   AcceptProgressionCandidateSchema,
+  ActivityRecordingModeSchema,
   ActivateTrainingProgramVersionSchema,
   BodyMeasurementSessionHistorySchema,
   BodyMeasurementSessionIdParamsSchema,
@@ -11,6 +12,8 @@ import {
   CorrectDailyContextNoteSchema,
   CorrectMealSchema,
   CorrectWorkoutSessionSchema,
+  ConfirmWorkoutActivityLinkSchema,
+  ConfirmWorkoutActivityLinkResultSchema,
   CreateBodyMeasurementSessionSchema,
   CreateDailyContextNoteSchema,
   CreateBrandSchema,
@@ -65,6 +68,8 @@ import {
   TrainingProgramSchema,
   SetTrustedExternalActivityTitleSchema,
   SetTrustedExternalActivityTitleResultSchema,
+  SetActivityRecordingModeSchema,
+  SetActivityRecordingModeResultSchema,
   TrustedExternalActivityTitleListSchema,
   TrainingVersionParamsSchema,
   UpsertExerciseOverlaySchema,
@@ -886,6 +891,19 @@ function trainingPaths(): Record<string, object> {
         }
       }
     },
+    "/v1/training/activity-recording-mode": {
+      get: {
+        tags: ["training-programs"],
+        summary: "Read confirmed generic Garmin strength recording mode",
+        responses: { "200": response(ActivityRecordingModeSchema, "Current recording mode") }
+      },
+      put: {
+        tags: ["training-programs"],
+        summary: "Confirm, replace, or revoke generic Garmin strength recording mode",
+        requestBody: request(SetActivityRecordingModeSchema),
+        responses: { "200": response(SetActivityRecordingModeResultSchema, "Current recording mode authority") }
+      }
+    },
     "/v1/training/programs/{id}/versions/{versionId}/activate": {
       post: {
         tags: ["training-programs"],
@@ -908,6 +926,14 @@ function trainingPaths(): Record<string, object> {
           "200": response(TrainingProgramSchema, "Draft version created"),
           "409": response(ErrorResponseSchema, "Candidate is stale")
         }
+      }
+    },
+    "/v1/training/session-activity-links/confirm": {
+      post: {
+        tags: ["training-sessions"],
+        summary: "Confirm one exact current WorkoutSession and ExternalActivity pair",
+        requestBody: request(ConfirmWorkoutActivityLinkSchema),
+        responses: { "200": response(ConfirmWorkoutActivityLinkResultSchema, "Explicit link outcome") }
       }
     },
     "/v1/training/sessions": {

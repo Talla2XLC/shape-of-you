@@ -203,6 +203,8 @@ const unavailableServices = {
     materializeProgramCadence: unreachable,
     classifyExternalActivity: unreachable,
     setTrustedExternalActivityTitle: unreachable,
+    setActivityRecordingMode: unreachable,
+    confirmWorkoutActivityLink: unreachable,
     getTrainingContext: unreachable
   },
   recovery: {
@@ -526,7 +528,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(30);
+    expect(body.result.tools).toHaveLength(32);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -559,6 +561,8 @@ describe("MCP HTTP adapter", () => {
       materialize_training_program_cadence: MCP_WORKOUT_WRITE_SCOPE,
       classify_external_activity: MCP_WORKOUT_WRITE_SCOPE,
       set_trusted_external_activity_title: MCP_WORKOUT_WRITE_SCOPE,
+      set_activity_recording_mode: MCP_WORKOUT_WRITE_SCOPE,
+      confirm_workout_activity_link: MCP_WORKOUT_WRITE_SCOPE,
       list_workout_sessions: MCP_READ_SCOPE,
       record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       correct_workout_session: MCP_WORKOUT_WRITE_SCOPE,
@@ -1179,6 +1183,16 @@ describe("MCP HTTP adapter", () => {
     const setTrustedExternalActivityTitle = vi.fn().mockResolvedValue({
       outcome: "created", currentTitle: "Ahilej B"
     });
+    const setActivityRecordingMode = vi.fn().mockResolvedValue({
+      outcome: "created",
+      current: { title: "Силовая тренировка", lockVersion: 1,
+        updatedAt: "2026-09-25T12:00:00.000Z" }
+    });
+    const confirmWorkoutActivityLink = vi.fn().mockResolvedValue({
+      outcome: "created",
+      sessionId: "00000000-0000-4000-8000-000000000471",
+      externalActivityId: "00000000-0000-4000-8000-000000000472"
+    });
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1208,7 +1222,9 @@ describe("MCP HTTP adapter", () => {
           saveConfirmedProgram,
           materializeProgramCadence,
           classifyExternalActivity,
-          setTrustedExternalActivityTitle
+          setTrustedExternalActivityTitle,
+          setActivityRecordingMode,
+          confirmWorkoutActivityLink
         }
       }
     });
@@ -1604,6 +1620,20 @@ describe("MCP HTTP adapter", () => {
         structuredContent: { outcome: "created", currentTitle: "Ahilej B" }
       });
       expect(setTrustedExternalActivityTitle).toHaveBeenCalledWith(trustedTitle);
+      const modeCommand = { expectedLockVersion: 0, title: "Силовая тренировка" };
+      const mode = (await call(218, "set_activity_recording_mode", modeCommand)).json().result;
+      expect(mode).toMatchObject({ structuredContent: { outcome: "created",
+        current: { title: "Силовая тренировка", lockVersion: 1 } } });
+      expect(setActivityRecordingMode).toHaveBeenCalledWith(modeCommand);
+      const linkCommand = {
+        sessionId: "00000000-0000-4000-8000-000000000471",
+        externalActivityId: "00000000-0000-4000-8000-000000000472",
+        expectedExternalActivityId: null
+      };
+      const linked = (await call(219, "confirm_workout_activity_link", linkCommand)).json().result;
+      expect(linked).toMatchObject({ structuredContent: { outcome: "created",
+        sessionId: linkCommand.sessionId, externalActivityId: linkCommand.externalActivityId } });
+      expect(confirmWorkoutActivityLink).toHaveBeenCalledWith(linkCommand);
     } finally {
       await authorizedFastify.close();
     }

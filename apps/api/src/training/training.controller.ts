@@ -14,8 +14,11 @@ import type { FastifyReply } from "fastify";
 
 import {
   AcceptProgressionCandidateSchema,
+  ActivityRecordingModeSchema,
   ActivateTrainingProgramVersionSchema,
   CorrectWorkoutSessionSchema,
+  ConfirmWorkoutActivityLinkSchema,
+  ConfirmWorkoutActivityLinkResultSchema,
   CreateExerciseSchema,
   CreateExerciseVersionSchema,
   CreateTrainingProgramSchema,
@@ -31,14 +34,19 @@ import {
   TrustedExternalActivityTitleListSchema,
   SetTrustedExternalActivityTitleSchema,
   SetTrustedExternalActivityTitleResultSchema,
+  SetActivityRecordingModeSchema,
+  SetActivityRecordingModeResultSchema,
   TrainingVersionParamsSchema,
   UpsertExerciseOverlaySchema,
   WorkoutSessionHistorySchema,
   WorkoutSessionListSchema,
   WorkoutSessionSchema,
   type AcceptProgressionCandidate,
+  type ActivityRecordingMode,
   type ActivateTrainingProgramVersion,
   type CorrectWorkoutSession,
+  type ConfirmWorkoutActivityLink,
+  type ConfirmWorkoutActivityLinkResult,
   type CreateExercise,
   type CreateExerciseVersion,
   type CreateTrainingProgram,
@@ -54,6 +62,8 @@ import {
   type TrustedExternalActivityTitle,
   type SetTrustedExternalActivityTitle,
   type SetTrustedExternalActivityTitleResult,
+  type SetActivityRecordingMode,
+  type SetActivityRecordingModeResult,
   type TrainingVersionParams,
   type UpsertExerciseOverlay,
   type WorkoutSession,
@@ -122,6 +132,29 @@ export class TrainingCatalogController {
     input: UpsertExerciseOverlay
   ): Promise<ExerciseOverlay> {
     return this.service.upsertExerciseOverlay(params.id, input);
+  }
+}
+
+/** HTTP transport for a Person's generic Garmin strength recording-mode authority. */
+@Controller("v1/training/activity-recording-mode")
+export class TrainingActivityRecordingModeController {
+  public constructor(@Inject(TrainingService) private readonly service: TrainingService) {}
+
+  /** Reads the current confirmed mode and optimistic lock. */
+  @Get()
+  @UseInterceptors(new JsonSchemaResponseInterceptor(ActivityRecordingModeSchema))
+  public read(): Promise<ActivityRecordingMode> {
+    return this.service.readActivityRecordingMode();
+  }
+
+  /** Applies an explicit mode confirmation, replacement, or revocation. */
+  @Put()
+  @UseInterceptors(new JsonSchemaResponseInterceptor(SetActivityRecordingModeResultSchema))
+  public set(
+    @Body(new JsonSchemaPipe<SetActivityRecordingMode>(SetActivityRecordingModeSchema))
+    input: SetActivityRecordingMode
+  ): Promise<SetActivityRecordingModeResult> {
+    return this.service.setActivityRecordingMode(input);
   }
 }
 
@@ -247,6 +280,16 @@ export class WorkoutSessionController {
   public constructor(
     @Inject(TrainingService) private readonly service: TrainingService
   ) {}
+
+  /** Records one directly confirmed exact pair without changing either source fact. */
+  @Post("session-activity-links/confirm")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(ConfirmWorkoutActivityLinkResultSchema))
+  public confirmActivityLink(
+    @Body(new JsonSchemaPipe<ConfirmWorkoutActivityLink>(ConfirmWorkoutActivityLinkSchema))
+    input: ConfirmWorkoutActivityLink
+  ): Promise<ConfirmWorkoutActivityLinkResult> {
+    return this.service.confirmWorkoutActivityLink(input);
+  }
 
   /** Creates one idempotent immutable WorkoutSession. */
   @Post("sessions")

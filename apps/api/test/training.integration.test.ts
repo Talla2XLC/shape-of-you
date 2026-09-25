@@ -70,6 +70,167 @@ afterAll(async () => {
 });
 
 describe("Training PostgreSQL vertical", () => {
+  it("confirms one exact pair explicitly and blocks corrected-lineage double occupancy", async () => {
+    const personId = "00000000-0000-4000-8000-000000000008";
+    const providerId = "00000000-0000-4000-8000-000000000801";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000802";
+    const consentId = "00000000-0000-4000-8000-000000000803";
+    const connectionId = "00000000-0000-4000-8000-000000000804";
+    await database.pool.query("insert into persons (id, kind, status) values ($1, 'real', 'active')", [personId]);
+    await database.pool.query(
+      "insert into recovery_providers (id, key, name) values ($1, 'task-0134-confirm-provider', 'TASK-0134 confirm provider')",
+      [providerId]
+    );
+    await database.pool.query(
+      "insert into recovery_connections (id, person_id, provider_id, dedupe_key) values ($1, $2, $3, 'task-0134-confirm-connection')",
+      [recoveryConnectionId, personId, providerId]
+    );
+    await database.pool.query(
+      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')",
+      [consentId, personId, recoveryConnectionId]
+    );
+    await database.pool.query(
+      "insert into integration_connections (id, person_id, recovery_connection_id, consent_id, provider_key, external_user_id) values ($1, $2, $3, $4, 'task-0134-confirm-provider', 'task-0134-confirm-user')",
+      [connectionId, personId, recoveryConnectionId, consentId]
+    );
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(repository, new SyntheticPersonContext(personId));
+    const exercise = await service.createExercise({
+      visibility: "private", name: "TASK-0134 confirm squat", category: "strength",
+      movementPattern: null, equipment: null, instructions: null, note: null
+    });
+    const sessionInput = {
+      occurredAt: "2026-09-25T16:00:00.000Z", timezone: "Europe/Belgrade",
+      programVersionId: null, programWorkoutPosition: null, externalActivityId: null,
+      workoutName: "Ahilej B", feeling: null, note: null,
+      exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+        loadBasis: "external_weight" as const, feeling: null, note: null,
+        sets: [{ weightKg: 40, reps: 8, rir: 2 }] }],
+      sourceReference: { channel: "manual" as const, externalSystem: null,
+        externalRecordId: null, occurredAt: "2026-09-25T16:00:00.000Z" },
+      dedupeKey: "task-0134-explicit-first", confidence: 1
+    };
+    const firstSession = (await service.createWorkoutSession(sessionInput)).session;
+    const otherSession = (await service.createWorkoutSession({
+      ...sessionInput, occurredAt: "2026-09-25T18:00:00.000Z",
+      sourceReference: { ...sessionInput.sourceReference,
+        occurredAt: "2026-09-25T18:00:00.000Z" },
+      dedupeKey: "task-0134-explicit-other"
+    })).session;
+    const importInput = {
+      connectionId, personId, consentId,
+      providerIdentity: "task-0134-confirm-activity", normalizedChecksum: "a".repeat(64),
+      occurredAt: "2026-09-25T15:50:00.000Z", localDate: "2026-09-25",
+      timezone: "Europe/Belgrade", name: "Силовая тренировка", durationSeconds: 3600,
+      distanceMeters: null, trainingLoad: 50,
+      trainingLoadBasis: "relative_training_stress" as const,
+      trainingLoadBasisVersion: "1", averageHeartRate: 120,
+      maximumHeartRate: 150, deviceName: "Garmin", sourceProvider: "intervals_icu",
+      garminAttributed: true
+    };
+    expect(await repository.importExternalActivity(importInput)).toBe("created");
+    const firstActivity = (await repository.listExternalActivities(personId, 10))[0]!;
+    const command = { sessionId: firstSession.id,
+      externalActivityId: firstActivity.id, expectedExternalActivityId: null };
+    expect(await service.confirmWorkoutActivityLink(command)).toMatchObject({ outcome: "created" });
+    expect(await service.confirmWorkoutActivityLink(command)).toMatchObject({ outcome: "unchanged" });
+    expect(await repository.confirmWorkoutActivityLink(personB, command)).toMatchObject({ outcome: "stale" });
+    expect(await service.confirmWorkoutActivityLink({ ...command, sessionId: otherSession.id }))
+      .toMatchObject({ outcome: "stale" });
+    expect(await repository.importExternalActivity({ ...importInput,
+      normalizedChecksum: "b".repeat(64), name: "Strength corrected" })).toBe("corrected");
+    const currentActivity = (await repository.listExternalActivities(personId, 10))[0]!;
+    expect(currentActivity.id).not.toBe(firstActivity.id);
+    expect(await service.confirmWorkoutActivityLink({
+      sessionId: otherSession.id, externalActivityId: currentActivity.id,
+      expectedExternalActivityId: null
+    })).toMatchObject({ outcome: "stale" });
+    expect(await service.confirmWorkoutActivityLink({ ...command,
+      externalActivityId: currentActivity.id })).toMatchObject({ outcome: "unchanged" });
+    expect(currentActivity.classification).toBeNull();
+    const links = await database.pool.query<{ session_id: string; match_basis: string | null }>(
+      "select session_id, match_basis from training_workout_session_activity_links where person_id = $1",
+      [personId]
+    );
+    expect(links.rows).toEqual([{ session_id: firstSession.id, match_basis: null }]);
+    await service.setActivityRecordingMode({ expectedLockVersion: 0, title: "Силовая тренировка" });
+    await repository.importExternalActivity({
+      ...importInput, providerIdentity: "task-0134-confirm-second-activity",
+      normalizedChecksum: "c".repeat(64), occurredAt: "2026-09-25T18:05:00.000Z"
+    });
+    const secondActivity = (await repository.listExternalActivities(personId, 10))
+      .find((item) => item.providerIdentity === "task-0134-confirm-second-activity")!;
+    const automatic = await database.pool.query<{ match_basis: string }>(
+      "select match_basis from training_workout_session_activity_links where session_id = $1",
+      [otherSession.id]
+    );
+    expect(automatic.rows[0]?.match_basis).toBe("confirmed_recording_context");
+    expect(await service.confirmWorkoutActivityLink({
+      sessionId: otherSession.id, externalActivityId: secondActivity.id,
+      expectedExternalActivityId: null
+    })).toMatchObject({ outcome: "stale" });
+    const unchangedAutomatic = await database.pool.query<{ match_basis: string }>(
+      "select match_basis from training_workout_session_activity_links where session_id = $1",
+      [otherSession.id]
+    );
+    expect(unchangedAutomatic.rows[0]?.match_basis).toBe("confirmed_recording_context");
+  });
+
+  it("versions Person-wide recording mode and preserves venue on immutable correction", async () => {
+    const personId = "00000000-0000-4000-8000-000000000007";
+    await database.pool.query(
+      "insert into persons (id, kind, status) values ($1, 'real', 'active')",
+      [personId]
+    );
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(repository, new SyntheticPersonContext(personId));
+    expect(await service.readActivityRecordingMode()).toEqual({
+      title: null, lockVersion: 0, updatedAt: null
+    });
+    const first = await service.setActivityRecordingMode({
+      expectedLockVersion: 0, title: "  Силовая   тренировка  "
+    });
+    expect(first).toMatchObject({
+      outcome: "created", current: { title: "Силовая тренировка", lockVersion: 1 }
+    });
+    expect(await repository.readActivityRecordingMode(personB)).toEqual({
+      title: null, lockVersion: 0, updatedAt: null
+    });
+    expect(await service.setActivityRecordingMode({
+      expectedLockVersion: 0, title: "Another mode"
+    })).toMatchObject({ outcome: "stale", current: { lockVersion: 1 } });
+    expect(await service.setActivityRecordingMode({
+      expectedLockVersion: 1, title: null
+    })).toMatchObject({ outcome: "revoked", current: { title: null, lockVersion: 2 } });
+    expect(await service.setActivityRecordingMode({
+      expectedLockVersion: 1, title: "Силовая тренировка"
+    })).toMatchObject({ outcome: "stale", current: { title: null, lockVersion: 2 } });
+
+    const exercise = await service.createExercise({
+      visibility: "private", name: "TASK-0134 venue roundtrip", category: "strength",
+      movementPattern: null, equipment: null, instructions: null, note: null
+    });
+    const sessionInput = {
+      occurredAt: "2026-09-25T16:00:00.000Z", timezone: "Europe/Belgrade",
+      programVersionId: null, programWorkoutPosition: null, externalActivityId: null,
+      venueLabel: "Ahilej", workoutName: "Strength", feeling: null, note: null,
+      exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+        loadBasis: "external_weight" as const, feeling: null, note: null,
+        sets: [{ weightKg: 40, reps: 8, rir: 2 }] }],
+      sourceReference: { channel: "manual" as const, externalSystem: null,
+        externalRecordId: null, occurredAt: "2026-09-25T16:00:00.000Z" },
+      dedupeKey: "task-0134-venue-create", confidence: 1
+    };
+    const created = await service.createWorkoutSession(sessionInput);
+    expect(created.session.venueLabel).toBe("Ahilej");
+    const corrected = await service.correctWorkoutSession(created.session.id, {
+      ...sessionInput, venueLabel: "Another gym", dedupeKey: "task-0134-venue-correct",
+      correctionReason: "Corrected venue"
+    });
+    expect(corrected.session.venueLabel).toBe("Another gym");
+    expect((await repository.findWorkoutSession(personId, created.session.id))?.venueLabel).toBe("Ahilej");
+  });
+
   it("applies the complete additive Training schema", async () => {
     const result = await database.pool.query<{ name: string | null }>(
       `select to_regclass('public.training_exercises')::text as name
@@ -304,6 +465,157 @@ describe("Training PostgreSQL vertical", () => {
       dedupeKey: "task-0133-session-after-activity"
     });
     expect(sessionAfterActivity.session.externalActivityId).toBe(activityFirst.id);
+  });
+
+  it("reconciles confirmed generic Garmin recording mode without assigning A or B from its title", async () => {
+    const oldDay = new Date(Date.now() - 45 * 86_400_000).toISOString().slice(0, 10);
+    const firstDay = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+    const secondDay = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const personId = "00000000-0000-4000-8000-000000000006";
+    const providerId = "00000000-0000-4000-8000-000000000611";
+    const recoveryConnectionId = "00000000-0000-4000-8000-000000000612";
+    const consentId = "00000000-0000-4000-8000-000000000613";
+    const connectionId = "00000000-0000-4000-8000-000000000614";
+    await database.pool.query("insert into persons (id, kind, status) values ($1, 'real', 'active')", [personId]);
+    await database.pool.query(
+      "insert into recovery_providers (id, key, name) values ($1, 'task-0134-provider', 'TASK-0134 provider')",
+      [providerId]
+    );
+    await database.pool.query(
+      "insert into recovery_connections (id, person_id, provider_id, dedupe_key) values ($1, $2, $3, 'task-0134-connection')",
+      [recoveryConnectionId, personId, providerId]
+    );
+    await database.pool.query(
+      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')",
+      [consentId, personId, recoveryConnectionId]
+    );
+    await database.pool.query(
+      "insert into integration_connections (id, person_id, recovery_connection_id, consent_id, provider_key, external_user_id) values ($1, $2, $3, $4, 'task-0134-provider', 'task-0134-user')",
+      [connectionId, personId, recoveryConnectionId, consentId]
+    );
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(repository, new SyntheticPersonContext(personId));
+    const exercise = await service.createExercise({
+      visibility: "private", name: "TASK-0134 squat", category: "strength",
+      movementPattern: null, equipment: null, instructions: null, note: null
+    });
+    const program = await service.saveConfirmedProgram({
+      expectedActiveProgramId: null, expectedLockVersion: null,
+      name: "TASK-0134 A/B", note: null,
+      cadence: { kind: "rolling_weekly", strengthSessionsPerWeek: 2,
+        workoutSequence: [1, 2], lightCardio: null },
+      workouts: ["Ahilej A", "Ahilej B"].map((name) => ({
+        name,
+        prescriptions: [{
+          exercise: { name: "TASK-0134 squat", category: "strength" as const,
+            movementPattern: null, equipment: null, instructions: null, note: null },
+          loadBasis: "external_weight" as const, targetWeightKg: 40,
+          targetSets: 1, targetRepsMin: 8, targetRepsMax: 10,
+          targetRir: 2, progressionIncrementKg: 2, note: null
+        }]
+      }))
+    });
+    const versionId = program.program!.activeVersionId!;
+    const sessionInput = (day: string, position: number, start: string) => ({
+      occurredAt: start, timezone: "Europe/Belgrade", venueLabel: "Ahilej",
+      programVersionId: versionId, programWorkoutPosition: position,
+      externalActivityId: null, workoutName: `Ahilej ${position === 1 ? "A" : "B"}`,
+      feeling: null, note: null,
+      exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+        loadBasis: "external_weight" as const, feeling: null, note: null,
+        sets: [{ weightKg: 40, reps: 8, rir: 2 }] }],
+      sourceReference: { channel: "manual" as const, externalSystem: null,
+        externalRecordId: null, occurredAt: start },
+      dedupeKey: `task-0134-${day}-${position}`, confidence: 1
+    });
+    const importInput = (identity: string, start: string, checksum: string) => ({
+      connectionId, personId, consentId, providerIdentity: identity,
+      normalizedChecksum: checksum.repeat(64), occurredAt: start,
+      localDate: start.slice(0, 10), timezone: "Europe/Belgrade",
+      name: "Силовая тренировка", durationSeconds: 2765, distanceMeters: null,
+      trainingLoad: 15, trainingLoadBasis: "relative_training_stress" as const,
+      trainingLoadBasisVersion: "1", averageHeartRate: 104,
+      maximumHeartRate: 127, deviceName: "Garmin Forerunner 970",
+      sourceProvider: "intervals_icu", garminAttributed: true
+    });
+    const b = await service.createWorkoutSession(sessionInput(firstDay, 2, `${firstDay}T18:10:00.000Z`));
+    await repository.importExternalActivity(importInput("task-0134-b", `${firstDay}T17:57:09.000Z`, "a"));
+    const activityB = (await repository.listExternalActivities(personId, 10))[0]!;
+    expect((await repository.findWorkoutSession(personId, b.session.id))?.externalActivityId).toBeNull();
+    expect(await repository.setActivityRecordingMode(personId, {
+      expectedLockVersion: 0, title: "Силовая тренировка"
+    })).toMatchObject({ outcome: "created", current: { lockVersion: 1 } });
+    expect((await repository.findWorkoutSession(personId, b.session.id))?.externalActivityId).toBe(activityB.id);
+    const link = await database.pool.query<{ match_basis: string; match_policy_version: string }>(
+      "select match_basis, match_policy_version from training_workout_session_activity_links where session_id = $1",
+      [b.session.id]
+    );
+    expect(link.rows).toEqual([{
+      match_basis: "confirmed_recording_context", match_policy_version: "automatic-activity-link-v3"
+    }]);
+    expect((await repository.listExternalActivities(personId, 10))[0]?.classification).toBeNull();
+
+    const historical = await service.createWorkoutSession(
+      sessionInput(oldDay, 1, `${oldDay}T18:10:00.000Z`)
+    );
+    await repository.importExternalActivity(importInput(
+      "task-0134-historical", `${oldDay}T18:00:00.000Z`, "d"
+    ));
+    expect((await repository.findWorkoutSession(personId, historical.session.id))?.externalActivityId)
+      .not.toBeNull();
+
+    const a = await service.createWorkoutSession(sessionInput(secondDay, 1, `${secondDay}T18:10:00.000Z`));
+    const replacementVersionId = "00000000-0000-4000-8000-000000000615";
+    await database.pool.query(
+      "insert into training_program_versions (id, program_id, person_id, version, name, note) values ($1, $2, $3, 2, 'New program version', null)",
+      [replacementVersionId, program.program!.id, personId]
+    );
+    await database.pool.query(
+      "insert into training_program_workouts (program_version_id, position, name) values ($1, 1, 'Other strength')",
+      [replacementVersionId]
+    );
+    await database.pool.query(
+      "update training_programs set active_version_id = $1, current_version_id = $1, lock_version = lock_version + 1 where id = $2",
+      [replacementVersionId, program.program!.id]
+    );
+    await database.pool.query(
+      "insert into training_program_workout_activity_titles (program_version_id, workout_position, person_id, title, normalized_title) values ($1, 1, $2, 'Ahilej A imported', 'ahilej a imported')",
+      [versionId, personId]
+    );
+    expect(await repository.listActivityLinkProgramContextForLocalDate(personId, secondDay))
+      .toContainEqual({ sessionId: a.session.id, programWorkoutName: "Ahilej A",
+        trustedExternalTitle: "Ahilej A imported" });
+
+    await repository.importExternalActivity(importInput("task-0134-a-1", `${secondDay}T18:00:00.000Z`, "b"));
+    expect((await repository.findWorkoutSession(personId, a.session.id))?.externalActivityId).not.toBeNull();
+    await repository.importExternalActivity(importInput("task-0134-a-2", `${secondDay}T18:05:00.000Z`, "c"));
+    expect((await repository.findWorkoutSession(personId, a.session.id))?.externalActivityId).toBeNull();
+    const ambiguousContext = await service.getTrainingContext({ localDate: secondDay, historyLimit: 1 });
+    expect(ambiguousContext.recentExternalActivities).toHaveLength(1);
+    expect(ambiguousContext.pendingActivityLinkQuestion).toMatchObject({
+      localDate: secondDay,
+      options: [
+        { sessionId: a.session.id, venueLabel: "Ahilej" },
+        { sessionId: a.session.id, venueLabel: "Ahilej" }
+      ]
+    });
+    for (let index = 0; index < 19; index += 1) {
+      await repository.importExternalActivity(importInput(
+        `task-0134-a-extra-${index}`, `${secondDay}T18:00:00.000Z`,
+        String.fromCharCode(101 + index)
+      ));
+    }
+    const crowdedContext = await service.getTrainingContext({ localDate: secondDay, historyLimit: 1 });
+    expect(crowdedContext.pendingActivityLinkQuestion?.options).toHaveLength(20);
+    expect(crowdedContext.pendingActivityLinkQuestion?.question).toContain("найдено 21 возможных пар");
+    await repository.reconcileRecentActivityLinks(personId, firstDay, secondDay);
+    expect((await repository.findWorkoutSession(personId, a.session.id))?.externalActivityId).toBeNull();
+    expect(await repository.setActivityRecordingMode(personId, {
+      expectedLockVersion: 1, title: null
+    })).toMatchObject({ outcome: "revoked", current: { lockVersion: 2, title: null } });
+    expect((await repository.findWorkoutSession(personId, b.session.id))?.externalActivityId).toBeNull();
+    expect((await repository.findWorkoutSession(personId, historical.session.id))?.externalActivityId)
+      .toBeNull();
   });
 
   it("classifies one external lineage append-only across provider correction and erasure", async () => {
@@ -1104,6 +1416,7 @@ describe("Training PostgreSQL vertical", () => {
         recentSessions: { items: [] },
         recentExternalActivities: [],
         trustedExternalTitles: [],
+        activityRecordingMode: { title: null, lockVersion: 0, updatedAt: null },
         nextStep: { state: "no_active_program", policyVersion: "training-next-step-v2" }
       });
     const exercise = await repository.createExercise(personA, {
