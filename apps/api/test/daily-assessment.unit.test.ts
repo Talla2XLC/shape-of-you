@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
 
-import type { DailyAssessmentUsedFacts } from "@shape-of-you/contracts";
+import { TrainingProgressionGuidanceSchema, type DailyAssessmentUsedFacts } from "@shape-of-you/contracts";
 
 import {
   dailyAssessmentChecksum,
@@ -324,5 +326,85 @@ describe("daily assessment policy", () => {
       previousRecommendation: null
     });
     expect(store.findLatestV4SnapshotForLocalDate).not.toHaveBeenCalled();
+  });
+
+  it("gates progression on the current Daily Assessment and exact next workout", async () => {
+    const training = { getTrainingContext: vi.fn(), listProgressionSessions: vi.fn() };
+    const service = new DailyAssessmentService(
+      {} as never, {} as never, {} as never, training as never,
+      {} as never, {} as never, {} as never
+    );
+    const step = {
+      state: "strength", policyVersion: "training-next-step-v2", localDate: "2026-09-25",
+      programVersionId, workoutPosition: 1, workoutName: "Ahilej A", reason: "sequence_continues"
+    };
+    const assessment = {
+      state: "available", snapshotId: "00000000-0000-4000-8000-000000000120",
+      evidenceChecksum: "a".repeat(64), localDate: "2026-09-25", status: "caution",
+      recommendedAction: { type: "recovery_first" },
+      usedFacts: { trainingNextStep: step, activeTrainingProgramVersionId: programVersionId }
+    };
+    vi.spyOn(service, "read").mockResolvedValue(assessment as never);
+    const unavailableGuidance = await service.readTrainingProgression();
+    expect(unavailableGuidance).toMatchObject({
+      state: "unavailable", reason: "recovery_not_ready", items: []
+    });
+    const ajv = new Ajv({ strict: false });
+    const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
+    installFormats(ajv);
+    expect(ajv.validate(TrainingProgressionGuidanceSchema, unavailableGuidance), JSON.stringify(ajv.errors)).toBe(true);
+    expect(training.getTrainingContext).not.toHaveBeenCalled();
+
+    vi.spyOn(service, "read").mockResolvedValue({
+      ...assessment, status: "ready", recommendedAction: { type: "follow_active_program" }
+    } as never);
+    training.getTrainingContext.mockResolvedValue({
+      status: "active",
+      program: {
+        activeVersionId: programVersionId,
+        activeVersion: {
+          id: programVersionId,
+          workouts: [{ position: 1, name: "Ahilej A", prescriptions: [{
+            position: 1, exerciseId: "00000000-0000-4000-8000-000000000102",
+            exerciseVersionId: "00000000-0000-4000-8000-000000000103",
+            exerciseLabel: "Press", loadBasis: "external_weight",
+            targetWeightKg: 100, targetSets: 1, targetRepsMin: 6, targetRepsMax: 8,
+            targetRir: 2, progressionIncrementKg: 2.5, note: null
+          }] }]
+        }
+      },
+      nextStep: step
+    });
+    training.listProgressionSessions.mockResolvedValue([
+        { id: "00000000-0000-4000-8000-000000000111", localDate: "2026-09-24", programVersionId,
+          programWorkoutPosition: 1, exercises: [{
+            exerciseVersionId: "00000000-0000-4000-8000-000000000103", loadBasis: "external_weight",
+            sets: [{ weightKg: 100, reps: 8, rir: 2 }]
+          }] },
+        { id: "00000000-0000-4000-8000-000000000112", localDate: "2026-09-23", programVersionId,
+          programWorkoutPosition: 1, exercises: [{
+            exerciseVersionId: "00000000-0000-4000-8000-000000000103", loadBasis: "external_weight",
+            sets: [{ weightKg: 100, reps: 8, rir: 2 }]
+          }] }
+      ]);
+    const guidance = await service.readTrainingProgression();
+    expect(guidance).toMatchObject({
+      state: "available", workoutName: "Ahilej A",
+      items: [{ action: "add_weight", suggestedTargetWeightKg: 102.5,
+        currentTargetWeightKg: 100, targetRepsMax: 8, targetRir: 2,
+        evidence: [
+          { sets: [{ weightKg: 100, reps: 8, rir: 2 }] },
+          { sets: [{ weightKg: 100, reps: 8, rir: 2 }] }
+        ]
+      }]
+    });
+    expect(ajv.validate(TrainingProgressionGuidanceSchema, guidance), JSON.stringify(ajv.errors)).toBe(true);
+    expect(training.listProgressionSessions).toHaveBeenCalledWith(programVersionId, 1, "2026-09-25");
+    training.getTrainingContext.mockResolvedValueOnce({
+      status: "active", program: { activeVersionId: "other" }, nextStep: step
+    });
+    await expect(service.readTrainingProgression()).resolves.toMatchObject({
+      state: "unavailable", reason: "program_changed"
+    });
   });
 });

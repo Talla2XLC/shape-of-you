@@ -1161,6 +1161,7 @@ describe("Training PostgreSQL vertical", () => {
     expect(activation.statusCode, activation.body).toBe(201);
     expect(activation.json().activeVersionId).toBe(versionId);
     expect(activation.json().activeVersion.id).toBe(versionId);
+    await database.pool.query("update persons set timezone = 'Europe/Moscow' where id = $1", [personA]);
     const activeCount = await database.pool.query<{ count: string }>(
       `select count(*)::text as count
          from training_programs
@@ -1299,7 +1300,27 @@ describe("Training PostgreSQL vertical", () => {
       })
     ]);
     expect(candidates.statusCode, candidates.body).toBe(200);
-    expect(candidates.json().items).toEqual([
+    expect(candidates.json().items).toEqual([]);
+    const previousSession = await fastify.inject({
+      method: "POST",
+      url: "/v1/training/sessions",
+      payload: {
+        ...sessionPayload,
+        occurredAt: "2026-07-30T07:00:00.000Z",
+        sourceReference: { ...sessionPayload.sourceReference, occurredAt: "2026-07-30T07:00:00.000Z" },
+        dedupeKey: "training:session:a:previous"
+      }
+    });
+    expect(previousSession.statusCode, previousSession.body).toBe(201);
+    expect((await repository.listProgressionSessions(personA, versionId, 1, "2026-07-30"))
+      .map((item) => item.id)).toEqual([previousSession.json().id]);
+    expect((await repository.listProgressionSessions(personA, versionId, 1, "2026-07-31"))
+      .map((item) => item.id)).toEqual([session.json().id, previousSession.json().id]);
+    const qualifiedCandidates = await fastify.inject({
+      method: "GET",
+      url: "/v1/training/progression-candidates"
+    });
+    expect(qualifiedCandidates.json().items).toEqual([
       expect.objectContaining({
         programId,
         programVersionId: versionId,
@@ -1309,7 +1330,41 @@ describe("Training PostgreSQL vertical", () => {
       })
     ]);
 
-    const candidate = candidates.json().items[0];
+    const invalidated = await fastify.inject({
+      method: "POST",
+      url: `/v1/training/sessions/${previousSession.json().id}/corrections`,
+      payload: {
+        ...sessionPayload,
+        occurredAt: "2026-07-30T07:00:00.000Z",
+        sourceReference: { ...sessionPayload.sourceReference, occurredAt: "2026-07-30T07:00:00.000Z" },
+        exercises: [{ ...sessionPayload.exercises[0], sets: [
+          { weightKg: 100, reps: 7, rir: 2 },
+          { weightKg: 100, reps: 8, rir: 2 },
+          { weightKg: 100, reps: 8, rir: 2 }
+        ] }],
+        dedupeKey: "training:session:a:previous:correction-low-reps",
+        correctionReason: "Correct previous reps"
+      }
+    });
+    expect(invalidated.statusCode, invalidated.body).toBe(201);
+    const invalidatedCandidates = await fastify.inject({ method: "GET", url: "/v1/training/progression-candidates" });
+    expect(invalidatedCandidates.json().items).toEqual([]);
+    const restored = await fastify.inject({
+      method: "POST",
+      url: `/v1/training/sessions/${invalidated.json().id}/corrections`,
+      payload: {
+        ...sessionPayload,
+        occurredAt: "2026-07-30T07:00:00.000Z",
+        sourceReference: { ...sessionPayload.sourceReference, occurredAt: "2026-07-30T07:00:00.000Z" },
+        dedupeKey: "training:session:a:previous:correction-restored",
+        correctionReason: "Restore previous reps"
+      }
+    });
+    expect(restored.statusCode, restored.body).toBe(201);
+    const restoredCandidates = await fastify.inject({ method: "GET", url: "/v1/training/progression-candidates" });
+    expect(restoredCandidates.json().items).toHaveLength(1);
+
+    const candidate = qualifiedCandidates.json().items[0];
     const accepted = await fastify.inject({
       method: "POST",
       url: `/v1/training/programs/${programId}/progression-candidates/accept`,
@@ -1401,6 +1456,52 @@ describe("Training PostgreSQL vertical", () => {
       reps: 6,
       sessionId: correction.json().id
     });
+  });
+
+  it("uses the Person-local day when qualifying a progression candidate", async () => {
+    const personId = "00000000-0000-4000-8000-000000000009";
+    await database.pool.query(
+      "insert into persons (id, kind, status, timezone) values ($1, 'real', 'active', 'Pacific/Kiritimati')",
+      [personId]
+    );
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(repository, new SyntheticPersonContext(personId));
+    const exercise = await service.createExercise({
+      visibility: "private", name: "Boundary press", category: "strength",
+      movementPattern: null, equipment: null, instructions: null, note: null
+    });
+    const program = await service.createProgram({
+      name: "Boundary A", note: null,
+      workouts: [{ name: "A", prescriptions: [{
+        exerciseVersionId: exercise.currentVersion.id,
+        loadBasis: "external_weight", targetWeightKg: 100, targetSets: 1,
+        targetRepsMin: 6, targetRepsMax: 8, targetRir: 2,
+        progressionIncrementKg: 2.5, note: null
+      }] }]
+    });
+    const versionId = program.currentVersion.id;
+    await service.activateProgramVersion(program.id, versionId, { expectedLockVersion: 0 });
+    for (const [index, occurredAt] of ["2026-09-24T11:00:00.000Z", "2026-09-25T10:30:00.000Z"].entries()) {
+      await service.createWorkoutSession({
+        occurredAt, timezone: "Pacific/Kiritimati", programVersionId: versionId,
+        programWorkoutPosition: 1, externalActivityId: null, venueLabel: null,
+        workoutName: "A", feeling: null, note: null,
+        exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+          loadBasis: "external_weight", feeling: null, note: null,
+          sets: [{ weightKg: 100, reps: 8, rir: 2 }] }],
+        sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt },
+        dedupeKey: `boundary-progress-${index}`, confidence: 1
+      });
+    }
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-09-25T11:00:00.000Z"));
+      const candidates = await service.progressionCandidates();
+      expect(candidates.items).toHaveLength(1);
+      expect(candidates.items[0]?.suggestedTargetWeightKg).toBe(102.5);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("atomically saves confirmed programs with deduplication, concurrency, and Person isolation", async () => {

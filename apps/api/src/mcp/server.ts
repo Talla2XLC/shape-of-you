@@ -48,6 +48,7 @@ import {
   SetActivityRecordingModeSchema,
   TrainingContextQuerySchema,
   TrainingContextSchema,
+  TrainingProgressionGuidanceSchema,
   TrainingProgramSchema,
   UpdatePersonPreferencesSchema,
   WeightMeasurementListSchema,
@@ -147,7 +148,7 @@ interface McpServices {
   readonly dailyProjection: Pick<DailyProjectionService, "projection">;
   readonly dailyAssessment?: Pick<
     DailyAssessmentService,
-    "read" | "readCoachContext" | "readCompletion" | "updatePreferences" | "recordFeedback"
+    "read" | "readCoachContext" | "readCompletion" | "readTrainingProgression" | "updatePreferences" | "recordFeedback"
   >;
   readonly currentRecoveryContext: Pick<CurrentRecoveryContextService, "read">;
 }
@@ -449,6 +450,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
+  "For a progression question about the next active strength workout, call get_training_progression after get_daily_assessment. Explain only the typed current-day decision for each exercise. Unavailable or insufficient evidence never authorizes a weight or repetition increase. Recheck on the actual training day; a proposal is separate from accepting a candidate and activating a new program version. " +
   "When training context returns one pending imported-strength classification, use a direct unambiguous user statement about that exact displayed activity and workout immediately; natural equivalents of the displayed workout name are sufficient. Never infer the answer from expected sequence, activity name, program note, time, or exercise similarity. If the user's statement does not identify one option, ask exactly the API-returned short question. After saving or an unchanged result, call get_training_context and then get_daily_assessment in the same turn, and use only that assessment for the visible next action. " +
   trainingProgramConfirmationPolicy + " " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
@@ -805,6 +807,15 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       (input) =>
         services.training.getTrainingContext(input as TrainingContextQuery),
       () => trainingContextResultContent
+    ),
+    defineTool(
+      "get_training_progression",
+      "Read current-day, read-only progression guidance for the exact next active strength workout. The API checks current Daily Assessment before evaluating detailed WorkoutSession sets. Explain the returned hold, add_reps, add_weight, or insufficient_evidence decision using only its typed target and performed set weights, repetitions, RIR, dates, and reason. Garmin activity and A/B classification never supply performed sets. A proposed increase is not a program change; do not call any program write action without a separate explicit user decision. For a future workout, check again on that day.",
+      emptyObjectSchema("GetTrainingProgressionInput"),
+      TrainingProgressionGuidanceSchema,
+      false,
+      MCP_READ_SCOPE,
+      () => services.dailyAssessment?.readTrainingProgression() ?? Promise.reject(new Error("Daily assessment service is unavailable"))
     ),
     defineTool(
       "save_confirmed_training_program",

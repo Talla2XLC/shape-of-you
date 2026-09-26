@@ -12,7 +12,6 @@ import {
 } from "@shape-of-you/contracts";
 
 import {
-  calculateProgressionWeight,
   canAccessTrainingExercise,
   evaluateNextTrainingStep,
   trainingProgramSnapshotMatches,
@@ -67,41 +66,6 @@ describe("Training domain", () => {
     expect(() => validateTrainingProgramVersion(program(6, 8, 0))).toThrow(
       "must be positive"
     );
-  });
-
-  it("proposes only an explicit increment after all required sets qualify", () => {
-    const prescription = {
-      targetSets: 3,
-      targetRepsMax: 8,
-      targetRir: 2,
-      targetWeightKg: 100,
-      progressionIncrementKg: 2.5
-    };
-
-    expect(
-      calculateProgressionWeight(prescription, [
-        { reps: 8, rir: 2 },
-        { reps: 9, rir: 3 },
-        { reps: 8, rir: 2 }
-      ])
-    ).toBe(102.5);
-    expect(
-      calculateProgressionWeight(prescription, [
-        { reps: 8, rir: 2 },
-        { reps: 7, rir: 3 },
-        { reps: 8, rir: 2 }
-      ])
-    ).toBeNull();
-    expect(
-      calculateProgressionWeight(
-        { ...prescription, progressionIncrementKg: null },
-        [
-          { reps: 8, rir: 2 },
-          { reps: 8, rir: 2 },
-          { reps: 8, rir: 2 }
-        ]
-      )
-    ).toBeNull();
   });
 
   it("compares confirmed programs by ordered domain meaning only", () => {

@@ -528,7 +528,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(32);
+    expect(body.result.tools).toHaveLength(33);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -557,6 +557,7 @@ describe("MCP HTTP adapter", () => {
       correct_meal: MCP_MEAL_WRITE_SCOPE,
       get_active_training_program: MCP_READ_SCOPE,
       get_training_context: MCP_READ_SCOPE,
+      get_training_progression: MCP_READ_SCOPE,
       save_confirmed_training_program: MCP_WORKOUT_WRITE_SCOPE,
       materialize_training_program_cadence: MCP_WORKOUT_WRITE_SCOPE,
       classify_external_activity: MCP_WORKOUT_WRITE_SCOPE,
@@ -2278,6 +2279,11 @@ describe("MCP HTTP adapter", () => {
         dailyAssessment: {
           read: readDailyAssessment,
           readCoachContext,
+          readTrainingProgression: async () => ({
+            state: "unavailable", reason: "recovery_not_ready",
+            localDate: "2026-09-02", programVersionId: null,
+            workoutPosition: null, workoutName: null, items: []
+          }),
           readCompletion,
           updatePreferences,
           recordFeedback
@@ -2381,6 +2387,7 @@ describe("MCP HTTP adapter", () => {
       ["correct_daily_context_note", { id, ...note, dedupeKey: "coach-policy-note-correction", reason: "Correction" }, "correct_daily_context_note"],
       ["set_current_timezone", { timezone: "Europe/Belgrade" }, "Europe/Belgrade"],
       ["get_daily_assessment", {}, "timezone_required"],
+      ["get_training_progression", {}, "recovery_not_ready"],
       ["record_daily_recommendation_feedback", {
         snapshotId: "00000000-0000-4000-8000-000000000501",
         status: "completed",
@@ -2475,6 +2482,10 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.structuredContent, name).toMatchObject({
             status: "active",
             program: { marker }
+          });
+        } else if (name === "get_training_progression") {
+          expect(toolResult.structuredContent, name).toMatchObject({
+            state: "unavailable", reason: marker, items: []
           });
         } else {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });

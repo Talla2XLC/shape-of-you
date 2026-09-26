@@ -103,8 +103,22 @@ automatically.
   becomes a domain fact or identifier.
 - `PersonalRecord` is a projection over current sets: highest weight, then more
   repetitions on ties.
-- Progression candidates are projections. Acceptance creates a new inactive
-  program version; explicit activation is separate.
+- `TrainingProgressionGuidance` is a read-only projection for an exact active
+  program version and workout position. It uses only the two latest current
+  detailed `WorkoutSession` facts through the requested Person-local date,
+  excluding future instants and superseded sessions. It compares the first
+  prescribed working sets' actual external weight, repetitions, and RIR with
+  the prescription. One eligible session can suggest one more repetition per
+  set within the range. Two consecutive eligible sessions at the upper bound
+  can suggest only the program's explicit increment, capped at 10% and 5 kg.
+  Missing or conflicting sets, duplicate exercise prescriptions without a
+  performed-assignment identity, and bodyweight or assisted loads fail closed.
+  The projection exposes the target and actual sets for explanation; imported
+  Garmin strength remains occurrence evidence only.
+- Weight progression candidates use the same two-session predicate and exact
+  workout position. Acceptance rechecks the candidate and creates a new
+  inactive program version; explicit activation is separate. Coaching applies
+  the current Daily Assessment recovery gate before showing increases.
 
 ## Evidence
 
@@ -122,10 +136,11 @@ automatically.
 - [Rolling cadence and Training-owned next step](../../adr/20260922-own-rolling-training-cadence-and-next-step-in-training.md).
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
+- [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
 
 ## Open questions
 
-- Production progression policy, richer exercise substitutions, external
+- Bodyweight/assisted progression policy, richer exercise substitutions, external
   catalog source/moderation, and live Intervals.icu activity-contract
   validation.
 

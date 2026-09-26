@@ -37,6 +37,17 @@ TrainingProgramVersion/assignment, and optional sessions. It may hold the
 assignment, propose target weight, or propose a repetition range, changing at
 most one parameter. It creates no program/session change.
 
+For focused questions about progression in the next active strength workout,
+Coach uses the read-only `get_training_progression` composition after the
+current Daily Assessment. Training supplies an exact A/B exercise decision
+from detailed current sets; Coaching permits an increase only when the
+current assessment is `ready` and still points to that exact active workout.
+The result includes target and actual weights, repetitions, RIR, dates, and
+typed limitations so Coach can explain a hold or a small increase without
+inventing Garmin sets. A current-day result is not a future readiness promise.
+No guidance writes a program, and explicit candidate acceptance still creates
+only an inactive draft requiring separate activation.
+
 The `daily_next_action` recommendation is a lazily materialized immutable
 snapshot for the current Person-local date. The API gathers current typed
 Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile
@@ -388,6 +399,8 @@ readable while current evaluation emits v2.
 - TASK-0130 accepted exact date-scoped classification authority, one-question
   Coach behavior, same-turn Training-context and Daily-Assessment read-back,
   new snapshot/checksum, and concrete next-workout tests.
+- TASK-0135 accepted exact-session progression, current Recovery gating,
+  read-only Coach delivery, and independent quality review.
 
 ## Decisions
 
@@ -402,6 +415,7 @@ readable while current evaluation emits v2.
 - [Atomic accepted-cadence materialization](../../adr/20260923-materialize-confirmed-training-program-cadence-atomically.md).
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
+- [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).

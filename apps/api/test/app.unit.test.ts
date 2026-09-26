@@ -236,6 +236,7 @@ const trainingStore: TrainingStore = {
   correctWorkoutSession: unreachable,
   findWorkoutSession: unreachable,
   listWorkoutSessions: unreachable,
+  listProgressionSessions: unreachable,
   listWorkoutSessionsForLocalDate: unreachable,
   listWorkoutSessionsForLocalDateRange: unreachable,
   getDataCoverage: unreachable,

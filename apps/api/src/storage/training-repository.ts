@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   gte,
+  isNull,
   lte,
   ne,
   notExists,
@@ -62,6 +63,7 @@ import {
   externalActivityProgramClassifications,
   integrationActivityFacts,
   integrationConnections,
+  persons,
   sourceReferences,
   trainingExerciseCatalogSourceRecords,
   trainingExerciseCatalogSources,
@@ -87,7 +89,6 @@ import {
   type WorkoutSessionRow
 } from "../database/schema.js";
 import {
-  calculateProgressionWeight,
   canAccessTrainingExercise,
   type ResolvedTrainingProgramSnapshot,
   trainingProgramSnapshotMatches,
@@ -95,6 +96,7 @@ import {
   trainingPolicyWeekStart,
   validateTrainingProgramVersion
 } from "../domain/training.js";
+import { evaluateTrainingProgression } from "../domain/training-progression.js";
 import { deriveLocalDate } from "../domain/weight-measurement.js";
 import {
   findAutomaticActivityLinks,
@@ -302,6 +304,8 @@ export interface TrainingStore {
     limit: number,
     localDate?: string
   ): Promise<WorkoutSessionList>;
+  /** Reads the two latest current detailed sessions for one exact workout through a local date. */
+  listProgressionSessions(personId: string, programVersionId: string, workoutPosition: number, throughLocalDate: string): Promise<readonly WorkoutSession[]>;
   /** Reads every current workout session for one exact Person-local date. */
   listWorkoutSessionsForLocalDate(personId: string, localDate: string): Promise<readonly WorkoutSession[]>;
   listWorkoutSessionsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly WorkoutSession[]>;
@@ -2830,6 +2834,27 @@ export class TrainingRepository implements TrainingStore {
     });
   }
 
+  public async listProgressionSessions(
+    personId: string,
+    programVersionId: string,
+    workoutPosition: number,
+    throughLocalDate: string
+  ): Promise<readonly WorkoutSession[]> {
+    return this.database.db.transaction(async (transaction) => {
+      const successor = alias(workoutSessions, "progression_session_successor");
+      const rows = await transaction.select().from(workoutSessions).where(and(
+        eq(workoutSessions.personId, personId),
+        eq(workoutSessions.programVersionId, programVersionId),
+        eq(workoutSessions.programWorkoutPosition, workoutPosition),
+        lte(workoutSessions.localDate, throughLocalDate),
+        or(isNull(workoutSessions.occurredAt), lte(workoutSessions.occurredAt, new Date())),
+        notExists(transaction.select({ id: successor.id }).from(successor)
+          .where(eq(successor.supersedesId, workoutSessions.id)))
+      )).orderBy(desc(workoutSessions.localDate), desc(workoutSessions.occurredAt), desc(workoutSessions.id)).limit(2);
+      return Promise.all(rows.map((row) => this.serializeSession(transaction, row)));
+    });
+  }
+
   /** {@inheritDoc TrainingStore.listWorkoutSessionsForLocalDate} */
   public async listWorkoutSessionsForLocalDate(personId: string, localDate: string): Promise<readonly WorkoutSession[]> {
     return this.database.db.transaction(async (transaction) => {
@@ -3004,6 +3029,10 @@ export class TrainingRepository implements TrainingStore {
     if (!version) {
       throw new Error("Active TrainingProgramVersion was not found");
     }
+    const [person] = await transaction.select({ timezone: persons.timezone })
+      .from(persons).where(eq(persons.id, personId)).limit(1);
+    if (!person?.timezone) return { items: [] };
+    const throughDate = deriveLocalDate(new Date(), person.timezone);
     const items: ProgressionCandidateList["items"] = [];
     for (const workout of version.workouts) {
       for (const prescription of workout.prescriptions) {
@@ -3013,22 +3042,16 @@ export class TrainingRepository implements TrainingStore {
         ) {
           continue;
         }
-        const [evidence] = await transaction
-          .select({ session: workoutSessions, exercise: performedExercises })
+        const evidenceRows = await transaction
+          .select()
           .from(workoutSessions)
-          .innerJoin(
-            performedExercises,
-            eq(performedExercises.sessionId, workoutSessions.id)
-          )
           .where(
             and(
               eq(workoutSessions.personId, personId),
               eq(workoutSessions.programVersionId, version.id),
-              eq(workoutSessions.workoutName, workout.name),
-              eq(
-                performedExercises.exerciseVersionId,
-                prescription.exerciseVersionId
-              ),
+              eq(workoutSessions.programWorkoutPosition, workout.position),
+              lte(workoutSessions.localDate, throughDate),
+              or(isNull(workoutSessions.occurredAt), lte(workoutSessions.occurredAt, new Date())),
               notExists(
                 transaction
                   .select({ id: replacementSession.id })
@@ -3040,29 +3063,23 @@ export class TrainingRepository implements TrainingStore {
             )
           )
           .orderBy(
+            desc(workoutSessions.localDate),
             desc(workoutSessions.occurredAt),
-            desc(workoutSessions.id),
-            asc(performedExercises.position)
+            desc(workoutSessions.id)
           )
-          .limit(1);
-        if (!evidence) {
-          continue;
-        }
-        const sets = await transaction
-          .select()
-          .from(performedSets)
-          .where(
-            eq(performedSets.performedExerciseId, evidence.exercise.id)
-          )
-          .orderBy(asc(performedSets.position));
-        const suggested = calculateProgressionWeight(
-          prescription,
-          sets.filter((set) => set.reps !== null).map((set) => ({
-            reps: set.reps!,
-            rir: numberOrNull(set.rir)
-          }))
+          .limit(2);
+        const evidence = await Promise.all(evidenceRows.map((row) =>
+          this.serializeSession(transaction, row)
+        ));
+        const decision = evaluateTrainingProgression(
+          version.id, workout.position, prescription, evidence,
+          throughDate,
+          workout.prescriptions.filter((item) =>
+            item.exerciseVersionId === prescription.exerciseVersionId &&
+            item.loadBasis === prescription.loadBasis
+          ).length !== 1
         );
-        if (suggested !== null) {
+        if (decision.action === "add_weight" && decision.suggestedTargetWeightKg !== null) {
           items.push({
             programId: program.id,
             programLockVersion: program.lockVersion,
@@ -3073,8 +3090,8 @@ export class TrainingRepository implements TrainingStore {
             exerciseVersionId: prescription.exerciseVersionId,
             exerciseLabel: prescription.exerciseLabel,
             currentTargetWeightKg: prescription.targetWeightKg,
-            suggestedTargetWeightKg: suggested,
-            evidenceSessionId: evidence.session.id
+            suggestedTargetWeightKg: decision.suggestedTargetWeightKg,
+            evidenceSessionId: evidence[0]!.id
           });
         }
       }

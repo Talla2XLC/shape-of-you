@@ -12,6 +12,7 @@ import type {
   DailyRecommendationCompletionAssessment,
   PersonPreferences,
   RecoveryObservation,
+  TrainingProgressionGuidance,
   UpdatePersonPreferences
 } from "@shape-of-you/contracts";
 
@@ -35,6 +36,7 @@ import {
 } from "../domain/personalized-daily-assessment.js";
 import { activePersonalBaselinePolicy } from "../domain/personal-baseline.js";
 import { countUncoveredExternalActivities } from "../domain/training.js";
+import { evaluateTrainingProgression } from "../domain/training-progression.js";
 import { buildCoverageDirection, shiftLocalDate } from "../progress-overview/progress-data-coverage.policy.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
 import { RecoveryService } from "../recovery/recovery.service.js";
@@ -106,6 +108,84 @@ export class DailyAssessmentService {
     @Inject(WeightMeasurementService) private readonly weights: WeightMeasurementService,
     @Inject(DailyContextNoteService) private readonly contextNotes: DailyContextNoteService
   ) {}
+
+  /** Composes exact detailed-session guidance under the current daily safety decision. */
+  public async readTrainingProgression(): Promise<TrainingProgressionGuidance> {
+    const assessment = await this.read();
+    const unavailable = (
+      reason: TrainingProgressionGuidance["reason"],
+      localDate: string | null = null
+    ): TrainingProgressionGuidance => ({
+      state: "unavailable", reason, localDate, programVersionId: null,
+      workoutPosition: null, workoutName: null, items: []
+    });
+    if (assessment.state === "timezone_required") return unavailable("timezone_required");
+    if (assessment.status !== "ready" || assessment.recommendedAction.type !== "follow_active_program") {
+      return unavailable("recovery_not_ready", assessment.localDate);
+    }
+    const step = assessment.usedFacts.trainingNextStep;
+    if (
+      step?.state !== "strength" || step.localDate !== assessment.localDate ||
+      assessment.usedFacts.activeTrainingProgramVersionId !== step.programVersionId
+    ) return unavailable("training_step_unavailable", assessment.localDate);
+    const context = await this.training.getTrainingContext({ localDate: assessment.localDate, historyLimit: 1 });
+    if (
+      context.status !== "active" || context.program.activeVersionId !== step.programVersionId ||
+      context.program.activeVersion?.id !== step.programVersionId ||
+      context.nextStep.state !== "strength" ||
+      context.nextStep.workoutPosition !== step.workoutPosition ||
+      context.nextStep.programVersionId !== step.programVersionId
+    ) return unavailable("program_changed", assessment.localDate);
+    const workout = context.program.activeVersion.workouts.find((item) => item.position === step.workoutPosition);
+    if (!workout) return unavailable("program_changed", assessment.localDate);
+    const sessions = await this.training.listProgressionSessions(
+      step.programVersionId, step.workoutPosition, assessment.localDate
+    );
+    const verifiedAssessment = await this.read();
+    if (
+      verifiedAssessment.state !== "available" ||
+      verifiedAssessment.snapshotId !== assessment.snapshotId ||
+      verifiedAssessment.evidenceChecksum !== assessment.evidenceChecksum
+    ) return unavailable("program_changed", assessment.localDate);
+    return {
+      state: "available", reason: "ready", localDate: assessment.localDate,
+      programVersionId: step.programVersionId, workoutPosition: step.workoutPosition,
+      workoutName: workout.name,
+      items: workout.prescriptions.map((prescription) => {
+        const decision = evaluateTrainingProgression(step.programVersionId, step.workoutPosition,
+          prescription, sessions, assessment.localDate,
+          workout.prescriptions.filter((item) =>
+            item.exerciseVersionId === prescription.exerciseVersionId &&
+            item.loadBasis === prescription.loadBasis
+          ).length !== 1);
+        return {
+          prescriptionPosition: prescription.position,
+          exerciseLabel: prescription.exerciseLabel,
+          currentTargetWeightKg: prescription.targetWeightKg,
+          targetSets: prescription.targetSets,
+          targetRepsMin: prescription.targetRepsMin,
+          targetRepsMax: prescription.targetRepsMax,
+          targetRir: prescription.targetRir,
+          ...decision,
+          suggestedReps: decision.suggestedReps === null ? null : [...decision.suggestedReps],
+          evidenceSessionIds: [...decision.evidenceSessionIds],
+          evidence: decision.evidenceSessionIds.flatMap((id) => {
+            const session = sessions.find((item) => item.id === id);
+            if (!session) return [];
+            const matching = session.exercises.filter((exercise) =>
+              exercise.exerciseVersionId === prescription.exerciseVersionId &&
+              exercise.loadBasis === prescription.loadBasis
+            );
+            return [{
+              sessionId: id, localDate: session.localDate,
+              sets: matching.length === 1 ? matching[0]!.sets.slice(0, prescription.targetSets)
+                .map((set) => ({ weightKg: set.weightKg, reps: set.reps, rir: set.rir })) : []
+            }];
+          })
+        };
+      })
+    };
+  }
 
   public preferences(): Promise<PersonPreferences> { return this.store.getPreferences(this.personContext.getPersonId()); }
 

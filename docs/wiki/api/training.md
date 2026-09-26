@@ -203,8 +203,22 @@ Projections:
 - `POST /v1/training/programs/:id/progression-candidates/accept`.
 
 Records choose maximum weight, then repetitions. Candidate calculation never
-mutates a program; acceptance creates a new inactive version and blocks duplicate
-pending acceptance.
+mutates a program. Weight candidacy now requires two latest current detailed
+sessions for the exact active version/workout position, with every prescribed
+working set at the assigned external weight, upper repetition target, and
+adequate RIR. A missing or excessive program increment, incomplete evidence,
+future session, or ambiguous duplicate prescription yields no candidate.
+Acceptance rechecks current evidence, creates a new inactive version, and
+blocks duplicate pending acceptance.
+
+The read-only MCP `get_training_progression` action composes the exact next
+strength workout with the current API-owned Daily Assessment. It returns a
+typed `hold`, `add_reps`, `add_weight`, or `insufficient_evidence` decision per
+exercise, the target, up to two current detailed sessions' actual weights,
+repetitions and RIR, and a reason. When Recovery is not ready, the active
+program or next step changed, or the timezone is missing, it returns an
+explicit unavailable state. Guidance never saves or activates a program;
+Coach must refresh it on the actual future training day.
 
 ## Evidence
 
@@ -218,6 +232,7 @@ pending acceptance.
   candidates are query projections, not mutable authority.
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
+- [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
 
 ## Open questions
 

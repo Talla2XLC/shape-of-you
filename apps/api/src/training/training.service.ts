@@ -441,6 +441,11 @@ export class TrainingService {
     );
   }
 
+  /** Reads exact current detailed progression evidence through the requested Person-local date. */
+  public listProgressionSessions(programVersionId: string, workoutPosition: number, throughLocalDate: string): Promise<readonly WorkoutSession[]> {
+    return this.store.listProgressionSessions(this.personContext.getPersonId(), programVersionId, workoutPosition, throughLocalDate);
+  }
+
   /** Reads all current workout sessions for a single local date for a coordinating projection. */
   public listWorkoutSessionsForLocalDate(localDate: string): Promise<readonly WorkoutSession[]> {
     return this.store.listWorkoutSessionsForLocalDate(this.personContext.getPersonId(), localDate);
