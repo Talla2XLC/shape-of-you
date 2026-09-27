@@ -37,11 +37,16 @@ TrainingProgramVersion/assignment, and optional sessions. It may hold the
 assignment, propose target weight, or propose a repetition range, changing at
 most one parameter. It creates no program/session change.
 
-For focused questions about progression in the next active strength workout,
-Coach uses the read-only `get_training_progression` composition after the
-current Daily Assessment. Training supplies an exact A/B exercise decision
-from detailed current sets; Coaching permits an increase only when the
-current assessment is `ready` and still points to that exact active workout.
+When discussing how to perform the next active strength workout, including
+ordinary questions about working weights, repetitions, or sets, Coach reads
+the current Daily Assessment and training context before the read-only
+`get_training_progression` composition. It calls progression once only when
+the assessment is `ready`, says to follow the active program, and both reads
+identify the same exact strength next step. Routine fact capture, unrelated
+topics, restricted recovery, absent or ambiguous steps, and completed training
+do not need this read, even when progression is asked about directly.
+Training supplies an exact A/B exercise decision from detailed current sets;
+Coaching permits an increase only under that current assessment gate.
 The result includes target and actual weights, repetitions, RIR, dates, and
 typed limitations so Coach can explain a hold or a small increase without
 inventing Garmin sets. A current-day result is not a future readiness promise.
@@ -410,6 +415,8 @@ readable while current evaluation emits v2.
   new snapshot/checksum, and concrete next-workout tests.
 - TASK-0135 accepted exact-session progression, current Recovery gating,
   read-only Coach delivery, and independent quality review.
+- TASK-0137 accepted ordinary next-strength progression routing with explicit
+  skip conditions and unchanged Daily Assessment authority.
 
 ## Decisions
 
@@ -425,6 +432,7 @@ readable while current evaluation emits v2.
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
 - [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
+- [Ordinary next-strength progression routing](../../adr/20260927-invoke-progression-in-ordinary-next-strength-coaching.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).

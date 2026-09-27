@@ -500,6 +500,50 @@ describe("MCP HTTP adapter", () => {
     );
   });
 
+  it("publishes progression call and skip conditions for ordinary next-strength discussion", async () => {
+    const policy = MCP_OPERATIONAL_INSTRUCTIONS;
+    const assessment = policy.indexOf("Read get_daily_assessment first, then get_training_context");
+    const progression = policy.indexOf("Call get_training_progression once in this turn only when");
+    expect(assessment).toBeGreaterThan(-1);
+    expect(progression).toBeGreaterThan(assessment);
+    const requiredConditions = [
+      "ordinary talk about its working weight, repetitions, or sets",
+      "do not wait for an explicit progression question",
+      "current assessment is ready with follow_active_program",
+      "both reads identify the same exact active strength next step"
+    ];
+    for (const condition of requiredConditions) {
+      expect(policy).toContain(condition);
+    }
+    const skipCases = [
+      "routine recording of a completed workout",
+      "unrelated facts, nutrition, general or focused recovery",
+      "an absent or ambiguous program or next step",
+      "completed-today or completed-week",
+      "any assessment that restricts training, even when the user asks directly about progression"
+    ];
+    for (const scenario of skipCases) {
+      expect(policy).toContain(scenario);
+    }
+    expect(policy).not.toContain("may read the tool for its typed unavailable reason");
+    expect(policy).toContain("Current readiness is not a promise for a future workout");
+    expect(policy).toContain("A proposal is separate from accepting a candidate and activating a new program version");
+
+    const response = await fastify.inject({
+      method: "POST",
+      url: "/mcp",
+      headers: { accept: "application/json, text/event-stream" },
+      payload: { jsonrpc: "2.0", id: 137, method: "tools/list", params: {} }
+    });
+    expect(response.statusCode).toBe(200);
+    const tools = response.json().result.tools as Array<{ name: string; description: string }>;
+    const progressionTool = tools.find((tool) => tool.name === "get_training_progression");
+    expect(progressionTool?.description).toContain("an explicit progression question is not required");
+    expect(progressionTool?.description).toContain("restricted recovery even after a direct progression question");
+    expect(progressionTool?.description).toContain("Garmin activity and A/B classification never supply performed sets");
+    expect(progressionTool?.description).toContain("For a future workout, check again on that day");
+  });
+
   it("publishes OAuth protected-resource metadata", async () => {
     const response = await fastify.inject({
       method: "GET",
@@ -1338,6 +1382,12 @@ describe("MCP HTTP adapter", () => {
       );
       expect(absent.content[0].text).toContain(
         "never supplies exercises or sets"
+      );
+      expect(absent.content[0].text).toContain(
+        "only if it is ready and says to follow this exact active strength workout, call get_training_progression once"
+      );
+      expect(absent.content[0].text).toContain(
+        "Skip that call for unrelated facts, a recovery restriction, an absent or ambiguous step, or a completed workout or week"
       );
 
       const invalid = (
