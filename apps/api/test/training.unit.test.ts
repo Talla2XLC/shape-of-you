@@ -441,6 +441,78 @@ describe("next training step", () => {
     })).toMatchObject({ state: "strength" });
   });
 
+  it("continues A/B across Monday and a missed week without carrying over weekly quota", () => {
+    const noCardio = {
+      ...activeProgram,
+      activeVersion: {
+        ...activeProgram.activeVersion!,
+        cadence: { ...activeProgram.activeVersion!.cadence!, lightCardio: null }
+      }
+    };
+    const priorClassified = [
+      { id: "00000000-0000-4000-8000-000000000231", localDate: "2026-09-23",
+        occurredAt: "2026-09-23T06:00:00.000Z", programVersionId: noCardio.activeVersionId!, workoutPosition: 2 },
+      { id: "00000000-0000-4000-8000-000000000232", localDate: "2026-09-25",
+        occurredAt: "2026-09-25T06:00:00.000Z", programVersionId: noCardio.activeVersionId!, workoutPosition: 1 }
+    ];
+    for (const localDate of ["2026-09-28", "2026-10-12"]) {
+      expect(evaluateNextTrainingStep({
+        program: noCardio, localDate, sessions: [], externalActivities: [], priorClassified
+      })).toMatchObject({
+        state: "strength", workoutPosition: 2, workoutName: "B", reason: "sequence_continues"
+      });
+    }
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      priorClassified: [{ ...priorClassified[1]!, workoutPosition: 2 }]
+    })).toMatchObject({ state: "strength", workoutPosition: 1 });
+  });
+
+  it("refuses an incompatible or unavailable cross-week sequence anchor", () => {
+    const noCardio = {
+      ...activeProgram,
+      activeVersion: {
+        ...activeProgram.activeVersion!,
+        cadence: { ...activeProgram.activeVersion!.cadence!, lightCardio: null }
+      }
+    };
+    const oldVersion = {
+      ...noCardio.activeVersion!,
+      id: "00000000-0000-4000-8000-000000000233",
+      workouts: noCardio.activeVersion!.workouts.map((workout) => ({
+        ...workout,
+        prescriptions: workout.prescriptions.map((prescription) => ({
+          ...prescription,
+          exerciseVersionId: "00000000-0000-4000-8000-000000000234"
+        }))
+      }))
+    } as TrainingProgramVersion;
+    const anchor = { id: "00000000-0000-4000-8000-000000000235",
+      localDate: "2026-09-25", occurredAt: "2026-09-25T06:00:00.000Z",
+      programVersionId: oldVersion.id, workoutPosition: 1 };
+    const compatibleVersion = {
+      ...noCardio.activeVersion!, id: oldVersion.id,
+      workouts: noCardio.activeVersion!.workouts.map((workout) => ({
+        ...workout,
+        prescriptions: workout.prescriptions.map((prescription) => ({
+          ...prescription, targetWeightKg: 42
+        }))
+      }))
+    } as TrainingProgramVersion;
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      priorClassified: [anchor], priorVersions: [{ programId: noCardio.id, version: compatibleVersion }]
+    })).toMatchObject({ state: "strength", workoutPosition: 2 });
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      priorClassified: [anchor], priorVersions: [{ programId: noCardio.id, version: oldVersion }]
+    })).toMatchObject({ state: "schedule_unavailable" });
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      priorClassified: [anchor]
+    })).toMatchObject({ state: "schedule_unavailable" });
+  });
+
   it("keeps an API-generated classification question within the contract bound", () => {
     const longNames = {
       ...activeProgram,

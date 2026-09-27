@@ -70,6 +70,57 @@ afterAll(async () => {
 });
 
 describe("Training PostgreSQL vertical", () => {
+  it("resets weekly counts but keeps the last current A/B session across a pause", async () => {
+    const personId = "00000000-0000-4000-8000-000000000138";
+    await database.pool.query("insert into persons (id, kind, status) values ($1, 'real', 'active')", [personId]);
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(repository, new SyntheticPersonContext(personId));
+    const exercise = await service.createExercise({
+      visibility: "private", name: "TASK-0138 exercise", category: "strength",
+      movementPattern: null, equipment: null, instructions: null, note: null
+    });
+    const saved = await service.saveConfirmedProgram({
+      expectedActiveProgramId: null, expectedLockVersion: null,
+      name: "TASK-0138 A/B", note: null,
+      cadence: { kind: "rolling_weekly", strengthSessionsPerWeek: 3,
+        workoutSequence: [1, 2], lightCardio: null },
+      workouts: ["A", "B"].map((name) => ({ name, prescriptions: [{
+        exerciseVersionId: exercise.currentVersion.id, loadBasis: "external_weight" as const,
+        targetWeightKg: 20, targetSets: 1, targetRepsMin: 8, targetRepsMax: 10,
+        targetRir: 2, progressionIncrementKg: 2, note: null
+      }] }))
+    });
+    const versionId = saved.program!.activeVersionId!;
+    const sessionInput = (date: string, position: number, key: string) => ({
+      occurredAt: `${date}T06:00:00.000Z`, timezone: "Europe/Belgrade",
+      programVersionId: versionId, programWorkoutPosition: position,
+      externalActivityId: null, workoutName: position === 1 ? "A" : "B",
+      feeling: null, note: null,
+      exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+        loadBasis: "external_weight" as const, feeling: null, note: null,
+        sets: [{ weightKg: 20, reps: 8, rir: 2 }] }],
+      sourceReference: { channel: "manual" as const, externalSystem: null,
+        externalRecordId: null, occurredAt: `${date}T06:00:00.000Z` },
+      dedupeKey: key, confidence: 1
+    });
+    await service.createWorkoutSession(sessionInput("2026-09-21", 1, "task-0138-a1"));
+    await service.createWorkoutSession(sessionInput("2026-09-23", 2, "task-0138-b1"));
+    const latest = await service.createWorkoutSession(sessionInput("2026-09-25", 1, "task-0138-a2"));
+    for (const localDate of ["2026-09-28", "2026-10-12"]) {
+      await expect(service.getTrainingContext({ localDate, historyLimit: 1 }))
+        .resolves.toMatchObject({ nextStep: {
+          state: "strength", workoutPosition: 2, workoutName: "B",
+          reason: "sequence_continues"
+        } });
+    }
+    await service.correctWorkoutSession(latest.session.id, {
+      ...sessionInput("2026-09-25", 2, "task-0138-a2-corrected"),
+      correctionReason: "Corrected A/B identity"
+    });
+    await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
+      .resolves.toMatchObject({ nextStep: { state: "strength", workoutPosition: 1, workoutName: "A" } });
+  });
+
   it("keeps prior-version strength in the active program week without duplicating it", async () => {
     const personId = "00000000-0000-4000-8000-000000000136";
     await database.pool.query("insert into persons (id, kind, status) values ($1, 'real', 'active')", [personId]);
@@ -816,6 +867,10 @@ describe("Training PostgreSQL vertical", () => {
     };
     const created = await service.classifyExternalActivity(command);
     expect(created).toMatchObject({ outcome: "created" });
+    await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
+      .resolves.toMatchObject({ nextStep: {
+        state: "strength", workoutPosition: 2, workoutName: "B"
+      } });
     await expect(dailyRepository.getEvidenceRevision(
       personD,
       "2026-09-01",
@@ -831,6 +886,10 @@ describe("Training PostgreSQL vertical", () => {
       classification: { kind: "program_workout", workoutPosition: 2 }
     });
     expect(corrected).toMatchObject({ outcome: "corrected" });
+    await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
+      .resolves.toMatchObject({ nextStep: {
+        state: "strength", workoutPosition: 1, workoutName: "A"
+      } });
     await expect(service.classifyExternalActivity(command)).resolves.toMatchObject({
       outcome: "stale"
     });
@@ -967,6 +1026,53 @@ describe("Training PostgreSQL vertical", () => {
         evidenceIds: [linkedSession.session.id]
       }
     });
+
+    await expect(repository.importExternalActivity({
+      ...activity,
+      providerIdentity: "strength-cross-week-linked",
+      normalizedChecksum: "e".repeat(64),
+      occurredAt: "2026-09-25T06:00:00.000Z",
+      localDate: "2026-09-25"
+    })).resolves.toBe("created");
+    const crossWeekActivity = (await repository.listExternalActivities(personD, 10))
+      .find((candidate) => candidate.providerIdentity === "strength-cross-week-linked")!;
+    await expect(service.classifyExternalActivity({
+      ...command,
+      expectedExternalActivityId: crossWeekActivity.id,
+      expectedLocalDate: "2026-09-25",
+      classification: { kind: "program_workout", workoutPosition: 1 }
+    })).resolves.toMatchObject({ outcome: "created" });
+    const crossWeekSession = await service.createWorkoutSession({
+      occurredAt: crossWeekActivity.occurredAt,
+      timezone: crossWeekActivity.timezone,
+      programVersionId: versionId,
+      programWorkoutPosition: 1,
+      externalActivityId: crossWeekActivity.id,
+      workoutName: "A detail",
+      feeling: null,
+      note: null,
+      exercises: [{
+        exerciseVersionId,
+        loadBasis: "external_weight",
+        feeling: null,
+        note: null,
+        sets: [{ weightKg: 20, reps: 8, rir: 2 }]
+      }],
+      sourceReference: {
+        channel: "manual",
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: crossWeekActivity.occurredAt
+      },
+      dedupeKey: "task-0138-cross-week-linked-session",
+      confidence: 1
+    });
+    expect(crossWeekSession.created).toBe(true);
+    await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
+      .resolves.toMatchObject({ nextStep: {
+        state: "strength", workoutPosition: 2, workoutName: "B",
+        reason: "sequence_continues"
+      } });
 
     const personDConfig: AppConfig = {
       NODE_ENV: "test",

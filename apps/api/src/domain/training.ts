@@ -214,6 +214,13 @@ export function evaluateNextTrainingStep(input: {
     readonly programId: string;
     readonly version: TrainingProgramVersion;
   }[];
+  readonly priorClassified?: readonly {
+    readonly id: string;
+    readonly localDate: string;
+    readonly occurredAt: string;
+    readonly programVersionId: string;
+    readonly workoutPosition: number;
+  }[];
 }): NextTrainingStep {
   const policyVersion = TRAINING_NEXT_STEP_POLICY_VERSION;
   if (input.program === null || input.program.activeVersion === null) {
@@ -264,6 +271,7 @@ export function evaluateNextTrainingStep(input: {
       id: session.id,
       localDate: session.localDate,
       occurredAt: session.occurredAt ?? `${session.localDate}T23:59:59.999Z`,
+      programVersionId: session.programVersionId!,
       workoutPosition: session.programWorkoutPosition!
     }));
   const classifiedExternal = input.externalActivities
@@ -278,6 +286,7 @@ export function evaluateNextTrainingStep(input: {
       id: activity.id,
       localDate: activity.localDate,
       occurredAt: activity.occurredAt,
+      programVersionId: activity.classification!.programVersionId,
       workoutPosition: activity.classification!.classification.kind === "program_workout"
         ? activity.classification!.classification.workoutPosition
         : 0
@@ -316,7 +325,7 @@ export function evaluateNextTrainingStep(input: {
     };
   }
 
-  const lastClassified = classified.at(-1) ?? null;
+  const lastWeekClassified = classified.at(-1) ?? null;
   const unclassified = input.externalActivities
     .filter((activity) =>
       !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
@@ -361,11 +370,11 @@ export function evaluateNextTrainingStep(input: {
   }
 
   const lastCardio = qualifyingCardio.at(-1) ?? null;
-  const lastStrengthInstant = lastClassified?.occurredAt ?? null;
+  const lastStrengthInstant = lastWeekClassified?.occurredAt ?? null;
   if (
     cardio !== null && cardioCount < cardio.sessionsPerWeek &&
     (strengthCount >= cadence.strengthSessionsPerWeek ||
-      (lastClassified !== null && (lastCardio === null || lastStrengthInstant! > lastCardio.occurredAt)))
+      (lastWeekClassified !== null && (lastCardio === null || lastStrengthInstant! > lastCardio.occurredAt)))
   ) {
     return {
       state: "light_cardio",
@@ -389,14 +398,26 @@ export function evaluateNextTrainingStep(input: {
     return { state: "schedule_unavailable", policyVersion };
   }
 
+  const sequenceHistory = [
+    ...(input.priorClassified ?? []).filter((item) => item.localDate < weekStart),
+    ...classified
+  ].sort((left, right) =>
+    left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
+  );
+  const lastClassified = sequenceHistory.at(-1) ?? null;
+  if (lastClassified !== null && !versionIsCompatible(lastClassified.programVersionId)) {
+    return { state: "schedule_unavailable", policyVersion };
+  }
   const sequence = cadence.workoutSequence;
   let nextPosition = sequence[0]!;
   let reason: Extract<NextTrainingStep, { state: "strength" }>["reason"] = "sequence_start";
   if (lastClassified !== null) {
     const index = sequence.lastIndexOf(lastClassified.workoutPosition);
     nextPosition = sequence[(index >= 0 ? index + 1 : 0) % sequence.length]!;
-    const previous = classified.at(-2);
-    const previousIndex = previous ? sequence.lastIndexOf(previous.workoutPosition) : -1;
+    const previous = sequenceHistory.at(-2);
+    const comparablePrevious = previous && versionIsCompatible(previous.programVersionId)
+      ? previous : null;
+    const previousIndex = comparablePrevious ? sequence.lastIndexOf(comparablePrevious.workoutPosition) : -1;
     const expectedLast = previousIndex >= 0 ? sequence[(previousIndex + 1) % sequence.length] : null;
     reason = expectedLast !== null && expectedLast !== lastClassified.workoutPosition
       ? "sequence_reanchored_after_deviation"

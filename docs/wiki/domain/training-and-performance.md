@@ -76,8 +76,11 @@ automatically.
   mutating the session. See the
   [recording-context ADR](../../adr/20260925-link-garmin-strength-with-recording-context.md).
 - `NextTrainingStep` is a deterministic read projection over the active cadence
-  and current Training facts. Missed days do not move its sequence; explicit
-  repeats or reordering become the next anchor. Qualified external cardio may
+  and current Training facts. Weekly strength/cardio targets reset each
+  Person-local Monday, while A/B continues from the last current, explicitly
+  classified event of the same program, even after a missed week. Missed days
+  do not move its sequence; explicit repeats or reordering become the next
+  anchor. Qualified external cardio may
   satisfy cardio from typed duration, distance, and heart-rate facts. External
   strength without an exact program-workout identity cannot advance A/B and
   produces a bounded classification need instead of a guess, including when it
@@ -140,6 +143,7 @@ automatically.
 - [Balanced personal-baseline activation in daily assessment v2](../../adr/20260917-activate-balanced-personal-baselines-in-daily-assessment-v2.md).
 - [Atomic exercise resolution during confirmed program save](../../adr/20260922-resolve-training-program-exercises-atomically.md).
 - [Rolling cadence and Training-owned next step](../../adr/20260922-own-rolling-training-cadence-and-next-step-in-training.md).
+- [Cross-week training sequence](../../adr/20260927-continue-training-sequence-across-weeks.md).
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
 - [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).

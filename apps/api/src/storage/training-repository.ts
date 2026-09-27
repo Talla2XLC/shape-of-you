@@ -1139,6 +1139,116 @@ export class TrainingRepository implements TrainingStore {
     }));
   }
 
+  private async readPriorClassifiedTraining(
+    transaction: DatabaseTransaction,
+    personId: string,
+    programId: string,
+    weekStart: string
+  ): Promise<readonly {
+    id: string;
+    localDate: string;
+    occurredAt: string;
+    programVersionId: string;
+    workoutPosition: number;
+  }[]> {
+    type AnchorRow = {
+      id: string;
+      local_date: string;
+      occurred_at: Date | string | null;
+      program_version_id: string;
+      workout_position: number;
+    };
+    const sessionResult = await transaction.execute(sql<AnchorRow>`
+      select session.id, session.local_date::text,
+             coalesce(session.occurred_at,
+               (session.local_date::text || 'T23:59:59.999Z')::timestamptz) as occurred_at,
+             session.program_version_id,
+             session.program_workout_position as workout_position
+        from workout_sessions session
+        join training_program_versions version
+          on version.id = session.program_version_id
+         and version.person_id = ${personId}
+         and version.program_id = ${programId}
+       where session.person_id = ${personId}
+         and session.local_date < ${weekStart}
+         and session.program_workout_position is not null
+         and not exists (
+           select 1 from workout_sessions successor
+            where successor.supersedes_id = session.id
+         )
+       order by occurred_at desc, session.id desc
+       limit 2
+    `);
+    const externalResult = await transaction.execute(sql<AnchorRow>`
+      with recursive current_class as (
+        select classification.id, classification.lineage_root_activity_id,
+               classification.program_version_id, classification.workout_position
+          from external_activity_program_classifications classification
+         where classification.person_id = ${personId}
+           and classification.program_id = ${programId}
+           and classification.kind = 'program_workout'
+           and not exists (
+             select 1 from external_activity_program_classifications successor
+              where successor.supersedes_id = classification.id
+           )
+      ), activity_chain as (
+        select classification.id as class_id, classification.program_version_id,
+               classification.workout_position, activity.id,
+               activity.local_date, activity.occurred_at
+          from current_class classification
+          join integration_activity_facts activity
+            on activity.id = classification.lineage_root_activity_id
+           and activity.person_id = ${personId}
+        union all
+        select parent.class_id, parent.program_version_id,
+               parent.workout_position, child.id,
+               child.local_date, child.occurred_at
+          from activity_chain parent
+          join integration_activity_facts child
+            on child.supersedes_id = parent.id
+           and child.person_id = ${personId}
+      )
+      select current.id, current.local_date::text, current.occurred_at,
+             current.program_version_id, current.workout_position
+        from activity_chain current
+       where current.local_date < ${weekStart}
+         and not exists (
+           select 1 from integration_activity_facts successor
+            where successor.supersedes_id = current.id
+         )
+         and not exists (
+           select 1
+             from activity_chain member
+             join training_workout_session_activity_links link
+               on link.external_activity_id = member.id
+              and link.person_id = ${personId}
+             join workout_sessions session on session.id = link.session_id
+            where member.class_id = current.class_id
+              and not exists (
+                select 1 from workout_sessions successor
+                 where successor.supersedes_id = session.id
+              )
+         )
+       order by current.occurred_at desc, current.id desc
+       limit 2
+    `);
+    return [
+      ...(sessionResult.rows as unknown as AnchorRow[]),
+      ...(externalResult.rows as unknown as AnchorRow[])
+    ]
+      .map((row) => ({
+        id: row.id,
+        localDate: row.local_date,
+        occurredAt: new Date(row.occurred_at!).toISOString(),
+        programVersionId: row.program_version_id,
+        workoutPosition: row.workout_position
+      }))
+      .sort((left, right) =>
+        right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
+      )
+      .slice(0, 2);
+  }
+
   private async readNextTrainingStepInTransaction(
     transaction: DatabaseTransaction,
     personId: string,
@@ -1178,11 +1288,15 @@ export class TrainingRepository implements TrainingStore {
       personId,
       { from: weekStart, to: localDate }
     );
+    const priorClassified = program === null ? [] : await this.readPriorClassifiedTraining(
+      transaction, personId, program.id, weekStart
+    );
     const versionIds = [...new Set([
       ...sessions.flatMap((session) => session.programVersionId === null ? [] : [session.programVersionId]),
       ...externalActivities.flatMap((activity) =>
         activity.classification === null ? [] : [activity.classification.programVersionId]
-      )
+      ),
+      ...priorClassified.map((item) => item.programVersionId)
     ])].filter((id) => id !== program?.activeVersionId);
     const versionRows = versionIds.length === 0 ? [] : await transaction
       .select({ id: trainingProgramVersions.id, programId: trainingProgramVersions.programId })
@@ -1201,7 +1315,8 @@ export class TrainingRepository implements TrainingStore {
       localDate,
       sessions,
       externalActivities,
-      priorVersions
+      priorVersions,
+      priorClassified
     });
   }
 
