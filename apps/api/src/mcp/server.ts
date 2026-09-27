@@ -1038,7 +1038,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_daily_recommendation_completion",
-      "Read an immutable explainable completion assessment for one exact daily-assessment-v4 snapshot from owning-domain facts and active manual correction evidence.",
+      "Read an immutable explainable completion assessment for one exact completion-capable daily assessment snapshot from owning-domain facts and active manual correction evidence.",
       ReadDailyRecommendationCompletionSchema,
       DailyRecommendationCompletionAssessmentSchema,
       false,

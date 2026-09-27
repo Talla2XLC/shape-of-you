@@ -80,11 +80,16 @@ automatically.
   repeats or reordering become the next anchor. Qualified external cardio may
   satisfy cardio from typed duration, distance, and heart-rate facts. External
   strength without an exact program-workout identity cannot advance A/B and
-  produces a bounded classification need instead of a guess. Legacy cadence,
-  missing local date, current-day completion, and completed weekly targets are
-  explicit states. Current projections emit `training-next-step-v2`; historical
-  Daily Assessment snapshots containing v1 remain readable. A classified
-  external strength activity can advance only cadence and never becomes
+  produces a bounded classification need instead of a guess, including when it
+  precedes a later classified strength session in the same local week. Strength
+  occurrences from earlier versions of the same program still count toward the
+  weekly target. An earlier A/B position anchors the active sequence only when
+  cadence and ordered exercise identities match; incompatible or unavailable
+  version evidence cannot produce an exact next A/B. Legacy cadence, missing
+  local date, current-day completion, and completed weekly targets are explicit
+  states. Current projections emit `training-next-step-v3`; historical v1/v2
+  snapshots remain readable. A classified external strength activity can
+  advance only cadence and never becomes
   exercise, set, load, personal-record, or progression evidence.
 - Profile coverage unions current WorkoutSession and external activity dates.
   One Person-local date is counted once regardless of source, and a date without
@@ -127,6 +132,7 @@ automatically.
 ## Decisions
 
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md).
+- [Training density and version changes ADR](../../adr/20260926-account-for-training-density-and-program-version-changes.md).
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md).
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).

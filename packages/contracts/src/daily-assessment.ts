@@ -23,7 +23,7 @@ export const DailyAssessmentReasonSchema = {
     "sleep_below_usual", "hrv_below_usual",
     "resting_heart_rate_above_usual", "body_battery_below_usual",
     "training_load_above_usual", "personal_trend_persistent",
-    "personal_baseline_unstable", "steps_above_usual"
+    "personal_baseline_unstable", "steps_above_usual", "five_consecutive_training_days"
   ]
 } as const;
 
@@ -122,6 +122,25 @@ export const DailyAssessmentV2UsedFactsSchema = {
     ...DailyAssessmentUsedFactsSchema.required,
     "dailyContextNoteIds"
   ]
+} as const;
+
+export const DailyAssessmentV5UsedFactsSchema = {
+  ...DailyAssessmentV2UsedFactsSchema,
+  required: [...DailyAssessmentV2UsedFactsSchema.required, "trainingDensity"],
+  properties: {
+    ...DailyAssessmentV2UsedFactsSchema.properties,
+    trainingDensity: {
+      type: "object",
+      additionalProperties: false,
+      required: ["from", "to", "completedDayCount", "qualifyingLocalDates"],
+      properties: {
+        from: localDate,
+        to: localDate,
+        completedDayCount: { type: "integer", minimum: 0, maximum: 5 },
+        qualifyingLocalDates: { type: "array", items: localDate, uniqueItems: true, maxItems: 5 }
+      }
+    }
+  }
 } as const;
 
 export const DailyAssessmentPersonalComparisonSchema = {
@@ -302,6 +321,22 @@ export const DailyAssessmentResultSchema = {
         personalBaseline: DailyAssessmentV3PersonalBaselineSchema,
         movement: DailyAssessmentMovementSchema
       }
+    },
+    {
+      type: "object", additionalProperties: false,
+      required: [
+        "state", ...Object.keys(readyProperties), "policyVersion",
+        "personalBaseline", "movement"
+      ],
+      properties: {
+        state: { const: "available" },
+        ...readyProperties,
+        recommendedAction: DailyNextActionV4Schema,
+        usedFacts: DailyAssessmentV5UsedFactsSchema,
+        policyVersion: { const: "daily-assessment-v5" },
+        personalBaseline: DailyAssessmentV3PersonalBaselineSchema,
+        movement: DailyAssessmentMovementSchema
+      }
     }
   ]
 } as const;
@@ -315,7 +350,8 @@ export type DailyAssessmentReason =
   | "sleep_below_usual" | "hrv_below_usual"
   | "resting_heart_rate_above_usual" | "body_battery_below_usual"
   | "training_load_above_usual" | "personal_trend_persistent"
-  | "personal_baseline_unstable" | "steps_above_usual";
+  | "personal_baseline_unstable" | "steps_above_usual"
+  | "five_consecutive_training_days";
 export type DailyAssessmentMissingData =
   | "sleep" | "hrv" | "resting_heart_rate" | "body_battery"
   | "training" | "training_program" | "weight" | "nutrition";
@@ -385,6 +421,19 @@ export interface DailyAssessmentUsedFacts {
 /** V2 evidence always identifies the typed context notes used for exclusions. */
 export interface DailyAssessmentV2UsedFacts extends DailyAssessmentUsedFacts {
   readonly dailyContextNoteIds: readonly string[];
+}
+
+/** Five completed Person-local days considered by the v5 training-density rule. */
+export interface DailyAssessmentTrainingDensity {
+  readonly from: string;
+  readonly to: string;
+  readonly completedDayCount: number;
+  readonly qualifyingLocalDates: readonly string[];
+}
+
+/** V5 captures the exact dated density evidence in its immutable facts. */
+export interface DailyAssessmentV5UsedFacts extends DailyAssessmentV2UsedFacts {
+  readonly trainingDensity: DailyAssessmentTrainingDensity;
 }
 
 export type DailyAssessmentV2PersonalMetric =
@@ -475,11 +524,21 @@ export interface DailyAssessmentAvailableV4 extends Omit<
   readonly recommendedAction: DailyNextActionV4;
 }
 
+/** V5 daily snapshot with dated training-density evidence. */
+export interface DailyAssessmentAvailableV5 extends Omit<
+  DailyAssessmentAvailableV4,
+  "policyVersion" | "usedFacts"
+> {
+  readonly policyVersion: "daily-assessment-v5";
+  readonly usedFacts: DailyAssessmentV5UsedFacts;
+}
+
 export type DailyAssessmentAvailable =
   | DailyAssessmentAvailableV1
   | DailyAssessmentAvailableV2
   | DailyAssessmentAvailableV3
-  | DailyAssessmentAvailableV4;
+  | DailyAssessmentAvailableV4
+  | DailyAssessmentAvailableV5;
 
 /** Read result that fails explicitly when Person timezone has not been configured. */
 export type DailyAssessmentResult =

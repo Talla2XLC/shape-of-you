@@ -456,6 +456,33 @@ export class TrainingService {
     return this.store.listWorkoutSessionsForLocalDateRange(this.personContext.getPersonId(), from, to);
   }
 
+  /** Reads complete current manual and connected facts for a bounded local-date window. */
+  public async listTrainingFactsForLocalDateRange(from: string, to: string): Promise<{
+    readonly sessions: readonly WorkoutSession[];
+    readonly externalActivities: readonly ExternalActivitySummary[];
+  }> {
+    const dates: string[] = [];
+    const cursor = new Date(`${from}T00:00:00.000Z`);
+    const end = new Date(`${to}T00:00:00.000Z`);
+    if (Number.isNaN(cursor.valueOf()) || Number.isNaN(end.valueOf()) ||
+        cursor > end || (end.valueOf() - cursor.valueOf()) / 86_400_000 > 31) {
+      throw new Error("Training fact date range must cover at most 32 local days");
+    }
+    while (cursor <= end) {
+      dates.push(cursor.toISOString().slice(0, 10));
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+    const personId = this.personContext.getPersonId();
+    const [sessions, ...activityDays] = await Promise.all([
+      this.store.listWorkoutSessionsForLocalDateRange(personId, from, to),
+      ...dates.map((date) => this.store.listExternalActivitiesForLocalDate(personId, date))
+    ]);
+    return {
+      sessions,
+      externalActivities: activityDays.flat().map(toExternalActivitySummary)
+    };
+  }
+
   /** Reads unioned manual and connected training evidence dates for Progress. */
   public getDataCoverage(from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
     return this.store.getDataCoverage(this.personContext.getPersonId(), from, to, asOf);

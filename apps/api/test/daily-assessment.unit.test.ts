@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { Ajv } from "ajv";
 import addFormats from "ajv-formats";
 
-import { TrainingProgressionGuidanceSchema, type DailyAssessmentUsedFacts } from "@shape-of-you/contracts";
+import { TrainingProgressionGuidanceSchema, type DailyAssessmentUsedFacts, type DailyAssessmentV5UsedFacts } from "@shape-of-you/contracts";
 
 import {
   dailyAssessmentChecksum,
   dailyAssessmentV2Checksum,
   dailyAssessmentV3Checksum,
-  evaluateDailyAssessment
+  dailyAssessmentV5Checksum,
+  evaluateDailyAssessment,
+  evaluateDailyAssessmentV5,
+  evaluateTrainingDensity
 } from "../src/domain/daily-assessment.js";
 import {
   DailyAssessmentService,
@@ -19,6 +22,68 @@ import type { DailyAssessmentStore } from "../src/storage/daily-assessment-repos
 import { DailyAssessmentEvidenceChangedError } from "../src/domain/errors.js";
 
 const programVersionId = "00000000-0000-4000-8000-000000000101";
+
+const densityDates = [
+  "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"
+];
+
+describe("daily assessment v5 training density", () => {
+  it("counts five completed local days once each and ignores standalone short warmups", () => {
+    const sessions = [
+      { localDate: densityDates[0]!, externalActivityId: "linked", exercises: [{ sets: [{}] }] },
+      { localDate: densityDates[2]!, externalActivityId: null, exercises: [{ sets: [{}] }] },
+      { localDate: densityDates[4]!, externalActivityId: null, exercises: [{ sets: [{}] }] }
+    ];
+    const external = [
+      { id: "linked", localDate: densityDates[0]!, durationSeconds: 2700, trainingLoad: 20 },
+      { id: "cardio-1", localDate: densityDates[1]!, durationSeconds: 2400, trainingLoad: 25 },
+      { id: "cardio-2", localDate: densityDates[3]!, durationSeconds: 2400, trainingLoad: 30 },
+      { id: "warmup", localDate: densityDates[3]!, durationSeconds: 599, trainingLoad: 7 }
+    ];
+    expect(evaluateTrainingDensity(densityDates, sessions as never, external)).toEqual({
+      from: "2026-09-21", to: "2026-09-25",
+      completedDayCount: 5, qualifyingLocalDates: densityDates
+    });
+    expect(evaluateTrainingDensity(densityDates, [], [
+      { id: "warmup", localDate: densityDates[0]!, durationSeconds: 599, trainingLoad: 7 }
+    ])).toMatchObject({ completedDayCount: 0, qualifyingLocalDates: [] });
+    expect(evaluateTrainingDensity(densityDates, [], [
+      { id: "no-load", localDate: densityDates[0]!, durationSeconds: 2400, trainingLoad: null }
+    ])).toMatchObject({ completedDayCount: 0 });
+    expect(() => evaluateTrainingDensity(
+      [densityDates[0]!, densityDates[1]!, densityDates[2]!, densityDates[3]!, "2026-09-27"],
+      [], []
+    )).toThrow("consecutive");
+  });
+
+  it("makes a ready assessment cautious without overriding a hard stop", () => {
+    const evidence: DailyAssessmentV5UsedFacts = {
+      ...facts(),
+      dailyContextNoteIds: [],
+      trainingDensity: {
+        from: densityDates[0]!, to: densityDates[4]!,
+        completedDayCount: 5, qualifyingLocalDates: densityDates
+      }
+    };
+    const result = evaluateDailyAssessmentV5(evidence);
+    expect(result.status).toBe("caution");
+    expect(result.reasons).toContain("five_consecutive_training_days");
+    expect(result.recommendedAction).toMatchObject({ type: "record_recovery_check_in" });
+    expect(evaluateDailyAssessmentV5({
+      ...evidence,
+      summary: { ...evidence.summary, recoveryHardStop: true }
+    }).status).toBe("recovery_priority");
+    expect(evaluateDailyAssessmentV5({
+      ...evidence,
+      trainingDensity: { ...evidence.trainingDensity, completedDayCount: 4, qualifyingLocalDates: densityDates.slice(0, 4) }
+    }).status).toBe("ready");
+    expect(dailyAssessmentV5Checksum("2026-09-26", "Europe/Belgrade", evidence, {}, {}, result))
+      .not.toBe(dailyAssessmentV5Checksum("2026-09-26", "Europe/Belgrade", {
+        ...evidence,
+        trainingDensity: { ...evidence.trainingDensity, completedDayCount: 4, qualifyingLocalDates: densityDates.slice(0, 4) }
+      }, {}, {}, result));
+  });
+});
 
 function facts(
   overrides: Partial<DailyAssessmentUsedFacts["summary"]> = {}
@@ -274,7 +339,7 @@ describe("daily assessment policy", () => {
       createdAt: "2026-09-20T08:00:00.000Z"
     };
     const store = {
-      findLatestV4SnapshotForLocalDate: vi.fn().mockResolvedValue(previous)
+      findLatestCompletionSnapshotForLocalDate: vi.fn().mockResolvedValue(previous)
     } as unknown as DailyAssessmentStore;
     const service = new DailyAssessmentService(
       store,
@@ -300,7 +365,7 @@ describe("daily assessment policy", () => {
         recommendedAction: previous.recommendedAction
       }
     });
-    expect(store.findLatestV4SnapshotForLocalDate).toHaveBeenCalledWith(
+    expect(store.findLatestCompletionSnapshotForLocalDate).toHaveBeenCalledWith(
       "00000000-0000-4000-8000-000000000001",
       "2026-09-20"
     );
@@ -308,7 +373,7 @@ describe("daily assessment policy", () => {
 
   it("does not look for a previous recommendation when timezone is required", async () => {
     const store = {
-      findLatestV4SnapshotForLocalDate: vi.fn()
+      findLatestCompletionSnapshotForLocalDate: vi.fn()
     } as unknown as DailyAssessmentStore;
     const service = new DailyAssessmentService(
       store,
@@ -325,7 +390,7 @@ describe("daily assessment policy", () => {
       assessment: { state: "timezone_required", timezone: null },
       previousRecommendation: null
     });
-    expect(store.findLatestV4SnapshotForLocalDate).not.toHaveBeenCalled();
+    expect(store.findLatestCompletionSnapshotForLocalDate).not.toHaveBeenCalled();
   });
 
   it("gates progression on the current Daily Assessment and exact next workout", async () => {

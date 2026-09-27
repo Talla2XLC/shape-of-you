@@ -70,6 +70,71 @@ afterAll(async () => {
 });
 
 describe("Training PostgreSQL vertical", () => {
+  it("keeps prior-version strength in the active program week without duplicating it", async () => {
+    const personId = "00000000-0000-4000-8000-000000000136";
+    await database.pool.query("insert into persons (id, kind, status) values ($1, 'real', 'active')", [personId]);
+    const repository = new TrainingRepository(database);
+    const service = new TrainingService(repository, new SyntheticPersonContext(personId));
+    const exercise = await service.createExercise({
+      visibility: "private", name: "TASK-0136 version exercise", category: "strength",
+      movementPattern: null, equipment: null, instructions: null, note: null
+    });
+    const prescription = {
+      exerciseVersionId: exercise.currentVersion.id,
+      loadBasis: "external_weight" as const,
+      targetWeightKg: 20, targetSets: 3, targetRepsMin: 8, targetRepsMax: 10,
+      targetRir: 2, progressionIncrementKg: 2, note: null
+    };
+    const snapshot = {
+      expectedActiveProgramId: null,
+      expectedLockVersion: null,
+      name: "TASK-0136 A/B", note: null,
+      cadence: { kind: "rolling_weekly" as const, strengthSessionsPerWeek: 3,
+        workoutSequence: [1, 2], lightCardio: null },
+      workouts: [
+        { name: "A", prescriptions: [prescription] },
+        { name: "B", prescriptions: [prescription] }
+      ]
+    };
+    const first = await repository.saveConfirmedProgram(personId, snapshot);
+    if (first.outcome === "needs_clarification" || first.program.activeVersionId === null) {
+      throw new Error("Expected active first version");
+    }
+    const record = async (date: string, versionId: string, position: number) => service.createWorkoutSession({
+      occurredAt: `${date}T06:00:00.000Z`, timezone: "Europe/Belgrade",
+      programVersionId: versionId, programWorkoutPosition: position,
+      externalActivityId: null, workoutName: position === 1 ? "A" : "B",
+      feeling: null, note: null,
+      exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+        loadBasis: "external_weight" as const, feeling: null, note: null,
+        sets: [{ weightKg: 20, reps: 8, rir: 2 }] }],
+      sourceReference: { channel: "manual" as const, externalSystem: null,
+        externalRecordId: null, occurredAt: `${date}T06:00:00.000Z` },
+      dedupeKey: `task-0136-${date}`, confidence: 1
+    });
+    const oldSession = await record("2026-09-23", first.program.activeVersionId, 2);
+    const second = await repository.saveConfirmedProgram(personId, {
+      ...snapshot,
+      expectedActiveProgramId: first.program.id,
+      expectedLockVersion: first.program.lockVersion,
+      workouts: snapshot.workouts.map((workout) => ({
+        ...workout,
+        prescriptions: [{ ...prescription, targetWeightKg: 22 }]
+      }))
+    });
+    if (second.outcome === "needs_clarification" || second.program.activeVersionId === null) {
+      throw new Error("Expected active successor version");
+    }
+    await record("2026-09-25", second.program.activeVersionId, 1);
+    const context = await service.getTrainingContext({ localDate: "2026-09-26", historyLimit: 1 });
+    expect(context.nextStep).toMatchObject({
+      state: "strength", policyVersion: "training-next-step-v3",
+      workoutPosition: 2, workoutName: "B"
+    });
+    expect(context.recentSessions.items).toHaveLength(1);
+    expect(oldSession.session.programVersionId).toBe(first.program.activeVersionId);
+  });
+
   it("confirms one exact pair explicitly and blocks corrected-lineage double occupancy", async () => {
     const personId = "00000000-0000-4000-8000-000000000008";
     const providerId = "00000000-0000-4000-8000-000000000801";
@@ -785,10 +850,14 @@ describe("Training PostgreSQL vertical", () => {
       normalizedChecksum: "c".repeat(64),
       occurredAt: "2026-09-21T05:00:00.000Z"
     })).resolves.toBe("created");
+    const earlierUnclassified = (await repository.listExternalActivities(personD, 10))
+      .find((candidate) => candidate.providerIdentity === "strength-before-last-classified")!;
     await expect(service.getTrainingContext({
       historyLimit: 1,
       localDate: "2026-09-22"
-    })).resolves.toMatchObject({ nextStep: { state: "strength" } });
+    })).resolves.toMatchObject({ nextStep: {
+      state: "needs_classification", externalActivityId: earlierUnclassified.id
+    } });
 
     await expect(repository.importExternalActivity({
       ...activity,
@@ -967,17 +1036,15 @@ describe("Training PostgreSQL vertical", () => {
         localDate
       });
       expect(contextAfterWrite.nextStep).toMatchObject({
-        state: "strength",
-        workoutPosition: 2,
-        workoutName: "B"
+        state: "needs_classification",
+        externalActivityId: staleAfterSessionActivity.id
       });
       expect(afterAssessment).toMatchObject({
         state: "available",
         usedFacts: {
           trainingNextStep: {
-            state: "strength",
-            workoutPosition: 2,
-            workoutName: "B"
+            state: "needs_classification",
+            externalActivityId: staleAfterSessionActivity.id
           }
         }
       });
@@ -1518,7 +1585,7 @@ describe("Training PostgreSQL vertical", () => {
         recentExternalActivities: [],
         trustedExternalTitles: [],
         activityRecordingMode: { title: null, lockVersion: 0, updatedAt: null },
-        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v2" }
+        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v3" }
       });
     const exercise = await repository.createExercise(personA, {
       visibility: "shared",

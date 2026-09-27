@@ -51,8 +51,8 @@ only an inactive draft requiring separate activation.
 The `daily_next_action` recommendation is a lazily materialized immutable
 snapshot for the current Person-local date. The API gathers current typed
 Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile
-coverage, and applies the code-owned `daily-assessment-v4` policy. Version 4
-first evaluates the unchanged absolute v1 safety rules, then applies the
+coverage, and applies the code-owned `daily-assessment-v5` policy. It first
+evaluates the unchanged absolute v1 safety rules, then applies the
 balanced personal-baseline policy to Recovery, Training, and optional daily
 movement. Completed local-day step totals can form a robust personal range;
 current-day steps remain explicit `partial_day` evidence with an exact `asOf`.
@@ -62,7 +62,7 @@ result without corroborating adverse Recovery or Training evidence. The result
 contains a safe day status, used facts, important missing data, typed reasons,
 one primary recommended action, bounded alternatives, limitations, confidence,
 policy version, qualitative personal comparisons, and evidence checksum. The
-primary V4 action also carries a closed `all_of` completion specification whose
+primary action also carries a closed `all_of` completion specification whose
 authoring default is one atomic required criterion. Its observation window is
 limited to owner facts recorded after the recommendation on the same
 Person-local date; presentation text is never parsed as an executable rule. Its private
@@ -74,9 +74,18 @@ session/activity link changes the checksum and selects a new snapshot.
 Classification and link revisions also participate in the Person
 evidence-revision guard, so a concurrent change forces the
 assessment to recompose instead of persisting stale output.
-Historical snapshots remain readable audit evidence unless privacy erasure
-removes one derived from erased evidence. Legacy v1, v2, and v3 snapshots
-remain readable.
+Version 5 additionally checks the five fully completed Person-local days before
+assessment. A day qualifies through a detailed session with performed sets or
+an imported activity lasting at least 20 minutes with positive training load.
+Multiple facts on one day count once, and a short standalone warmup does not
+qualify. Five consecutive training days turn an otherwise `ready` result into
+`caution` with a subjective recovery check-in before the next strength workout;
+stronger recovery signals keep priority. This is a conservative Shape of You
+rule, not a Garmin Training Readiness score. The dated count and reason enter
+the v5 used facts and checksum. Historical snapshots remain readable audit
+evidence unless privacy erasure removes one derived from erased evidence.
+Legacy v1–v4 snapshots remain readable. See the
+[density ADR](../../adr/20260926-account-for-training-density-and-program-version-changes.md).
 
 Daily Assessment counts a linked detailed session and imported activity as one
 training occurrence. External activity remains the source of its numeric
@@ -84,7 +93,7 @@ training load; the link does not add a second load. Both fact IDs remain in
 evidence provenance.
 
 `DailyRecommendationCompletionAssessment` is a separate immutable Coaching
-conclusion for one exact V4 snapshot and completion-policy version. It keeps
+conclusion for one exact V4 or V5 snapshot and completion-policy version. It keeps
 `completionState` (`completed`, `partially_completed`, `not_completed`, or
 `unknown`) independent from `evidenceMode` (`observed`, `self_reported`,
 `partially_observed`, or `unknown`). The lazy Person-scoped read evaluates

@@ -4,6 +4,7 @@ import {
   desc,
   eq,
   gte,
+  inArray,
   isNull,
   lte,
   ne,
@@ -1177,11 +1178,30 @@ export class TrainingRepository implements TrainingStore {
       personId,
       { from: weekStart, to: localDate }
     );
+    const versionIds = [...new Set([
+      ...sessions.flatMap((session) => session.programVersionId === null ? [] : [session.programVersionId]),
+      ...externalActivities.flatMap((activity) =>
+        activity.classification === null ? [] : [activity.classification.programVersionId]
+      )
+    ])].filter((id) => id !== program?.activeVersionId);
+    const versionRows = versionIds.length === 0 ? [] : await transaction
+      .select({ id: trainingProgramVersions.id, programId: trainingProgramVersions.programId })
+      .from(trainingProgramVersions)
+      .where(and(
+        eq(trainingProgramVersions.personId, personId),
+        inArray(trainingProgramVersions.id, versionIds)
+      ));
+    const priorVersions = [];
+    for (const row of versionRows) {
+      const version = await this.readProgramVersion(transaction, personId, row.id);
+      if (version !== null) priorVersions.push({ programId: row.programId, version });
+    }
     return evaluateNextTrainingStep({
       program,
       localDate,
       sessions,
-      externalActivities
+      externalActivities,
+      priorVersions
     });
   }
 

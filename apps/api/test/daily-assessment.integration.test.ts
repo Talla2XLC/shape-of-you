@@ -8,7 +8,7 @@ import { buildApp, getFastifyInstance } from "../src/app.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
 import { evaluateDailyAssessment } from "../src/domain/daily-assessment.js";
-import { evaluatePersonalizedDailyAssessment } from "../src/domain/personalized-daily-assessment.js";
+import { evaluatePersonalizedDailyAssessment, evaluatePersonalizedDailyAssessmentV3 } from "../src/domain/personalized-daily-assessment.js";
 import { DailyAssessmentEvidenceChangedError, NotFoundError } from "../src/domain/errors.js";
 import { derivePersonLocalDate } from "../src/coaching/daily-assessment.service.js";
 import { DailyAssessmentRepository } from "../src/storage/daily-assessment-repository.js";
@@ -170,7 +170,8 @@ describe("API-owned daily assessment", () => {
       timezone: "Europe/Moscow",
       status: "insufficient_data",
       recommendedAction: { type: "record_recovery_check_in" },
-      policyVersion: "daily-assessment-v4",
+      policyVersion: "daily-assessment-v5",
+      usedFacts: { trainingDensity: { completedDayCount: expect.any(Number) } },
       personalBaseline: {
         policyKey: "balanced",
         policyVersion: "personal-baseline-v2",
@@ -210,30 +211,30 @@ describe("API-owned daily assessment", () => {
 
     const rows = await database.pool.query<{
       count: number;
-      all_v4: boolean;
+      all_v5: boolean;
       all_reproducible: boolean;
     }>(
       `select count(*)::int as count,
-              bool_and(policy_version = 'daily-assessment-v4') as all_v4,
+              bool_and(policy_version = 'daily-assessment-v5') as all_v5,
               bool_and(personal_baseline is not null
                        and personal_baseline_calculation is not null) as all_reproducible
          from coaching_daily_assessment_details
         where person_id = $1`,
       [personId]
     );
-    expect(rows.rows[0]).toEqual({ count: 2, all_v4: true, all_reproducible: true });
+    expect(rows.rows[0]).toEqual({ count: 2, all_v5: true, all_reproducible: true });
 
     const dailyRepository = new DailyAssessmentRepository(database);
     const changedBody = changed.json();
-    await expect(dailyRepository.findLatestV4SnapshotForLocalDate(
+    await expect(dailyRepository.findLatestCompletionSnapshotForLocalDate(
       personId,
       changedBody.localDate
     )).resolves.toMatchObject({
       snapshotId: changedBody.snapshotId,
       localDate: changedBody.localDate,
-      policyVersion: "daily-assessment-v4"
+      policyVersion: "daily-assessment-v5"
     });
-    await expect(dailyRepository.findLatestV4SnapshotForLocalDate(
+    await expect(dailyRepository.findLatestCompletionSnapshotForLocalDate(
       personId,
       "2000-01-01"
     )).resolves.toBeNull();
@@ -271,6 +272,23 @@ describe("API-owned daily assessment", () => {
       personalBaseline: { policyVersion: "personal-baseline-v1" }
     });
     expect(storedV2).not.toHaveProperty("movement");
+    const legacyV4 = await dailyRepository.createOrGet(otherPersonId, {
+      ...sameEvidence,
+      policyVersion: "daily-assessment-v4",
+      evidenceChecksum: "4".repeat(64),
+      recommendedAction: changedBody.recommendedAction,
+      personalBaseline: evaluatePersonalizedDailyAssessmentV3(
+        changedBody.localDate, []
+      ).publicBaseline,
+      personalBaselineCalculation: evaluatePersonalizedDailyAssessmentV3(
+        changedBody.localDate, []
+      ).calculation,
+      movement: changedBody.movement
+    });
+    expect(legacyV4).toMatchObject({ policyVersion: "daily-assessment-v4" });
+    await expect(dailyRepository.getCompletionSnapshot(
+      otherPersonId, legacyV4.snapshotId
+    )).resolves.toMatchObject({ policyVersion: "daily-assessment-v4" });
 
     await database.pool.query(`
       create function test_hold_daily_snapshot() returns trigger language plpgsql as $$
@@ -625,7 +643,7 @@ describe("API-owned daily assessment", () => {
     const body = response.json();
     expect(evaluateDailyAssessment(body.usedFacts).status).toBe("caution");
     expect(body).toMatchObject({
-      policyVersion: "daily-assessment-v4",
+      policyVersion: "daily-assessment-v5",
       status: "recovery_priority",
       personalBaseline: {
         policyKey: "balanced",
@@ -674,7 +692,7 @@ describe("API-owned daily assessment", () => {
 
     expect(response.statusCode, response.body).toBe(200);
     expect(response.json()).toMatchObject({
-      policyVersion: "daily-assessment-v4",
+      policyVersion: "daily-assessment-v5",
       movement: {
         status: "available",
         current: {

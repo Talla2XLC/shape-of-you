@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 
 import type {
   DailyAssessmentAvailable,
+  DailyAssessmentTrainingDensity,
   DailyAssessmentUsedFacts,
+  DailyAssessmentV5UsedFacts,
+  ExternalActivitySummary,
+  WorkoutSession,
   DailyNextAction
 } from "@shape-of-you/contracts";
 
@@ -20,6 +24,69 @@ export const DAILY_ASSESSMENT_POLICY_VERSION = "daily-assessment-v1" as const;
 export const DAILY_ASSESSMENT_V2_POLICY_VERSION = "daily-assessment-v2" as const;
 export const DAILY_ASSESSMENT_V3_POLICY_VERSION = "daily-assessment-v3" as const;
 export const DAILY_ASSESSMENT_V4_POLICY_VERSION = "daily-assessment-v4" as const;
+export const DAILY_ASSESSMENT_V5_POLICY_VERSION = "daily-assessment-v5" as const;
+
+/** Counts substantive training on five fully completed Person-local dates. */
+export function evaluateTrainingDensity(
+  dates: readonly string[],
+  sessions: readonly Pick<WorkoutSession, "localDate" | "externalActivityId" | "exercises">[],
+  externalActivities: readonly Pick<ExternalActivitySummary, "id" | "localDate" | "durationSeconds" | "trainingLoad">[]
+): DailyAssessmentTrainingDensity {
+  const sortedDates = [...dates].sort();
+  const dayNumbers = sortedDates.map((date) => {
+    const day = new Date(`${date}T00:00:00.000Z`);
+    if (Number.isNaN(day.valueOf()) || day.toISOString().slice(0, 10) !== date) {
+      throw new Error("Training density requires valid local dates");
+    }
+    return day.valueOf() / 86_400_000;
+  });
+  if (
+    dates.length !== 5 ||
+    dayNumbers.some((day, index) => index > 0 && day !== dayNumbers[index - 1]! + 1)
+  ) {
+    throw new Error("Training density requires five consecutive completed local dates");
+  }
+  const completedSessions = sessions.filter((item) =>
+    item.exercises.some((exercise) => exercise.sets.length > 0)
+  );
+  const linkedExternalIds = new Set(completedSessions.flatMap((item) =>
+    item.externalActivityId === null ? [] : [item.externalActivityId]
+  ));
+  const qualifyingDates = new Set(completedSessions.map((item) => item.localDate));
+  for (const item of externalActivities) {
+    if (
+      !linkedExternalIds.has(item.id) &&
+      item.durationSeconds >= 20 * 60 &&
+      item.trainingLoad !== null && item.trainingLoad > 0
+    ) qualifyingDates.add(item.localDate);
+  }
+  const qualifyingLocalDates = sortedDates.filter((date) => qualifyingDates.has(date));
+  return {
+    from: sortedDates[0]!,
+    to: sortedDates[4]!,
+    completedDayCount: qualifyingLocalDates.length,
+    qualifyingLocalDates
+  };
+}
+
+/** Applies the v5 density caution without weakening earlier recovery decisions. */
+export function evaluateDailyAssessmentV5(facts: DailyAssessmentV5UsedFacts): DailyAssessmentEvaluation {
+  const base = evaluateDailyAssessment(facts);
+  if (facts.trainingDensity.completedDayCount !== 5) return base;
+  const reasons = [...new Set([...base.reasons, "five_consecutive_training_days" as const])];
+  if (base.status !== "ready") return { ...base, reasons };
+  const recommendedAction = action(
+    "record_recovery_check_in",
+    "После пяти тренировочных дней подряд проверь усталость, болезненность и боль перед следующей силовой."
+  );
+  return {
+    ...base,
+    status: "caution",
+    reasons,
+    recommendedAction,
+    alternatives: base.alternatives.filter((item) => item.type !== recommendedAction.type)
+  };
+}
 
 export interface DailyAssessmentEvaluation {
   readonly status: DailyAssessmentAvailable["status"];
@@ -215,6 +282,26 @@ export function dailyAssessmentV4Checksum(
 ): string {
   return createHash("sha256").update(JSON.stringify({
     policyVersion: DAILY_ASSESSMENT_V4_POLICY_VERSION,
+    localDate,
+    timezone,
+    facts,
+    personalCalculation,
+    movement,
+    selectedDecision
+  })).digest("hex");
+}
+
+/** Stable v5 checksum including exact completed-day density facts and decision. */
+export function dailyAssessmentV5Checksum(
+  localDate: string,
+  timezone: string,
+  facts: DailyAssessmentV5UsedFacts,
+  personalCalculation: unknown,
+  movement: unknown,
+  selectedDecision: unknown
+): string {
+  return createHash("sha256").update(JSON.stringify({
+    policyVersion: DAILY_ASSESSMENT_V5_POLICY_VERSION,
     localDate,
     timezone,
     facts,

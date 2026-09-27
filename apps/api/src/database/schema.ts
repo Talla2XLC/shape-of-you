@@ -3830,7 +3830,7 @@ export const coachingDailyAssessmentDetails = pgTable(
             AND ${table.personalBaseline} IS NOT NULL
             AND ${table.personalBaselineCalculation} IS NOT NULL
             AND ${table.movement} IS NULL)
-        OR (${table.policyVersion} in ('daily-assessment-v3', 'daily-assessment-v4')
+        OR (${table.policyVersion} in ('daily-assessment-v3', 'daily-assessment-v4', 'daily-assessment-v5')
             AND ${table.personalBaseline} IS NOT NULL
             AND ${table.personalBaselineCalculation} IS NOT NULL
             AND ${table.movement} IS NOT NULL)`

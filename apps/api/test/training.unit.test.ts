@@ -177,7 +177,7 @@ describe("Training context", () => {
         garminAttributed: true,
         classification: null
       }],
-      nextStep: { state: "no_active_program", policyVersion: "training-next-step-v2" }
+      nextStep: { state: "no_active_program", policyVersion: "training-next-step-v3" }
     });
     expect(findActiveProgram).toHaveBeenCalledWith(personId);
     expect(listWorkoutSessions).toHaveBeenCalledWith(personId, 3);
@@ -219,7 +219,10 @@ describe("next training step", () => {
           cooldownSeconds: 300
         }
       },
-      workouts: [{ position: 1, name: "A" }, { position: 2, name: "B" }]
+      workouts: [
+        { position: 1, name: "A", prescriptions: [{ exerciseVersionId: "00000000-0000-4000-8000-000000000211", loadBasis: "external_weight" }] },
+        { position: 2, name: "B", prescriptions: [{ exerciseVersionId: "00000000-0000-4000-8000-000000000212", loadBasis: "external_weight" }] }
+      ]
     }
   } as TrainingProgram;
 
@@ -228,6 +231,7 @@ describe("next training step", () => {
     occurredAt: "2026-09-22T06:00:00.000Z",
     localDate: "2026-09-22",
     durationSeconds: 2395,
+    trainingLoad: 20,
     distanceMeters: 4880,
     averageHeartRate: 134
   } as ExternalActivitySummary;
@@ -303,13 +307,13 @@ describe("next training step", () => {
       externalActivities: [classifiedActivity]
     })).toMatchObject({
       state: "strength",
-      policyVersion: "training-next-step-v2",
+      policyVersion: "training-next-step-v3",
       workoutPosition: 2,
       workoutName: "B"
     });
   });
 
-  it("suppresses the question but does not advance cadence for negative or old-version classification", () => {
+  it("suppresses the question for a negative classification and refuses an unresolved old version", () => {
     const noCardio = {
       ...activeProgram,
       activeVersion: {
@@ -347,7 +351,94 @@ describe("next training step", () => {
           classification: { kind: "program_workout" as const, workoutPosition: 2 }
         }
       }]
-    })).toMatchObject({ state: "strength", workoutPosition: 1 });
+    })).toMatchObject({ state: "schedule_unavailable" });
+  });
+
+  it("preserves weekly occurrences and A/B sequence across compatible versions", () => {
+    const noCardio = {
+      ...activeProgram,
+      activeVersion: {
+        ...activeProgram.activeVersion!,
+        cadence: { ...activeProgram.activeVersion!.cadence!, lightCardio: null }
+      }
+    };
+    const oldVersion = {
+      ...noCardio.activeVersion,
+      id: "00000000-0000-4000-8000-000000000220",
+      workouts: noCardio.activeVersion.workouts.map((workout) => ({
+        ...workout,
+        prescriptions: workout.prescriptions.map((prescription) => ({
+          ...prescription,
+          targetWeightKg: 75
+        }))
+      }))
+    } as TrainingProgramVersion;
+    const session = (id: string, versionId: string, date: string, position: number) => ({
+      id, programVersionId: versionId, programWorkoutPosition: position,
+      externalActivityId: null, localDate: date,
+      occurredAt: `${date}T06:00:00.000Z`, createdAt: `${date}T07:00:00.000Z`
+    }) as WorkoutSession;
+    const priorVersions = [{ programId: noCardio.id, version: oldVersion }];
+    const previous = session("00000000-0000-4000-8000-000000000221", oldVersion.id, "2026-09-23", 2);
+    const current = session("00000000-0000-4000-8000-000000000222", noCardio.activeVersionId!, "2026-09-25", 1);
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-26", sessions: [previous, current],
+      externalActivities: [], priorVersions
+    })).toMatchObject({ state: "strength", workoutPosition: 2, policyVersion: "training-next-step-v3" });
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-26",
+      sessions: [session("00000000-0000-4000-8000-000000000223", oldVersion.id, "2026-09-21", 1), previous, current],
+      externalActivities: [], priorVersions
+    })).toMatchObject({ state: "week_complete", evidenceIds: [
+      "00000000-0000-4000-8000-000000000223", previous.id, current.id
+    ] });
+  });
+
+  it("does not infer A/B across incompatible versions or before classifying an earlier strength activity", () => {
+    const noCardio = {
+      ...activeProgram,
+      activeVersion: {
+        ...activeProgram.activeVersion!,
+        cadence: { ...activeProgram.activeVersion!.cadence!, lightCardio: null }
+      }
+    };
+    const prior = {
+      ...noCardio.activeVersion,
+      id: "00000000-0000-4000-8000-000000000224",
+      workouts: noCardio.activeVersion.workouts.map((workout) => ({
+        ...workout,
+        prescriptions: workout.prescriptions.map((prescription) => ({
+          ...prescription,
+          exerciseVersionId: "00000000-0000-4000-8000-000000000225"
+        }))
+      }))
+    } as TrainingProgramVersion;
+    const oldSession = {
+      id: "00000000-0000-4000-8000-000000000226",
+      programVersionId: prior.id, programWorkoutPosition: 2,
+      externalActivityId: null, localDate: "2026-09-23",
+      occurredAt: "2026-09-23T06:00:00.000Z"
+    } as WorkoutSession;
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-26", sessions: [oldSession],
+      externalActivities: [], priorVersions: [{ programId: noCardio.id, version: prior }]
+    })).toMatchObject({ state: "schedule_unavailable" });
+
+    const later = { ...oldSession, id: "00000000-0000-4000-8000-000000000227",
+      programVersionId: noCardio.activeVersionId, localDate: "2026-09-25",
+      occurredAt: "2026-09-25T06:00:00.000Z" } as WorkoutSession;
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-26", sessions: [later],
+      externalActivities: [{ ...cardio, id: "00000000-0000-4000-8000-000000000228",
+        localDate: "2026-09-21", occurredAt: "2026-09-21T06:00:00.000Z",
+        distanceMeters: null, durationSeconds: 2780, trainingLoad: 23 }]
+    })).toMatchObject({ state: "needs_classification", externalActivityId: "00000000-0000-4000-8000-000000000228" });
+    expect(evaluateNextTrainingStep({
+      program: noCardio, localDate: "2026-09-26", sessions: [later],
+      externalActivities: [{ ...cardio, id: "00000000-0000-4000-8000-000000000229",
+        localDate: "2026-09-21", occurredAt: "2026-09-21T06:00:00.000Z",
+        distanceMeters: null, durationSeconds: 579, trainingLoad: 7 }]
+    })).toMatchObject({ state: "strength" });
   });
 
   it("keeps an API-generated classification question within the contract bound", () => {
@@ -370,7 +461,7 @@ describe("next training step", () => {
     expect(result.state).toBe("needs_classification");
     if (
       result.state === "needs_classification" &&
-      result.policyVersion === "training-next-step-v2"
+      result.policyVersion === "training-next-step-v3"
     ) {
       expect(result.question.length).toBeLessThanOrEqual(256);
       expect(result.options).toHaveLength(2);
@@ -466,6 +557,6 @@ describe("next training step", () => {
       localDate: "2026-09-22",
       sessions: [],
       externalActivities: []
-    })).toEqual({ state: "schedule_unavailable", policyVersion: "training-next-step-v2" });
+    })).toEqual({ state: "schedule_unavailable", policyVersion: "training-next-step-v3" });
   });
 });

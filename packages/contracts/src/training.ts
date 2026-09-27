@@ -1335,7 +1335,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion"],
       properties: {
         state: { enum: ["no_active_program", "local_date_required", "schedule_unavailable"] },
-        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] }
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3"] }
       }
     },
     {
@@ -1356,7 +1356,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "externalActivityId", "options", "question"],
       properties: {
         state: { const: "needs_classification" },
-        policyVersion: { const: "training-next-step-v2" },
+        policyVersion: { enum: ["training-next-step-v2", "training-next-step-v3"] },
         localDate: { type: "string", format: "date" },
         externalActivityId: uuidSchema,
         options: {
@@ -1382,7 +1382,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "reason", "evidenceIds"],
       properties: {
         state: { enum: ["complete_today", "week_complete"] },
-        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] },
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3"] },
         localDate: { type: "string", format: "date" },
         reason: { enum: ["training_already_completed_today", "weekly_targets_completed"] },
         evidenceIds: { type: "array", items: uuidSchema, uniqueItems: true }
@@ -1394,7 +1394,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "programVersionId", "workoutPosition", "workoutName", "reason"],
       properties: {
         state: { const: "strength" },
-        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] },
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3"] },
         localDate: { type: "string", format: "date" },
         programVersionId: uuidSchema,
         workoutPosition: { type: "integer", minimum: 1, maximum: 100 },
@@ -1408,7 +1408,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "reason", "prescription"],
       properties: {
         state: { const: "light_cardio" },
-        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2"] },
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3"] },
         localDate: { type: "string", format: "date" },
         reason: { enum: ["between_strength_sessions", "strength_target_completed"] },
         prescription: {

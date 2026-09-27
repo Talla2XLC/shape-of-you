@@ -145,7 +145,26 @@ export function trainingProgramSnapshotMatches(
   });
 }
 
-export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v2" as const;
+export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v3" as const;
+
+/** Whether a previous immutable version preserves the active A/B positions. */
+export function hasCompatibleWorkoutSequence(
+  active: TrainingProgramVersion,
+  previous: TrainingProgramVersion
+): boolean {
+  if (active.cadence === null || previous.cadence === null ||
+      active.cadence.strengthSessionsPerWeek !== previous.cadence.strengthSessionsPerWeek ||
+      JSON.stringify(active.cadence.workoutSequence) !== JSON.stringify(previous.cadence.workoutSequence) ||
+      active.workouts.length !== previous.workouts.length) return false;
+  return active.workouts.every((workout) => {
+    const prior = previous.workouts.find((item) => item.position === workout.position);
+    return prior !== undefined && prior.prescriptions.length === workout.prescriptions.length &&
+      workout.prescriptions.every((prescription, index) =>
+        prescription.exerciseVersionId === prior.prescriptions[index]?.exerciseVersionId &&
+        prescription.loadBasis === prior.prescriptions[index]?.loadBasis
+      );
+  });
+}
 
 /** Returns the Monday that bounds the shared rolling-week next-step policy. */
 export function trainingPolicyWeekStart(localDate: string): string {
@@ -191,6 +210,10 @@ export function evaluateNextTrainingStep(input: {
   readonly externalActivities: readonly (ExternalActivitySummary & {
     readonly sessionCovered?: boolean;
   })[];
+  readonly priorVersions?: readonly {
+    readonly programId: string;
+    readonly version: TrainingProgramVersion;
+  }[];
 }): NextTrainingStep {
   const policyVersion = TRAINING_NEXT_STEP_POLICY_VERSION;
   if (input.program === null || input.program.activeVersion === null) {
@@ -207,6 +230,25 @@ export function evaluateNextTrainingStep(input: {
   }
 
   const weekStart = trainingPolicyWeekStart(localDate);
+  const priorVersions = new Map(input.priorVersions?.map((item) => [item.version.id, item]) ?? []);
+  const versionBelongsToProgram = (versionId: string): boolean =>
+    versionId === active.id || priorVersions.get(versionId)?.programId === input.program!.id;
+  const versionIsCompatible = (versionId: string): boolean =>
+    versionId === active.id ||
+    (priorVersions.get(versionId)?.programId === input.program!.id &&
+      hasCompatibleWorkoutSequence(active, priorVersions.get(versionId)!.version));
+  let unknownVersionEvidence = false;
+  let incompatibleSequenceEvidence = false;
+  for (const session of input.sessions) {
+    if (session.localDate < weekStart || session.localDate > localDate ||
+        session.programWorkoutPosition === null || session.programVersionId === null) continue;
+    if (!priorVersions.has(session.programVersionId) && session.programVersionId !== active.id) {
+      unknownVersionEvidence = true;
+    } else if (versionBelongsToProgram(session.programVersionId) &&
+      !versionIsCompatible(session.programVersionId)) {
+      incompatibleSequenceEvidence = true;
+    }
+  }
   const directlyLinkedActivityIds = new Set(
     input.sessions.flatMap((session) =>
       session.externalActivityId === null ? [] : [session.externalActivityId]
@@ -214,7 +256,8 @@ export function evaluateNextTrainingStep(input: {
   );
   const classifiedSessions = input.sessions
     .filter((session) =>
-      session.programVersionId === active.id && session.programWorkoutPosition !== null &&
+      session.programVersionId !== null && versionBelongsToProgram(session.programVersionId) &&
+      session.programWorkoutPosition !== null &&
       session.localDate >= weekStart && session.localDate <= localDate
     )
     .map((session) => ({
@@ -226,7 +269,8 @@ export function evaluateNextTrainingStep(input: {
   const classifiedExternal = input.externalActivities
     .filter((activity) =>
       !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
-      activity.classification?.programVersionId === active.id &&
+      activity.classification?.programId === input.program!.id &&
+      versionBelongsToProgram(activity.classification.programVersionId) &&
       activity.classification.classification.kind === "program_workout" &&
       activity.localDate >= weekStart && activity.localDate <= localDate
     )
@@ -242,6 +286,12 @@ export function evaluateNextTrainingStep(input: {
     .sort((left, right) =>
       left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
     );
+  if (input.externalActivities.some((activity) =>
+    activity.localDate >= weekStart && activity.localDate <= localDate &&
+    activity.classification?.programId === input.program!.id &&
+    activity.classification.classification.kind === "program_workout" &&
+    !versionIsCompatible(activity.classification.programVersionId)
+  )) incompatibleSequenceEvidence = true;
   const cardio = cadence.lightCardio;
   const qualifyingCardio = cardio === null ? [] : input.externalActivities
     .filter((activity) =>
@@ -272,7 +322,7 @@ export function evaluateNextTrainingStep(input: {
       !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
       activity.distanceMeters === null && activity.classification == null &&
       activity.localDate >= weekStart && activity.localDate <= localDate &&
-      (lastClassified === null || activity.occurredAt > lastClassified.occurredAt)
+      activity.durationSeconds >= 1200
     )
     .sort((left, right) =>
       right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
@@ -333,6 +383,10 @@ export function evaluateNextTrainingStep(input: {
         cooldownSeconds: cardio.cooldownSeconds
       }
     };
+  }
+
+  if (unknownVersionEvidence || incompatibleSequenceEvidence) {
+    return { state: "schedule_unavailable", policyVersion };
   }
 
   const sequence = cadence.workoutSequence;

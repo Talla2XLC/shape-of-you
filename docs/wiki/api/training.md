@@ -62,19 +62,25 @@ it remain readable and return `schedule_unavailable`; the API never parses
 `NextTrainingStep` returns an exact strength workout, typed light cardio,
 `complete_today`, `week_complete`, `needs_classification`, or an explicit
 absence/unavailable state. Sequence advances only from classified current
-sessions, so missed days do not skip workouts. Explicit repeats or reordering
-anchor the next step and expose a deviation reason. A distance, duration, and
-heart-rate-qualified external cardio activity may satisfy cardio without a
-fabricated detailed session. An external activity without A/B identity never
+occurrences, so missed days do not skip workouts. Same-program strength from a
+prior version contributes to the weekly count; its A/B position anchors the
+current sequence only when cadence and ordered exercise identities match.
+Incompatible version evidence leaves the exact schedule unavailable. An older
+unclassified substantial strength activity can still change the weekly quota
+and triggers a question before an exact A/B recommendation. Explicit repeats
+or reordering anchor the next step and expose a deviation reason. A distance,
+duration, and heart-rate-qualified external cardio activity may satisfy cardio
+without a fabricated detailed session. An external activity without A/B identity never
 advances the strength sequence and may trigger one short classification
 question.
 
-The current evaluator emits `training-next-step-v2`. Its
+The current evaluator emits `training-next-step-v3`. Its
 `needs_classification` result identifies one exact current external activity,
 the active program-workout options, and one short API-generated question. The
 date-scoped target is computed from one shared policy through the requested
 Person-local date and is independent of the recent-history display limit.
-Historical Daily Assessment snapshots containing `training-next-step-v1`
+Historical Daily Assessment snapshots containing `training-next-step-v1` or
+`training-next-step-v2`
 remain readable.
 
 The narrow MCP `classify_external_activity` command uses the existing
