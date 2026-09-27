@@ -3158,13 +3158,14 @@ export const recoverySubjectiveDetails = pgTable(
   "recovery_subjective_details",
   {
     observationId: uuid("observation_id").primaryKey(),
-    energy: smallint("energy").notNull(),
-    fatigue: smallint("fatigue").notNull(),
-    muscleSoreness: smallint("muscle_soreness").notNull(),
-    stress: smallint("stress").notNull(),
-    sleepQuality: smallint("sleep_quality").notNull(),
-    acuteIllness: boolean("acute_illness").notNull(),
-    injuryConcern: boolean("injury_concern").notNull()
+    energy: smallint("energy"),
+    fatigue: smallint("fatigue"),
+    muscleSoreness: smallint("muscle_soreness"),
+    stress: smallint("stress"),
+    sleepQuality: smallint("sleep_quality"),
+    acuteIllness: boolean("acute_illness"),
+    injuryConcern: boolean("injury_concern"),
+    signal: varchar("signal", { length: 32 })
   },
   (table) => [
     foreignKey({
@@ -3174,11 +3175,23 @@ export const recoverySubjectiveDetails = pgTable(
     }).onDelete("cascade"),
     check(
       "recovery_subjective_details_scales",
-      sql`${table.energy} BETWEEN 1 AND 5
+      sql`(${table.signal} IS NULL
+          AND ${table.energy} IS NOT NULL AND ${table.fatigue} IS NOT NULL
+          AND ${table.muscleSoreness} IS NOT NULL AND ${table.stress} IS NOT NULL
+          AND ${table.sleepQuality} IS NOT NULL
+          AND ${table.energy} BETWEEN 1 AND 5
           AND ${table.fatigue} BETWEEN 1 AND 5
           AND ${table.muscleSoreness} BETWEEN 1 AND 5
           AND ${table.stress} BETWEEN 1 AND 5
-          AND ${table.sleepQuality} BETWEEN 1 AND 5`
+          AND ${table.sleepQuality} BETWEEN 1 AND 5
+          AND ${table.acuteIllness} IS NOT NULL
+          AND ${table.injuryConcern} IS NOT NULL)
+          OR (${table.signal} IS NOT NULL
+          AND ${table.signal} IN ('feeling_well', 'fatigued', 'sore', 'acute_illness', 'injury_concern')
+          AND ${table.energy} IS NULL AND ${table.fatigue} IS NULL
+          AND ${table.muscleSoreness} IS NULL AND ${table.stress} IS NULL
+          AND ${table.sleepQuality} IS NULL AND ${table.acuteIllness} IS NULL
+          AND ${table.injuryConcern} IS NULL)`
     )
   ]
 );
@@ -3830,7 +3843,7 @@ export const coachingDailyAssessmentDetails = pgTable(
             AND ${table.personalBaseline} IS NOT NULL
             AND ${table.personalBaselineCalculation} IS NOT NULL
             AND ${table.movement} IS NULL)
-        OR (${table.policyVersion} in ('daily-assessment-v3', 'daily-assessment-v4', 'daily-assessment-v5')
+        OR (${table.policyVersion} in ('daily-assessment-v3', 'daily-assessment-v4', 'daily-assessment-v5', 'daily-assessment-v6')
             AND ${table.personalBaseline} IS NOT NULL
             AND ${table.personalBaselineCalculation} IS NOT NULL
             AND ${table.movement} IS NOT NULL)`

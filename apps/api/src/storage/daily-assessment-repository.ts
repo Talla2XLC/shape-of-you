@@ -6,6 +6,7 @@ import type {
   DailyAssessmentAvailableV1,
   DailyAssessmentAvailableV4,
   DailyAssessmentAvailableV5,
+  DailyAssessmentAvailableV6,
   DailyCompletionCriterionResult,
   DailyCompletionOwnerDomain,
   DailyRecommendationCompletionAssessment,
@@ -13,6 +14,7 @@ import type {
   DailyAssessmentMovement,
   DailyAssessmentV2UsedFacts,
   DailyAssessmentV5UsedFacts,
+  DailyAssessmentV6UsedFacts,
   CreateDailyRecommendationFeedback,
   DailyRecommendationFeedback,
   DailyRecommendationFeedbackList,
@@ -93,6 +95,14 @@ export type DailyAssessmentSnapshotInput = DailyAssessmentSnapshotBase & (
       readonly personalBaselineCalculation: DailyAssessmentPersonalCalculation;
       readonly movement: DailyAssessmentMovement;
     }
+  | {
+      readonly policyVersion: "daily-assessment-v6";
+      readonly usedFacts: DailyAssessmentV6UsedFacts;
+      readonly recommendedAction: DailyAssessmentAvailableV6["recommendedAction"];
+      readonly personalBaseline: DailyAssessmentAvailableV6["personalBaseline"];
+      readonly personalBaselineCalculation: DailyAssessmentPersonalCalculation;
+      readonly movement: DailyAssessmentMovement;
+    }
 );
 
 export interface DailyAssessmentConsistencyGuard {
@@ -110,7 +120,7 @@ export interface CreatedDailyRecommendationFeedback {
 }
 
 export interface DailyCompletionAssessmentInput {
-  readonly snapshot: DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5;
+  readonly snapshot: DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6;
   readonly criteria: readonly DailyCompletionCriterionResult[];
   readonly completionState: DailyRecommendationCompletionAssessment["completionState"];
   readonly evidenceMode: DailyRecommendationCompletionAssessment["evidenceMode"];
@@ -166,12 +176,12 @@ export interface DailyAssessmentStore {
     personId: string,
     snapshotId: string
   ): Promise<DailyRecommendationFeedbackList>;
-  getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5>;
+  getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6>;
   /** Finds the latest completion-capable recommendation for one exact Person-local date. */
   findLatestCompletionSnapshotForLocalDate(
     personId: string,
     localDate: string
-  ): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | null>;
+  ): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6 | null>;
   createOrGetCompletion(
     personId: string,
     input: DailyCompletionAssessmentInput
@@ -219,10 +229,10 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         (input.personalBaseline === undefined || input.personalBaselineCalculation === undefined)) {
       throw new Error("Personalized daily assessment requires its versioned baseline payload");
     }
-    if ((input.policyVersion === "daily-assessment-v3" || input.policyVersion === "daily-assessment-v4" || input.policyVersion === "daily-assessment-v5") && input.movement === undefined) {
+    if ((input.policyVersion === "daily-assessment-v3" || input.policyVersion === "daily-assessment-v4" || input.policyVersion === "daily-assessment-v5" || input.policyVersion === "daily-assessment-v6") && input.movement === undefined) {
       throw new Error("Daily assessment v3+ requires its movement payload");
     }
-    if (input.policyVersion === "daily-assessment-v4" || input.policyVersion === "daily-assessment-v5") {
+    if (input.policyVersion === "daily-assessment-v4" || input.policyVersion === "daily-assessment-v5" || input.policyVersion === "daily-assessment-v6") {
       assertDailyCompletionSpecification(input.recommendedAction);
     }
     if (input.policyVersion === "daily-assessment-v1" &&
@@ -262,7 +272,9 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
       const policyRows = await transaction.insert(coachingPolicies).values({ key: "daily-assessment", name: "Daily assessment" }).onConflictDoNothing().returning();
       const policy = policyRows[0] ?? (await transaction.select().from(coachingPolicies).where(eq(coachingPolicies.key, "daily-assessment")).limit(1))[0];
       if (!policy) throw new Error("Daily assessment policy could not be resolved");
-      const policyVersionNumber = input.policyVersion === "daily-assessment-v5"
+      const policyVersionNumber = input.policyVersion === "daily-assessment-v6"
+        ? 6
+        : input.policyVersion === "daily-assessment-v5"
         ? 5
         : input.policyVersion === "daily-assessment-v4"
         ? 4
@@ -272,7 +284,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         policyId: policy.id,
         version: policyVersionNumber,
         effectiveFrom: new Date(
-          policyVersionNumber === 5
+          policyVersionNumber >= 5
             ? "2026-09-27T00:00:00.000Z"
             : policyVersionNumber >= 2
             ? "2026-09-17T00:00:00.000Z"
@@ -317,7 +329,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         personalBaselineCalculation: input.personalBaselineCalculation ?? null,
         movement: "movement" in input ? input.movement : null
       }).onConflictDoNothing();
-      if (input.policyVersion === "daily-assessment-v4" || input.policyVersion === "daily-assessment-v5") {
+      if (input.policyVersion === "daily-assessment-v4" || input.policyVersion === "daily-assessment-v5" || input.policyVersion === "daily-assessment-v6") {
         await transaction.insert(coachingDailyCompletionCriteria).values(
           input.recommendedAction.completion.criteria.map((item, index) => ({
             recommendationId: recommendation.id,
@@ -454,7 +466,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
     });
   }
 
-  public async getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5> {
+  public async getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6> {
     const rows = await this.database.db.select({
       recommendation: coachingRecommendations,
       detail: coachingDailyAssessmentDetails
@@ -466,7 +478,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
       )).limit(1);
     if (!rows[0]) throw new NotFoundError("Daily recommendation snapshot was not found");
     const snapshot = this.hydrate(rows[0].recommendation, rows[0].detail);
-    if (snapshot.policyVersion !== "daily-assessment-v4" && snapshot.policyVersion !== "daily-assessment-v5") {
+    if (snapshot.policyVersion !== "daily-assessment-v4" && snapshot.policyVersion !== "daily-assessment-v5" && snapshot.policyVersion !== "daily-assessment-v6") {
       throw new DomainValidationError("Completion assessment requires a completion-capable daily snapshot");
     }
     return snapshot;
@@ -475,7 +487,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
   public async findLatestCompletionSnapshotForLocalDate(
     personId: string,
     localDate: string
-  ): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | null> {
+  ): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6 | null> {
     const rows = await this.database.db.select({
       recommendation: coachingRecommendations,
       detail: coachingDailyAssessmentDetails
@@ -488,7 +500,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         eq(coachingRecommendations.personId, personId),
         eq(coachingDailyAssessmentDetails.personId, personId),
         eq(coachingDailyAssessmentDetails.localDate, localDate),
-        sql`${coachingDailyAssessmentDetails.policyVersion} in ('daily-assessment-v4', 'daily-assessment-v5')`
+        sql`${coachingDailyAssessmentDetails.policyVersion} in ('daily-assessment-v4', 'daily-assessment-v5', 'daily-assessment-v6')`
       ))
       .orderBy(
         desc(coachingRecommendations.createdAt),
@@ -499,7 +511,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
     return this.hydrate(
       rows[0].recommendation,
       rows[0].detail
-    ) as DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5;
+    ) as DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6;
   }
 
   public createOrGetCompletion(
@@ -576,7 +588,7 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
   }
 
   private hydrate(recommendation: typeof coachingRecommendations.$inferSelect, detail: typeof coachingDailyAssessmentDetails.$inferSelect): DailyAssessmentAvailable {
-    if (detail.policyVersion !== "daily-assessment-v1" && detail.policyVersion !== "daily-assessment-v2" && detail.policyVersion !== "daily-assessment-v3" && detail.policyVersion !== "daily-assessment-v4" && detail.policyVersion !== "daily-assessment-v5") {
+    if (detail.policyVersion !== "daily-assessment-v1" && detail.policyVersion !== "daily-assessment-v2" && detail.policyVersion !== "daily-assessment-v3" && detail.policyVersion !== "daily-assessment-v4" && detail.policyVersion !== "daily-assessment-v5" && detail.policyVersion !== "daily-assessment-v6") {
       throw new Error(`Unsupported daily assessment policy version: ${detail.policyVersion}`);
     }
     if (detail.policyVersion !== "daily-assessment-v1" && detail.personalBaseline === null) {
@@ -586,10 +598,10 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         !Array.isArray(detail.usedFacts.dailyContextNoteIds)) {
       throw new Error("Stored personalized daily assessment is missing its context-note evidence IDs");
     }
-    if ((detail.policyVersion === "daily-assessment-v3" || detail.policyVersion === "daily-assessment-v4" || detail.policyVersion === "daily-assessment-v5") && detail.movement === null) {
+    if ((detail.policyVersion === "daily-assessment-v3" || detail.policyVersion === "daily-assessment-v4" || detail.policyVersion === "daily-assessment-v5" || detail.policyVersion === "daily-assessment-v6") && detail.movement === null) {
       throw new Error("Stored daily assessment v3/v4 is missing its movement context");
     }
-    if ((detail.policyVersion === "daily-assessment-v3" || detail.policyVersion === "daily-assessment-v4" || detail.policyVersion === "daily-assessment-v5") &&
+    if ((detail.policyVersion === "daily-assessment-v3" || detail.policyVersion === "daily-assessment-v4" || detail.policyVersion === "daily-assessment-v5" || detail.policyVersion === "daily-assessment-v6") &&
         detail.personalBaseline?.policyVersion !== "personal-baseline-v2") {
       throw new Error("Stored daily assessment v3 has the wrong baseline policy");
     }
@@ -631,6 +643,20 @@ export class DailyAssessmentRepository implements DailyAssessmentStore {
         personalBaseline: detail.personalBaseline as DailyAssessmentPersonalBaseline & {
           readonly policyVersion: "personal-baseline-v2";
         },
+        movement: detail.movement!
+      };
+    }
+    if (detail.policyVersion === "daily-assessment-v6") {
+      if (!("trainingDensity" in detail.usedFacts) || !("wellbeingSignals" in detail.usedFacts) ||
+          !Array.isArray(detail.usedFacts.wellbeingSignals)) {
+        throw new Error("Stored daily assessment v6 is missing qualitative wellbeing facts");
+      }
+      return {
+        ...personalized,
+        policyVersion: detail.policyVersion,
+        usedFacts: personalized.usedFacts as DailyAssessmentV6UsedFacts,
+        recommendedAction: detail.recommendedAction as DailyAssessmentAvailableV6["recommendedAction"],
+        personalBaseline: detail.personalBaseline as DailyAssessmentAvailableV6["personalBaseline"],
         movement: detail.movement!
       };
     }
@@ -745,12 +771,12 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
     };
   }
 
-  public async getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5> {
+  public async getCompletionSnapshot(personId: string, snapshotId: string): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6> {
     const snapshot = [...this.snapshots.values()].find((item) => item.snapshotId === snapshotId);
     if (!snapshot || this.snapshotOwners.get(snapshotId) !== personId) {
       throw new NotFoundError("Daily recommendation snapshot was not found");
     }
-    if (snapshot.policyVersion !== "daily-assessment-v4" && snapshot.policyVersion !== "daily-assessment-v5") {
+    if (snapshot.policyVersion !== "daily-assessment-v4" && snapshot.policyVersion !== "daily-assessment-v5" && snapshot.policyVersion !== "daily-assessment-v6") {
       throw new DomainValidationError("Completion assessment requires a completion-capable daily snapshot");
     }
     return snapshot;
@@ -759,10 +785,10 @@ export class InMemoryDailyAssessmentStore implements DailyAssessmentStore {
   public async findLatestCompletionSnapshotForLocalDate(
     personId: string,
     localDate: string
-  ): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | null> {
+  ): Promise<DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6 | null> {
     const snapshots = [...this.snapshots.values()]
-      .filter((item): item is DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 =>
-        (item.policyVersion === "daily-assessment-v4" || item.policyVersion === "daily-assessment-v5") &&
+      .filter((item): item is DailyAssessmentAvailableV4 | DailyAssessmentAvailableV5 | DailyAssessmentAvailableV6 =>
+        (item.policyVersion === "daily-assessment-v4" || item.policyVersion === "daily-assessment-v5" || item.policyVersion === "daily-assessment-v6") &&
         item.localDate === localDate &&
         this.snapshotOwners.get(item.snapshotId) === personId
       )

@@ -244,8 +244,8 @@ export async function readRecoveryBaselineDays(
        group by local_date
      ), subjective_daily as (
        select observation.local_date,
-              bool_or(subjective.acute_illness) as acute_illness,
-              bool_or(subjective.injury_concern) as injury_concern
+              bool_or(coalesce(subjective.acute_illness, false) or subjective.signal = 'acute_illness') as acute_illness,
+              bool_or(coalesce(subjective.injury_concern, false) or subjective.signal = 'injury_concern') as injury_concern
        from current_safety_subjective observation
        join recovery_subjective_details subjective on subjective.observation_id = observation.id
        group by observation.local_date

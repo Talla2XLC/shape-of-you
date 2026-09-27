@@ -56,7 +56,7 @@ only an inactive draft requiring separate activation.
 The `daily_next_action` recommendation is a lazily materialized immutable
 snapshot for the current Person-local date. The API gathers current typed
 Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile
-coverage, and applies the code-owned `daily-assessment-v5` policy. It first
+coverage, and applies the code-owned `daily-assessment-v6` policy. It first
 evaluates the unchanged absolute v1 safety rules, then applies the
 balanced personal-baseline policy to Recovery, Training, and optional daily
 movement. Completed local-day step totals can form a robust personal range;
@@ -92,13 +92,27 @@ evidence unless privacy erasure removes one derived from erased evidence.
 Legacy v1–v4 snapshots remain readable. See the
 [density ADR](../../adr/20260926-account-for-training-density-and-program-version-changes.md).
 
+Version 6 includes current direct qualitative wellbeing reports as exact
+Recovery observation IDs and closed signals in used facts and the checksum.
+Reported illness or injury concern stops training progression; fatigue or
+soreness makes an otherwise actionable decision cautious. An existing
+`insufficient_data` decision still requests missing evidence, with the report
+shown as a reason. Feeling well cannot lift another restriction or create
+readiness from sparse data. Coach records a clear current report through
+Recovery, reads it back, and requests a fresh `get_daily_assessment` before
+explaining the result. It asks one short question only when a material detail
+is unclear and does not require a check-in after every reply. Today's result
+does not promise readiness for a future workout. Earlier v5 snapshots remain
+readable and completion-capable. See the
+[qualitative wellbeing ADR](../../adr/20260927-record-qualitative-wellbeing-in-recovery-and-reassess.md).
+
 Daily Assessment counts a linked detailed session and imported activity as one
 training occurrence. External activity remains the source of its numeric
 training load; the link does not add a second load. Both fact IDs remain in
 evidence provenance.
 
 `DailyRecommendationCompletionAssessment` is a separate immutable Coaching
-conclusion for one exact V4 or V5 snapshot and completion-policy version. It keeps
+conclusion for one exact V4, V5, or V6 snapshot and completion-policy version. It keeps
 `completionState` (`completed`, `partially_completed`, `not_completed`, or
 `unknown`) independent from `evidenceMode` (`observed`, `self_reported`,
 `partially_observed`, or `unknown`). The lazy Person-scoped read evaluates

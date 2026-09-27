@@ -22,6 +22,7 @@ import type {
   CreateRecoveryObservation,
   GrantRecoveryConsent,
   ListRecoveryObservationsQuery,
+  QualitativeSubjectiveObservationDetail,
   RecoveryAssessment,
   RecoveryAssessmentList,
   RecoveryConnection,
@@ -36,6 +37,11 @@ import type {
   RecoveryObservationList,
   RevokeRecoveryConsent
 } from "@shape-of-you/contracts";
+
+const isQualitativeSubjective = (
+  detail: RecoveryObservationDetail
+): detail is QualitativeSubjectiveObservationDetail =>
+  detail.type === "subjective" && "signal" in detail;
 
 import type { DatabaseContext } from "../database/context.js";
 import {
@@ -490,16 +496,18 @@ export class RecoveryRepository implements RecoveryStore {
     } else if (detail.type === "metric") {
       await transaction.insert(recoveryMetricDetails).values({ observationId, metric: detail.metric, value: detail.value.toFixed(3), unit: detail.unit });
     } else {
-      await transaction.insert(recoverySubjectiveDetails).values({
-        observationId,
-        energy: detail.energy,
-        fatigue: detail.fatigue,
-        muscleSoreness: detail.muscleSoreness,
-        stress: detail.stress,
-        sleepQuality: detail.sleepQuality,
-        acuteIllness: detail.acuteIllness,
-        injuryConcern: detail.injuryConcern
-      });
+      await transaction.insert(recoverySubjectiveDetails).values(isQualitativeSubjective(detail)
+        ? { observationId, signal: detail.signal }
+        : {
+            observationId,
+            energy: detail.energy,
+            fatigue: detail.fatigue,
+            muscleSoreness: detail.muscleSoreness,
+            stress: detail.stress,
+            sleepQuality: detail.sleepQuality,
+            acuteIllness: detail.acuteIllness,
+            injuryConcern: detail.injuryConcern
+          });
     }
   }
 
@@ -753,7 +761,17 @@ export class RecoveryRepository implements RecoveryStore {
     } else {
       const item = await transaction.query.recoverySubjectiveDetails.findFirst({ where: eq(recoverySubjectiveDetails.observationId, row.id) });
       if (!item) throw new Error("Recovery subjective detail is missing");
-      detail = { type: "subjective", energy: item.energy, fatigue: item.fatigue, muscleSoreness: item.muscleSoreness, stress: item.stress, sleepQuality: item.sleepQuality, acuteIllness: item.acuteIllness, injuryConcern: item.injuryConcern };
+      if (item.signal !== null) {
+        detail = { type: "subjective", signal: item.signal as QualitativeSubjectiveObservationDetail["signal"] };
+      } else {
+        if (item.energy === null || item.fatigue === null || item.muscleSoreness === null ||
+            item.stress === null || item.sleepQuality === null || item.acuteIllness === null ||
+            item.injuryConcern === null) throw new Error("Recovery scored subjective detail is incomplete");
+        detail = { type: "subjective", energy: item.energy, fatigue: item.fatigue,
+          muscleSoreness: item.muscleSoreness, stress: item.stress,
+          sleepQuality: item.sleepQuality, acuteIllness: item.acuteIllness,
+          injuryConcern: item.injuryConcern };
+      }
     }
     return {
       id: row.id,

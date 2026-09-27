@@ -20,6 +20,7 @@ export const DailyAssessmentReasonSchema = {
     "resting_heart_rate_above_baseline", "low_body_battery",
     "recent_training_load", "active_training_program", "partial_nutrition",
     "sparse_recovery_data", "no_active_training_program",
+    "reported_fatigue", "reported_soreness", "reported_illness_or_injury",
     "sleep_below_usual", "hrv_below_usual",
     "resting_heart_rate_above_usual", "body_battery_below_usual",
     "training_load_above_usual", "personal_trend_persistent",
@@ -138,6 +139,26 @@ export const DailyAssessmentV5UsedFactsSchema = {
         to: localDate,
         completedDayCount: { type: "integer", minimum: 0, maximum: 5 },
         qualifyingLocalDates: { type: "array", items: localDate, uniqueItems: true, maxItems: 5 }
+      }
+    }
+  }
+} as const;
+
+export const DailyAssessmentV6UsedFactsSchema = {
+  ...DailyAssessmentV5UsedFactsSchema,
+  required: [...DailyAssessmentV5UsedFactsSchema.required, "wellbeingSignals"],
+  properties: {
+    ...DailyAssessmentV5UsedFactsSchema.properties,
+    wellbeingSignals: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["observationId", "signal"],
+        properties: {
+          observationId: uuid,
+          signal: { enum: ["feeling_well", "fatigued", "sore", "acute_illness", "injury_concern"] }
+        }
       }
     }
   }
@@ -337,6 +358,22 @@ export const DailyAssessmentResultSchema = {
         personalBaseline: DailyAssessmentV3PersonalBaselineSchema,
         movement: DailyAssessmentMovementSchema
       }
+    },
+    {
+      type: "object", additionalProperties: false,
+      required: [
+        "state", ...Object.keys(readyProperties), "policyVersion",
+        "personalBaseline", "movement"
+      ],
+      properties: {
+        state: { const: "available" },
+        ...readyProperties,
+        recommendedAction: DailyNextActionV4Schema,
+        usedFacts: DailyAssessmentV6UsedFactsSchema,
+        policyVersion: { const: "daily-assessment-v6" },
+        personalBaseline: DailyAssessmentV3PersonalBaselineSchema,
+        movement: DailyAssessmentMovementSchema
+      }
     }
   ]
 } as const;
@@ -347,6 +384,7 @@ export type DailyAssessmentReason =
   | "resting_heart_rate_above_baseline" | "low_body_battery"
   | "recent_training_load" | "active_training_program" | "partial_nutrition"
   | "sparse_recovery_data" | "no_active_training_program"
+  | "reported_fatigue" | "reported_soreness" | "reported_illness_or_injury"
   | "sleep_below_usual" | "hrv_below_usual"
   | "resting_heart_rate_above_usual" | "body_battery_below_usual"
   | "training_load_above_usual" | "personal_trend_persistent"
@@ -434,6 +472,14 @@ export interface DailyAssessmentTrainingDensity {
 /** V5 captures the exact dated density evidence in its immutable facts. */
 export interface DailyAssessmentV5UsedFacts extends DailyAssessmentV2UsedFacts {
   readonly trainingDensity: DailyAssessmentTrainingDensity;
+}
+
+/** V6 records the exact current-day qualitative reports considered by policy. */
+export interface DailyAssessmentV6UsedFacts extends DailyAssessmentV5UsedFacts {
+  readonly wellbeingSignals: readonly {
+    readonly observationId: string;
+    readonly signal: "feeling_well" | "fatigued" | "sore" | "acute_illness" | "injury_concern";
+  }[];
 }
 
 export type DailyAssessmentV2PersonalMetric =
@@ -533,12 +579,22 @@ export interface DailyAssessmentAvailableV5 extends Omit<
   readonly usedFacts: DailyAssessmentV5UsedFacts;
 }
 
+/** V6 daily snapshot with exact Person-reported qualitative wellbeing. */
+export interface DailyAssessmentAvailableV6 extends Omit<
+  DailyAssessmentAvailableV5,
+  "policyVersion" | "usedFacts"
+> {
+  readonly policyVersion: "daily-assessment-v6";
+  readonly usedFacts: DailyAssessmentV6UsedFacts;
+}
+
 export type DailyAssessmentAvailable =
   | DailyAssessmentAvailableV1
   | DailyAssessmentAvailableV2
   | DailyAssessmentAvailableV3
   | DailyAssessmentAvailableV4
-  | DailyAssessmentAvailableV5;
+  | DailyAssessmentAvailableV5
+  | DailyAssessmentAvailableV6;
 
 /** Read result that fails explicitly when Person timezone has not been configured. */
 export type DailyAssessmentResult =

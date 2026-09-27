@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { Ajv } from "ajv";
+import addFormats from "ajv-formats";
 
-import type { CreateRecoveryObservation } from "@shape-of-you/contracts";
+import { CreateRecoveryObservationSchema, type CreateRecoveryObservation } from "@shape-of-you/contracts";
 
 import {
   evaluateRecovery,
@@ -47,6 +49,41 @@ const manualMetric: CreateRecoveryObservation = {
 };
 
 describe("Recovery domain", () => {
+  it("accepts a date-only qualitative report without invented scales or absent answers", () => {
+    const ajv = new Ajv({ strict: false });
+    const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
+    installFormats(ajv);
+    const validate = ajv.compile(CreateRecoveryObservationSchema);
+    const reported: CreateRecoveryObservation = {
+      ...manualMetric,
+      kind: "subjective",
+      observedFrom: null,
+      observedUntil: null,
+      temporalPrecision: "local_date",
+      localDate: "2026-10-25",
+      dedupeKey: "manual:wellbeing:fatigued:2026-10-25",
+      sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null },
+      detail: { type: "subjective", signal: "fatigued" }
+    };
+    expect(validate(reported), JSON.stringify(validate.errors)).toBe(true);
+    expect(validateRecoveryObservation(reported)).toMatchObject({ localDate: "2026-10-25", temporalPrecision: "local_date" });
+    expect(validate({ ...reported, detail: { type: "subjective", signal: "fatigued", fatigue: 4 } })).toBe(false);
+    expect(validate({ ...reported, detail: { type: "subjective", signal: "unknown" } })).toBe(false);
+    expect(() => validateRecoveryObservation({
+      ...reported,
+      sourceReference: { ...reported.sourceReference, channel: "import" }
+    })).toThrow("direct manual provenance");
+  });
+
+  it("does not turn qualitative wellbeing into a numeric readiness score or confidence", () => {
+    const empty = evaluateRecovery(policy, [], {
+      sessionIds: [], externalSetCount: 0, bodyweightSetCount: 0, assistedSetCount: 0
+    });
+    const reported = evaluateRecovery(policy, [{
+      id: "qualitative-1", quality: "reliable", detail: { type: "subjective", signal: "acute_illness" }
+    }], { sessionIds: [], externalSetCount: 0, bodyweightSetCount: 0, assistedSetCount: 0 });
+    expect(reported).toEqual(empty);
+  });
   it("derives the local date from the observation-time timezone across DST", () => {
     expect(validateRecoveryObservation(manualMetric).localDate).toBe("2026-10-25");
   });

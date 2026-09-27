@@ -284,6 +284,18 @@ describe("MCP HTTP adapter", () => {
       "Never call get_daily_assessment merely to discover completion during unrelated routine capture"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "For a direct, unambiguous report about the Person's current physical wellbeing, record each explicitly reported qualitative subjective signal"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Do not request a wellbeing check-in after every response"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "After a write or correction, read back that localDate and call get_daily_assessment again"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
+      "Ask one short clarification only when the date or meaning is material and unclear"
+    );
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "If the daily result provides no previous candidate, do not call completion"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
@@ -853,6 +865,13 @@ describe("MCP HTTP adapter", () => {
       "detail"
     ]);
     const recoveryDetailSchemas = recordRecoveryTool?.inputSchema.properties.detail.oneOf;
+    const qualitativeDetailSchema = recoveryDetailSchemas.find((detail: {
+      properties: { signal?: { enum: string[] } };
+    }) => detail.properties.signal !== undefined);
+    expect(qualitativeDetailSchema.required).toEqual(["type", "signal"]);
+    expect(qualitativeDetailSchema.properties.signal.enum).toContain("fatigued");
+    expect(qualitativeDetailSchema.properties).not.toHaveProperty("energy");
+    expect(recordRecoveryTool?.description).toContain("do not ask for a routine check-in");
     const sleepDetailSchema = recoveryDetailSchemas.find((detail: {
       properties: { type: { const: string } };
     }) => detail.properties.type.const === "sleep");

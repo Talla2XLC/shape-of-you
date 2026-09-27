@@ -7,7 +7,7 @@ import type {
   DailyAssessmentMovement,
   DailyAssessmentAvailableV4,
   DailyAssessmentResult,
-  DailyAssessmentV5UsedFacts,
+  DailyAssessmentV6UsedFacts,
   DailyRecommendationFeedbackList,
   DailyRecommendationCompletionAssessment,
   PersonPreferences,
@@ -20,8 +20,9 @@ import type { PersonContext } from "../application/person-context.js";
 import { DAILY_ASSESSMENT_STORE, PERSON_CONTEXT } from "../application/tokens.js";
 import { assertIanaTimezone } from "../domain/date-context.js";
 import {
-  DAILY_ASSESSMENT_V5_POLICY_VERSION,
-  dailyAssessmentV5Checksum,
+  DAILY_ASSESSMENT_V6_POLICY_VERSION,
+  applyQualitativeWellbeing,
+  dailyAssessmentV6Checksum,
   evaluateDailyAssessmentV5,
   evaluateTrainingDensity
 } from "../domain/daily-assessment.js";
@@ -375,13 +376,25 @@ export class DailyAssessmentService {
     const recentSessions = training.recentSessions.items.filter((item) => item.localDate >= recentFrom && item.localDate <= localDate);
     const recentExternal = training.recentExternalActivities.filter((item) => item.localDate >= recentFrom && item.localDate <= localDate);
     const assessment = assessments[0] ?? null;
-    const subjectiveHardStop = currentRecovery.some((item) => item.detail.type === "subjective" && (item.detail.acuteIllness || item.detail.injuryConcern));
+    const wellbeingSignals = currentRecovery
+      .filter((item): item is RecoveryObservation & {
+        readonly detail: { readonly type: "subjective"; readonly signal: DailyAssessmentV6UsedFacts["wellbeingSignals"][number]["signal"] };
+      } => item.detail.type === "subjective" && "signal" in item.detail)
+      .map((item) => ({ observationId: item.id, signal: item.detail.signal }))
+      .sort((left, right) => left.observationId.localeCompare(right.observationId));
+    const reportedHardStop = wellbeingSignals.some((item) =>
+      item.signal === "acute_illness" || item.signal === "injury_concern"
+    );
+    const subjectiveHardStop = currentRecovery.some((item) =>
+      item.detail.type === "subjective" && !("signal" in item.detail) &&
+      (item.detail.acuteIllness || item.detail.injuryConcern)
+    ) || reportedHardStop;
     const baselineRecoveryObservationIds = recoveryBaselineDays.flatMap((day) => day.observationIds);
     const baselineRecoveryAssessmentIds = recoveryBaselineDays.flatMap((day) => day.assessmentIds);
     const baselineWorkoutSessionIds = trainingBaselineDays.flatMap((day) => day.workoutSessionIds);
     const baselineExternalActivityIds = trainingBaselineDays.flatMap((day) => day.externalActivityIds);
     const unique = (values: readonly string[]) => [...new Set(values)].sort();
-    const facts: DailyAssessmentV5UsedFacts = {
+    const facts: DailyAssessmentV6UsedFacts = {
       recoveryObservationIds: unique([
         ...sortedObservations.map((item) => item.id),
         ...baselineRecoveryObservationIds
@@ -409,6 +422,7 @@ export class DailyAssessmentService {
         densityTraining.sessions,
         densityTraining.externalActivities
       ),
+      wellbeingSignals,
       dailyContextNoteIds: unique(contextNotes.items.map((item) => item.id)),
       coveragePolicyVersion: "profile-data-coverage-v1",
       coverageReadiness: {
@@ -478,7 +492,7 @@ export class DailyAssessmentService {
           localDate: date,
           values,
           baselineExcluded: excludedDates.has(date),
-          recoveryHardStop: recovery?.hardStop === true ||
+          recoveryHardStop: (date === localDate && subjectiveHardStop) || recovery?.hardStop === true ||
             recovery?.acuteIllness === true || recovery?.injuryConcern === true,
           trainingLoadIncompatible: trainingDay?.incompatibleLoadSources ?? false,
           trainingLoadSeriesKey: trainingDay?.loadSeriesKey ?? null,
@@ -499,13 +513,13 @@ export class DailyAssessmentService {
       personal.publicBaseline.comparisons.find((item) => item.metric === "training_load")
         ?.availability === "incompatible"
     ) limitations.push("training_load_baseline_unavailable");
-    const evaluation = {
+    const evaluation = applyQualitativeWellbeing(facts, {
       ...baseEvaluation,
       status: overlay.status,
       recommendedAction: overlay.action,
       reasons: [...new Set([...baseEvaluation.reasons, ...personal.reasons])],
       limitations: [...new Set(limitations)]
-    };
+    });
     const stepsComparison = personal.publicBaseline.comparisons.find((item) => item.metric === "steps");
     const movement: DailyAssessmentMovement = currentStepsEligible &&
       currentStepsObservation?.detail.type === "metric" && currentStepsAsOf !== null
@@ -531,21 +545,21 @@ export class DailyAssessmentService {
           }
         }
       : { status: "unavailable", summary: null, current: null };
-    const v5Evaluation = {
+    const v6Evaluation = {
       ...evaluation,
       recommendedAction: withDailyCompletionSpecification(evaluation.recommendedAction)
     };
-    const evidenceChecksum = dailyAssessmentV5Checksum(
+    const evidenceChecksum = dailyAssessmentV6Checksum(
       localDate,
       timezone,
       facts,
       personal.calculation,
       movement,
-      { ...v5Evaluation, personalBaseline: personal.publicBaseline }
+      { ...v6Evaluation, personalBaseline: personal.publicBaseline }
     );
     return this.store.createOrGet(personId, {
-      localDate, timezone, ...v5Evaluation, usedFacts: facts,
-      policyVersion: DAILY_ASSESSMENT_V5_POLICY_VERSION,
+      localDate, timezone, ...v6Evaluation, usedFacts: facts,
+      policyVersion: DAILY_ASSESSMENT_V6_POLICY_VERSION,
       evidenceChecksum,
       personalBaseline: personal.publicBaseline,
       personalBaselineCalculation: personal.calculation,
@@ -625,7 +639,9 @@ function evaluateCompletionCriterion(
     return unknownCriterion(criterion);
   }
   if (criterion.type === "recovery_check_in_recorded") {
-    const fact = facts.observations.find((item) => isFresh(item.createdAt) && item.detail.type === "subjective");
+    const fact = facts.observations.find((item) =>
+      isFresh(item.createdAt) && item.detail.type === "subjective" && !("signal" in item.detail)
+    );
     return fact ? result("satisfied", fact.quality === "reliable" ? "complete" : "partial", fact.observedUntil ?? fact.observedFrom ?? fact.createdAt, "recovery_observation", fact.id,
       fact.quality === "reliable" ? [] : ["source_partial"]) : unknownCriterion(criterion);
   }

@@ -40,6 +40,13 @@ payload. Wearable `sleep_score` is a provider-neutral numeric metric with the
 existing `score` unit and a `0..100` range. It remains separate from the
 nullable subjective `sleepQuality` scale of `1..5`.
 
+Subjective detail also accepts one direct manual qualitative report:
+`feeling_well`, `fatigued`, `sore`, `acute_illness`, or `injury_concern`. It is
+disjoint from the complete scored check-in, uses the same correction lifecycle,
+and never fills missing scales or boolean answers. Qualitative reports do not
+enter the numeric Recovery scorer or count as completed scored check-ins. See
+the [qualitative wellbeing ADR](../../adr/20260927-record-qualitative-wellbeing-in-recovery-and-reassess.md).
+
 Natural text or screenshot capture uses the existing MCP Recovery boundary.
 The connector accepts exact local-date facts without requiring clients to
 construct nullable ownership, provenance, or interval bookkeeping, then

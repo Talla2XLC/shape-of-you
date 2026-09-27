@@ -5,6 +5,7 @@ import type {
   DailyAssessmentTrainingDensity,
   DailyAssessmentUsedFacts,
   DailyAssessmentV5UsedFacts,
+  DailyAssessmentV6UsedFacts,
   ExternalActivitySummary,
   WorkoutSession,
   DailyNextAction
@@ -25,6 +26,7 @@ export const DAILY_ASSESSMENT_V2_POLICY_VERSION = "daily-assessment-v2" as const
 export const DAILY_ASSESSMENT_V3_POLICY_VERSION = "daily-assessment-v3" as const;
 export const DAILY_ASSESSMENT_V4_POLICY_VERSION = "daily-assessment-v4" as const;
 export const DAILY_ASSESSMENT_V5_POLICY_VERSION = "daily-assessment-v5" as const;
+export const DAILY_ASSESSMENT_V6_POLICY_VERSION = "daily-assessment-v6" as const;
 
 /** Counts substantive training on five fully completed Person-local dates. */
 export function evaluateTrainingDensity(
@@ -86,6 +88,41 @@ export function evaluateDailyAssessmentV5(facts: DailyAssessmentV5UsedFacts): Da
     recommendedAction,
     alternatives: base.alternatives.filter((item) => item.type !== recommendedAction.type)
   };
+}
+
+/** Applies explicit qualitative reports after the existing conservative decision. */
+export function applyQualitativeWellbeing(
+  facts: DailyAssessmentV6UsedFacts,
+  evaluation: DailyAssessmentEvaluation
+): DailyAssessmentEvaluation {
+  const signals = new Set(facts.wellbeingSignals.map((item) => item.signal));
+  const hardStop = signals.has("acute_illness") || signals.has("injury_concern");
+  const caution = signals.has("fatigued") || signals.has("sore");
+  const reasons = [...new Set([
+    ...evaluation.reasons,
+    ...(hardStop ? ["reported_illness_or_injury" as const] : []),
+    ...(signals.has("fatigued") ? ["reported_fatigue" as const] : []),
+    ...(signals.has("sore") ? ["reported_soreness" as const] : [])
+  ])];
+  if (hardStop) {
+    return {
+      ...evaluation,
+      status: "recovery_priority",
+      reasons,
+      recommendedAction: action("recovery_first", "Сегодня поставь восстановление первым действием и не повышай тренировочную нагрузку."),
+      alternatives: evaluation.alternatives.filter((item) => item.type !== "follow_active_program")
+    };
+  }
+  if (caution && evaluation.status !== "recovery_priority" && evaluation.status !== "insufficient_data") {
+    return {
+      ...evaluation,
+      status: "caution",
+      reasons,
+      recommendedAction: action("recovery_first", "Сегодня сохрани консервативную нагрузку и не выполняй прогрессию."),
+      alternatives: evaluation.alternatives.filter((item) => item.type !== "follow_active_program")
+    };
+  }
+  return { ...evaluation, reasons };
 }
 
 export interface DailyAssessmentEvaluation {
@@ -302,6 +339,26 @@ export function dailyAssessmentV5Checksum(
 ): string {
   return createHash("sha256").update(JSON.stringify({
     policyVersion: DAILY_ASSESSMENT_V5_POLICY_VERSION,
+    localDate,
+    timezone,
+    facts,
+    personalCalculation,
+    movement,
+    selectedDecision
+  })).digest("hex");
+}
+
+/** Stable v6 checksum including exact qualitative reports and selected action. */
+export function dailyAssessmentV6Checksum(
+  localDate: string,
+  timezone: string,
+  facts: DailyAssessmentV6UsedFacts,
+  personalCalculation: unknown,
+  movement: unknown,
+  selectedDecision: unknown
+): string {
+  return createHash("sha256").update(JSON.stringify({
+    policyVersion: DAILY_ASSESSMENT_V6_POLICY_VERSION,
     localDate,
     timezone,
     facts,

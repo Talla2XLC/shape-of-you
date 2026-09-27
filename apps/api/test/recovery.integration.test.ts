@@ -169,6 +169,61 @@ afterAll(async () => {
 });
 
 describe("Recovery PostgreSQL vertical", () => {
+  it("enforces disjoint qualitative and scored subjective rows in PostgreSQL", async () => {
+    const sqlCheckPersonId = "00000000-0000-4000-8000-000000000139";
+    await database.pool.query(
+      "insert into persons (id, kind, status) values ($1, 'real', 'active')",
+      [sqlCheckPersonId]
+    );
+    const common = {
+      kind: "subjective" as const,
+      observedFrom: null,
+      observedUntil: null,
+      temporalPrecision: "local_date" as const,
+      localDate: "2026-09-27",
+      timezone: "Europe/Belgrade",
+      quality: "reliable" as const,
+      connectionId: null,
+      consentId: null,
+      sourceReference: {
+        channel: "manual" as const,
+        externalSystem: null,
+        externalRecordId: null,
+        occurredAt: null
+      }
+    };
+    const qualitative = await repository.createObservation(sqlCheckPersonId, {
+      ...common,
+      dedupeKey: "manual:qualitative:sql-check",
+      detail: { type: "subjective", signal: "fatigued" }
+    });
+    const scored = await repository.createObservation(sqlCheckPersonId, {
+      ...common,
+      dedupeKey: "manual:scored:sql-check",
+      detail: {
+        type: "subjective", energy: 3, fatigue: 3, muscleSoreness: 3,
+        stress: 3, sleepQuality: 3, acuteIllness: false, injuryConcern: false
+      }
+    });
+
+    await expect(database.pool.query(
+      "update recovery_subjective_details set energy = 3 where observation_id = $1",
+      [qualitative.observation.id]
+    )).rejects.toMatchObject({ code: "23514" });
+    await expect(database.pool.query(
+      "update recovery_subjective_details set acute_illness = false where observation_id = $1",
+      [qualitative.observation.id]
+    )).rejects.toMatchObject({ code: "23514" });
+    await expect(database.pool.query(
+      "update recovery_subjective_details set injury_concern = null where observation_id = $1",
+      [scored.observation.id]
+    )).rejects.toMatchObject({ code: "23514" });
+    expect((await repository.findObservation(sqlCheckPersonId, qualitative.observation.id))?.detail)
+      .toEqual({ type: "subjective", signal: "fatigued" });
+    expect((await repository.findObservation(sqlCheckPersonId, scored.observation.id))?.detail)
+      .toEqual(scored.observation.detail);
+  });
+
   it("does not inherit delivery evidence across consent generations and preserves idempotent corrections", async () => {
     const integrations = new IntegrationRepository(database);
     const training = new TrainingRepository(database);

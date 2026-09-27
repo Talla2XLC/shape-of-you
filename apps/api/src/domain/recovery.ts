@@ -3,7 +3,8 @@ import type {
   RecoveryAssessmentDataQuality,
   RecoveryObservationDetail,
   RecoveryObservationQuality,
-  RecoveryRiskLevel
+  RecoveryRiskLevel,
+  SubjectiveObservationDetail
 } from "@shape-of-you/contracts";
 
 import { DomainValidationError } from "./errors.js";
@@ -95,6 +96,10 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
   if (input.kind !== input.detail.type) {
     throw new DomainValidationError("Observation kind must match its typed detail");
   }
+  if (input.detail.type === "subjective" && "signal" in input.detail &&
+      input.sourceReference.channel !== "manual") {
+    throw new DomainValidationError("Qualitative wellbeing requires direct manual provenance");
+  }
   const connected = input.sourceReference.channel === "device" || input.sourceReference.channel === "account";
   if (connected !== (input.connectionId !== null && input.consentId !== null)) {
     throw new DomainValidationError(
@@ -157,10 +162,16 @@ export function evaluateRecovery(
   observations: readonly RecoveryObservationEvidence[],
   training: RecoveryTrainingEvidence
 ): RecoveryEvaluation {
-  const subjective = [...observations]
+  const scoredObservations = observations.filter((item) =>
+    item.detail.type !== "subjective" || !("signal" in item.detail)
+  );
+  const subjective = [...scoredObservations]
     .reverse()
-    .find((item) => item.detail.type === "subjective")?.detail;
-  const sleep = [...observations]
+    .map((item) => item.detail)
+    .find((detail): detail is SubjectiveObservationDetail =>
+      detail.type === "subjective" && !("signal" in detail)
+    );
+  const sleep = [...scoredObservations]
     .reverse()
     .find((item) => item.detail.type === "sleep")?.detail;
 
@@ -205,8 +216,8 @@ export function evaluateRecovery(
         ? "moderate"
         : "low";
 
-  const count = observations.length;
-  const hasPoor = observations.some((item) => item.quality === "poor");
+  const count = scoredObservations.length;
+  const hasPoor = scoredObservations.some((item) => item.quality === "poor");
   const dataQuality: RecoveryAssessmentDataQuality =
     count < policy.minimumObservations
       ? "insufficient"

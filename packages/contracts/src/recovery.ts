@@ -334,7 +334,14 @@ export interface SubjectiveObservationDetail {
   readonly injuryConcern: boolean;
 }
 
-export type RecoveryObservationDetail = SleepObservationDetail | MetricObservationDetail | SubjectiveObservationDetail;
+/** One directly reported qualitative state without inferred numeric scores. */
+export interface QualitativeSubjectiveObservationDetail {
+  readonly type: "subjective";
+  readonly signal: "feeling_well" | "fatigued" | "sore" | "acute_illness" | "injury_concern";
+}
+
+export type RecoveryObservationDetail = SleepObservationDetail | MetricObservationDetail |
+  SubjectiveObservationDetail | QualitativeSubjectiveObservationDetail;
 
 export const SleepObservationDetailSchema = {
   type: "object",
@@ -403,6 +410,16 @@ export const SubjectiveObservationDetailSchema = {
   }
 } as const;
 
+export const QualitativeSubjectiveObservationDetailSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["type", "signal"],
+  properties: {
+    type: { const: "subjective" },
+    signal: { enum: ["feeling_well", "fatigued", "sore", "acute_illness", "injury_concern"] }
+  }
+} as const;
+
 const observationInputProperties = {
   kind: RecoveryObservationKindSchema,
   observedFrom: { anyOf: [dateTime, { type: "null" }] },
@@ -416,7 +433,8 @@ const observationInputProperties = {
   dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
   sourceReference: RecoverySourceReferenceInputSchema,
   detail: {
-    oneOf: [SleepObservationDetailSchema, MetricObservationDetailSchema, SubjectiveObservationDetailSchema]
+    oneOf: [SleepObservationDetailSchema, MetricObservationDetailSchema, SubjectiveObservationDetailSchema,
+      QualitativeSubjectiveObservationDetailSchema]
   }
 } as const;
 
@@ -709,7 +727,8 @@ export const CurrentRecoveryObservationSchema = {
     timezone: { type: "string", minLength: 1, maxLength: 64 },
     quality: RecoveryObservationQualitySchema,
     detail: {
-      oneOf: [SleepObservationDetailSchema, MetricObservationDetailSchema, SubjectiveObservationDetailSchema]
+      oneOf: [SleepObservationDetailSchema, MetricObservationDetailSchema, SubjectiveObservationDetailSchema,
+        QualitativeSubjectiveObservationDetailSchema]
     }
   }
 } as const;

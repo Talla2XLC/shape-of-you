@@ -2,13 +2,16 @@ import { describe, expect, it, vi } from "vitest";
 import { Ajv } from "ajv";
 import addFormats from "ajv-formats";
 
-import { TrainingProgressionGuidanceSchema, type DailyAssessmentUsedFacts, type DailyAssessmentV5UsedFacts } from "@shape-of-you/contracts";
+import { TrainingProgressionGuidanceSchema, type DailyAssessmentUsedFacts, type DailyAssessmentV5UsedFacts,
+  type DailyAssessmentV6UsedFacts } from "@shape-of-you/contracts";
 
 import {
   dailyAssessmentChecksum,
   dailyAssessmentV2Checksum,
   dailyAssessmentV3Checksum,
   dailyAssessmentV5Checksum,
+  dailyAssessmentV6Checksum,
+  applyQualitativeWellbeing,
   evaluateDailyAssessment,
   evaluateDailyAssessmentV5,
   evaluateTrainingDensity
@@ -26,6 +29,69 @@ const programVersionId = "00000000-0000-4000-8000-000000000101";
 const densityDates = [
   "2026-09-21", "2026-09-22", "2026-09-23", "2026-09-24", "2026-09-25"
 ];
+
+describe("daily assessment v6 reported wellbeing", () => {
+  const withSignal = (signal: DailyAssessmentV6UsedFacts["wellbeingSignals"][number]["signal"]): DailyAssessmentV6UsedFacts => ({
+    ...facts(),
+    dailyContextNoteIds: [],
+    trainingDensity: {
+      from: densityDates[0]!, to: densityDates[4]!,
+      completedDayCount: 0, qualifyingLocalDates: []
+    },
+    wellbeingSignals: [{ observationId: "00000000-0000-4000-8000-000000000139", signal }]
+  });
+
+  it("makes fatigue or soreness cautious without inventing scored recovery", () => {
+    for (const signal of ["fatigued", "sore"] as const) {
+      const evidence = withSignal(signal);
+      const result = applyQualitativeWellbeing(evidence, evaluateDailyAssessmentV5(evidence));
+      expect(result).toMatchObject({ status: "caution", recommendedAction: { type: "recovery_first" } });
+      expect(result.reasons).toContain(signal === "fatigued" ? "reported_fatigue" : "reported_soreness");
+      expect(dailyAssessmentV6Checksum("2026-09-27", "Europe/Belgrade", evidence, {}, {}, result))
+        .not.toBe(dailyAssessmentV6Checksum("2026-09-27", "Europe/Belgrade", {
+          ...evidence, wellbeingSignals: []
+        }, {}, {}, result));
+    }
+  });
+
+  it("keeps insufficient evidence insufficient after fatigue or soreness", () => {
+    for (const signal of ["fatigued", "sore"] as const) {
+      const evidence = {
+        ...withSignal(signal),
+        summary: {
+          ...withSignal(signal).summary,
+          recoveryRiskLevel: null,
+          sleepMinutes: null,
+          hrvMs: null,
+          restingHeartRateBpm: null,
+          bodyBattery: null,
+          bodyBatteryMin: null,
+          bodyBatteryMax: null
+        }
+      };
+      const result = applyQualitativeWellbeing(evidence, evaluateDailyAssessmentV5(evidence));
+      expect(result.status).toBe("insufficient_data");
+      expect(result.recommendedAction.type).toBe("record_recovery_check_in");
+      expect(result.reasons).toContain(signal === "fatigued" ? "reported_fatigue" : "reported_soreness");
+    }
+  });
+
+  it("treats illness and injury concern as hard stops and never lets a good report lift one", () => {
+    for (const signal of ["acute_illness", "injury_concern"] as const) {
+      const evidence = withSignal(signal);
+      expect(applyQualitativeWellbeing(evidence, evaluateDailyAssessmentV5(evidence)))
+        .toMatchObject({ status: "recovery_priority", recommendedAction: { type: "recovery_first" } });
+    }
+    const good = withSignal("feeling_well");
+    const restricted = evaluateDailyAssessmentV5({
+      ...good,
+      summary: { ...good.summary, recoveryHardStop: true }
+    });
+    expect(applyQualitativeWellbeing(good, restricted)).toMatchObject({ status: "recovery_priority" });
+    expect(applyQualitativeWellbeing(good, evaluateDailyAssessmentV5(good)))
+      .toEqual(evaluateDailyAssessmentV5(good));
+  });
+});
 
 describe("daily assessment v5 training density", () => {
   it("counts five completed local days once each and ignores standalone short warmups", () => {
