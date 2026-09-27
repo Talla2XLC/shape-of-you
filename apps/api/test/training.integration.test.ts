@@ -1086,6 +1086,8 @@ describe("Training PostgreSQL vertical", () => {
     };
     await dailyRepository.setTimezone(personD, "Europe/Belgrade");
     const personDApp = await buildApp({ config: personDConfig, database });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-24T12:00:00.000Z"));
     try {
       const personDFastify = getFastifyInstance(personDApp);
       const localDate = derivePersonLocalDate("Europe/Belgrade");
@@ -1188,6 +1190,7 @@ describe("Training PostgreSQL vertical", () => {
         to: localDate
       })).rejects.toBeInstanceOf(DailyAssessmentEvidenceChangedError);
     } finally {
+      vi.useRealTimers();
       await personDApp.close();
     }
 
