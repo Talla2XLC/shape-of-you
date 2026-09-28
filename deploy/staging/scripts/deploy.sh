@@ -7,6 +7,7 @@ COMPOSE_FILE=${COMPOSE_FILE:-"$PACKAGE_DIR/compose.yaml"}
 IDENTITY_COMPOSE_FILE=${IDENTITY_COMPOSE_FILE:-"$PACKAGE_DIR/compose.identity.yaml"}
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-shape-of-you-staging}
 DEPLOY_ROOT=${DEPLOY_ROOT:-/opt/shape-of-you/staging}
+RUNTIME_ENV=${RUNTIME_ENV:-/etc/shape-of-you/staging/api.env}
 RELEASES_DIR="$DEPLOY_ROOT/releases"
 CURRENT_LINK="$DEPLOY_ROOT/current"
 PREVIOUS_LINK="$DEPLOY_ROOT/previous"
@@ -19,6 +20,7 @@ identity_enabled=false
 identity_update_required=false
 rollback_schema_compatible=false
 rollback_client_compatible=false
+rollback_denial_safe=true
 active_migration_container=
 DOCKER_DIAGNOSTIC_TIMEOUT_SECONDS=15
 DOCKER_CLEANUP_TIMEOUT_SECONDS=30
@@ -90,6 +92,10 @@ fi
 if [ "$identity_enabled" = "false" ] ||
   [ "$IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE" = "true" ]; then
   rollback_client_compatible=true
+fi
+if [ -f "$RUNTIME_ENV" ] &&
+  grep -Eq '^IDENTITY_OAUTH_DENIED_KIDS=.+$' "$RUNTIME_ENV"; then
+  rollback_denial_safe=false
 fi
 
 case "$DEPLOYMENT_TOPOLOGY" in
@@ -374,7 +380,8 @@ if ! RELEASE_ID="$RELEASE_ID" \
   sh "$SCRIPT_DIR/smoke.sh"; then
   printf '%s\n' "Deployment smoke failed." >&2
 
-  if [ "$rollback_schema_compatible" = "true" ] &&
+  if [ "$rollback_denial_safe" = "true" ] &&
+    [ "$rollback_schema_compatible" = "true" ] &&
     [ "$rollback_client_compatible" = "true" ] && [ -L "$CURRENT_LINK" ]; then
     previous_release=$(basename "$(readlink -f "$CURRENT_LINK")")
     printf '%s\n' "Attempting application rollback to $previous_release." >&2
@@ -382,7 +389,7 @@ if ! RELEASE_ID="$RELEASE_ID" \
       RUN_WRITE_SMOKE=false sh "$SCRIPT_DIR/rollback.sh" "$previous_release"
   else
     printf '%s\n' \
-      "Automatic rollback is disabled because schema or predefined OAuth client compatibility is not confirmed." >&2
+      "Automatic rollback is disabled because API key denial or schema/client compatibility forbids it." >&2
   fi
 
   exit 1

@@ -128,7 +128,8 @@ plan-only pushes skip the whole publication workflow. Successful publication
 uploads `staging-release-candidate-<full-sha>` for 30 days. The artifact contains
 only repository/run provenance, exact release SHA, published digests, the
 Identity update decision, and the expected deployed base release for Identity
-reuse; it contains no credentials or runtime configuration.
+reuse; newer candidates also declare API denied-`kid` capability version `1`.
+It contains no credentials or runtime configuration.
 
 To deploy the exact current `main`, manually dispatch `Promote staging` with
 that one full 40-character SHA. The workflow resolves one successful matching
@@ -140,7 +141,13 @@ commit advanced `main` after the last candidate, first manually dispatch
 require exact current `origin/main`, not an ancestor. Direct `Deploy staging`
 dispatch remains the digest-based recovery path and defaults to full Identity;
 it supplies full commit SHA, all image digests, separate API and Identity
-schema compatibility flags, and the write-smoke choice.
+schema compatibility flags, and the write-smoke choice. Both deployment paths
+independently verify the API digest against an exact successful `main` publish
+run and its candidate before SSH. Direct recovery cannot substitute an arbitrary
+API digest. A legacy candidate without the capability field can still be
+deployed for recovery, but cannot authorize Identity incident maintenance.
+An expired or missing candidate fails closed and requires a new verified
+publication or a separately approved recovery decision.
 Fitness Tracker
 imports are not part of deployment; controlled runs use the operator
 workstation workflow documented in the migration strategy.
@@ -280,6 +287,37 @@ historical sequence prevented the new workflow input contract from racing the
 old installed root wrapper; the stable bootstrap removes this class of
 steady-state rollout race.
 
+### Identity signing-key incident maintenance
+
+The repository provides an operator-only, root-run
+`deploy/staging/scripts/identity-incident-maintenance.sh` with `stage`,
+`activate`, `retire`, and `resume` phases. This path has passed a local simulated
+drill; it has not been run on staging. Each real phase, candidate runtime file,
+key rotation, and authority revocation requires explicit operational approval.
+Candidate `api.env` and `identity.env` files must be complete, root-owned mode
+`0600`, and kept outside Git. Do not print or log their values.
+
+`stage <api-candidate> <identity-candidate> <old-kid> <new-kid>` requires a
+deployed API digest bound to a successful CI publication candidate with deny
+capability version `1`. It first installs the API deny policy and replacement
+browser-session cookie key, recreates API from the pinned release digest, and
+checks readiness and deny behavior in that container. It then starts Identity
+in JWKS-only mode, confirms external metadata, usable old/new ES256 JWKs,
+`/ready=503` and token issuance `503`, and globally revokes Identity sessions,
+session authorizations, and refresh families. The incident marker records the
+first successful external JWKS observation.
+
+`activate <identity-candidate>` waits the full configured publication interval
+(minimum 660 seconds) from that observation. `retire <identity-candidate>`
+waits the verification overlap enforced by Identity lifecycle metadata and
+confirms the old key is absent externally. `resume <identity-candidate>`
+returns issuance and `/ready=200` while retaining API deny. A failed phase
+leaves a `preparing-*` marker and stops Identity for investigation. Active
+maintenance blocks ordinary deployment and all rollback; active deny also
+blocks rollback. After `resume`, a full verified Identity deployment with the
+same deny policy rebaselines the runtime and immutable release manifest and
+removes the marker. Ordinary Promote readiness and smoke are never relaxed.
+
 ### TLS activation and renewal
 
 The first TLS-capable deployment verifies both DNS answers, the external
@@ -345,6 +383,7 @@ This does not affect unrelated Compose/PostgreSQL.
 - [Manual immutable staging promotion](../../adr/20260922-promote-staging-manually-with-immutable-candidates.md)
 - [End-to-end staging migration bounds](../../adr/20260917-make-staging-migration-bounds-end-to-end.md)
 - [Component-aware Identity delivery and bounded readiness](../../adr/20260921-skip-unchanged-identity-delivery-and-bound-readiness-probes.md)
+- [Identity incident maintenance](../../adr/20260928-separate-identity-incident-maintenance-from-normal-staging-release.md)
 - [Shared Host/SNI ingress](../../adr/20260805-route-shared-vm-ingress-by-host-and-sni.md)
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
 

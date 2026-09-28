@@ -9,8 +9,10 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 CONTROL_STAGING=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 RUNTIME_ENV=/etc/shape-of-you/staging/api.env
 IDENTITY_RUNTIME_ENV=/etc/shape-of-you/staging/identity.env
+IDENTITY_INCIDENT_MARKER=/etc/shape-of-you/staging/identity-incident.state
 RELEASE_ENV=
 DOCKER_CONFIG_DIR=
+INCIDENT_REBASELINE=false
 
 cleanup() {
   if [ -n "$RELEASE_ENV" ]; then
@@ -37,6 +39,8 @@ command -v sha256sum >/dev/null 2>&1 ||
 
 RELEASE_ID=
 API_DIGEST=
+API_SOURCE_RUN_ID=
+API_IDENTITY_KID_DENY_CAPABILITY_VERSION=
 DEPLOY_IDENTITY=
 EXPECTED_STAGING_BASE=
 IDENTITY_IMAGE=
@@ -87,7 +91,7 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
   esac
 
   case "$input_key" in
-    RELEASE_ID|API_DIGEST|DEPLOY_IDENTITY|EXPECTED_STAGING_BASE|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|IDENTITY_TOTP_ACTIVE_KEY_ID|IDENTITY_TOTP_ENCRYPTION_KEYS|IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID|IDENTITY_OAUTH_SIGNING_KEYS|IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS|IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS|IDENTITY_OAUTH_COOKIE_KEYS|IDENTITY_CHATGPT_REDIRECT_URI|IDENTITY_WEB_REDIRECT_URI|API_BROWSER_SESSION_KEYS|IDENTITY_OAUTH_DENIED_KIDS|INTERVALS_ICU_CLIENT_ID|INTERVALS_ICU_CLIENT_SECRET|INTERVALS_ICU_REDIRECT_URI|INTEGRATION_ENCRYPTION_KEY_RING|INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID|GHCR_TOKEN)
+    RELEASE_ID|API_DIGEST|API_SOURCE_RUN_ID|API_IDENTITY_KID_DENY_CAPABILITY_VERSION|DEPLOY_IDENTITY|EXPECTED_STAGING_BASE|IDENTITY_DIGEST|EDGE_DIGEST|CERTBOT_DIGEST|ACME_EMAIL|PUBLIC_IPV4|DEPLOYMENT_TOPOLOGY|SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_SCHEMA_BACKWARD_COMPATIBLE|IDENTITY_OAUTH_CLIENTS_BACKWARD_COMPATIBLE|RUN_WRITE_SMOKE|GHCR_NAMESPACE|GHCR_ACTOR|CONTROL_SHA|DATABASE_URL|IDENTITY_DATABASE_URL|IDENTITY_TOTP_ACTIVE_KEY_ID|IDENTITY_TOTP_ENCRYPTION_KEYS|IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID|IDENTITY_OAUTH_SIGNING_KEYS|IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS|IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS|IDENTITY_OAUTH_COOKIE_KEYS|IDENTITY_CHATGPT_REDIRECT_URI|IDENTITY_WEB_REDIRECT_URI|API_BROWSER_SESSION_KEYS|IDENTITY_OAUTH_DENIED_KIDS|INTERVALS_ICU_CLIENT_ID|INTERVALS_ICU_CLIENT_SECRET|INTERVALS_ICU_REDIRECT_URI|INTEGRATION_ENCRYPTION_KEY_RING|INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID|GHCR_TOKEN)
       case "$seen_keys" in
         *" $input_key "*) fail "Duplicate input: $input_key." ;;
       esac
@@ -95,6 +99,8 @@ while IFS= read -r input_line || [ -n "$input_line" ]; do
       case "$input_key" in
         RELEASE_ID) RELEASE_ID=$input_value ;;
         API_DIGEST) API_DIGEST=$input_value ;;
+        API_SOURCE_RUN_ID) API_SOURCE_RUN_ID=$input_value ;;
+        API_IDENTITY_KID_DENY_CAPABILITY_VERSION) API_IDENTITY_KID_DENY_CAPABILITY_VERSION=$input_value ;;
         DEPLOY_IDENTITY) DEPLOY_IDENTITY=$input_value ;;
         EXPECTED_STAGING_BASE) EXPECTED_STAGING_BASE=$input_value ;;
         IDENTITY_DIGEST) IDENTITY_DIGEST=$input_value ;;
@@ -139,6 +145,8 @@ done
 
 [ -n "$RELEASE_ID" ] || fail 'RELEASE_ID is required.'
 [ -n "$API_DIGEST" ] || fail 'API_DIGEST is required.'
+[ -n "$API_SOURCE_RUN_ID" ] || fail 'API_SOURCE_RUN_ID is required.'
+[ -n "$API_IDENTITY_KID_DENY_CAPABILITY_VERSION" ] || fail 'API_IDENTITY_KID_DENY_CAPABILITY_VERSION is required.'
 [ -n "$DEPLOY_IDENTITY" ] || fail 'DEPLOY_IDENTITY is required.'
 [ -n "$EDGE_DIGEST" ] || fail 'EDGE_DIGEST is required.'
 [ -n "$CERTBOT_DIGEST" ] || fail 'CERTBOT_DIGEST is required.'
@@ -157,10 +165,28 @@ done
 printf '%s\n' "$RELEASE_ID" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid RELEASE_ID.'
 printf '%s\n' "$CONTROL_SHA" | grep -Eq '^[0-9a-f]{40}$' || fail 'Invalid CONTROL_SHA.'
 printf '%s\n' "$API_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$' || fail 'Invalid API_DIGEST.'
+printf '%s\n' "$API_SOURCE_RUN_ID" | grep -Eq '^[1-9][0-9]*$' || fail 'Invalid API_SOURCE_RUN_ID.'
+printf '%s\n' "$API_IDENTITY_KID_DENY_CAPABILITY_VERSION" | grep -Eq '^(0|1)$' || fail 'Invalid API deny capability version.'
 case "$DEPLOY_IDENTITY" in
   true|false) ;;
   *) fail 'Invalid DEPLOY_IDENTITY.' ;;
 esac
+if [ -e "$IDENTITY_INCIDENT_MARKER" ] || [ -L "$IDENTITY_INCIDENT_MARKER" ]; then
+  [ -f "$IDENTITY_INCIDENT_MARKER" ] && [ ! -L "$IDENTITY_INCIDENT_MARKER" ] &&
+    [ "$(stat -c '%u:%a' "$IDENTITY_INCIDENT_MARKER")" = '0:600' ] ||
+    fail 'Identity incident marker is unsafe.'
+  grep -qx 'phase=resumed' "$IDENTITY_INCIDENT_MARKER" ||
+    fail 'Normal deployment is blocked during Identity incident maintenance.'
+  [ "$DEPLOY_IDENTITY" = true ] ||
+    fail 'Incident rebaseline requires a full Identity deployment.'
+  incident_old_kid=$(awk -F= '$1 == "old_kid" { count++; value = $2 } END { if (count != 1) exit 1; print value }' "$IDENTITY_INCIDENT_MARKER") ||
+    fail 'Identity incident marker has no unique old key id.'
+  printf '%s\n' "$incident_old_kid" | grep -Eq '^[A-Za-z0-9._-]{1,64}$' ||
+    fail 'Identity incident marker has an invalid old key id.'
+  printf '%s' "$IDENTITY_OAUTH_DENIED_KIDS" | grep -Fq "\"$incident_old_kid\"" ||
+    fail 'Incident rebaseline must retain the API key deny policy.'
+  INCIDENT_REBASELINE=true
+fi
 
 read_current_release_value() {
   current_key=$1
@@ -179,6 +205,20 @@ read_current_release_value() {
   fi
   printf '%s\n' "$current_value"
 }
+
+if [ -f "$RUNTIME_ENV" ]; then
+  current_deny_policy=$(awk '
+    index($0, "IDENTITY_OAUTH_DENIED_KIDS=") == 1 {
+      count += 1
+      value = substr($0, length("IDENTITY_OAUTH_DENIED_KIDS=") + 1)
+    }
+    END { if (count > 1) exit 1; print value }
+  ' "$RUNTIME_ENV") || fail 'Current API deny policy is duplicated.'
+  if [ -n "$current_deny_policy" ] &&
+    [ "$IDENTITY_OAUTH_DENIED_KIDS" != "$current_deny_policy" ]; then
+    fail 'Normal deployment cannot remove or alter active API key denial.'
+  fi
+fi
 
 if [ "$DEPLOY_IDENTITY" = false ]; then
   printf '%s\n' "$EXPECTED_STAGING_BASE" | grep -Eq '^[0-9a-f]{40}$' ||
@@ -400,6 +440,8 @@ cat > "$RELEASE_ENV" <<EOF
 RELEASE_ID=$RELEASE_ID
 API_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-api
 API_DIGEST=$API_DIGEST
+API_SOURCE_RUN_ID=$API_SOURCE_RUN_ID
+API_IDENTITY_KID_DENY_CAPABILITY_VERSION=$API_IDENTITY_KID_DENY_CAPABILITY_VERSION
 EDGE_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-edge
 EDGE_DIGEST=$EDGE_DIGEST
 CERTBOT_IMAGE=ghcr.io/$GHCR_NAMESPACE/shape-of-you-certbot
@@ -434,3 +476,7 @@ DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
   sh "$CONTROL_STAGING/scripts/deploy.sh" "$RELEASE_ENV"
 
 sh "$JOURNAL_SYNC_INSTALLER"
+
+if [ "$INCIDENT_REBASELINE" = true ]; then
+  rm -f "$IDENTITY_INCIDENT_MARKER"
+fi

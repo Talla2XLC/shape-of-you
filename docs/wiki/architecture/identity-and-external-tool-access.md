@@ -119,11 +119,18 @@ Identity receives private ES256 keys through a versioned runtime key ring.
 PostgreSQL stores only public SPKI material, lifecycle metadata, and an opaque
 handle. A temporary accepted
 [single-VM key decision](../../adr/20260928-temporarily-use-host-managed-identity-signing-keys.md)
-permits a protected host-managed ring for the first production stage. Key
-rotation publishes a new `kid` before activation, retains the previous key
-for a bounded verification overlap, and requires retirement and an API-local
-emergency deny policy on both current Identity JWT validation paths before
-production. Host compromise and VM loss remain accepted risks.
+permits a protected host-managed ring for the first production stage. The
+repository implementation stages a replacement `kid` in JWKS before
+activation, waits at least 660 seconds after externally observed publication,
+retains the previous key for at least 660 seconds after signing stops, then
+retires it without republishing. A versioned API-local denied-`kid` policy is
+checked by both MCP bearer validation and the browser OAuth callback. An
+operator-only [incident maintenance path](../../adr/20260928-separate-identity-incident-maintenance-from-normal-staging-release.md)
+halts issuance while preserving public metadata/JWKS, revokes Identity
+sessions and refresh authority, and blocks normal deployment and rollback
+until phased recovery completes. Its local drill has passed; an external
+staging drill and independent Security Review remain before production. Host
+compromise and VM loss remain accepted risks.
 
 Login is passkey-first through WebAuthn, initially implemented with pinned
 `@simplewebauthn/server` 13.3.2 behind a project-owned adapter. Accounts can
@@ -501,6 +508,7 @@ lifecycle.
 - [User and Person separation](../../adr/20260730-separate-user-access-from-person-data-ownership.md)
 - [Service autonomy](../../adr/20260728-deployable-service-autonomy.md)
 - [Identity relational model](../../adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
+- [Identity incident maintenance](../../adr/20260928-separate-identity-incident-maintenance-from-normal-staging-release.md)
 - [Passkey-bound sliding sessions](../../adr/20260806-use-passkey-bound-sliding-identity-sessions.md)
 - [Initial passkey bootstrap and CSRF](../../adr/20260806-bootstrap-first-passkey-and-require-origin-csrf-defense.md)
 - [TOTP emergency recovery](../../adr/20260806-use-totp-for-emergency-passkey-recovery.md)
@@ -522,8 +530,8 @@ lifecycle.
 
 ## Open questions
 
-- Measured signing-key overlap and retirement intervals; emergency deny
-  implementation and drill.
+- External staging incident drill, Security Review, and verification of measured
+  signing-key cache/overlap behavior outside local tests.
 - Production hostname, single-VM backup freshness and retention, and security
   monitoring. VM-loss RPO/RTO are not guaranteed under the temporary risk
   decision.

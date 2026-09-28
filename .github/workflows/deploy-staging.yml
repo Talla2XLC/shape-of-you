@@ -96,6 +96,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: read
   contents: read
   packages: read
 
@@ -128,6 +129,11 @@ jobs:
       RUN_WRITE_SMOKE: ${{ inputs.run_write_smoke }}
 
     steps:
+      - name: Check out current main control tree
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
       - name: Validate deployment inputs
         shell: bash
         run: |
@@ -151,6 +157,16 @@ jobs:
           test "$VM_USER" = 'shape-deploy'
           printf '%s\n' "$VM_PORT" | grep -Eq '^[0-9]{1,5}$'
           printf '%s\n' "$GHCR_NAMESPACE" | grep -Eq '^[a-z0-9][a-z0-9._-]*$'
+
+      - name: Verify API publication candidate
+        id: api_publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          sh deploy/staging/scripts/verify-api-publication-candidate.sh \
+            "$RELEASE_ID" "$API_DIGEST" "$GITHUB_REPOSITORY" "$GITHUB_OUTPUT"
 
       - name: Configure SSH
         shell: bash
@@ -186,6 +202,8 @@ jobs:
           INTEGRATION_ENCRYPTION_KEY_RING: ${{ secrets.STAGING_INTEGRATION_ENCRYPTION_KEY_RING }}
           INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID: ${{ vars.STAGING_INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID }}
           GHCR_TOKEN: ${{ github.token }}
+          API_SOURCE_RUN_ID: ${{ steps.api_publication.outputs.api_source_run_id }}
+          API_IDENTITY_KID_DENY_CAPABILITY_VERSION: ${{ steps.api_publication.outputs.api_identity_kid_deny_capability_version }}
         run: |
           set -eu
           test -n "$DATABASE_URL"
@@ -203,10 +221,14 @@ jobs:
           fi
           test -n "$API_BROWSER_SESSION_KEYS"
           test -n "$GHCR_TOKEN"
+          printf '%s\n' "$API_SOURCE_RUN_ID" | grep -Eq '^[1-9][0-9]*$'
+          printf '%s\n' "$API_IDENTITY_KID_DENY_CAPABILITY_VERSION" | grep -Eq '^(0|1)$'
           target="$VM_USER@$VM_HOST"
           {
             printf 'RELEASE_ID=%s\n' "$RELEASE_ID"
             printf 'API_DIGEST=%s\n' "$API_DIGEST"
+            printf 'API_SOURCE_RUN_ID=%s\n' "$API_SOURCE_RUN_ID"
+            printf 'API_IDENTITY_KID_DENY_CAPABILITY_VERSION=%s\n' "$API_IDENTITY_KID_DENY_CAPABILITY_VERSION"
             printf 'DEPLOY_IDENTITY=%s\n' "$DEPLOY_IDENTITY"
             printf 'EXPECTED_STAGING_BASE=%s\n' "$EXPECTED_STAGING_BASE"
             printf 'EDGE_DIGEST=%s\n' "$EDGE_DIGEST"

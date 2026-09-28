@@ -27,11 +27,17 @@ jobs:
       - name: Test Identity deployment contract
         run: sh deploy/staging/scripts/tests/identity-deployment-contract.sh
 
+      - name: Test Identity JWKS and warm/cold JWT rotation
+        run: node deploy/staging/scripts/tests/identity-jwks-rotation.mjs
+
       - name: Test component-aware Identity delivery contract
         run: sh deploy/staging/scripts/tests/component-aware-identity-contract.sh
 
       - name: Test staging release candidate contract
         run: sh deploy/staging/scripts/tests/release-candidate-contract.sh
+
+      - name: Test API publication provenance for direct deployment
+        run: sh deploy/staging/scripts/tests/api-publication-provenance.sh
 
       - name: Test current Identity state verification
         run: sh deploy/staging/scripts/tests/current-identity-state-contract.sh
@@ -71,6 +77,9 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+      - name: Test Identity incident maintenance phases
+        run: sh deploy/staging/scripts/tests/identity-incident-maintenance.sh
 
       - name: Test
         run: pnpm test

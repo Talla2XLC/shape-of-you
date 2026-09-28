@@ -10,7 +10,7 @@ host-managed key ring принята в
 публикуется до подписи, старый удаляется после доказанного overlap, а API
 немедленно отвергает скомпрометированный `kid` независимо от JWKS cache.
 
-## Текущие факты
+## Исходное состояние на момент утверждения плана
 
 - `OAuthSigningKeyStore.reconcile` реализует `staged` → `active` →
   `verifying` и не допускает исчезновения verification key из runtime ring.
@@ -90,6 +90,48 @@ ring/JWKS и переводится в `retired`. Лишь после внешн
 сохраняется; rollback на image без deny запрещён. Все изменения среды,
 секретов и реальные команды инцидента требуют отдельных разрешений.
 
+Quality отклонил первую реализацию: штатный staging `Promote` не может принять
+преднамеренный `/ready=503`, а rollback не учитывал deny capability. Оператор
+разрешил исправление через отдельный
+[maintenance path](../../../docs/adr/20260928-separate-identity-incident-maintenance-from-normal-staging-release.md).
+Фазовая команда работает с root-owned кандидатами runtime env и текущими
+digest-pinned images, проверяет внешний metadata/JWKS и ожидаемые HTTP статусы,
+а active incident marker закрывает обычный deployment и rollback. После
+`resume` нужен новый полный Identity release для согласования runtime env и
+release manifest; API deny не снимается этим переходом. Локальный макет
+четырёх фаз и проверка отказа неправильного порядка входят в CI.
+
+Для operator drill подготовить полные root-owned `0600` файлы вне Git; их
+содержимое не выводить. После установки API candidate операторская
+команда запускает в работающем API container проверку фактической deny policy и
+отклонения старого `kid`. API candidate содержит deny для старого
+`kid` и новый `API_BROWSER_SESSION_KEYS` без прежних verification keys.
+Identity candidates сохраняют оба rotation interval не меньше 660 секунд.
+Первое успешное внешнее чтение пригодного JWKS фиксируется в incident marker;
+`activate` запрещён до истечения publication interval от этого времени.
+Локальный drill проверяет ложный JWKS и warm/cold JWT acceptance.
+После третьего Quality review происхождение API image проверяется до SSH:
+любой staging workflow, включая direct dispatch, сверяет digest с artifact
+успешного publish run для точного `RELEASE_ID`. Только candidate с явной
+отметкой проверенных MCP и browser deny путей разрешает incident stage;
+старый candidate может служить recovery release, но не аварийной ротацией.
+Проверка helper внутри контейнера остаётся дополнительным барьером.
+
+| Фаза | Identity active/ring | Режим | Проверка |
+| --- | --- | --- | --- |
+| `stage` | старый active, старый+новый | JWKS-only | API deny/readiness, глобальный отзыв authority, metadata/JWKS, выдача `503` |
+| `activate` | новый active, старый+новый | JWKS-only | минимум 660 секунд после внешней публикации, оба `kid` в JWKS |
+| `retire` | новый active, только новый | JWKS-only | минимум 660 секунд после activation, старого `kid` нет в JWKS |
+| `resume` | новый active, только новый | обычный | Identity `/ready=200`, API deny старого `kid` сохранён |
+
+Фазовая команда: `sh deploy/staging/scripts/identity-incident-maintenance.sh`
+с `stage <api-candidate> <identity-candidate> <old-kid> <new-kid>` или
+`activate|retire|resume <identity-candidate>`. Её запускает только одобренный
+оператор с root-доступом из проверенного control checkout на названной VM.
+При ошибке фазы marker остаётся в `preparing-*`, а Identity останавливается;
+повтор без расследования запрещён. После `resume` обычный полный Identity
+deployment с тем же API deny устраняет runtime/manifest drift и удаляет marker.
+
 ## Architecture Review
 
 1. Лишняя сложность: используются существующие lifecycle rows и два
@@ -109,3 +151,4 @@ ring/JWKS и переводится в `retired`. Лишь после внешн
 - [Identity signing-key ADR](../../../docs/adr/20260928-temporarily-use-host-managed-identity-signing-keys.md)
 - [Identity current state](../../../docs/wiki/architecture/identity-and-external-tool-access.md)
 - [Production hardening plan](2026-09-28-identity-production-hardening.md)
+- [Separated incident maintenance ADR](../../../docs/adr/20260928-separate-identity-incident-maintenance-from-normal-staging-release.md)

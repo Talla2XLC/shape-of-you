@@ -22,6 +22,7 @@ source_repository=
 source_run_id=
 release_id=
 api_digest=
+api_identity_kid_deny_capability_version=0
 deploy_identity=
 expected_staging_base=
 identity_digest=
@@ -31,6 +32,7 @@ seen_source_repository=false
 seen_source_run_id=false
 seen_release_id=false
 seen_api_digest=false
+seen_api_identity_kid_deny_capability_version=false
 seen_deploy_identity=false
 seen_expected_staging_base=false
 seen_identity_digest=false
@@ -80,6 +82,14 @@ while IFS= read -r line || [ -n "$line" ]; do
       }
       api_digest=$value
       seen_api_digest=true
+      ;;
+    API_IDENTITY_KID_DENY_CAPABILITY_VERSION)
+      [ "$seen_api_identity_kid_deny_capability_version" = false ] || {
+        printf '%s\n' 'Duplicate staging release candidate field.' >&2
+        exit 2
+      }
+      api_identity_kid_deny_capability_version=$value
+      seen_api_identity_kid_deny_capability_version=true
       ;;
     DEPLOY_IDENTITY)
       [ "$seen_deploy_identity" = false ] || {
@@ -150,6 +160,8 @@ printf '%s\n' "$source_repository" |
 printf '%s\n' "$source_run_id" | grep -Eq '^[1-9][0-9]*$'
 printf '%s\n' "$release_id" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s\n' "$api_digest" | grep -Eq "$digest_pattern"
+printf '%s\n' "$api_identity_kid_deny_capability_version" |
+  grep -Eq '^(0|1)$'
 printf '%s\n' "$deploy_identity" | grep -Eq '^(true|false)$'
 printf '%s\n' "$edge_digest" | grep -Eq "$digest_pattern"
 printf '%s\n' "$certbot_digest" | grep -Eq "$digest_pattern"
@@ -177,6 +189,7 @@ fi
 
 printf 'release_id=%s\n' "$release_id"
 printf 'api_digest=%s\n' "$api_digest"
+printf 'api_identity_kid_deny_capability_version=%s\n' "$api_identity_kid_deny_capability_version"
 printf 'deploy_identity=%s\n' "$deploy_identity"
 printf 'expected_staging_base=%s\n' "$expected_staging_base"
 printf 'identity_digest=%s\n' "$identity_digest"

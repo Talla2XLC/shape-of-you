@@ -180,6 +180,29 @@ run_automatic_rollback_case true true false false
 run_automatic_rollback_case false true true false
 run_automatic_rollback_case true false true false
 
+printf '%s\n' 'IDENTITY_OAUTH_DENIED_KIDS={"version":1,"kids":["old"]}' \
+  > "$TEST_ROOT/api-deny.env"
+RUNTIME_ENV="$TEST_ROOT/api-deny.env"
+export RUNTIME_ENV
+run_automatic_rollback_case true true true false
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$TEST_ROOT/deploy" \
+  LOCK_FILE="$TEST_ROOT/deploy.lock" \
+  sh "$TEST_ROOT/package/scripts/rollback.sh" "$RELEASE_ID" >/dev/null 2>&1; then
+  printf '%s\n' 'Manual rollback was accepted while API key denial is active.' >&2
+  exit 1
+fi
+unset RUNTIME_ENV
+printf '%s\n' 'phase=staged' > "$TEST_ROOT/identity-incident.state"
+if PATH="$TEST_ROOT/fake-bin:$PATH" \
+  DEPLOY_ROOT="$TEST_ROOT/deploy" \
+  LOCK_FILE="$TEST_ROOT/deploy.lock" \
+  IDENTITY_INCIDENT_MARKER="$TEST_ROOT/identity-incident.state" \
+  sh "$TEST_ROOT/package/scripts/rollback.sh" "$RELEASE_ID" >/dev/null 2>&1; then
+  printf '%s\n' 'Manual rollback was accepted during an Identity incident.' >&2
+  exit 1
+fi
+
 printf '%s\n' \
   '#!/bin/sh' \
   'set -eu' \

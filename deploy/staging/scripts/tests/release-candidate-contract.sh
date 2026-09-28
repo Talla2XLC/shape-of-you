@@ -32,6 +32,7 @@ CERTBOT_DIGEST=$certbot_digest \
 
 output=$(sh "$READER" "$candidate" "$release_id" 123456 Talla2XLC/shape-of-you)
 printf '%s\n' "$output" | grep -F -- "release_id=$release_id" >/dev/null
+printf '%s\n' "$output" | grep -F -- 'api_identity_kid_deny_capability_version=1' >/dev/null
 printf '%s\n' "$output" | grep -F -- "identity_digest=$identity_digest" >/dev/null
 printf '%s\n' "$output" | grep -F -- 'expected_staging_base=' >/dev/null
 
@@ -87,6 +88,16 @@ assert_rejected "$missing_base" "$release_id" 123457 Talla2XLC/shape-of-you
 
 assert_rejected "$candidate" "$release_id" 999999 Talla2XLC/shape-of-you
 assert_rejected "$candidate" "$release_id" 123456 another/repository
+
+legacy="$TEST_ROOT/legacy.env"
+grep -v '^API_IDENTITY_KID_DENY_CAPABILITY_VERSION=' "$candidate" > "$legacy"
+sh "$READER" "$legacy" "$release_id" 123456 Talla2XLC/shape-of-you |
+  grep -F -- 'api_identity_kid_deny_capability_version=0' >/dev/null
+
+invalid_capability="$TEST_ROOT/invalid-capability.env"
+sed 's/^API_IDENTITY_KID_DENY_CAPABILITY_VERSION=.*/API_IDENTITY_KID_DENY_CAPABILITY_VERSION=2/' \
+  "$candidate" > "$invalid_capability"
+assert_rejected "$invalid_capability"
 
 if grep -Eq '(^|[[:space:]])(eval|source)([[:space:]]|$)' "$READER"; then
   printf '%s\n' 'Candidate reader must not evaluate artifact contents.' >&2

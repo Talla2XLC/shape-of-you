@@ -12,6 +12,8 @@ CURRENT_LINK="$DEPLOY_ROOT/current"
 PREVIOUS_LINK="$DEPLOY_ROOT/previous"
 TARGET_RELEASE=${1:-}
 LOCK_FILE=${LOCK_FILE:-/run/shape-of-you-staging.lock}
+RUNTIME_ENV=${RUNTIME_ENV:-/etc/shape-of-you/staging/api.env}
+IDENTITY_INCIDENT_MARKER=${IDENTITY_INCIDENT_MARKER:-/etc/shape-of-you/staging/identity-incident.state}
 EXPECTED_DEPLOYMENT_TOPOLOGY=${EXPECTED_DEPLOYMENT_TOPOLOGY:-}
 
 if [ "${SHAPE_OF_YOU_STAGING_LOCK_HELD:-false}" != "true" ]; then
@@ -21,6 +23,16 @@ if [ "${SHAPE_OF_YOU_STAGING_LOCK_HELD:-false}" != "true" ]; then
     printf '%s\n' 'Rollback refused because a deployment or renewal is active.' >&2
     exit 1
   fi
+fi
+
+if [ -e "$IDENTITY_INCIDENT_MARKER" ] || [ -L "$IDENTITY_INCIDENT_MARKER" ]; then
+  printf '%s\n' 'Rollback is blocked during Identity incident maintenance.' >&2
+  exit 1
+fi
+if [ -f "$RUNTIME_ENV" ] &&
+  grep -Eq '^IDENTITY_OAUTH_DENIED_KIDS=.+$' "$RUNTIME_ENV"; then
+  printf '%s\n' 'Rollback is blocked while API key denial is active.' >&2
+  exit 1
 fi
 
 if [ -z "$TARGET_RELEASE" ]; then

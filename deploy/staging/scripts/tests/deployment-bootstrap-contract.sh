@@ -49,6 +49,8 @@ write_identity_request() {
   {
     printf '%s\n' 'RELEASE_ID=0123456789abcdef0123456789abcdef01234567'
     printf '%s\n' 'API_DIGEST=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+    printf '%s\n' 'API_SOURCE_RUN_ID=123456'
+    printf '%s\n' 'API_IDENTITY_KID_DENY_CAPABILITY_VERSION=1'
     printf '%s\n' 'DEPLOY_IDENTITY=true'
     printf '%s\n' 'IDENTITY_DIGEST=sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
     printf '%s\n' 'EDGE_DIGEST=sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'
