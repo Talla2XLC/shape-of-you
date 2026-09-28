@@ -13,8 +13,11 @@ import {
 } from "./recovery.js";
 import { NextTrainingStepSchema, type NextTrainingStep } from "./training.js";
 
-const { recoveryRiskLevel: _riskLevel, recoveryHardStop: _hardStop, ...factSummaryProperties } =
-  DailyAssessmentFactSummarySchema.properties;
+const factSummaryProperties = Object.fromEntries(
+  Object.entries(DailyAssessmentFactSummarySchema.properties).filter(
+    ([key]) => key !== "recoveryRiskLevel" && key !== "recoveryHardStop"
+  )
+) as Omit<typeof DailyAssessmentFactSummarySchema.properties, "recoveryRiskLevel" | "recoveryHardStop">;
 
 /** Non-prescriptive daily facts; Recovery observations carry exact time and quality separately. */
 export interface DailyDecisionFacts {
