@@ -135,4 +135,4 @@ rollback на предыдущий Identity image после успешной re
 - [Инвалидировать одноразовые OAuth-артефакты при ротации callback](20260827-retire-obsolete-oauth-protocol-artifacts-during-callback-rotation.md)
 - [Удалить закрытие дня и перейти к capture-first Coach](20260829-remove-day-closure-and-use-capture-first-coach.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
-- [TASK-0080 implementation plan](../../plans/2026/08/2026-08-30-task-0080-oauth-scope-retirement.md)
+- [TASK-0080 implementation plan](../../plans/2026/08/completed/2026-08-30-task-0080-oauth-scope-retirement.md)

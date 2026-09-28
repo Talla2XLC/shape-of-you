@@ -128,4 +128,4 @@ rotation and an MCP read without another interactive authorization prompt.
 - [Identity service and protocol libraries](20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md)
 - [Typed Identity protocol state](20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
-- [TASK-0035 execution plan](../../plans/2026/08/2026-08-10-task-0035-connect-chatgpt-mcp-oauth.md)
+- [TASK-0035 execution plan](../../plans/2026/08/completed/2026-08-10-task-0035-connect-chatgpt-mcp-oauth.md)

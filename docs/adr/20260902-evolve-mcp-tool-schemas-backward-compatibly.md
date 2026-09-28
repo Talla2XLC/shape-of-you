@@ -102,4 +102,4 @@ normalization и до writer service.
 - [Meal amount evidence ADR](20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
 - [Meal API](../wiki/api/meals.md)
-- [TASK-0092 plan](../../plans/2026/09/2026-09-02-task-0092-mcp-schema-backward-compatibility.md)
+- [TASK-0092 plan](../../plans/2026/09/completed/2026-09-02-task-0092-mcp-schema-backward-compatibility.md)

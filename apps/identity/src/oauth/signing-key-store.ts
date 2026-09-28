@@ -17,11 +17,12 @@ export class OAuthSigningKeyStore {
   public constructor(private readonly pool: Pool) {}
 
   /**
-   * Activates the configured key and preserves the previous key for verification.
+   * Publishes new verification keys before a later active-key transition.
    *
-   * A first boot accepts exactly one new key. Rotation accepts one new active
-   * key while every previous verification key remains present in the external
-   * ring. Public material changes under an existing `kid` fail closed.
+   * A first boot accepts exactly one new key. A later boot with the old active
+   * key may stage additional keys in JWKS. Activation requires a key staged by
+   * a previous reconciliation, while every previous verification key remains
+   * present. Public material changes under an existing `kid` fail closed.
    *
    * @param keyRing - Validated external ES256 signing material.
    * @throws Error when lifecycle metadata and external keys cannot be reconciled.
@@ -46,6 +47,9 @@ export class OAuthSigningKeyStore {
         if (row && row.secret_provider_handle !== `env:${keyId}`) {
           throw new Error(`OAuth signing key ${keyId} uses an unexpected secret-provider handle`);
         }
+        if (row && ["retired", "revoked"].includes(row.status)) {
+          throw new Error(`OAuth signing key ${keyId} cannot be republished`);
+        }
       }
 
       const active = result.rows.find((row) => row.status === "active");
@@ -67,8 +71,8 @@ export class OAuthSigningKeyStore {
         if (!keyRing.publicSpkiByKeyId.has(active.key_id)) {
           throw new Error("Previous OAuth signing key must remain available during rotation");
         }
-        if (configuredActive && configuredActive.status !== "staged") {
-          throw new Error("Configured OAuth signing key is not staged for activation");
+        if (!configuredActive || configuredActive.status !== "staged") {
+          throw new Error("Configured OAuth signing key must be staged before activation");
         }
         const now = new Date();
         await client.query(
@@ -78,25 +82,18 @@ export class OAuthSigningKeyStore {
           [active.id, now]
         );
         await insertSigningKeyEvent(client, active.id);
-        let activatedKeyId: string;
-        if (configuredActive) {
-          await client.query(
-            `update oauth_signing_keys
-                set status = 'active', published_at = coalesce(published_at, $2),
-                    activated_at = $2
-              where id = $1 and status = 'staged'`,
-            [configuredActive.id, now]
-          );
-          activatedKeyId = configuredActive.id;
-        } else {
-          activatedKeyId = await insertActiveKey(client, keyRing, now);
-        }
-        await insertSigningKeyEvent(client, activatedKeyId);
+        await client.query(
+          `update oauth_signing_keys
+              set status = 'active', activated_at = $2
+            where id = $1 and status = 'staged'`,
+          [configuredActive.id, now]
+        );
+        await insertSigningKeyEvent(client, configuredActive.id);
       }
 
       for (const row of result.rows) {
         if (
-          ["active", "verifying"].includes(row.status) &&
+          ["staged", "active", "verifying"].includes(row.status) &&
           !keyRing.publicSpkiByKeyId.has(row.key_id)
         ) {
           throw new Error(`OAuth signing key ${row.key_id} is still required for verification`);
@@ -105,8 +102,18 @@ export class OAuthSigningKeyStore {
       const unknownExternalKeys = [...keyRing.publicSpkiByKeyId.keys()].filter(
         (keyId) => keyId !== keyRing.activeKeyId && !rowsByKeyId.has(keyId)
       );
-      if (unknownExternalKeys.length > 0) {
-        throw new Error("Non-active OAuth signing keys must already have lifecycle metadata");
+      for (const keyId of unknownExternalKeys) {
+        const publicSpki = keyRing.publicSpkiByKeyId.get(keyId)!;
+        const signingKeyId = randomUUID();
+        const now = new Date();
+        await client.query(
+          `insert into oauth_signing_keys
+             (id, key_id, algorithm, public_key_spki, secret_provider_handle,
+              status, created_at, published_at)
+           values ($1, $2, 'ES256', $3, $4, 'staged', $5, $5)`,
+          [signingKeyId, keyId, publicSpki, `env:${keyId}`, now]
+        );
+        await insertSigningKeyEvent(client, signingKeyId);
       }
 
       await client.query("commit");

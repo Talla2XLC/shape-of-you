@@ -1,5 +1,7 @@
 # TASK-0035 — Подключение ChatGPT к staging MCP/OAuth
 
+> Архивный план: задача завершена; статусы этапов ниже сохранены как история выполнения.
+
 ## Статус и граница разрешения
 
 - Статус: pre-provisioning code gate завершён и принят независимым Quality
@@ -28,14 +30,14 @@ staging endpoint Shape of You, завершить Authorization Code + S256 PKCE
 
 Новый ADR не требуется. Задача реализует уже принятые решения:
 
-- [`docs/adr/20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md`](../../../docs/adr/20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md)
+- [`docs/adr/20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md`](../../../../docs/adr/20260802-own-identity-service-and-use-replaceable-oauth-oidc-libraries.md)
   — project-owned Identity, predefined ChatGPT public client, PKCE и API-owned
   Person authorization;
-- [`docs/adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md`](../../../docs/adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
+- [`docs/adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md`](../../../../docs/adr/20260803-model-identity-protocol-state-in-typed-lifecycle-tables.md)
   — typed OAuth client/grant/session state;
-- [`docs/adr/20260730-separate-user-access-from-person-data-ownership.md`](../../../docs/adr/20260730-separate-user-access-from-person-data-ownership.md)
+- [`docs/adr/20260730-separate-user-access-from-person-data-ownership.md`](../../../../docs/adr/20260730-separate-user-access-from-person-data-ownership.md)
   — внешний subject не даёт Person-доступ без API User и active grant;
-- [`docs/wiki/architecture/identity-and-external-tool-access.md`](../../../docs/wiki/architecture/identity-and-external-tool-access.md)
+- [`docs/wiki/architecture/identity-and-external-tool-access.md`](../../../../docs/wiki/architecture/identity-and-external-tool-access.md)
   — текущий OAuth/MCP contract и scope ownership.
 
 Актуальная официальная документация OpenAI подтверждает поддержку predefined
@@ -428,7 +430,7 @@ authorization request присутствуют `openid` и пять resource sco
 scope.
 
 Дополнение опирается на accepted ADR
-[`docs/adr/20260810-require-offline-access-for-durable-oauth-connections.md`](../../../docs/adr/20260810-require-offline-access-for-durable-oauth-connections.md)
+[`docs/adr/20260810-require-offline-access-for-durable-oauth-connections.md`](../../../../docs/adr/20260810-require-offline-access-for-durable-oauth-connections.md)
 и разрешает исходный код в точной границе этого дополнения после утверждения
 оператором 2026-08-10.
 

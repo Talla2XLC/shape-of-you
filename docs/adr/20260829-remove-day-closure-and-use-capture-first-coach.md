@@ -198,4 +198,4 @@ confirmation и exact Meal execution ceremony противоречат capture-f
 - [Superseded DayClosure ADR](20260811-model-versioned-person-local-day-closures.md)
 - [Superseded Daily Coach ADR](20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 - [Independent facts over broad daily records](20260728-prefer-independent-facts-over-broad-day-record.md)
-- [TASK-0079 plan](../../plans/2026/08/2026-08-29-task-0079-capture-first-coach.md)
+- [TASK-0079 plan](../../plans/2026/08/completed/2026-08-29-task-0079-capture-first-coach.md)

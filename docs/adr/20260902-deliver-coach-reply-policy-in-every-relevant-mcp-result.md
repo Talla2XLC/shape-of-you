@@ -129,4 +129,4 @@ Per-result policy является самой сильной управляем�
 - [Daily Coach ADR](20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 - [Coaching and Decision Support](../wiki/domain/coaching-and-decision-support.md)
 - [Identity and external tool access](../wiki/architecture/identity-and-external-tool-access.md)
-- [TASK-0093 plan](../../plans/2026/09/2026-09-02-task-0093-proactive-coach-reply-policy.md)
+- [TASK-0093 plan](../../plans/2026/09/completed/2026-09-02-task-0093-proactive-coach-reply-policy.md)

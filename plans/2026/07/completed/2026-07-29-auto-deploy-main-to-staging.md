@@ -2,7 +2,7 @@
 id: "plan-20260729-auto-deploy-main-to-staging"
 kind: plan
 title: "Автоматический deployment main в staging"
-status: active
+status: completed
 date: 2026-07-29
 owner: "4DreamTeam"
 related_adrs:
@@ -10,6 +10,9 @@ related_adrs:
 ---
 
 # Автоматический deployment main в staging
+
+> Архивный план: автоматическое развёртывание было реализовано, затем заменено
+> ручным promotion по TASK-0124. Текущий порядок описан в Wiki.
 
 ## Цель
 

@@ -1,5 +1,7 @@
 # TASK-0080 — Транзакционное retirement сокращённых OAuth scopes
 
+> Архивный план: задача завершена; статусы этапов ниже сохранены как история выполнения.
+
 ## Статус и разрешение
 
 - Статус: architecture accepted, implementation approval pending.

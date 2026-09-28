@@ -206,5 +206,5 @@ concurrency lifecycle. Нет измеренной необходимости; �
 - [Coaching recommendations](./20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md)
 - [Provider-neutral profile coverage](./20260913-show-provider-neutral-profile-data-coverage.md)
 - [Typed Intervals wellness import](./20260912-import-supported-intervals-wellness-as-typed-recovery.md)
-- [TASK-0115 plan](../../plans/2026/09/2026-09-15-task-0115-personal-baselines.md)
+- [TASK-0115 plan](../../plans/2026/09/completed/2026-09-15-task-0115-personal-baselines.md)
 - TASK-0115

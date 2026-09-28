@@ -533,8 +533,9 @@ describe("Identity migration chain", () => {
     }
   });
 
-  it("activates and rotates external OAuth signing keys without private-key persistence", async () => {
+  it("stages an OAuth signing key before activation without private-key persistence", async () => {
     const pool = new Pool({ connectionString: container.getConnectionUri() });
+    let publicationServer: ReturnType<typeof createIdentityServer> | undefined;
     const privateKeyValue = (): string => {
       const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
       return privateKey
@@ -548,6 +549,58 @@ describe("Identity migration chain", () => {
       await store.reconcile(
         parseOAuthSigningKeyRing("v1", JSON.stringify({ v1: first }))
       );
+      await expect(
+        store.reconcile(
+          parseOAuthSigningKeyRing("v2", JSON.stringify({ v1: first, v2: second }))
+        )
+      ).rejects.toThrow("must be staged before activation");
+      const publishedRing = parseOAuthSigningKeyRing(
+        "v1",
+        JSON.stringify({ v1: first, v2: second })
+      );
+      await store.reconcile(publishedRing);
+      const staged = await pool.query<{
+        key_id: string;
+        status: string;
+        published_at: Date;
+        activated_at: Date | null;
+      }>(
+        `select key_id, status, published_at, activated_at
+           from oauth_signing_keys
+          order by key_id`
+      );
+      expect(staged.rows).toEqual([
+        expect.objectContaining({ key_id: "v1", status: "active" }),
+        expect.objectContaining({
+          key_id: "v2",
+          status: "staged",
+          published_at: expect.any(Date),
+          activated_at: null
+        })
+      ]);
+      const publicationRuntime = new OAuthRuntime({
+        pool,
+        issuer: "http://127.0.0.1:3000",
+        resource: "https://api.example.test/mcp",
+        signingKeys: publishedRing,
+        cookieKeys: [randomBytes(32).toString("base64url")]
+      });
+      publicationServer = createIdentityServer({
+        readiness: { check: async () => undefined },
+        oauthRuntime: publicationRuntime
+      });
+      await new Promise<void>((resolve, reject) => {
+        publicationServer!.once("error", reject);
+        publicationServer!.listen(0, "127.0.0.1", resolve);
+      });
+      const address = publicationServer.address();
+      if (!address || typeof address === "string") throw new Error("Loopback port is unavailable");
+      const jwksResponse = await fetch(`http://127.0.0.1:${address.port}/oauth/jwks`);
+      expect(jwksResponse.status).toBe(200);
+      const jwks = await jwksResponse.json() as { keys: { kid: string }[] };
+      expect(jwks.keys.map((key) => key.kid).sort()).toEqual(["v1", "v2"]);
+      await new Promise<void>((resolve) => publicationServer!.close(() => resolve()));
+      publicationServer = undefined;
       await store.reconcile(
         parseOAuthSigningKeyRing(
           "v2",
@@ -575,13 +628,16 @@ describe("Identity migration chain", () => {
               select id from oauth_signing_keys where secret_provider_handle like 'env:%'
             )`
       );
-      expect(events.rows[0]?.count).toBe("3");
+      expect(events.rows[0]?.count).toBe("4");
       await expect(
         store.reconcile(
           parseOAuthSigningKeyRing("v2", JSON.stringify({ v2: second }))
         )
       ).rejects.toThrow("still required for verification");
     } finally {
+      if (publicationServer) {
+        await new Promise<void>((resolve) => publicationServer!.close(() => resolve()));
+      }
       await pool.query(
         `delete from identity_security_events where signing_key_id in (
            select id from oauth_signing_keys where secret_provider_handle like 'env:%'
@@ -1898,11 +1954,11 @@ describe("Identity migration chain", () => {
       };
       expect(tokenBody.expires_in).toBe(600);
       expect(tokenBody.id_token.split(".")).toHaveLength(3);
-      expect(
-        JSON.parse(
-          Buffer.from(tokenBody.id_token.split(".")[1]!, "base64url").toString("utf8")
-        )
-      ).toMatchObject({ sub: accountId });
+      const idTokenPayload = JSON.parse(
+        Buffer.from(tokenBody.id_token.split(".")[1]!, "base64url").toString("utf8")
+      ) as { sub: string; exp: number; iat: number };
+      expect(idTokenPayload.sub).toBe(accountId);
+      expect(idTokenPayload.exp - idTokenPayload.iat).toBe(600);
       expect(tokenBody.refresh_token).toMatch(/^[A-Za-z0-9_-]{43}$/);
 
       const stableSessionBeforeRecovery = await pool.query<{

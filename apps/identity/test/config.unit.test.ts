@@ -67,9 +67,26 @@ describe("loadIdentityConfig", () => {
         NODE_ENV: "production",
         DATABASE_URL: "postgresql://identity:identity@127.0.0.1:5432/identity",
         IDENTITY_PUBLIC_ORIGIN: "http://identity.example.test",
-        WEBAUTHN_RP_ID: "identity.example.test"
+        WEBAUTHN_RP_ID: "identity.example.test",
+        IDENTITY_TOTP_ACTIVE_KEY_ID: "v1",
+        IDENTITY_TOTP_ENCRYPTION_KEYS: "configured",
+        IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: "v1",
+        IDENTITY_OAUTH_SIGNING_KEYS: "configured",
+        IDENTITY_OAUTH_COOKIE_KEYS: "configured",
+        IDENTITY_OAUTH_RESOURCE: "https://api.example.test/mcp"
       })
     ).toThrow("must use https in production");
+  });
+
+  it("requires OAuth and TOTP key rings before production startup", () => {
+    expect(() =>
+      loadIdentityConfig({
+        NODE_ENV: "production",
+        DATABASE_URL: "postgresql://identity:identity@127.0.0.1:5432/identity",
+        IDENTITY_PUBLIC_ORIGIN: "https://identity.example.test",
+        WEBAUTHN_RP_ID: "identity.example.test"
+      })
+    ).toThrow("production requires");
   });
 
   it("requires both TOTP key-ring settings when recovery is enabled", () => {

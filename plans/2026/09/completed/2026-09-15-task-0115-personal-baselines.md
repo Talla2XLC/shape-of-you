@@ -1,10 +1,12 @@
 # TASK-0115 — Личные baseline и trend-aware ежедневная оценка
 
+> Архивный план: задача завершена; статусы этапов ниже сохранены как история выполнения.
+
 ## Статус
 
 Источники architecture authority — принятые
-[hybrid baseline ADR](../../../docs/adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md)
-и [counterfactual replay ADR](../../../docs/adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
+[hybrid baseline ADR](../../../../docs/adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md)
+и [counterfactual replay ADR](../../../../docs/adr/20260915-replay-daily-assessment-v1-with-explicit-ambiguity.md).
 Ниже сохранён операторский review record и порядок выполнения; при расхождении
 ADR имеет приоритет и план не создаёт второй архитектурный контракт.
 

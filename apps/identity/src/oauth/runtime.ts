@@ -159,6 +159,7 @@ export class OAuthRuntime {
         AccessToken: 600,
         AuthorizationCode: 600,
         Grant: 365 * 24 * 60 * 60,
+        IdToken: 600,
         Interaction: 10 * 60,
         RefreshToken: 30 * 24 * 60 * 60,
         Session: 30 * 24 * 60 * 60
@@ -170,7 +171,9 @@ export class OAuthRuntime {
         `${JSON.stringify({
           level: "error",
           message: "OAuth provider request failed",
-          error: error.message
+          errorName: ["Error", "RangeError", "SyntaxError", "TypeError"].includes(error.name)
+            ? error.name
+            : "UnknownError"
         })}\n`
       );
     });

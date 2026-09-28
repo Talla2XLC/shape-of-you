@@ -72,6 +72,22 @@ const identityEnvironmentSchema = z
         message: "all OAuth runtime settings must be supplied together"
       });
     }
+    if (value.NODE_ENV === "production") {
+      if (!value.IDENTITY_TOTP_ACTIVE_KEY_ID || !value.IDENTITY_TOTP_ENCRYPTION_KEYS) {
+        context.addIssue({
+          code: "custom",
+          path: ["IDENTITY_TOTP_ENCRYPTION_KEYS"],
+          message: "production requires a TOTP encryption key ring"
+        });
+      }
+      if (!oauthSettings.every(Boolean)) {
+        context.addIssue({
+          code: "custom",
+          path: ["IDENTITY_OAUTH_SIGNING_KEYS"],
+          message: "production requires the complete OAuth runtime configuration"
+        });
+      }
+    }
   });
 
 /** Validated runtime configuration owned by the Identity deployable. */

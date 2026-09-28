@@ -2,7 +2,7 @@
 id: "plan-20260729-verified-main-deployment-control"
 kind: plan
 title: "Автоматическое обновление staging deployment-control"
-status: active
+status: completed
 date: 2026-07-29
 owner: "4DreamTeam"
 related_adrs:
@@ -10,6 +10,9 @@ related_adrs:
 ---
 
 # Автоматическое обновление staging deployment-control
+
+> Архивный план: задача TASK-0006 завершена; текущий порядок deployment
+> описан в Wiki.
 
 ## Цель
 

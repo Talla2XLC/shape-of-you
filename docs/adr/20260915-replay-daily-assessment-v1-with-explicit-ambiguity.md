@@ -126,5 +126,5 @@ baselines stored-snapshot режим не может измерить перех
 
 - [Hybrid personal baselines](./20260915-use-hybrid-personal-baselines-for-daily-assessment.md)
 - [API-owned daily assessment](./20260914-own-daily-assessment-and-next-action-in-api.md)
-- [TASK-0115 plan](../../plans/2026/09/2026-09-15-task-0115-personal-baselines.md)
+- [TASK-0115 plan](../../plans/2026/09/completed/2026-09-15-task-0115-personal-baselines.md)
 - TASK-0115
