@@ -13,11 +13,14 @@ tags:
 
 ## Summary
 
-Shape of You owns database `shape_of_you_api` inside a shared cluster and does
-not modify the cluster owner's overall backup policy. As verified on
+Shape of You owns the separate `shape_of_you_api` and `shape_of_you_identity`
+databases inside a shared cluster and does not modify the cluster owner's
+overall backup policy. As verified on
 2026-09-04, PostgreSQL WAL/PITR archiving and automated host backup jobs are not
-configured. One owner-created custom-format logical backup is retained manually
-on the database VM with owner-only access and no deletion deadline.
+configured. Owner-created custom-format logical backups are retained manually
+on the database VM with owner-only access and no deletion deadline. Fresh API
+and Identity backups were created and restore-checked on 2026-09-28 before the
+staging promotion of release `a3a5f7458d7cc1866702081cbb1938507438861f`.
 
 ## Content
 
@@ -27,6 +30,7 @@ logical backup after cluster-owner approval:
 
 ```sh
 pg_dump --format=custom --file=<protected-path> shape_of_you_api
+pg_dump --format=custom --file=<separate-protected-path> shape_of_you_identity
 ```
 
 Never pass credentials in process arguments, logs, or documentation. Use the
@@ -35,19 +39,22 @@ owner-approved authentication mechanism.
 Verify restore first in a separate test database:
 
 ```sh
-createdb <temporary-restore-database>
-pg_restore --exit-on-error --dbname=<temporary-restore-database> <backup-file>
+createdb <temporary-api-restore-database>
+pg_restore --exit-on-error --dbname=<temporary-api-restore-database> <api-backup-file>
+createdb <temporary-identity-restore-database>
+pg_restore --exit-on-error --dbname=<temporary-identity-restore-database> <identity-backup-file>
 ```
 
 Then verify migration journal, expected tables, and synthetic read/write.
 Deleting the test database is destructive and needs separate approval.
 Cluster owner defines retention, at-rest encryption, storage path, and deletion.
 
-The current manual backup is stored in an owner-controlled same-host backup
-directory with directory mode `0700` and file mode `0600`. It was restored
-successfully into an isolated PostgreSQL 17 instance before being accepted as a
-usable copy. This is a logical-restore checkpoint, not disaster recovery: loss
-of the VM can remove both the live database and the manual backup.
+The manual backups are stored in an owner-controlled same-host backup
+directory with directory mode `0700` and file mode `0600`. The 2026-09-04 API
+backup and the 2026-09-28 API and Identity backups each restored successfully
+into isolated PostgreSQL 17 instances. These are logical-restore checkpoints,
+not disaster recovery: loss of the VM can remove both the live databases and
+the manual backups.
 
 Before real wearable data is enabled, the restore boundary must also retain an
 append-only Recovery erasure journal outside every restorable database snapshot,
@@ -181,6 +188,13 @@ verified manual backup remains on the VM.
   inspection.
 - TASK-0098 owner-backed restore completed without shared-cluster writes,
   migrations, Docker, compose, service changes, deployment, commit, or push.
+- On 2026-09-28, fresh API and Identity custom-format backups were restored in
+  a network-isolated PostgreSQL 17.4 container with owner and privilege replay
+  disabled. Restored migration/table counts matched the live databases (API
+  52/99; Identity 8/26), and synthetic read/write transactions succeeded in
+  both restored databases. Role and ACL replay was not verified. The temporary
+  containers were removed after operator approval; the backup files remain on
+  the VM. The later staging promotion applied two API migrations.
 - TASK-0099 created and offline-verified the first same-host live journal and
   sealed completeness checkpoint. The running API kept the same container ID
   and start time, remained healthy, and had zero restarts; no compose, deploy,

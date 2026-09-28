@@ -328,6 +328,13 @@ This does not affect unrelated Compose/PostgreSQL.
 ## Evidence
 
 - Staging Compose, publish/deploy workflows, and deployment scripts.
+- On 2026-09-28, the operator-approved `Promote staging` run
+  [36397674322](https://github.com/Talla2XLC/shape-of-you/actions/runs/36397674322)
+  promoted exact release `a3a5f7458d7cc1866702081cbb1938507438861f`
+  after restore-checking fresh API and Identity backups. The API migration
+  journal advanced from 52 to 54; Identity reported its migration journal
+  current at 8. The API, Identity, and edge containers were healthy and the
+  pipeline smoke checks passed. Write smoke was disabled for this promotion.
 
 ## Decisions
 
