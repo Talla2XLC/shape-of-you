@@ -7,6 +7,7 @@ import type { AuthorizedPerson } from "../storage/identity-subject-mapping-repos
 import type { RecoveryErasureRequest } from "@shape-of-you/contracts";
 import { ApplicationError } from "../domain/errors.js";
 import type { RequestPersonContext } from "../application/person-context.js";
+import { assertAllowedIdentityTokenKid } from "../identity/assert-allowed-token-kid.js";
 
 const sessionCookieName = "__Host-shape_of_you_api_session";
 const csrfCookieName = "__Host-shape_of_you_api_csrf";
@@ -31,6 +32,7 @@ export interface BrowserAuthOptions {
   readonly resource: string;
   readonly clientId: string;
   readonly cookieKeys: readonly string[];
+  readonly deniedIdentityKids?: ReadonlySet<string>;
   readonly resolveAuthorizedPersons: (issuer: string, subject: string) => Promise<readonly AuthorizedPerson[]>;
   readonly requestRecoveryErasure: (input: {
     readonly personId: string;
@@ -139,6 +141,10 @@ export class BrowserAuth {
       clearCookie(reply, transactionCookieName);
       try {
         const token = await this.exchangeCode(code, transaction.verifier);
+        assertAllowedIdentityTokenKid(
+          token,
+          this.options.deniedIdentityKids ?? new Set()
+        );
         const { payload } = await jwtVerify(token, this.jwks, {
           issuer: this.options.issuer,
           audience: this.options.clientId,

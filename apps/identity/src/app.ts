@@ -41,6 +41,8 @@ export interface IdentityServerDependencies {
   readonly oauthBrowserUi?: OAuthBrowserUi;
   /** Optional OAuth protocol runtime when the full key configuration is present. */
   readonly oauthRuntime?: OAuthRuntime;
+  /** Emergency mode serving only OAuth metadata and JWKS while issuance is halted. */
+  readonly oauthIssuanceDisabled?: boolean;
 }
 
 function reportUnexpectedRequestError(
@@ -257,6 +259,20 @@ export function createIdentityServer(
 
     if (method === "GET" && pathname === "/live") {
       writeJson(response, 200, { status: "alive" });
+      return;
+    }
+
+    if (dependencies.oauthIssuanceDisabled) {
+      const publicMetadataPath =
+        pathname === "/.well-known/openid-configuration" ||
+        pathname === "/.well-known/oauth-authorization-server" ||
+        pathname === "/oauth/jwks";
+      if (method === "GET" && publicMetadataPath && dependencies.oauthRuntime) {
+        dependencies.oauthRuntime.handleProviderRequest(request, response, pathname);
+        return;
+      }
+      response.setHeader("cache-control", "no-store");
+      writeJson(response, 503, { error: "temporarily_unavailable" });
       return;
     }
 

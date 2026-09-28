@@ -47,7 +47,15 @@ async function main(): Promise<void> {
       config.IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID,
       config.IDENTITY_OAUTH_SIGNING_KEYS
     );
-    await new OAuthSigningKeyStore(database.pool).reconcile(signingKeys);
+    const rotationPolicy =
+      config.IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS &&
+      config.IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS
+        ? {
+            publicationDelayMs: config.IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS * 1_000,
+            verificationOverlapMs: config.IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS * 1_000
+          }
+        : undefined;
+    await new OAuthSigningKeyStore(database.pool).reconcile(signingKeys, rotationPolicy);
     oauthRuntime = new OAuthRuntime({
       pool: database.pool,
       issuer: config.IDENTITY_PUBLIC_ORIGIN,
@@ -69,6 +77,7 @@ async function main(): Promise<void> {
     },
     authentication,
     publicOrigin: config.IDENTITY_PUBLIC_ORIGIN,
+    oauthIssuanceDisabled: config.IDENTITY_OAUTH_ISSUANCE_DISABLED === "true",
     ...(oauthBrowserUi ? { oauthBrowserUi } : {}),
     ...(oauthRuntime ? { oauthRuntime } : {})
   });

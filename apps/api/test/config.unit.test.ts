@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { loadConfig } from "@shape-of-you/config";
+import { loadConfig, parseIdentityOAuthDeniedKids } from "@shape-of-you/config";
 
 const baseEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: "test",
@@ -44,5 +44,33 @@ describe("Intervals.icu runtime configuration", () => {
       INTEGRATION_ENCRYPTION_KEY_RING: "test-v1:dGVzdC1rZXk",
       INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID: "test-v1"
     })).toThrow("must use HTTPS");
+  });
+});
+
+describe("Identity OAuth emergency deny policy", () => {
+  it("accepts an absent or versioned policy", () => {
+    expect([...parseIdentityOAuthDeniedKids(undefined)]).toEqual([]);
+    expect([...parseIdentityOAuthDeniedKids(
+      '{"version":1,"kids":["staging-v1","staging-v2"]}'
+    )]).toEqual(["staging-v1", "staging-v2"]);
+    expect(loadConfig({
+      ...baseEnvironment,
+      IDENTITY_OAUTH_DENIED_KIDS: '{"version":1,"kids":["staging-v1"]}'
+    }).IDENTITY_OAUTH_DENIED_KIDS).toContain("staging-v1");
+  });
+
+  it("fails configuration for malformed, duplicate, or unsupported policies", () => {
+    for (const policy of [
+      "",
+      '{"version":2,"kids":[]}',
+      '{"version":1,"kids":["same","same"]}',
+      '{"version":1,"kids":["unsafe kid"]}',
+      '{"version":1,"kids":[],"extra":true}'
+    ]) {
+      expect(() => loadConfig({
+        ...baseEnvironment,
+        IDENTITY_OAUTH_DENIED_KIDS: policy
+      })).toThrow("denied-kid policy");
+    }
   });
 });

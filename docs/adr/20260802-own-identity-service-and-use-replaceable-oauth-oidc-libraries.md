@@ -113,13 +113,14 @@ Initial protocol profile:
 - exact issuer, audience/resource, lifetime, and scope validation at every
   resource server.
 
-For local development and staging, private ES256 signing keys enter Identity
-through a versioned secret key ring in the runtime environment. PostgreSQL
-stores only public SPKI material, lifecycle metadata, and an opaque key-ring
-handle. Rotation publishes the next public key before switching the active
-signer and retains the previous public key for a bounded verification overlap.
-Production use remains blocked until a separate decision selects and operates
-a Vault/KMS-grade private-key provider.
+Private ES256 signing keys enter Identity through a versioned runtime key ring.
+PostgreSQL stores only public SPKI material, lifecycle metadata, and an opaque
+key-ring handle. Rotation publishes the next public key before switching the
+active signer and retains the previous public key for a bounded verification
+overlap. The later
+[temporary single-VM signing-key decision](20260928-temporarily-use-host-managed-identity-signing-keys.md)
+allows a protected host-managed ring for the first production stage, subject
+to its retirement, emergency-deny, security-review, and delivery gates.
 
 The initial single-operator ChatGPT connection continues to use the predefined
 public client. CIMD is now the preferred OpenAI registration method for broader

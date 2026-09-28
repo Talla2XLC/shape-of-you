@@ -16,7 +16,8 @@ function auth(
   resolveAuthorizedPersons: BrowserAuthOptions["resolveAuthorizedPersons"] = async () => [],
   requestRecoveryErasure: BrowserAuthOptions["requestRecoveryErasure"] = async () => {
     throw new Error("Unexpected Recovery erasure request");
-  }
+  },
+  deniedIdentityKids?: ReadonlySet<string>
 ): BrowserAuth {
   return new BrowserAuth({
     origin,
@@ -25,6 +26,7 @@ function auth(
     resource,
     clientId: "shape-of-you-web-test",
     cookieKeys: [key],
+    ...(deniedIdentityKids ? { deniedIdentityKids } : {}),
     resolveAuthorizedPersons,
     requestRecoveryErasure
   });
@@ -102,6 +104,15 @@ describe("API browser session boundary", () => {
         request(`__Host-shape_of_you_api_session=${await session("5m", oldKey)}`)
       )
     ).resolves.toMatchObject({ subject: "identity-subject" });
+  });
+
+  it("invalidates existing browser sessions when an old cookie key is removed", async () => {
+    const oldKey = "old-browser-cookie-key-that-is-long-enough-for-validation";
+    await expect(
+      auth().requireRead(
+        request(`__Host-shape_of_you_api_session=${await session("5m", oldKey)}`)
+      )
+    ).rejects.toBeInstanceOf(BrowserAuthorizationError);
   });
 
   it("requires exact Origin and matching CSRF for browser writes", async () => {
@@ -313,6 +324,63 @@ describe("API browser session boundary", () => {
     });
     expect(legacyResponse.statusCode).toBe(302);
     expect(legacyResponse.headers.location).toBe(`${origin}/progress`);
+    await fastify.close();
+  });
+
+  it("rejects a compromised Identity kid after warming the browser JWKS cache", async () => {
+    const allowed = await generateKeyPair("ES256");
+    const compromised = await generateKeyPair("ES256");
+    const allowedJwk = await exportJWK(allowed.publicKey);
+    const compromisedJwk = await exportJWK(compromised.publicKey);
+    const idToken = (kid: string | null, privateKey: typeof allowed.privateKey) =>
+      new SignJWT({})
+        .setProtectedHeader({ alg: "ES256", ...(kid ? { kid } : {}) })
+        .setIssuer("https://identity.example.test")
+        .setAudience("shape-of-you-web-test")
+        .setSubject("authorized-subject")
+        .setIssuedAt()
+        .setExpirationTime("5m")
+        .sign(privateKey);
+    let servedToken = await idToken("allowed", allowed.privateKey);
+    let jwksFetches = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      if (url.pathname === "/oauth/token") return Response.json({ id_token: servedToken });
+      if (url.pathname === "/oauth/jwks") {
+        jwksFetches += 1;
+        return Response.json({ keys: [
+          { ...allowedJwk, alg: "ES256", kid: "allowed", use: "sig" },
+          { ...compromisedJwk, alg: "ES256", kid: "compromised", use: "sig" }
+        ] });
+      }
+      return new Response(null, { status: 404 });
+    }));
+    const fastify = Fastify();
+    auth(
+      async () => [{
+        personId: "00000000-0000-4000-8000-000000000001",
+        roles: ["owner"]
+      }],
+      undefined,
+      new Set(["compromised"])
+    ).register(fastify);
+    const callback = async () => {
+      const start = await fastify.inject({ method: "GET", url: "/browser-auth/sign-in" });
+      const state = new URL(start.headers.location!).searchParams.get("state");
+      return fastify.inject({
+        method: "GET",
+        url: `/browser-auth/callback?code=one-time-code&state=${state}`,
+        headers: { cookie: transactionCookie(start) }
+      });
+    };
+    expect((await callback()).statusCode).toBe(302);
+    expect(jwksFetches).toBe(1);
+    servedToken = await idToken("compromised", compromised.privateKey);
+    expect((await callback()).statusCode).toBe(401);
+    expect(jwksFetches).toBe(1);
+    servedToken = await idToken(null, allowed.privateKey);
+    expect((await callback()).statusCode).toBe(401);
+    expect(jwksFetches).toBe(1);
     await fastify.close();
   });
 

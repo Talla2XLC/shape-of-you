@@ -19,6 +19,7 @@ describe("loadIdentityConfig", () => {
       IDENTITY_PUBLIC_ORIGIN: "http://identity.localhost",
       WEBAUTHN_RP_ID: "identity.localhost",
       WEBAUTHN_RP_NAME: "Shape of You",
+      IDENTITY_OAUTH_ISSUANCE_DISABLED: "false",
       LOG_LEVEL: "info",
       SHUTDOWN_TIMEOUT_MS: 10_000
     });
@@ -126,5 +127,39 @@ describe("loadIdentityConfig", () => {
       IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: "v1",
       IDENTITY_OAUTH_RESOURCE: "http://api.localhost:3000/mcp"
     });
+  });
+
+  it("requires complete and bounded signing-key rotation windows", () => {
+    const base = {
+      DATABASE_URL: "postgresql://identity:identity@127.0.0.1:5432/identity",
+      IDENTITY_PUBLIC_ORIGIN: "http://identity.localhost",
+      WEBAUTHN_RP_ID: "identity.localhost"
+    };
+    expect(() => loadIdentityConfig({
+      ...base,
+      IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS: "660"
+    })).toThrow("must be supplied together");
+    expect(() => loadIdentityConfig({
+      ...base,
+      IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS: "660",
+      IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS: "599"
+    })).toThrow(">=660");
+    expect(loadIdentityConfig({
+      ...base,
+      IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS: "660",
+      IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS: "660"
+    })).toMatchObject({
+      IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS: 660,
+      IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS: 660
+    });
+  });
+
+  it("requires OAuth configuration for emergency JWKS-only mode", () => {
+    expect(() => loadIdentityConfig({
+      DATABASE_URL: "postgresql://identity:identity@127.0.0.1:5432/identity",
+      IDENTITY_PUBLIC_ORIGIN: "http://identity.localhost",
+      WEBAUTHN_RP_ID: "identity.localhost",
+      IDENTITY_OAUTH_ISSUANCE_DISABLED: "true"
+    })).toThrow("JWKS-only mode requires");
   });
 });

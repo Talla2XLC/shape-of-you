@@ -10,6 +10,16 @@ interface SigningKeyRow {
   readonly public_key_spki: Buffer;
   readonly secret_provider_handle: string;
   readonly status: "staged" | "active" | "verifying" | "retired" | "revoked";
+  readonly published_at: Date | null;
+  readonly signing_stopped_at: Date | null;
+}
+
+/** Measured minimum windows required for planned signing-key transitions. */
+export interface OAuthSigningKeyRotationPolicy {
+  /** Minimum time since staging; external JWKS visibility needs an operator check. */
+  readonly publicationDelayMs: number;
+  /** Time an old key must remain verifiable after signing stops. */
+  readonly verificationOverlapMs: number;
 }
 
 /** Reconciles external private signing material with public database metadata. */
@@ -21,18 +31,34 @@ export class OAuthSigningKeyStore {
    *
    * A first boot accepts exactly one new key. A later boot with the old active
    * key may stage additional keys in JWKS. Activation requires a key staged by
-   * a previous reconciliation, while every previous verification key remains
-   * present. Public material changes under an existing `kid` fail closed.
+   * a previous reconciliation and an explicit publication window. A verifying
+   * key can leave the ring only after the explicit verification window. Public
+   * material changes under an existing `kid` fail closed.
    *
    * @param keyRing - Validated external ES256 signing material.
+   * @param policy - Measured transition windows, required for activation and retirement.
    * @throws Error when lifecycle metadata and external keys cannot be reconciled.
    */
-  public async reconcile(keyRing: OAuthSigningKeyRing): Promise<void> {
+  public async reconcile(
+    keyRing: OAuthSigningKeyRing,
+    policy?: OAuthSigningKeyRotationPolicy
+  ): Promise<void> {
+    if (
+      policy && (
+        !Number.isSafeInteger(policy.publicationDelayMs) ||
+        policy.publicationDelayMs < 660_000 ||
+        !Number.isSafeInteger(policy.verificationOverlapMs) ||
+        policy.verificationOverlapMs < 660_000
+      )
+    ) {
+      throw new Error("OAuth signing-key rotation policy is invalid");
+    }
     const client = await this.pool.connect();
     try {
       await client.query("begin");
       const result = await client.query<SigningKeyRow>(
-        `select id, key_id, public_key_spki, secret_provider_handle, status
+        `select id, key_id, public_key_spki, secret_provider_handle, status,
+                published_at, signing_stopped_at
            from oauth_signing_keys
           order by created_at
           for update`
@@ -75,6 +101,12 @@ export class OAuthSigningKeyStore {
           throw new Error("Configured OAuth signing key must be staged before activation");
         }
         const now = new Date();
+        if (
+          !policy ||
+          !elapsed(configuredActive.published_at, policy.publicationDelayMs, now)
+        ) {
+          throw new Error("Staged OAuth signing key has not completed its publication window");
+        }
         await client.query(
           `update oauth_signing_keys
               set status = 'verifying', signing_stopped_at = $2
@@ -92,10 +124,20 @@ export class OAuthSigningKeyStore {
       }
 
       for (const row of result.rows) {
-        if (
-          ["staged", "active", "verifying"].includes(row.status) &&
-          !keyRing.publicSpkiByKeyId.has(row.key_id)
-        ) {
+        if (keyRing.publicSpkiByKeyId.has(row.key_id)) continue;
+        if (row.status === "verifying") {
+          const now = new Date();
+          if (!policy || !elapsed(row.signing_stopped_at, policy.verificationOverlapMs, now)) {
+            throw new Error(`OAuth signing key ${row.key_id} is still required for verification`);
+          }
+          await client.query(
+            `update oauth_signing_keys
+                set status = 'retired', retired_at = $2
+              where id = $1 and status = 'verifying'`,
+            [row.id, now]
+          );
+          await insertSigningKeyEvent(client, row.id);
+        } else if (row.status === "staged" || row.status === "active") {
           throw new Error(`OAuth signing key ${row.key_id} is still required for verification`);
         }
       }
@@ -124,6 +166,10 @@ export class OAuthSigningKeyStore {
       client.release();
     }
   }
+}
+
+function elapsed(since: Date | null, minimumMs: number, now: Date): boolean {
+  return since !== null && now.getTime() - since.getTime() >= minimumMs;
 }
 
 function buffersEqual(left: Buffer, right: Buffer): boolean {

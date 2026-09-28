@@ -36,9 +36,13 @@ function resolver(
   return { resolveAuthorizedPersons: async () => persons };
 }
 
-async function token(scope: string, audience = resource): Promise<string> {
+async function token(
+  scope: string,
+  audience = resource,
+  kid: string | null = "test-v1"
+): Promise<string> {
   return new SignJWT({ scope })
-    .setProtectedHeader({ alg: "ES256", kid: "test-v1" })
+    .setProtectedHeader({ alg: "ES256", ...(kid ? { kid } : {}) })
     .setIssuer(issuer)
     .setSubject("identity-account-1")
     .setAudience(audience)
@@ -66,6 +70,37 @@ describe("MCP OAuth authorization", () => {
         false
       )
     ).rejects.toBeInstanceOf(McpAuthorizationError);
+  });
+
+  it("denies a compromised kid even when the signing key remains cached", async () => {
+    const authorizer = new McpAuthorizer(
+      issuer,
+      "https://unused.test/jwks",
+      resource,
+      resolver(),
+      localJwks,
+      new Set(["test-v1"])
+    );
+    await expect(
+      authorizer.authorize(`Bearer ${await token(MCP_READ_SCOPE)}`, MCP_READ_SCOPE, false)
+    ).rejects.toMatchObject({ oauthError: "invalid_token" });
+  });
+
+  it("rejects a signed token with no kid instead of selecting a cached key", async () => {
+    const authorizer = new McpAuthorizer(
+      issuer,
+      "https://unused.test/jwks",
+      resource,
+      resolver(),
+      localJwks
+    );
+    await expect(
+      authorizer.authorize(
+        `Bearer ${await token(MCP_READ_SCOPE, resource, null)}`,
+        MCP_READ_SCOPE,
+        false
+      )
+    ).rejects.toMatchObject({ oauthError: "invalid_token" });
   });
 
   it("rejects writes for a viewer even with the write scope", async () => {

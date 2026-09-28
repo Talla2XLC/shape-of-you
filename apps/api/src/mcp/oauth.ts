@@ -6,6 +6,7 @@ import {
 } from "jose";
 
 import type { AuthorizedPerson } from "../storage/identity-subject-mapping-repository.js";
+import { assertAllowedIdentityTokenKid } from "../identity/assert-allowed-token-kid.js";
 
 export const MCP_READ_SCOPE = "person:read";
 export const MCP_WEIGHT_WRITE_SCOPE = "weight:write";
@@ -57,7 +58,8 @@ export class McpAuthorizer implements McpAuthorizationBoundary {
     private readonly mappings: IdentitySubjectResolver,
     keyResolver: JWTVerifyGetKey = createRemoteJWKSet(
       new URL(jwksUri)
-    )
+    ),
+    private readonly deniedKids: ReadonlySet<string> = new Set()
   ) {
     this.jwks = keyResolver;
   }
@@ -71,6 +73,7 @@ export class McpAuthorizer implements McpAuthorizationBoundary {
     const token = parseBearerToken(authorizationHeader);
     let payload: JWTPayload;
     try {
+      assertAllowedIdentityTokenKid(token, this.deniedKids);
       ({ payload } = await jwtVerify(token, this.jwks, {
         issuer: this.issuer,
         audience: this.resource,

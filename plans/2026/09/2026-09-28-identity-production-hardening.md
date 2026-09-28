@@ -1,7 +1,7 @@
 # Identity — подготовка production hardening
 
-Статус: репозиторная часть в работе; production architecture и операции не
-утверждены.
+Статус: signing-key architecture принята; single-VM recovery ADR и
+production operations ещё не утверждены.
 
 ## Цель
 
@@ -21,8 +21,8 @@
   API/MCP unit tests; canonical documentation validation прошла.
 - Staging API и Identity logical backups от 2026-09-28 восстановлены в
   изолированных PostgreSQL 17 instances. Они находятся на той же VM; это не
-  защита от потери VM. Для production предложены RPO ≤ 1 час и RTO ≤ 4 часа;
-  они не утверждены и не подтверждены off-host copy или полным restore drill.
+  защита от потери VM. Оператор временно принимает риск её полной потери;
+  прежние предложенные RPO ≤ 1 час и RTO ≤ 4 часа для этого сценария сняты.
 - В коде есть key-ring parsing, локально проверенные предварительная
   публикация нового `kid` в JWKS и переключение active signer с сохранением
   предыдущего ключа. Интервал перекрытия, retirement и аварийный runbook не
@@ -33,22 +33,25 @@
 
 ## Архитектурные решения до реализации
 
-1. Выбрать production Vault/KMS-grade signing-key provider и способ доставки
-   операций подписи. Действующий Identity ADR блокирует production до этого
-   выбора. Host-managed private key ring является альтернативой только через
-   явное изменение принятого решения с описанием риска и процедур защиты.
-2. Утвердить RPO/RTO, максимальный срок хранения restorable backups и
-   независимую копию Identity и API backups. Согласовать с владельцем
-   PostgreSQL границу PITR/WAL или периодических encrypted logical backups.
+1. Принято временное исключение для host-managed signing-key ring на одной VM.
+   До production реализовать его retirement, emergency deny на обоих API
+   путях Identity JWT, защищённый runtime handoff и измеренный rotation
+   runbook. Внешний Vault/KMS-grade provider отложен до отдельного решения.
+2. Утвердить временную single-VM backup policy: расписание для обеих баз,
+   максимальный возраст проверенной пары, retention, alert и владельца
+   восстановления. Для полной потери VM нет гарантированных RPO/RTO.
+   Off-host backup и независимая копия Recovery journal остаются будущим
+   улучшением после появления внешнего хранилища.
 3. Утвердить production hostname/RP ID и TLS ownership без переноса
    signing-key lifecycle в edge.
 4. Утвердить минимальные security signals, SLO и владельца реакции на alert.
 
 Проекты двух canonical ADR отделяют lifecycle signing keys от восстановления:
-[signing keys](../../../docs/adr/20260928-use-managed-identity-signing-keys-with-staged-rotation.md)
-и [backup/restore](../../../docs/adr/20260928-require-off-host-pitr-and-isolated-identity-restore.md).
-Они имеют статус `proposed`; реализация и изменение current-state Wiki возможны
-только после архитектурного утверждения и проверки качества.
+[signing keys](../../../docs/adr/20260928-temporarily-use-host-managed-identity-signing-keys.md)
+и [backup/restore](../../../docs/adr/20260928-accept-single-vm-identity-recovery-risk.md).
+Signing-key ADR принят; recovery ADR остаётся `proposed`. Реализация и
+изменение остальных current-state Wiki страниц возможны только после
+соответствующих архитектурных и quality gates.
 
 ## Минимальная последовательность после архитектурного утверждения
 
@@ -57,10 +60,12 @@
 2. Реализовать и проверить публикацию нового `kid` до его активации, смену
    signer, bounded verification overlap, retirement и emergency replacement.
    Проверить совместимость с кэшем JWKS у API и уже выданными JWT.
-3. Ввести независимый encrypted backup обеих service-owned БД, retention и
-   восстановление в изолированную среду; проверить роли/ACL, миграционный
-   журнал, синтетические read/write и обязательный Recovery erasure journal
-   replay до открытия трафика. Измерить достижение RPO/RTO.
+3. Автоматизировать owner-controlled same-host logical backups обеих
+   service-owned БД, проверку свежести пары, retention и alert.
+   Восстановить пару в изолированную среду; проверить роли/ACL, миграционные
+   журналы, синтетические read/write, Identity/API binding и обязательный
+   Recovery erasure journal replay до открытия трафика. Измерить возраст
+   backup и время локального восстановления, не заявляя VM-loss RPO/RTO.
 4. Добавить только нужные метрики/alerts: OAuth/passkey failures, refresh
    reuse, readiness/JWKS errors, backup age/failure и restore-drill failure.
    События и логи не содержат токенов, TOTP seeds и Person-данных.
@@ -85,19 +90,24 @@
   build и canonical docs validation. Один промежуточный integration run был
   прерван таймаутом старта тестового PostgreSQL container до запуска migration
   tests; целевой и последующий полный повтор прошли.
+- Release `d79666aa12ead4cf4fd3b84f69d7b2e135440a21` опубликован и
+  доставлен в staging: Identity migration journal был current, Identity/API/edge
+  стали healthy, внешние staging smoke checks прошли. Write smoke не запускался.
 
-Это не завершает production gate: provider, retirement, emergency deny,
-backup, monitoring, Security Review и conformance остаются открытыми.
+Это не завершает production gate: retirement, emergency deny, backup policy,
+monitoring, Security Review и conformance остаются открытыми. Принятие риска
+потери VM не закрывает остальные gates.
 
 ## Критерии готовности к production
 
-- Принятый ADR задаёт key provider, двухфазную ротацию, аварийную замену,
-  RPO/RTO, backup retention, restore boundary, hostname/RP ID и владельцев
-  наблюдаемости.
+- Принятые ADR задают signing-key boundary, двухфазную ротацию, аварийную
+  замену, временный single-VM recovery contract, backup retention, restore
+  boundary, hostname/RP ID и владельцев наблюдаемости.
 - Старый JWT остаётся проверяемым в заданном overlap; новый `kid` доступен
   через JWKS до первой подписи; компрометация имеет проверенный emergency path.
-- Потеря VM не уничтожает единственную восстанавливаемую копию Identity и API;
-  изолированный restore с Recovery erasure replay подтверждает RPO/RTO.
+- Проверенная пара same-host backup свежа по утверждённому порогу; изолированный
+  restore с Recovery erasure replay и отрицательными сценариями прошёл.
+  Риск полной потери VM явно принят; RPO/RTO для него не заявляются.
 - Production readiness не зелёная при отсутствующем обязательном OAuth или
   TOTP key configuration. Security alerts проверены без утечки credentials.
 - Security Review и выбранный conformance profile приняты с сохранённым
@@ -126,15 +136,15 @@ backup, monitoring, Security Review и conformance остаются открыт
    решения, текущая Wiki остаётся описанием принятого состояния. Recovery
    erasure journal не переопределяется; production ADR ссылается на его
    действующий fail-closed контракт.
-5. Упрощение без потери масштабируемости: secret-provider key-ring adapter
-   сохраняет существующую библиотеку; cluster-level PITR использует общий
-   recovery point и не требует третьего application deployable. Если владелец
-   cluster не примет PITR, возврат к частым off-host logical backups требует
-   отдельного доказательства RPO и согласования риска рассинхронизации.
+5. Упрощение без потери масштабируемости: текущая VM и service-owned базы
+   сохраняются. Same-host logical backups полезны для локального restore,
+   но не становятся disaster recovery и не имеют общего атомарного момента.
+   При появлении off-host storage можно добавить независимые копии без
+   изменения модели владения базами и Recovery replay.
 
-Вывод review: предложенное решение достаточно узкое для следующего этапа, но
-provider, интервалы ротации, RPO/RTO и owner-operated storage должны быть
-утверждены до изменения runtime.
+Вывод review: временное single-VM решение соответствует доступной
+инфраструктуре. Signing-key boundary принята; интервалы ротации, локальные
+пороги backup и owner-operated storage должны быть проверены до production.
 
 ## Отдельные operator gates
 

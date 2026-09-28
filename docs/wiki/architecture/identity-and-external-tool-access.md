@@ -115,11 +115,15 @@ sessions, security events, and unrelated grants remain intact. A scope-
 contracting release is not automatically rollback-compatible with the previous
 Identity image and requires a new external OAuth consent after cutover.
 
-Local development and staging supply private ES256 keys through a versioned
-runtime secret key ring. PostgreSQL stores only public SPKI material, lifecycle
-metadata, and an opaque handle. Key rotation publishes an overlap key before
-changing the active signer. Production remains blocked on a separate Vault/KMS
-decision.
+Identity receives private ES256 keys through a versioned runtime key ring.
+PostgreSQL stores only public SPKI material, lifecycle metadata, and an opaque
+handle. A temporary accepted
+[single-VM key decision](../../adr/20260928-temporarily-use-host-managed-identity-signing-keys.md)
+permits a protected host-managed ring for the first production stage. Key
+rotation publishes a new `kid` before activation, retains the previous key
+for a bounded verification overlap, and requires retirement and an API-local
+emergency deny policy on both current Identity JWT validation paths before
+production. Host compromise and VM loss remain accepted risks.
 
 Login is passkey-first through WebAuthn, initially implemented with pinned
 `@simplewebauthn/server` 13.3.2 behind a project-owned adapter. Accounts can
@@ -518,8 +522,11 @@ lifecycle.
 
 ## Open questions
 
-- Signing-key overlap and rotation intervals.
-- Production hostname, secret storage, backup RPO/RTO, and security monitoring.
+- Measured signing-key overlap and retirement intervals; emergency deny
+  implementation and drill.
+- Production hostname, single-VM backup freshness and retention, and security
+  monitoring. VM-loss RPO/RTO are not guaranteed under the temporary risk
+  decision.
 - End-to-end OpenID/OAuth conformance results for the implemented HTTP and
   interaction flow before production use.
 

@@ -1,5 +1,6 @@
 import {
   createHash,
+  createPrivateKey,
   generateKeyPairSync,
   randomBytes,
   randomUUID
@@ -19,6 +20,7 @@ import type {
   PublicKeyCredentialRequestOptionsJSON
 } from "@simplewebauthn/server";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
+import { createLocalJWKSet, jwtVerify, SignJWT } from "jose";
 import type { AdapterPayload } from "oidc-provider";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -45,6 +47,7 @@ import {
   createIdentityDatabase
 } from "../src/database/context.js";
 import { OAuthSigningKeyStore } from "../src/oauth/signing-key-store.js";
+import { revokeOAuthAuthorityForIncident } from "../src/oauth/incident-revocation.js";
 import { parseOAuthSigningKeyRing } from "../src/oauth/signing-keys.js";
 import { OAuthClientStore } from "../src/oauth/client-store.js";
 import { createOAuthProviderAdapterFactory } from "../src/oauth/provider-adapter.js";
@@ -545,6 +548,22 @@ describe("Identity migration chain", () => {
     const first = privateKeyValue();
     const second = privateKeyValue();
     const store = new OAuthSigningKeyStore(pool);
+    const signedToken = (keyId: string, value: string) =>
+      new SignJWT({ scope: "person:read" })
+        .setProtectedHeader({ alg: "ES256", kid: keyId })
+        .setIssuer("https://identity.example.test")
+        .setAudience("https://api.example.test/mcp")
+        .setIssuedAt()
+        .setExpirationTime("5m")
+        .sign(createPrivateKey({
+          key: Buffer.from(value, "base64url"),
+          format: "der",
+          type: "pkcs8"
+        }));
+    const rotationPolicy = {
+      publicationDelayMs: 660_000,
+      verificationOverlapMs: 660_000
+    };
     try {
       await store.reconcile(
         parseOAuthSigningKeyRing("v1", JSON.stringify({ v1: first }))
@@ -587,7 +606,8 @@ describe("Identity migration chain", () => {
       });
       publicationServer = createIdentityServer({
         readiness: { check: async () => undefined },
-        oauthRuntime: publicationRuntime
+        oauthRuntime: publicationRuntime,
+        oauthIssuanceDisabled: true
       });
       await new Promise<void>((resolve, reject) => {
         publicationServer!.once("error", reject);
@@ -597,15 +617,49 @@ describe("Identity migration chain", () => {
       if (!address || typeof address === "string") throw new Error("Loopback port is unavailable");
       const jwksResponse = await fetch(`http://127.0.0.1:${address.port}/oauth/jwks`);
       expect(jwksResponse.status).toBe(200);
+      const haltedTokenResponse = await fetch(`http://127.0.0.1:${address.port}/oauth/token`, {
+        method: "POST"
+      });
+      expect(haltedTokenResponse.status).toBe(503);
+      expect(await haltedTokenResponse.json()).toEqual({ error: "temporarily_unavailable" });
+      expect((await fetch(`http://127.0.0.1:${address.port}/ready`)).status).toBe(503);
+      expect((await fetch(`http://127.0.0.1:${address.port}/oauth/authorize`)).status).toBe(503);
+      expect((await fetch(`http://127.0.0.1:${address.port}/v1/security/sessions`)).status).toBe(503);
+      expect((await fetch(
+        `http://127.0.0.1:${address.port}/.well-known/openid-configuration`
+      )).status).toBe(200);
       const jwks = await jwksResponse.json() as { keys: { kid: string }[] };
       expect(jwks.keys.map((key) => key.kid).sort()).toEqual(["v1", "v2"]);
+      const oldToken = await signedToken("v1", first);
+      await expect(jwtVerify(
+        oldToken,
+        createLocalJWKSet(jwks as Parameters<typeof createLocalJWKSet>[0])
+      )).resolves.toMatchObject({ protectedHeader: { kid: "v1" } });
       await new Promise<void>((resolve) => publicationServer!.close(() => resolve()));
       publicationServer = undefined;
+      await expect(
+        store.reconcile(
+          parseOAuthSigningKeyRing("v2", JSON.stringify({ v1: first, v2: second }))
+        )
+      ).rejects.toThrow("publication window");
+      await expect(
+        store.reconcile(
+          parseOAuthSigningKeyRing("v2", JSON.stringify({ v1: first, v2: second })),
+          rotationPolicy
+        )
+      ).rejects.toThrow("publication window");
+      await pool.query(
+        `update oauth_signing_keys
+            set created_at = now() - interval '2 hours',
+                published_at = now() - interval '2 hours'
+          where key_id = 'v2'`
+      );
       await store.reconcile(
         parseOAuthSigningKeyRing(
           "v2",
           JSON.stringify({ v1: first, v2: second })
-        )
+        ),
+        rotationPolicy
       );
 
       const rows = await pool.query<{
@@ -621,6 +675,11 @@ describe("Identity migration chain", () => {
         { key_id: "v1", secret_provider_handle: "env:v1", status: "verifying" },
         { key_id: "v2", secret_provider_handle: "env:v2", status: "active" }
       ]);
+      const newToken = await signedToken("v2", second);
+      await expect(jwtVerify(
+        newToken,
+        createLocalJWKSet(jwks as Parameters<typeof createLocalJWKSet>[0])
+      )).resolves.toMatchObject({ protectedHeader: { kid: "v2" } });
       const events = await pool.query<{ count: string }>(
         `select count(*)::text as count from identity_security_events
           where event_type = 'signing_key_lifecycle_changed'
@@ -634,6 +693,70 @@ describe("Identity migration chain", () => {
           parseOAuthSigningKeyRing("v2", JSON.stringify({ v2: second }))
         )
       ).rejects.toThrow("still required for verification");
+      await expect(
+        store.reconcile(
+          parseOAuthSigningKeyRing("v2", JSON.stringify({ v2: second })),
+          rotationPolicy
+        )
+      ).rejects.toThrow("still required for verification");
+      await pool.query(
+        `update oauth_signing_keys
+            set created_at = now() - interval '3 hours',
+                published_at = now() - interval '3 hours',
+                activated_at = now() - interval '3 hours',
+                signing_stopped_at = now() - interval '12 minutes'
+          where key_id = 'v1'`
+      );
+      const retiredRing = parseOAuthSigningKeyRing(
+        "v2",
+        JSON.stringify({ v2: second })
+      );
+      await store.reconcile(retiredRing, rotationPolicy);
+      const retired = await pool.query<{ status: string; retired_at: Date | null }>(
+        "select status, retired_at from oauth_signing_keys where key_id = 'v1'"
+      );
+      expect(retired.rows[0]).toEqual({
+        status: "retired",
+        retired_at: expect.any(Date)
+      });
+      const retiredRuntime = new OAuthRuntime({
+        pool,
+        issuer: "http://127.0.0.1:3000",
+        resource: "https://api.example.test/mcp",
+        signingKeys: retiredRing,
+        cookieKeys: [randomBytes(32).toString("base64url")]
+      });
+      publicationServer = createIdentityServer({
+        readiness: { check: async () => undefined },
+        oauthRuntime: retiredRuntime
+      });
+      await new Promise<void>((resolve, reject) => {
+        publicationServer!.once("error", reject);
+        publicationServer!.listen(0, "127.0.0.1", resolve);
+      });
+      const retiredAddress = publicationServer.address();
+      if (!retiredAddress || typeof retiredAddress === "string") {
+        throw new Error("Loopback port is unavailable");
+      }
+      const retiredJwks = await fetch(
+        `http://127.0.0.1:${retiredAddress.port}/oauth/jwks`
+      ).then((response) => response.json()) as { keys: { kid: string }[] };
+      expect(retiredJwks.keys.map((key) => key.kid)).toEqual(["v2"]);
+      const retiredResolver = createLocalJWKSet(
+        retiredJwks as Parameters<typeof createLocalJWKSet>[0]
+      );
+      await expect(jwtVerify(newToken, retiredResolver)).resolves.toMatchObject({
+        protectedHeader: { kid: "v2" }
+      });
+      await expect(jwtVerify(oldToken, retiredResolver)).rejects.toThrow();
+      await new Promise<void>((resolve) => publicationServer!.close(() => resolve()));
+      publicationServer = undefined;
+      await expect(
+        store.reconcile(
+          parseOAuthSigningKeyRing("v2", JSON.stringify({ v1: first, v2: second })),
+          rotationPolicy
+        )
+      ).rejects.toThrow("cannot be republished");
     } finally {
       if (publicationServer) {
         await new Promise<void>((resolve) => publicationServer!.close(() => resolve()));
@@ -3187,6 +3310,92 @@ describe("Identity migration chain", () => {
         )
       ).rejects.toMatchObject({
         constraint: "identity_security_events_session_account"
+      });
+    } finally {
+      await pool.end();
+    }
+  });
+
+  it("revokes incident OAuth authority atomically and idempotently", async () => {
+    const pool = new Pool({ connectionString: container.getConnectionUri() });
+    const accountId = randomUUID();
+    const sessionId = randomUUID();
+    const grantId = randomUUID();
+    const familyId = randomUUID();
+    const clientId = `incident-${randomUUID()}`;
+    try {
+      await pool.query(
+        `insert into identity_accounts
+           (id, subject, webauthn_user_handle, display_name)
+         values ($1, $2, $3, 'Incident test account')`,
+        [accountId, randomUUID(), randomBytes(32)]
+      );
+      await pool.query(
+        `insert into oauth_clients (id, display_name) values ($1, 'Incident test client')`,
+        [clientId]
+      );
+      await pool.query(
+        `insert into oauth_grants (id, account_id, client_id) values ($1, $2, $3)`,
+        [grantId, accountId, clientId]
+      );
+      await pool.query(
+        `insert into oauth_sessions
+           (id, account_id, credential_hash, csrf_token_hash, provider_uid,
+            authenticated_at, acr, amr, last_activity_at, expires_at)
+         values ($1, $2, $3, $4, $5, now() - interval '1 second',
+                 'urn:shape-of-you:acr:passkey', array['recovery_code'], now(),
+                 now() + interval '1 day')`,
+        [sessionId, accountId, randomBytes(32), randomBytes(32), randomUUID()]
+      );
+      await pool.query(
+        `insert into oauth_session_authorizations
+           (session_id, account_id, client_id, grant_id)
+         values ($1, $2, $3, $4)`,
+        [sessionId, accountId, clientId, grantId]
+      );
+      await pool.query(
+        `insert into oauth_refresh_token_families
+           (id, account_id, client_id, session_id, grant_id, expires_at)
+         values ($1, $2, $3, $4, $5, now() + interval '1 day')`,
+        [familyId, accountId, clientId, sessionId, grantId]
+      );
+
+      const first = await revokeOAuthAuthorityForIncident(pool);
+      expect(first.sessionsRevoked).toBeGreaterThanOrEqual(1);
+      expect(first.sessionAuthorizationsRevoked).toBeGreaterThanOrEqual(1);
+      expect(first.refreshFamiliesRevoked).toBeGreaterThanOrEqual(1);
+      expect(first.correlationId).toMatch(/^[0-9a-f-]{36}$/);
+      const authority = await pool.query<{
+        session_revoked: boolean;
+        authorization_revoked: boolean;
+        family_revoked: boolean;
+      }>(
+        `select s.revoked_at is not null as session_revoked,
+                a.revoked_at is not null as authorization_revoked,
+                f.revoked_at is not null as family_revoked
+           from oauth_sessions s
+           join oauth_session_authorizations a on a.session_id = s.id
+           join oauth_refresh_token_families f on f.session_id = s.id
+          where s.id = $1`,
+        [sessionId]
+      );
+      expect(authority.rows[0]).toEqual({
+        session_revoked: true,
+        authorization_revoked: true,
+        family_revoked: true
+      });
+      const audit = await pool.query<{ count: string }>(
+        `select count(*)::text as count from identity_security_events
+          where session_id = $1 and correlation_id = $2
+            and event_type = 'oauth_session_revoked'`,
+        [sessionId, first.correlationId]
+      );
+      expect(audit.rows[0]?.count).toBe("1");
+      const second = await revokeOAuthAuthorityForIncident(pool);
+      expect(second).toMatchObject({
+        sessionsRevoked: 0,
+        sessionAuthorizationsRevoked: 0,
+        refreshFamiliesRevoked: 0
       });
     } finally {
       await pool.end();

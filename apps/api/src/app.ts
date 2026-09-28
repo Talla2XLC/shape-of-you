@@ -7,7 +7,7 @@ import {
 } from "@nestjs/platform-fastify";
 import type { FastifyInstance } from "fastify";
 
-import type { AppConfig } from "@shape-of-you/config";
+import { parseIdentityOAuthDeniedKids, type AppConfig } from "@shape-of-you/config";
 
 import { AppModule } from "./application/app.module.js";
 import {
@@ -256,6 +256,9 @@ export async function buildApp(
         parseIntegrationKeyRing(options.config.INTEGRATION_ENCRYPTION_KEY_RING!)
       )
     : null;
+  const deniedIdentityKids = parseIdentityOAuthDeniedKids(
+    options.config.IDENTITY_OAUTH_DENIED_KIDS
+  );
   const browserAuth =
     identitySubjectMappings &&
     personContext instanceof RequestPersonContext &&
@@ -270,6 +273,7 @@ export async function buildApp(
             .split(",")
             .map((key) => key.trim())
             .filter(Boolean),
+          deniedIdentityKids,
           resolveAuthorizedPersons:
             identitySubjectMappings.resolveAuthorizedPersons.bind(
               identitySubjectMappings
@@ -336,7 +340,9 @@ export async function buildApp(
         options.config.IDENTITY_OAUTH_ISSUER,
         options.config.IDENTITY_OAUTH_JWKS_URI,
         options.config.IDENTITY_OAUTH_RESOURCE,
-        new IdentitySubjectMappingRepository(database)
+        new IdentitySubjectMappingRepository(database),
+        undefined,
+        deniedIdentityKids
       ),
       personContext,
       services: {

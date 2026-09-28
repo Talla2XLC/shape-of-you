@@ -1,5 +1,44 @@
 import { z } from "zod";
 
+const oauthKeyIdPattern = /^[A-Za-z0-9._-]{1,64}$/;
+
+/**
+ * Parses the deployment-owned emergency deny policy for Identity JWT keys.
+ *
+ * @param serialized - Versioned JSON policy or undefined for an empty policy.
+ * @returns Key identifiers rejected before JWT verification.
+ * @throws Error when the version, shape, or key identifiers are invalid.
+ */
+export function parseIdentityOAuthDeniedKids(
+  serialized: string | undefined
+): ReadonlySet<string> {
+  if (serialized === undefined) return new Set();
+  let value: unknown;
+  try {
+    value = JSON.parse(serialized) as unknown;
+  } catch {
+    throw new Error("Identity OAuth denied-kid policy must be valid JSON");
+  }
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "kids,version" ||
+    !("version" in value) ||
+    value.version !== 1 ||
+    !("kids" in value) ||
+    !Array.isArray(value.kids) ||
+    value.kids.length > 100 ||
+    !value.kids.every(
+      (kid) => typeof kid === "string" && oauthKeyIdPattern.test(kid)
+    ) ||
+    new Set(value.kids).size !== value.kids.length
+  ) {
+    throw new Error("Identity OAuth denied-kid policy is invalid");
+  }
+  return new Set(value.kids);
+}
+
 const environmentSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
   HOST: z.string().min(1).default("0.0.0.0"),
@@ -20,6 +59,17 @@ const environmentSchema = z.object({
   IDENTITY_OAUTH_ISSUER: z.string().url().optional(),
   IDENTITY_OAUTH_JWKS_URI: z.string().url().optional(),
   IDENTITY_OAUTH_RESOURCE: z.string().url().optional(),
+  IDENTITY_OAUTH_DENIED_KIDS: z.string().max(8_192).optional()
+    .superRefine((value, context) => {
+      try {
+        parseIdentityOAuthDeniedKids(value);
+      } catch {
+        context.addIssue({
+          code: "custom",
+          message: "Identity OAuth denied-kid policy is invalid"
+        });
+      }
+    }),
   API_BROWSER_ORIGIN: z.string().url().optional(),
   API_BROWSER_OAUTH_CLIENT_ID: z.string().min(1).max(128).optional(),
   API_BROWSER_SESSION_KEYS: z

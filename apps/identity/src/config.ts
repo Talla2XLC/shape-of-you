@@ -34,6 +34,9 @@ const identityEnvironmentSchema = z
   IDENTITY_TOTP_ENCRYPTION_KEYS: z.string().min(1).optional(),
   IDENTITY_OAUTH_ACTIVE_SIGNING_KEY_ID: z.string().min(1).max(64).optional(),
   IDENTITY_OAUTH_SIGNING_KEYS: z.string().min(1).optional(),
+  IDENTITY_OAUTH_ISSUANCE_DISABLED: z.enum(["true", "false"]).default("false"),
+  IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS: z.coerce.number().int().min(660).max(604_800).optional(),
+  IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS: z.coerce.number().int().min(660).max(604_800).optional(),
   IDENTITY_OAUTH_COOKIE_KEYS: z.string().min(1).optional(),
   IDENTITY_OAUTH_RESOURCE: z.string().url().optional(),
   IDENTITY_CHATGPT_REDIRECT_URI: z.string().min(1).optional(),
@@ -70,6 +73,23 @@ const identityEnvironmentSchema = z
         code: "custom",
         path: ["IDENTITY_OAUTH_SIGNING_KEYS"],
         message: "all OAuth runtime settings must be supplied together"
+      });
+    }
+    if (value.IDENTITY_OAUTH_ISSUANCE_DISABLED === "true" && !oauthSettings.every(Boolean)) {
+      context.addIssue({
+        code: "custom",
+        path: ["IDENTITY_OAUTH_ISSUANCE_DISABLED"],
+        message: "JWKS-only mode requires the complete OAuth runtime configuration"
+      });
+    }
+    if (
+      Boolean(value.IDENTITY_OAUTH_PUBLICATION_DELAY_SECONDS) !==
+      Boolean(value.IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS)
+    ) {
+      context.addIssue({
+        code: "custom",
+        path: ["IDENTITY_OAUTH_VERIFICATION_OVERLAP_SECONDS"],
+        message: "OAuth rotation windows must be supplied together"
       });
     }
     if (value.NODE_ENV === "production") {

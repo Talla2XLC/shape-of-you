@@ -24,7 +24,8 @@
     "account:bootstrap": "tsx src/commands/bootstrap-account.ts",
     "account:subject": "tsx src/commands/show-account-subject.ts",
     "oauth-client:provision": "tsx src/commands/provision-oauth-client.ts",
-    "oauth-client:reconcile-predefined": "tsx src/commands/reconcile-predefined-oauth-clients.ts"
+    "oauth-client:reconcile-predefined": "tsx src/commands/reconcile-predefined-oauth-clients.ts",
+    "oauth:incident-revoke": "tsx src/commands/revoke-oauth-authority-for-incident.ts"
   },
   "dependencies": {
     "@simplewebauthn/server": "13.3.2",
@@ -39,6 +40,7 @@
     "@types/oidc-provider": "9.11.0",
     "@types/pg": "^8.15.5",
     "drizzle-kit": "^0.31.10",
+    "jose": "6.2.8",
     "tsx": "^4.20.6",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
