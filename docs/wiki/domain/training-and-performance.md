@@ -80,8 +80,11 @@ automatically.
   Person-local Monday, while A/B continues from the last current, explicitly
   classified event of the same program, even after a missed week. Missed days
   do not move its sequence; explicit repeats or reordering become the next
-  anchor. Qualified external cardio may
-  satisfy cardio from typed duration, distance, and heart-rate facts. External
+  anchor. The current projection returns eligible exact strength and typed
+  light-cardio options with weekly progress; it does not force cardio after a
+  strength session or carry a cardio debt through missed days. A qualifying
+  external cardio activity may satisfy the current weekly target from typed
+  duration, distance, and heart-rate facts. External
   strength without an exact program-workout identity cannot advance A/B and
   produces a bounded classification need instead of a guess, including when it
   precedes a later classified strength session in the same local week. Strength
@@ -90,10 +93,12 @@ automatically.
   cadence and ordered exercise identities match; incompatible or unavailable
   version evidence cannot produce an exact next A/B. Legacy cadence, missing
   local date, current-day completion, and completed weekly targets are explicit
-  states. Current projections emit `training-next-step-v3`; historical v1/v2
+  states. Current projections emit `training-next-step-v4`; historical v1-v3
   snapshots remain readable. A classified external strength activity can
   advance only cadence and never becomes
   exercise, set, load, personal-record, or progression evidence.
+  [Safe training options ADR](../../adr/20260928-let-coach-choose-safe-training-options.md)
+  defines the choice boundary with Coach.
 - Profile coverage unions current WorkoutSession and external activity dates.
   One Person-local date is counted once regardless of source, and a date without
   a workout is not described as a missed training day.
@@ -125,8 +130,8 @@ automatically.
   Garmin strength remains occurrence evidence only.
 - Weight progression candidates use the same two-session predicate and exact
   workout position. Acceptance rechecks the candidate and creates a new
-  inactive program version; explicit activation is separate. Coaching applies
-  the current Daily Assessment recovery gate before showing increases.
+  inactive program version; explicit activation is separate. Coach weighs
+  current Recovery observations before suggesting an increase.
 
 ## Evidence
 

@@ -1,4 +1,5 @@
 import { Inject, Injectable } from "@nestjs/common";
+import { createHash } from "node:crypto";
 
 import type {
   CreateDailyRecommendationFeedback,
@@ -7,12 +8,14 @@ import type {
   DailyAssessmentMovement,
   DailyAssessmentAvailableV4,
   DailyAssessmentResult,
+  DailyDecisionFacts,
   DailyAssessmentV6UsedFacts,
   DailyRecommendationFeedbackList,
   DailyRecommendationCompletionAssessment,
   PersonPreferences,
   RecoveryObservation,
   TrainingProgressionGuidance,
+  NextTrainingStep,
   UpdatePersonPreferences
 } from "@shape-of-you/contracts";
 
@@ -37,7 +40,7 @@ import {
   type PersonalAssessmentEvidenceDay
 } from "../domain/personalized-daily-assessment.js";
 import { activePersonalBaselinePolicy } from "../domain/personal-baseline.js";
-import { countUncoveredExternalActivities } from "../domain/training.js";
+import { countUncoveredExternalActivities, qualifiesAsLightCardio } from "../domain/training.js";
 import { evaluateTrainingProgression } from "../domain/training-progression.js";
 import { buildCoverageDirection, shiftLocalDate } from "../progress-overview/progress-data-coverage.policy.js";
 import { NutritionService } from "../nutrition/nutrition.service.js";
@@ -86,6 +89,19 @@ export interface DailyAssessmentCoachContext {
   readonly previousRecommendation: DailyRecommendationReference | null;
 }
 
+/** Internal fact projection shared with the new non-prescriptive daily read. */
+export type DailyDecisionFactsRead =
+  | { readonly state: "timezone_required"; readonly timezone: null }
+  | {
+      readonly state: "available";
+      readonly localDate: string;
+      readonly timezone: string;
+      readonly evidenceChecksum: string;
+      readonly facts: DailyDecisionFacts;
+      readonly activeTrainingProgramVersionId: string | null;
+      readonly trainingNextStep: NextTrainingStep | undefined;
+    };
+
 function median(values: readonly number[]): number | null {
   if (values.length < 7) return null;
   const sorted = [...values].sort((a, b) => a - b);
@@ -111,9 +127,9 @@ export class DailyAssessmentService {
     @Inject(DailyContextNoteService) private readonly contextNotes: DailyContextNoteService
   ) {}
 
-  /** Composes exact detailed-session guidance under the current daily safety decision. */
+  /** Composes exact detailed-session guidance; Coach evaluates current Recovery separately. */
   public async readTrainingProgression(): Promise<TrainingProgressionGuidance> {
-    const assessment = await this.read();
+    const assessment = await this.readDecisionFacts();
     const unavailable = (
       reason: TrainingProgressionGuidance["reason"],
       localDate: string | null = null
@@ -122,39 +138,42 @@ export class DailyAssessmentService {
       workoutPosition: null, workoutName: null, items: []
     });
     if (assessment.state === "timezone_required") return unavailable("timezone_required");
-    if (assessment.status !== "ready" || assessment.recommendedAction.type !== "follow_active_program") {
-      return unavailable("recovery_not_ready", assessment.localDate);
-    }
-    const step = assessment.usedFacts.trainingNextStep;
+    const step = assessment.trainingNextStep;
+    const strength = step?.state === "training_options" ? step.strength :
+      step?.state === "strength" ? step : null;
     if (
-      step?.state !== "strength" || step.localDate !== assessment.localDate ||
-      assessment.usedFacts.activeTrainingProgramVersionId !== step.programVersionId
+      strength === null || step === undefined || !("localDate" in step) ||
+      step.localDate !== assessment.localDate ||
+      assessment.activeTrainingProgramVersionId !== strength.programVersionId
     ) return unavailable("training_step_unavailable", assessment.localDate);
     const context = await this.training.getTrainingContext({ localDate: assessment.localDate, historyLimit: 1 });
+    const contextStrength = context.nextStep.state === "training_options" ? context.nextStep.strength :
+      context.nextStep.state === "strength" ? context.nextStep : null;
     if (
-      context.status !== "active" || context.program.activeVersionId !== step.programVersionId ||
-      context.program.activeVersion?.id !== step.programVersionId ||
-      context.nextStep.state !== "strength" ||
-      context.nextStep.workoutPosition !== step.workoutPosition ||
-      context.nextStep.programVersionId !== step.programVersionId
+      context.status !== "active" || context.program.activeVersionId !== strength.programVersionId ||
+      context.program.activeVersion?.id !== strength.programVersionId ||
+      contextStrength === null ||
+      contextStrength.workoutPosition !== strength.workoutPosition ||
+      contextStrength.programVersionId !== strength.programVersionId
     ) return unavailable("program_changed", assessment.localDate);
-    const workout = context.program.activeVersion.workouts.find((item) => item.position === step.workoutPosition);
+    const workout = context.program.activeVersion.workouts.find((item) => item.position === strength.workoutPosition);
     if (!workout) return unavailable("program_changed", assessment.localDate);
     const sessions = await this.training.listProgressionSessions(
-      step.programVersionId, step.workoutPosition, assessment.localDate
+      strength.programVersionId, strength.workoutPosition, assessment.localDate
     );
-    const verifiedAssessment = await this.read();
+    const verifiedAssessment = await this.readDecisionFacts();
     if (
       verifiedAssessment.state !== "available" ||
-      verifiedAssessment.snapshotId !== assessment.snapshotId ||
+      verifiedAssessment.localDate !== assessment.localDate ||
+      verifiedAssessment.timezone !== assessment.timezone ||
       verifiedAssessment.evidenceChecksum !== assessment.evidenceChecksum
     ) return unavailable("program_changed", assessment.localDate);
     return {
       state: "available", reason: "ready", localDate: assessment.localDate,
-      programVersionId: step.programVersionId, workoutPosition: step.workoutPosition,
+      programVersionId: strength.programVersionId, workoutPosition: strength.workoutPosition,
       workoutName: workout.name,
       items: workout.prescriptions.map((prescription) => {
-        const decision = evaluateTrainingProgression(step.programVersionId, step.workoutPosition,
+        const decision = evaluateTrainingProgression(strength.programVersionId, strength.workoutPosition,
           prescription, sessions, assessment.localDate,
           workout.prescriptions.filter((item) =>
             item.exerciseVersionId === prescription.exerciseVersionId &&
@@ -200,7 +219,12 @@ export class DailyAssessmentService {
   }
 
   public read(): Promise<DailyAssessmentResult> {
-    return withDailyAssessmentConsistency(() => this.readConsistent());
+    return withDailyAssessmentConsistency(() => this.readConsistent("assessment"));
+  }
+
+  /** Composes current facts without evaluating or storing a legacy daily recommendation. */
+  public readDecisionFacts(): Promise<DailyDecisionFactsRead> {
+    return withDailyAssessmentConsistency(() => this.readConsistent("facts"));
   }
 
   /** Composes fresh MCP guidance without changing the public assessment result. */
@@ -241,17 +265,21 @@ export class DailyAssessmentService {
   public async readCompletion(snapshotId: string): Promise<DailyRecommendationCompletionAssessment> {
     const personId = this.personContext.getPersonId();
     const snapshot = await this.store.getCompletionSnapshot(personId, snapshotId);
-    const [weights, meals, sessions, observations, training, feedback] = await Promise.all([
+    const [weights, meals, sessions, observations, training, activities, feedback] = await Promise.all([
       this.weights.listForLocalDate(snapshot.localDate),
       this.nutrition.listMealsForLocalDate(snapshot.localDate),
       this.training.listWorkoutSessionsForLocalDate(snapshot.localDate),
       this.recovery.listObservationsForLocalDate(snapshot.localDate),
       this.training.getTrainingContext({ historyLimit: 50, localDate: snapshot.localDate }),
+      this.training.listExternalActivitiesForLocalDate(snapshot.localDate),
       this.store.listFeedback(personId, snapshotId)
     ]);
     const asOf = snapshot.createdAt;
     const results = snapshot.recommendedAction.completion.criteria.map((criterion) =>
-      evaluateCompletionCriterion(criterion, asOf, { localDate: snapshot.localDate, weights, meals, sessions, observations, training })
+      evaluateCompletionCriterion(criterion, asOf, {
+        localDate: snapshot.localDate, weights, meals, sessions, observations, training, activities,
+        trainingNextStep: snapshot.usedFacts.trainingNextStep
+      })
     );
     const superseded = new Set(feedback.items.map((item) => item.supersedesFeedbackId).filter(Boolean));
     const activeDisposition = [...feedback.items].reverse().find((item) =>
@@ -281,7 +309,11 @@ export class DailyAssessmentService {
     });
   }
 
-  private async readConsistent(): Promise<DailyAssessmentResult> {
+  private async readConsistent(mode: "assessment"): Promise<DailyAssessmentResult>;
+  private async readConsistent(mode: "facts"): Promise<DailyDecisionFactsRead>;
+  private async readConsistent(
+    mode: "assessment" | "facts"
+  ): Promise<DailyAssessmentResult | DailyDecisionFactsRead> {
     const personId = this.personContext.getPersonId();
     const preferences = await this.store.getPreferences(personId);
     if (preferences.timezone === null) return { state: "timezone_required", timezone: null };
@@ -455,7 +487,6 @@ export class DailyAssessmentService {
         latestWeightKg: weights[0]?.weightKg ?? null
       }
     };
-    const baseEvaluation = evaluateDailyAssessmentV5(facts);
     const recoveryByDate = new Map(recoveryBaselineDays.map((day) => [day.localDate, day]));
     const trainingByDate = new Map(trainingBaselineDays.map((day) => [day.localDate, day]));
     const excludedDates = new Set(
@@ -503,23 +534,6 @@ export class DailyAssessmentService {
         };
       });
     const personal = evaluatePersonalizedDailyAssessmentV3(localDate, personalDays);
-    const overlay = applyConservativePersonalOverlay(
-      baseEvaluation.status,
-      baseEvaluation.recommendedAction,
-      personal.signals
-    );
-    const limitations = [...baseEvaluation.limitations];
-    if (
-      personal.publicBaseline.comparisons.find((item) => item.metric === "training_load")
-        ?.availability === "incompatible"
-    ) limitations.push("training_load_baseline_unavailable");
-    const evaluation = applyQualitativeWellbeing(facts, {
-      ...baseEvaluation,
-      status: overlay.status,
-      recommendedAction: overlay.action,
-      reasons: [...new Set([...baseEvaluation.reasons, ...personal.reasons])],
-      limitations: [...new Set(limitations)]
-    });
     const stepsComparison = personal.publicBaseline.comparisons.find((item) => item.metric === "steps");
     const movement: DailyAssessmentMovement = currentStepsEligible &&
       currentStepsObservation?.detail.type === "metric" && currentStepsAsOf !== null
@@ -545,9 +559,49 @@ export class DailyAssessmentService {
           }
         }
       : { status: "unavailable", summary: null, current: null };
+    if (mode === "facts") {
+      const summary = Object.fromEntries(Object.entries(facts.summary).filter(
+        ([key]) => key !== "recoveryRiskLevel" && key !== "recoveryHardStop"
+      )) as DailyDecisionFacts["summary"];
+      return {
+        state: "available", localDate, timezone,
+        evidenceChecksum: createHash("sha256").update(JSON.stringify({
+          policyVersion: "daily-decision-context-v1", localDate, timezone,
+          facts, personalCalculation: personal.calculation, movement
+        })).digest("hex"),
+        facts: {
+          summary,
+          coverageReadiness: facts.coverageReadiness,
+          trainingDensity: facts.trainingDensity,
+          wellbeingSignals: facts.wellbeingSignals,
+          personalBaseline: personal.publicBaseline,
+          movement
+        },
+        activeTrainingProgramVersionId: facts.activeTrainingProgramVersionId,
+        trainingNextStep: facts.trainingNextStep
+      };
+    }
+    const baseEvaluation = evaluateDailyAssessmentV5(facts);
+    const overlay = applyConservativePersonalOverlay(
+      baseEvaluation.status,
+      baseEvaluation.recommendedAction,
+      personal.signals
+    );
+    const limitations = [...baseEvaluation.limitations];
+    if (
+      personal.publicBaseline.comparisons.find((item) => item.metric === "training_load")
+        ?.availability === "incompatible"
+    ) limitations.push("training_load_baseline_unavailable");
+    const evaluation = applyQualitativeWellbeing(facts, {
+      ...baseEvaluation,
+      status: overlay.status,
+      recommendedAction: overlay.action,
+      reasons: [...new Set([...baseEvaluation.reasons, ...personal.reasons])],
+      limitations: [...new Set(limitations)]
+    });
     const v6Evaluation = {
       ...evaluation,
-      recommendedAction: withDailyCompletionSpecification(evaluation.recommendedAction)
+      recommendedAction: withDailyCompletionSpecification(evaluation.recommendedAction, facts.trainingNextStep)
     };
     const evidenceChecksum = dailyAssessmentV6Checksum(
       localDate,
@@ -581,6 +635,8 @@ type CompletionFacts = {
   readonly sessions: Awaited<ReturnType<TrainingService["listWorkoutSessionsForLocalDate"]>>;
   readonly observations: Awaited<ReturnType<RecoveryService["listObservationsForLocalDate"]>>;
   readonly training: Awaited<ReturnType<TrainingService["getTrainingContext"]>>;
+  readonly activities: Awaited<ReturnType<TrainingService["listExternalActivitiesForLocalDate"]>>;
+  readonly trainingNextStep: NextTrainingStep | undefined;
 };
 
 function unknownCriterion(criterion: DailyCompletionCriterion, limitation: DailyCompletionCriterionResult["limitations"][number] = "source_unknown"): DailyCompletionCriterionResult {
@@ -595,7 +651,8 @@ function unknownCriterion(criterion: DailyCompletionCriterion, limitation: Daily
   };
 }
 
-function evaluateCompletionCriterion(
+/** Evaluates one snapshot criterion against current owner facts without rewriting its choice. */
+export function evaluateCompletionCriterion(
   criterion: DailyCompletionCriterion,
   asOf: string,
   facts: CompletionFacts
@@ -630,12 +687,37 @@ function evaluateCompletionCriterion(
       : facts.meals.length > 0 ? unknownCriterion(criterion, "source_stale") : unknownCriterion(criterion);
   }
   if (criterion.type === "program_workout_completed") {
-    const fact = facts.sessions.find((item) => isFresh(item.createdAt) && item.programVersionId === criterion.trainingProgramVersionId);
+    const step = facts.trainingNextStep;
+    const requiredPosition = step?.state === "training_options" ? step.strength?.workoutPosition : null;
+    if (step?.state === "training_options" && requiredPosition === undefined) {
+      return unknownCriterion(criterion);
+    }
+    const fact = facts.sessions.find((item) =>
+      isFresh(item.createdAt) && item.programVersionId === criterion.trainingProgramVersionId &&
+      (requiredPosition === null || item.programWorkoutPosition === requiredPosition)
+    );
     if (fact) return result("satisfied", "complete", fact.occurredAt ?? fact.createdAt, "workout_session", fact.id);
     const external = facts.training.recentExternalActivities.find((item) =>
       item.localDate === facts.localDate && item.occurredAt > asOf
     );
     if (external) return result("partial", "partial", external.occurredAt, "external_activity", external.id, ["external_activity_not_program_linked"]);
+    return unknownCriterion(criterion);
+  }
+  if (criterion.type === "light_cardio_completed") {
+    const step = facts.trainingNextStep;
+    if (step?.state !== "training_options" || step.lightCardio === null || step.strength !== null) {
+      return unknownCriterion(criterion);
+    }
+    const prescription = step.lightCardio;
+    const linkedActivityIds = new Set(facts.sessions.flatMap((item) =>
+      item.externalActivityId === null ? [] : [item.externalActivityId]
+    ));
+    const cardio = facts.activities.find((item) =>
+      item.occurredAt > asOf && !item.sessionCovered && !linkedActivityIds.has(item.id) &&
+      item.classification?.classification.kind !== "program_workout" &&
+      qualifiesAsLightCardio(item, prescription)
+    );
+    if (cardio) return result("satisfied", "complete", cardio.occurredAt, "external_activity", cardio.id);
     return unknownCriterion(criterion);
   }
   if (criterion.type === "recovery_check_in_recorded") {

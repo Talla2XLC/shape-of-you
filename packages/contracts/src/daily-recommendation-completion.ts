@@ -9,6 +9,7 @@ export type DailyCompletionCriterionType =
   | "weight_recorded"
   | "meal_recorded"
   | "program_workout_completed"
+  | "light_cardio_completed"
   | "recovery_check_in_recorded"
   | "steps_threshold_reached"
   | "sleep_duration_reached"
@@ -43,7 +44,7 @@ export const DailyCompletionCriterionSchema = {
     id: { type: "string", minLength: 1, maxLength: 64, pattern: "^[a-z0-9_]+$" },
     type: {
       enum: [
-        "weight_recorded", "meal_recorded", "program_workout_completed",
+        "weight_recorded", "meal_recorded", "program_workout_completed", "light_cardio_completed",
         "recovery_check_in_recorded", "steps_threshold_reached",
         "sleep_duration_reached", "training_program_confirmed",
         "manual_confirmation"

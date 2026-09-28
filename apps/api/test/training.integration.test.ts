@@ -109,8 +109,8 @@ describe("Training PostgreSQL vertical", () => {
     for (const localDate of ["2026-09-28", "2026-10-12"]) {
       await expect(service.getTrainingContext({ localDate, historyLimit: 1 }))
         .resolves.toMatchObject({ nextStep: {
-          state: "strength", workoutPosition: 2, workoutName: "B",
-          reason: "sequence_continues"
+          state: "training_options", strength: { workoutPosition: 2, workoutName: "B",
+            reason: "sequence_continues" }
         } });
     }
     await service.correctWorkoutSession(latest.session.id, {
@@ -118,7 +118,7 @@ describe("Training PostgreSQL vertical", () => {
       correctionReason: "Corrected A/B identity"
     });
     await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
-      .resolves.toMatchObject({ nextStep: { state: "strength", workoutPosition: 1, workoutName: "A" } });
+      .resolves.toMatchObject({ nextStep: { state: "training_options", strength: { workoutPosition: 1, workoutName: "A" } } });
   });
 
   it("keeps prior-version strength in the active program week without duplicating it", async () => {
@@ -179,8 +179,8 @@ describe("Training PostgreSQL vertical", () => {
     await record("2026-09-25", second.program.activeVersionId, 1);
     const context = await service.getTrainingContext({ localDate: "2026-09-26", historyLimit: 1 });
     expect(context.nextStep).toMatchObject({
-      state: "strength", policyVersion: "training-next-step-v3",
-      workoutPosition: 2, workoutName: "B"
+      state: "training_options", policyVersion: "training-next-step-v4",
+      strength: { workoutPosition: 2, workoutName: "B" }
     });
     expect(context.recentSessions.items).toHaveLength(1);
     expect(oldSession.session.programVersionId).toBe(first.program.activeVersionId);
@@ -869,7 +869,7 @@ describe("Training PostgreSQL vertical", () => {
     expect(created).toMatchObject({ outcome: "created" });
     await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
       .resolves.toMatchObject({ nextStep: {
-        state: "strength", workoutPosition: 2, workoutName: "B"
+        state: "training_options", strength: { workoutPosition: 2, workoutName: "B" }
       } });
     await expect(dailyRepository.getEvidenceRevision(
       personD,
@@ -888,7 +888,7 @@ describe("Training PostgreSQL vertical", () => {
     expect(corrected).toMatchObject({ outcome: "corrected" });
     await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
       .resolves.toMatchObject({ nextStep: {
-        state: "strength", workoutPosition: 1, workoutName: "A"
+        state: "training_options", strength: { workoutPosition: 1, workoutName: "A" }
       } });
     await expect(service.classifyExternalActivity(command)).resolves.toMatchObject({
       outcome: "stale"
@@ -1070,8 +1070,8 @@ describe("Training PostgreSQL vertical", () => {
     expect(crossWeekSession.created).toBe(true);
     await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
       .resolves.toMatchObject({ nextStep: {
-        state: "strength", workoutPosition: 2, workoutName: "B",
-        reason: "sequence_continues"
+        state: "training_options", strength: { workoutPosition: 2, workoutName: "B",
+          reason: "sequence_continues" }
       } });
 
     const personDConfig: AppConfig = {
@@ -1694,7 +1694,7 @@ describe("Training PostgreSQL vertical", () => {
         recentExternalActivities: [],
         trustedExternalTitles: [],
         activityRecordingMode: { title: null, lockVersion: 0, updatedAt: null },
-        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v3" }
+        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v4" }
       });
     const exercise = await repository.createExercise(personA, {
       visibility: "shared",
@@ -1932,7 +1932,7 @@ describe("Training PostgreSQL vertical", () => {
       localDate: "2026-09-23"
     })).resolves.toMatchObject({
       program: { activeVersion: { cadence } },
-      nextStep: { state: "strength", workoutPosition: 1, workoutName: "A" }
+      nextStep: { state: "training_options", strength: { workoutPosition: 1, workoutName: "A" } }
     });
 
     const oldVersionCadence = await database.pool.query<{ count: string }>(

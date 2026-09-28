@@ -463,9 +463,36 @@ describe("API-owned daily assessment", () => {
     ]);
     expect(await new DailyAssessmentRepository(database).getCompletionSnapshot(wellbeingTestPersonId, reported.json().snapshotId))
       .toMatchObject({ status: "insufficient_data", usedFacts: { wellbeingSignals: [{ signal: "fatigued" }] } });
+    const concern = await fastify.inject({
+      method: "POST",
+      url: `/v1/recovery/observations/${correction.json().id}/corrections`,
+      payload: {
+        ...report,
+        dedupeKey: `daily-decision-context:wellbeing:injury:${localDate}`,
+        detail: { type: "subjective", signal: "injury_concern" },
+        reason: "Person now reports injury concern"
+      }
+    });
+    expect(concern.statusCode, concern.body).toBe(201);
+    const snapshotsBeforeContext = await database.pool.query<{ count: number }>(
+      "select count(*)::int as count from coaching_daily_assessment_details where person_id = $1",
+      [wellbeingTestPersonId]
+    );
+    const context = await fastify.inject({ method: "GET", url: "/v1/daily-assessment/context" });
+    expect(context.statusCode, context.body).toBe(200);
+    expect(context.json()).toMatchObject({
+      facts: { wellbeingSignals: [{ signal: "injury_concern" }] },
+      recovery: { observations: { items: [{ sourceChannel: "manual", detail: { signal: "injury_concern" } }] } }
+    });
+    expect(context.json()).not.toHaveProperty("recommendedAction");
+    const snapshotsAfterContext = await database.pool.query<{ count: number }>(
+      "select count(*)::int as count from coaching_daily_assessment_details where person_id = $1",
+      [wellbeingTestPersonId]
+    );
+    expect(snapshotsAfterContext.rows).toEqual(snapshotsBeforeContext.rows);
     await new RecoveryRepository(database).withdrawObservation(
       wellbeingTestPersonId,
-      correction.json().id,
+      concern.json().id,
       `daily-assessment:wellbeing:withdrawn:${localDate}`,
       "Isolate the qualitative report test"
     );
@@ -1043,5 +1070,27 @@ describe("API-owned daily assessment", () => {
       [deletedSnapshotId]
     );
     expect(deletedFeedback.rows[0]?.count).toBe(0);
+  });
+
+  it("serves current decision facts without writing a legacy recommendation snapshot", async () => {
+    const count = async () => (await database.pool.query<{ total: string }>(
+      "select count(*)::text as total from coaching_recommendations where person_id = $1",
+      [personId]
+    )).rows[0]!.total;
+    const before = await count();
+    const response = await getFastifyInstance(app).inject({
+      method: "GET", url: "/v1/daily-assessment/context"
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    const context = response.json();
+    expect(context).toMatchObject({
+      state: "available", policyVersion: "daily-decision-context-v1",
+      recovery: { state: "available" },
+      training: { nextStep: expect.any(Object) }
+    });
+    expect(context).not.toHaveProperty("status");
+    expect(context).not.toHaveProperty("recommendedAction");
+    expect(context.facts.summary).not.toHaveProperty("recoveryHardStop");
+    expect(await count()).toBe(before);
   });
 });

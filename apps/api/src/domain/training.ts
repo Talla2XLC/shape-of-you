@@ -145,7 +145,7 @@ export function trainingProgramSnapshotMatches(
   });
 }
 
-export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v3" as const;
+export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v4" as const;
 
 /** Whether a previous immutable version preserves the active A/B positions. */
 export function hasCompatibleWorkoutSequence(
@@ -174,9 +174,11 @@ export function trainingPolicyWeekStart(localDate: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-function qualifiesAsLightCardio(
+/** Tests a connected activity against the active typed light-cardio prescription. */
+export function qualifiesAsLightCardio(
   activity: ExternalActivitySummary,
-  cardio: NonNullable<TrainingProgramCadence["lightCardio"]>
+  cardio: Pick<NonNullable<TrainingProgramCadence["lightCardio"]>,
+    "durationSeconds" | "targetAverageHeartRateMin" | "targetAverageHeartRateMax">
 ): boolean {
   const durationFloor = Math.round(cardio.durationSeconds * 0.9);
   const durationCeiling = Math.round(cardio.durationSeconds * 1.1);
@@ -305,6 +307,7 @@ export function evaluateNextTrainingStep(input: {
   const qualifyingCardio = cardio === null ? [] : input.externalActivities
     .filter((activity) =>
       !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
+      activity.classification?.classification.kind !== "program_workout" &&
       activity.localDate >= weekStart && activity.localDate <= localDate &&
       qualifiesAsLightCardio(activity, cardio)
     )
@@ -325,7 +328,6 @@ export function evaluateNextTrainingStep(input: {
     };
   }
 
-  const lastWeekClassified = classified.at(-1) ?? null;
   const unclassified = input.externalActivities
     .filter((activity) =>
       !activity.sessionCovered && !directlyLinkedActivityIds.has(activity.id) &&
@@ -369,31 +371,6 @@ export function evaluateNextTrainingStep(input: {
     };
   }
 
-  const lastCardio = qualifyingCardio.at(-1) ?? null;
-  const lastStrengthInstant = lastWeekClassified?.occurredAt ?? null;
-  if (
-    cardio !== null && cardioCount < cardio.sessionsPerWeek &&
-    (strengthCount >= cadence.strengthSessionsPerWeek ||
-      (lastWeekClassified !== null && (lastCardio === null || lastStrengthInstant! > lastCardio.occurredAt)))
-  ) {
-    return {
-      state: "light_cardio",
-      policyVersion,
-      localDate,
-      reason: strengthCount >= cadence.strengthSessionsPerWeek
-        ? "strength_target_completed"
-        : "between_strength_sessions",
-      prescription: {
-        durationSeconds: cardio.durationSeconds,
-        targetAverageHeartRateMin: cardio.targetAverageHeartRateMin,
-        targetAverageHeartRateMax: cardio.targetAverageHeartRateMax,
-        warmupSeconds: cardio.warmupSeconds,
-        workSeconds: cardio.workSeconds,
-        cooldownSeconds: cardio.cooldownSeconds
-      }
-    };
-  }
-
   if (unknownVersionEvidence || incompatibleSequenceEvidence) {
     return { state: "schedule_unavailable", policyVersion };
   }
@@ -422,8 +399,6 @@ export function evaluateNextTrainingStep(input: {
     reason = expectedLast !== null && expectedLast !== lastClassified.workoutPosition
       ? "sequence_reanchored_after_deviation"
       : "sequence_continues";
-  } else if (lastCardio !== null) {
-    reason = "after_cardio";
   } else if (cardioCount >= cardioTarget && cardioTarget > 0) {
     reason = "cardio_target_completed";
   }
@@ -431,13 +406,38 @@ export function evaluateNextTrainingStep(input: {
   if (!workout) {
     throw new DomainValidationError("cadence references a missing active workout");
   }
-  return {
-    state: "strength",
+  const base = {
+    state: "training_options" as const,
     policyVersion,
     localDate,
-    programVersionId: active.id,
-    workoutPosition: workout.position,
-    workoutName: workout.name,
-    reason
+    weeklyProgress: {
+      strengthCompleted: strengthCount,
+      strengthTarget: cadence.strengthSessionsPerWeek,
+      cardioCompleted: cardioCount,
+      cardioTarget
+    },
+    lastStrengthLocalDate: lastClassified?.localDate ?? null,
+    lastCardioThisWeekLocalDate: qualifyingCardio.at(-1)?.localDate ?? null
   };
+  const strengthOption = strengthCount < cadence.strengthSessionsPerWeek ? {
+      programVersionId: active.id,
+      workoutPosition: workout.position,
+      workoutName: workout.name,
+      reason
+    } : null;
+  const cardioOption = cardio !== null && cardioCount < cardio.sessionsPerWeek ? {
+      durationSeconds: cardio.durationSeconds,
+      targetAverageHeartRateMin: cardio.targetAverageHeartRateMin,
+      targetAverageHeartRateMax: cardio.targetAverageHeartRateMax,
+      warmupSeconds: cardio.warmupSeconds,
+      workSeconds: cardio.workSeconds,
+      cooldownSeconds: cardio.cooldownSeconds
+    } : null;
+  if (strengthOption !== null) {
+    return { ...base, strength: strengthOption, lightCardio: cardioOption };
+  }
+  if (cardioOption !== null) {
+    return { ...base, strength: null, lightCardio: cardioOption };
+  }
+  throw new DomainValidationError("unfinished training week has no eligible option");
 }

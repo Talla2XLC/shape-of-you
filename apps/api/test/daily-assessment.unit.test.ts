@@ -221,6 +221,43 @@ describe("daily assessment policy", () => {
     });
   });
 
+  it("leaves a ready training choice to Coach and keeps Recovery hard stop dominant", () => {
+    const step = {
+      state: "training_options" as const,
+      policyVersion: "training-next-step-v4" as const,
+      localDate: "2026-09-28",
+      weeklyProgress: { strengthCompleted: 0, strengthTarget: 3, cardioCompleted: 0, cardioTarget: 2 },
+      lastStrengthLocalDate: "2026-09-25",
+      lastCardioThisWeekLocalDate: null,
+      strength: { programVersionId, workoutPosition: 2, workoutName: "Ahilej B", reason: "sequence_continues" as const },
+      lightCardio: { durationSeconds: 2400, targetAverageHeartRateMin: 135,
+        targetAverageHeartRateMax: 145, warmupSeconds: 300, workSeconds: 1800,
+        cooldownSeconds: 300 }
+    };
+    const readyFacts = { ...facts({ recentWorkoutCount: 0, recentTrainingLoad: 20 }), trainingNextStep: step };
+    const ready = evaluateDailyAssessment(readyFacts);
+    expect(ready).toMatchObject({
+      status: "ready",
+      recommendedAction: { type: "follow_active_program", trainingProgramVersionId: programVersionId }
+    });
+    expect(ready.recommendedAction.text).toContain("Выбери одно допустимое занятие");
+
+    const blocked = evaluateDailyAssessment({
+      ...readyFacts,
+      summary: { ...readyFacts.summary, recoveryHardStop: true, recoveryRiskLevel: "blocked" }
+    });
+    expect(blocked).toMatchObject({
+      status: "recovery_priority", recommendedAction: { type: "recovery_first" }
+    });
+    expect(blocked.alternatives).not.toContainEqual(expect.objectContaining({ type: "follow_active_program" }));
+
+    const cardioDone = evaluateDailyAssessment({
+      ...readyFacts,
+      trainingNextStep: { ...step, weeklyProgress: { ...step.weeklyProgress, cardioCompleted: 2 }, lightCardio: null }
+    });
+    expect(cardioDone.recommendedAction.text).toContain("Ahilej B");
+  });
+
   it("keeps V1, V2 and V3 identities independent of operational sync metadata", () => {
     const evidence = facts();
     const calculation = { policy: "personal-baseline-v1", comparisons: [] };
@@ -459,7 +496,7 @@ describe("daily assessment policy", () => {
     expect(store.findLatestCompletionSnapshotForLocalDate).not.toHaveBeenCalled();
   });
 
-  it("gates progression on the current Daily Assessment and exact next workout", async () => {
+  it("provides exact progression evidence without turning legacy Recovery status into permission", async () => {
     const training = { getTrainingContext: vi.fn(), listProgressionSessions: vi.fn() };
     const service = new DailyAssessmentService(
       {} as never, {} as never, {} as never, training as never,
@@ -470,25 +507,14 @@ describe("daily assessment policy", () => {
       programVersionId, workoutPosition: 1, workoutName: "Ahilej A", reason: "sequence_continues"
     };
     const assessment = {
-      state: "available", snapshotId: "00000000-0000-4000-8000-000000000120",
-      evidenceChecksum: "a".repeat(64), localDate: "2026-09-25", status: "caution",
-      recommendedAction: { type: "recovery_first" },
-      usedFacts: { trainingNextStep: step, activeTrainingProgramVersionId: programVersionId }
+      state: "available", evidenceChecksum: "a".repeat(64),
+      localDate: "2026-09-25", timezone: "Europe/Belgrade",
+      trainingNextStep: step, activeTrainingProgramVersionId: programVersionId
     };
-    vi.spyOn(service, "read").mockResolvedValue(assessment as never);
-    const unavailableGuidance = await service.readTrainingProgression();
-    expect(unavailableGuidance).toMatchObject({
-      state: "unavailable", reason: "recovery_not_ready", items: []
-    });
+    vi.spyOn(service, "readDecisionFacts").mockResolvedValue(assessment as never);
     const ajv = new Ajv({ strict: false });
     const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
     installFormats(ajv);
-    expect(ajv.validate(TrainingProgressionGuidanceSchema, unavailableGuidance), JSON.stringify(ajv.errors)).toBe(true);
-    expect(training.getTrainingContext).not.toHaveBeenCalled();
-
-    vi.spyOn(service, "read").mockResolvedValue({
-      ...assessment, status: "ready", recommendedAction: { type: "follow_active_program" }
-    } as never);
     training.getTrainingContext.mockResolvedValue({
       status: "active",
       program: {

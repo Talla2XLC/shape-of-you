@@ -78,6 +78,7 @@ const confirmedAbsentRecoveryMetrics = [
 
 const safeCurrentRecoveryObservation = {
   kind: "metric",
+  sourceChannel: "account",
   observedFrom: null,
   observedUntil: null,
   temporalPrecision: "local_date",
@@ -251,10 +252,10 @@ describe("MCP HTTP adapter", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().result.instructions).toBe(MCP_OPERATIONAL_INSTRUCTIONS);
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "MUST call get_daily_assessment first"
+      "MUST call get_daily_decision_context first"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Never reconstruct or alter that decision from get_daily_projection"
+      "You decide whether and how to recommend training"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
       "call get_daily_projection first"
@@ -275,10 +276,10 @@ describe("MCP HTTP adapter", () => {
       "Outside a full Daily Coach assessment, give one clear Next step"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment"
+      "Do not add a third Training option"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "Use recommendation completion contextually, never on every response"
+      "Use legacy recommendation completion only for an exact known DailyAssessment snapshot"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Never call get_daily_assessment merely to discover completion during unrelated routine capture"
@@ -290,13 +291,13 @@ describe("MCP HTTP adapter", () => {
       "Do not request a wellbeing check-in after every response"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "After a write or correction, read back that localDate and call get_daily_assessment again"
+      "After a write or correction, read back that localDate and call get_daily_decision_context again"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Ask one short clarification only when the date or meaning is material and unclear"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "If the daily result provides no previous candidate, do not call completion"
+      "The new conversational decision has no snapshot or automatic completion"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).not.toContain(
       "Give one clear Next step plus"
@@ -380,7 +381,7 @@ describe("MCP HTTP adapter", () => {
       "materialize it as an immutable successor"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "then call get_training_context and get_daily_assessment in the same turn"
+      "then call get_training_context and get_daily_decision_context in the same turn"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "label every such program only Proposed now"
@@ -442,9 +443,9 @@ describe("MCP HTTP adapter", () => {
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Always use the user's language"
     );
-    const priorityInstructions = MCP_OPERATIONAL_INSTRUCTIONS.slice(0, 512);
-    expect(priorityInstructions).toContain("call get_daily_assessment");
-    expect(priorityInstructions).toContain("sole decision authority");
+    const priorityInstructions = MCP_OPERATIONAL_INSTRUCTIONS.slice(0, 700);
+    expect(priorityInstructions).toContain("call get_daily_decision_context");
+    expect(priorityInstructions).toContain("decide from its verified facts");
     expect(priorityInstructions).toContain(
       "Keep internal mechanics invisible in user-facing replies"
     );
@@ -476,7 +477,7 @@ describe("MCP HTTP adapter", () => {
       "Never require Garmin Training Readiness or Recovery Time screenshots"
     );
     expect(MCP_COACH_REPLY_POLICY).toContain(
-      "an absent Garmin value is unknown, not a reason to withhold advice"
+      "an absent Garmin value is unknown, not a reason by itself to withhold advice"
     );
     expect(MCP_COACH_REPLY_POLICY).toContain(
       "A voluntarily supplied Garmin report is manual evidence, not connected-device data"
@@ -514,32 +515,29 @@ describe("MCP HTTP adapter", () => {
 
   it("publishes progression call and skip conditions for ordinary next-strength discussion", async () => {
     const policy = MCP_OPERATIONAL_INSTRUCTIONS;
-    const assessment = policy.indexOf("Read get_daily_assessment first, then get_training_context");
-    const progression = policy.indexOf("Call get_training_progression once in this turn only when");
+    const assessment = policy.indexOf("read get_daily_decision_context first, then get_training_context");
+    const progression = policy.indexOf("Use progression guidance only when");
     expect(assessment).toBeGreaterThan(-1);
     expect(progression).toBeGreaterThan(assessment);
     const requiredConditions = [
-      "ordinary talk about its working weight, repetitions, or sets",
-      "do not wait for an explicit progression question",
-      "current assessment is ready with follow_active_program",
-      "both reads identify the same exact active strength next step"
+      "including working weight, repetitions, or sets",
+      "both reads identify the same exact eligible strength option"
     ];
     for (const condition of requiredConditions) {
       expect(policy).toContain(condition);
     }
     const skipCases = [
-      "routine recording of a completed workout",
-      "unrelated facts, nutrition, general or focused recovery",
-      "an absent or ambiguous program or next step",
-      "completed-today or completed-week",
-      "any assessment that restricts training, even when the user asks directly about progression"
+      "routine recording",
+      "unrelated facts, general recovery",
+      "absent or ambiguous strength identity",
+      "completed training"
     ];
     for (const scenario of skipCases) {
       expect(policy).toContain(scenario);
     }
     expect(policy).not.toContain("may read the tool for its typed unavailable reason");
-    expect(policy).toContain("Current readiness is not a promise for a future workout");
-    expect(policy).toContain("A proposal is separate from accepting a candidate and activating a new program version");
+    expect(policy).toContain("Reassess current facts on the actual training day");
+    expect(policy).toContain("You decide whether and how to recommend training");
 
     const response = await fastify.inject({
       method: "POST",
@@ -551,7 +549,7 @@ describe("MCP HTTP adapter", () => {
     const tools = response.json().result.tools as Array<{ name: string; description: string }>;
     const progressionTool = tools.find((tool) => tool.name === "get_training_progression");
     expect(progressionTool?.description).toContain("an explicit progression question is not required");
-    expect(progressionTool?.description).toContain("restricted recovery even after a direct progression question");
+    expect(progressionTool?.description).toContain("not Recovery permission");
     expect(progressionTool?.description).toContain("Garmin activity and A/B classification never supply performed sets");
     expect(progressionTool?.description).toContain("For a future workout, check again on that day");
   });
@@ -584,7 +582,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(33);
+    expect(body.result.tools).toHaveLength(34);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -631,6 +629,7 @@ describe("MCP HTTP adapter", () => {
       record_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       correct_daily_context_note: MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       set_current_timezone: MCP_PERSON_TIMEZONE_WRITE_SCOPE,
+      get_daily_decision_context: MCP_READ_SCOPE,
       get_daily_assessment: MCP_READ_SCOPE,
       get_daily_recommendation_completion: MCP_READ_SCOPE,
       record_daily_recommendation_feedback: MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
@@ -648,8 +647,18 @@ describe("MCP HTTP adapter", () => {
       annotations: { readOnlyHint: true, destructiveHint: false },
       securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
     });
-    expect(dailyAssessmentTool.description).toContain("mandatory and sole decision authority");
-    expect(dailyAssessmentTool.description).toContain("do not recreate or embellish the policy in prompts");
+    expect(dailyAssessmentTool.description).toContain("legacy deterministic");
+    const decisionContextTool = body.result.tools.find((tool: { name: string }) =>
+      tool.name === "get_daily_decision_context"
+    );
+    expect(decisionContextTool).toMatchObject({
+      inputSchema: { $id: "GetDailyDecisionContextInput", additionalProperties: false },
+      outputSchema: { $id: "DailyDecisionContextResult", oneOf: expect.any(Array) },
+      annotations: { readOnlyHint: true, destructiveHint: false },
+      securitySchemes: [{ scopes: [MCP_READ_SCOPE] }]
+    });
+    expect(decisionContextTool.outputSchema.oneOf[1].properties).not.toHaveProperty("recommendedAction");
+    expect(decisionContextTool.outputSchema.oneOf[1].properties).not.toHaveProperty("status");
     const currentRecoveryContextTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "get_current_recovery_context"
     );
@@ -1004,10 +1013,10 @@ describe("MCP HTTP adapter", () => {
       ]);
     }
     expect(trainingContextTool.description).toContain(
-      "without requesting a screenshot or manual repeat"
+      "Imported summaries do not supply exercises or sets"
     );
     expect(trainingContextTool.description).toContain(
-      "never infer exercises or sets"
+      "avoid double-counting"
     );
     const classifyActivityTool = body.result.tools.find(
       (tool: { name: string }) => tool.name === "classify_external_activity"
@@ -1096,7 +1105,7 @@ describe("MCP HTTP adapter", () => {
       "never ask the user to restate it"
     );
     expect(materializeCadenceTool.description).toContain(
-      "call get_training_context and get_daily_assessment in the same turn"
+      "call get_training_context and get_daily_decision_context in the same turn"
     );
     expect(ToolSchema.safeParse(materializeCadenceTool).success).toBe(true);
   });
@@ -1403,10 +1412,10 @@ describe("MCP HTTP adapter", () => {
         "never supplies exercises or sets"
       );
       expect(absent.content[0].text).toContain(
-        "only if it is ready and says to follow this exact active strength workout, call get_training_progression once"
+        "Read get_daily_decision_context before recommending training"
       );
       expect(absent.content[0].text).toContain(
-        "Skip that call for unrelated facts, a recovery restriction, an absent or ambiguous step, or a completed workout or week"
+        "Skip progression for unrelated facts, absent or ambiguous strength identity, or a completed workout or week"
       );
 
       const invalid = (
@@ -1598,7 +1607,7 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(materialized.content[0].text).toContain(
-        "MUST immediately call get_training_context and get_daily_assessment"
+        "MUST immediately call get_training_context and get_daily_decision_context"
       );
       expect(materializeProgramCadence).toHaveBeenCalledWith(acceptedCadence);
 
@@ -1670,7 +1679,7 @@ describe("MCP HTTP adapter", () => {
         structuredContent: { outcome: "created" }
       });
       expect(classified.content[0].text).toContain(
-        "MUST call get_training_context and then get_daily_assessment"
+        "MUST call get_training_context and then get_daily_decision_context"
       );
       expect(classifyExternalActivity).toHaveBeenCalledWith(
         activityClassification
@@ -2356,6 +2365,9 @@ describe("MCP HTTP adapter", () => {
           readCompletion,
           updatePreferences,
           recordFeedback
+        },
+        dailyDecisionContext: {
+          read: async () => ({ state: "timezone_required", timezone: null })
         }
       } as unknown as Parameters<typeof registerMcpRoutes>[0]["services"]
     });
@@ -2456,6 +2468,7 @@ describe("MCP HTTP adapter", () => {
       ["correct_daily_context_note", { id, ...note, dedupeKey: "coach-policy-note-correction", reason: "Correction" }, "correct_daily_context_note"],
       ["set_current_timezone", { timezone: "Europe/Belgrade" }, "Europe/Belgrade"],
       ["get_daily_assessment", {}, "timezone_required"],
+      ["get_daily_decision_context", {}, "timezone_required"],
       ["get_training_progression", {}, "recovery_not_ready"],
       ["record_daily_recommendation_feedback", {
         snapshotId: "00000000-0000-4000-8000-000000000501",
@@ -2487,22 +2500,24 @@ describe("MCP HTTP adapter", () => {
         const toolResult = response.json().result;
         successfulContent.set(name, toolResult.content[0].text);
         expect(toolResult.isError, name).not.toBe(true);
-        expect(toolResult.content[0].text, name).toContain(MCP_COACH_REPLY_POLICY);
-        if (name === "get_current_recovery_context" || name === "get_daily_assessment") {
+        if (name !== "get_daily_projection") {
+          expect(toolResult.content[0].text, name).toContain(MCP_COACH_REPLY_POLICY);
+        }
+        if (name === "get_current_recovery_context" || name === "get_daily_assessment" || name === "get_daily_decision_context") {
           expect(toolResult.content[0].text, name).toContain(
             "Never require Garmin Training Readiness or Recovery Time screenshots"
           );
         }
-        expect(toolResult.content[0].text, name).toContain(
-          MCP_COACH_FINAL_RESPONSE_REQUIREMENT
-        );
-        expect(toolResult.content[0].text, name).toMatch(
-          /MANDATORY FINAL REPLY:[\s\S]*never silently omit the next step\.$/u
-        );
+        if (name !== "get_daily_projection") {
+          expect(toolResult.content[0].text, name).toContain(MCP_COACH_FINAL_RESPONSE_REQUIREMENT);
+          expect(toolResult.content[0].text, name).toMatch(
+            /MANDATORY FINAL REPLY:[\s\S]*never silently omit the next step\.$/u
+          );
+        }
         if (name === "set_current_timezone") {
           expect(toolResult.structuredContent, name).toMatchObject({ timezone: marker });
           expect(toolResult.content[0].text, name).toContain(
-            "Immediately retry the authoritative read"
+            "Immediately retry the read that required it"
           );
         } else if (name === "get_current_recovery_context") {
           expect(toolResult.structuredContent, name).toMatchObject({
@@ -2532,11 +2547,11 @@ describe("MCP HTTP adapter", () => {
             timezone: null
           });
           expect(toolResult.content[0].text, name).toContain(
-            "Do not recalculate, replace, or embellish the policy decision"
+            "legacy API-owned recommendation snapshot"
           );
-          expect(toolResult.content[0].text, name).toContain(
-            "Do not add a duration, intensity, workout, medical rationale, trend, or substitute action"
-          );
+        } else if (name === "get_daily_decision_context") {
+          expect(toolResult.structuredContent, name).toEqual({ state: "timezone_required", timezone: null });
+          expect(toolResult.content[0].text, name).toContain("You are responsible for the current training decision");
         } else if (name === "record_daily_recommendation_feedback") {
           expect(toolResult.structuredContent, name).toMatchObject({ status: marker });
           expect(toolResult.content[0].text, name).toContain(
@@ -2545,7 +2560,7 @@ describe("MCP HTTP adapter", () => {
         } else if (name === "get_daily_projection") {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });
           expect(toolResult.content[0].text, name).toContain(
-            'API-OWNED DAILY ASSESSMENT RESULT (exact JSON; preserve every decision field): {"state":"timezone_required","timezone":null}'
+            "FACTUAL-ONLY DAILY PROJECTION"
           );
         } else if (name === "get_active_training_program") {
           expect(toolResult.structuredContent, name).toMatchObject({
@@ -2646,7 +2661,7 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(recordFeedback).toHaveBeenCalledTimes(1);
-      expect(readDailyAssessment).toHaveBeenCalledTimes(2);
+      expect(readDailyAssessment).toHaveBeenCalledTimes(1);
       expect(successfulContent.get("record_weight_measurement")).toContain(
         "owning-domain read-back"
       );
@@ -2784,7 +2799,7 @@ describe("MCP HTTP adapter", () => {
       expect(directDailyAssessment.json().result.structuredContent.movement.current)
         .toMatchObject({ role: "partial_day", steps: 12_345 });
       expect(directDailyAssessment.json().result.content[0].text).toContain(
-        "Do not recalculate, replace, or embellish the policy decision"
+        "For a new Daily Coach decision, read get_daily_decision_context"
       );
       expect(directDailyAssessment.json().result.content[0].text).toContain(
         "PREVIOUS RECOMMENDATION CANDIDATE"
@@ -2901,7 +2916,6 @@ describe("MCP HTTP adapter", () => {
         "active user report and automatic observation conflict"
       );
 
-      readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
       const compatibleDailyProjection = await authorizedFastify.inject({
         method: "POST",
         url: "/mcp",
@@ -2921,16 +2935,10 @@ describe("MCP HTTP adapter", () => {
       });
       expect(compatibleDailyProjection.json().result).toMatchObject({
         structuredContent: { marker: "get_daily_projection" },
-        content: [{ text: expect.stringContaining(JSON.stringify(availableDailyAssessment)) }]
+        content: [{ text: expect.stringContaining("FACTUAL-ONLY DAILY PROJECTION") }]
       });
-      expect(compatibleDailyProjection.json().result.content[0].text).toContain(
-        "Do not recalculate, replace, or embellish the policy decision"
-      );
-      expect(compatibleDailyProjection.json().result.content[0].text).toContain(
-        previousRecommendation.snapshotId
-      );
+      expect(compatibleDailyProjection.json().result.content[0].text).not.toContain(availableDailyAssessment.snapshotId);
 
-      readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
       const historicalDailyProjection = await authorizedFastify.inject({
         method: "POST",
         url: "/mcp",
@@ -2964,7 +2972,6 @@ describe("MCP HTTP adapter", () => {
         "safest useful next action"
       );
 
-      readDailyAssessment.mockRejectedValueOnce(new Error("assessment unavailable"));
       const projectionWithoutAssessment = await authorizedFastify.inject({
         method: "POST",
         url: "/mcp",
@@ -2984,11 +2991,11 @@ describe("MCP HTTP adapter", () => {
       });
       expect(projectionWithoutAssessment.json().result).toMatchObject({
         structuredContent: { marker: "get_daily_projection" },
-        content: [{ text: expect.stringContaining("API-OWNED DAILY ASSESSMENT UNAVAILABLE") }]
+        content: [{ text: expect.stringContaining("FACTUAL-ONLY DAILY PROJECTION") }]
       });
       expect(projectionWithoutAssessment.json().result.isError).not.toBe(true);
       expect(projectionWithoutAssessment.json().result.content[0].text).toContain(
-        "ask them only to retry the assessment later"
+        "read get_daily_decision_context"
       );
       expect(projectionWithoutAssessment.json().result.content[0].text).not.toContain(
         MCP_COACH_FINAL_RESPONSE_REQUIREMENT
@@ -3377,10 +3384,10 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(dailyProjectionResult.content[0].text).toContain(
-        "API-OWNED DAILY ASSESSMENT UNAVAILABLE"
+        "FACTUAL-ONLY DAILY PROJECTION"
       );
       expect(dailyProjectionResult.content[0].text).toContain(
-        "Do not derive a status or propose any nutrition, training, recovery, medical, or other next action"
+        "read get_daily_decision_context"
       );
       expect(dailyProjectionResult.content[0].text).not.toContain(
         "give one clear Next step plus bounded nutrition, training, and recovery guidance"

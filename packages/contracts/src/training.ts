@@ -1335,7 +1335,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion"],
       properties: {
         state: { enum: ["no_active_program", "local_date_required", "schedule_unavailable"] },
-        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3"] }
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3", "training-next-step-v4"] }
       }
     },
     {
@@ -1356,7 +1356,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "externalActivityId", "options", "question"],
       properties: {
         state: { const: "needs_classification" },
-        policyVersion: { enum: ["training-next-step-v2", "training-next-step-v3"] },
+        policyVersion: { enum: ["training-next-step-v2", "training-next-step-v3", "training-next-step-v4"] },
         localDate: { type: "string", format: "date" },
         externalActivityId: uuidSchema,
         options: {
@@ -1382,7 +1382,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "reason", "evidenceIds"],
       properties: {
         state: { enum: ["complete_today", "week_complete"] },
-        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3"] },
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3", "training-next-step-v4"] },
         localDate: { type: "string", format: "date" },
         reason: { enum: ["training_already_completed_today", "weekly_targets_completed"] },
         evidenceIds: { type: "array", items: uuidSchema, uniqueItems: true }
@@ -1423,6 +1423,61 @@ export const NextTrainingStepSchema = {
             workSeconds: { type: "integer" },
             cooldownSeconds: { type: "integer" }
           }
+        }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "weeklyProgress", "lastStrengthLocalDate", "lastCardioThisWeekLocalDate", "strength", "lightCardio"],
+      anyOf: [
+        { properties: { strength: { type: "object" } } },
+        { properties: { lightCardio: { type: "object" } } }
+      ],
+      properties: {
+        state: { const: "training_options" },
+        policyVersion: { const: "training-next-step-v4" },
+        localDate: { type: "string", format: "date" },
+        weeklyProgress: {
+          type: "object",
+          additionalProperties: false,
+          required: ["strengthCompleted", "strengthTarget", "cardioCompleted", "cardioTarget"],
+          properties: {
+            strengthCompleted: { type: "integer", minimum: 0 },
+            strengthTarget: { type: "integer", minimum: 1 },
+            cardioCompleted: { type: "integer", minimum: 0 },
+            cardioTarget: { type: "integer", minimum: 0 }
+          }
+        },
+        lastStrengthLocalDate: { anyOf: [{ type: "string", format: "date" }, { type: "null" }] },
+        lastCardioThisWeekLocalDate: { anyOf: [{ type: "string", format: "date" }, { type: "null" }] },
+        strength: {
+          anyOf: [{
+            type: "object",
+            additionalProperties: false,
+            required: ["programVersionId", "workoutPosition", "workoutName", "reason"],
+            properties: {
+              programVersionId: uuidSchema,
+              workoutPosition: { type: "integer", minimum: 1, maximum: 100 },
+              workoutName: { type: "string", minLength: 1, maxLength: 256 },
+              reason: { enum: ["sequence_start", "sequence_continues", "after_cardio", "sequence_reanchored_after_deviation", "cardio_target_completed"] }
+            }
+          }, { type: "null" }]
+        },
+        lightCardio: {
+          anyOf: [{
+            type: "object",
+            additionalProperties: false,
+            required: ["durationSeconds", "targetAverageHeartRateMin", "targetAverageHeartRateMax", "warmupSeconds", "workSeconds", "cooldownSeconds"],
+            properties: {
+              durationSeconds: { type: "integer" },
+              targetAverageHeartRateMin: { type: "integer" },
+              targetAverageHeartRateMax: { type: "integer" },
+              warmupSeconds: { type: "integer" },
+              workSeconds: { type: "integer" },
+              cooldownSeconds: { type: "integer" }
+            }
+          }, { type: "null" }]
         }
       }
     }

@@ -115,6 +115,7 @@ import {
   DailyProjectionQuerySchema,
   DailyProjectionSchema,
   DailyAssessmentResultSchema,
+  DailyDecisionContextResultSchema,
   PersonPreferencesSchema,
   UpdatePersonPreferencesSchema,
   ProgressOverviewQuerySchema,
@@ -1247,6 +1248,13 @@ function dailyProjectionPaths(): Record<string, object> {
 
 function dailyAssessmentPaths(): Record<string, object> {
   return {
+    "/v1/daily-assessment/context": {
+      get: {
+        tags: ["daily-assessment"],
+        summary: "Read current facts for an agent-owned daily decision",
+        responses: { "200": { description: "Current non-prescriptive context", content: { "application/json": { schema: DailyDecisionContextResultSchema } } } }
+      }
+    },
     "/v1/daily-assessment": {
       get: {
         tags: ["daily-assessment"],

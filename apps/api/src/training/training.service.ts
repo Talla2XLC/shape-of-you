@@ -396,6 +396,11 @@ export class TrainingService {
         };
   }
 
+  /** Reads every current connected activity on one Person-local date for exact completion checks. */
+  public listExternalActivitiesForLocalDate(localDate: string): Promise<readonly ExternalActivityFact[]> {
+    return this.store.listExternalActivitiesForLocalDate(this.personContext.getPersonId(), localDate);
+  }
+
   /** Creates one idempotent immutable WorkoutSession fact. */
   public createWorkoutSession(
     input: CreateWorkoutSession

@@ -696,6 +696,7 @@ export interface CurrentRecoveryContextV1 {
  */
 export interface CurrentRecoveryObservation {
   readonly kind: RecoveryObservationKind;
+  readonly sourceChannel: RecoveryObservation["sourceReference"]["channel"];
   readonly observedFrom: string | null;
   readonly observedUntil: string | null;
   readonly temporalPrecision: "instant" | "local_date";
@@ -715,11 +716,12 @@ export const CurrentRecoveryObservationSchema = {
   type: "object",
   additionalProperties: false,
   required: [
-    "kind", "observedFrom", "observedUntil", "temporalPrecision", "localDate",
+    "kind", "sourceChannel", "observedFrom", "observedUntil", "temporalPrecision", "localDate",
     "timezone", "quality", "detail"
   ],
   properties: {
     kind: RecoveryObservationKindSchema,
+    sourceChannel: { enum: ["manual", "google_sheets", "import", "device", "account"] },
     observedFrom: { anyOf: [dateTime, { type: "null" }] },
     observedUntil: { anyOf: [dateTime, { type: "null" }] },
     temporalPrecision: { type: "string", enum: ["instant", "local_date"] },

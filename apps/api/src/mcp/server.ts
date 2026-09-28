@@ -24,6 +24,7 @@ import {
   CurrentRecoveryContextResultSchema,
   DailyContextNoteListSchema,
   DailyAssessmentResultSchema,
+  DailyDecisionContextResultSchema,
   DailyRecommendationFeedbackSchema,
   DailyRecommendationCompletionAssessmentSchema,
   ReadDailyRecommendationCompletionSchema,
@@ -105,6 +106,7 @@ import type { DailyProjectionService } from "../daily-projections/daily-projecti
 import type { DailyAssessmentService } from "../coaching/daily-assessment.service.js";
 import type { DailyAssessmentCoachContext } from "../coaching/daily-assessment.service.js";
 import type { CurrentRecoveryContextService } from "../coaching/current-recovery-context.service.js";
+import type { DailyDecisionContextService } from "../coaching/daily-decision-context.service.js";
 import {
   ConflictError,
   DomainValidationError,
@@ -151,6 +153,7 @@ interface McpServices {
     "read" | "readCoachContext" | "readCompletion" | "readTrainingProgression" | "updatePreferences" | "recordFeedback"
   >;
   readonly currentRecoveryContext: Pick<CurrentRecoveryContextService, "read">;
+  readonly dailyDecisionContext?: Pick<DailyDecisionContextService, "read">;
 }
 
 /** Dependencies required by the API-owned stateless MCP transport adapter. */
@@ -171,12 +174,6 @@ interface ToolDefinition {
   readonly execute: (input: Record<string, unknown>) => Promise<unknown>;
   readonly present?: (value: unknown) => string;
   readonly structured?: (value: unknown) => unknown;
-}
-
-interface DailyProjectionCompatibilityResult {
-  readonly projection: unknown;
-  readonly query: DailyProjectionQuery;
-  readonly assessmentContext: DailyAssessmentCoachContext | null;
 }
 
 class ConnectorInputError extends Error {}
@@ -202,9 +199,9 @@ export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
 export const MCP_COACH_REPLY_POLICY =
   "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
   "For every meaningful nutrition, training, recovery, body, or daily-summary interaction, one useful evidence-grounded observation and one concrete next step are mandatory. " +
-  "Never require Garmin Training Readiness or Recovery Time screenshots for routine recovery or daily guidance. Base advice on the Shape of You assessment and available recovery observations; an absent Garmin value is unknown, not a reason to withhold advice. When asked specifically for Recovery Time, call list_recovery_observations with metric=garmin_post_activity_recovery_time. Only a returned observation with sourceReference.channel=account and externalSystem=intervals_icu_activity_fit:garmin_140_9_v1 is an Intervals.icu activity FIT snapshot; state its estimated minute value and observation time. Never calculate a current countdown from it or let it replace the Shape of You assessment. When asked for Garmin Training Readiness, give only a verified value with its known time or say it is unavailable; do not infer it from a generic readiness field. Do not ask for a screenshot to make routine guidance possible. A voluntarily supplied Garmin report is manual evidence, not connected-device data; do not record an unsupported Garmin score under another metric. " +
+  "Never require Garmin Training Readiness or Recovery Time screenshots for routine recovery or daily guidance. Base advice on verified current facts and available recovery observations; an absent Garmin value is unknown, not a reason by itself to withhold advice. When asked specifically for Recovery Time, call list_recovery_observations with metric=garmin_post_activity_recovery_time. Only a returned observation with sourceReference.channel=account and externalSystem=intervals_icu_activity_fit:garmin_140_9_v1 is an Intervals.icu activity FIT snapshot; state its estimated minute value and observation time. Never calculate a current countdown from it or let it replace current evidence. When asked for Garmin Training Readiness, give only a verified value with its known time or say it is unavailable; do not infer it from a generic readiness field. Do not ask for a screenshot to make routine guidance possible. A voluntarily supplied Garmin report is manual evidence, not connected-device data; do not record an unsupported Garmin score under another metric. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
-  "Keep planned facts, proposed guidance, and verified completed facts distinct. Use the structured completion assessment for completion claims; neither it nor manual feedback creates an owning-domain fact.";
+  "Keep planned facts, proposed guidance, and verified completed facts distinct. State completed workouts only from verified Training or activity facts. Use the structured completion assessment only for claims about an exact legacy DailyAssessment recommendation; neither it nor manual feedback creates an owning-domain fact.";
 
 /** Mandatory ending delivered last in every successful MCP result. */
 export const MCP_COACH_FINAL_RESPONSE_REQUIREMENT =
@@ -272,7 +269,7 @@ const workoutReadResultContent = coachResultContent(
 const recoveryWriteResultContent = coachResultContent(
   "The reported recovery fact has been saved. Continue capturing every other independent fact from the same report " +
   "before replying, even if one separate fact could not be saved. Then complete the required day-level check silently. " +
-  "After a qualitative subjective signal, call get_daily_assessment and use only its returned training decision. " +
+  "After a qualitative subjective signal, call get_daily_decision_context and decide from its current facts. " +
   "Briefly acknowledge the useful recovery picture, interpret it, and give one concrete useful next step without inventing values."
 );
 
@@ -281,7 +278,7 @@ const recoveryReadResultContent = coachResultContent(
 );
 
 const currentRecoveryContextResultContent = coachResultContent(
-  "Use the typed observations as the only authority for health values. Use syncState, targetDateDelivery, and metricDelivery only to explain availability; never compare timestamps yourself or let delivery status change a health assessment. " +
+  "Use the typed observations as the only authority for health values. Consider their observation times, quality, and source channels when deciding what the evidence means. Use syncState, targetDateDelivery, and metricDelivery only to explain availability; delivery alone does not establish a health value. " +
   "A retained_unconfirmed value is a previously saved local value whose freshness has not yet been confirmed by the current OAuth consent generation. Never present it as current, and do not infer whether reconnect, migration, or another delivery transition caused the unconfirmed state. A confirmed_absent metric was not delivered in the normalized current-consent record; this is not zero and does not prove a cause. A confirmed_present metric is current-consent delivery evidence. " +
   "For steps with periodState partial_day, always call the value intermediate or accumulated as of the exact asOf time. Never call it a final, complete, or end-of-day total and never use a low partial value as evidence of low daily activity. " +
   "For fresh_success with record_without_supported_facts, say the connected-data check succeeded but the source has not supplied supported values for today. For unknown delivery, say only that delivery for today is not established; never claim the successful request covered that date. For failed, say the latest synchronization failed and current data is unknown. For stale_success or never_checked, do not claim current freshness or absence. " +
@@ -293,11 +290,15 @@ const activeTrainingProgramResultContent = coachResultContent(
 );
 
 const trainingContextResultContent = coachResultContent(
-  "Use an active program as planned authority and the returned next training step as the sole schedule projection for the requested Person-local date. When discussing how to perform the next active strength workout, follow the current Daily Assessment first; only if it is ready and says to follow this exact active strength workout, call get_training_progression once in this turn to explain the exercise parameters. Skip that call for unrelated facts, a recovery restriction, an absent or ambiguous step, or a completed workout or week. Never derive A/B order from names, notes, or an unlinked activity. A classification-needed result requires exactly its one short human question; do not guess. A completed-today or completed-week result forbids adding another training action. Keep detailed completed sessions separate from connected activity summaries unless the exact explicit link is present. A connected summary confirms only the typed activity and load shown and never supplies exercises or sets. When the program is absent, historical evidence is proposal input only and must never be presented as an existing plan."
+  "Use an active program as planned authority and its Training-owned options as the only verified training identities for the requested Person-local date. Read get_daily_decision_context before recommending training; decide from its current Recovery facts, uncertainty, user intent, and Training options. A/B identity comes only from the exact strength option. Do not turn an unfilled weekly cardio target or a missed day into mandatory cardio. When explaining how to perform the next exact strength option, get_training_progression may supply derived set evidence; it does not decide Recovery suitability. Skip progression for unrelated facts, absent or ambiguous strength identity, or a completed workout or week. Never derive A/B order from names, notes, or an unlinked activity. A classification-needed result requires exactly its one short human question. A completed-today or completed-week result means the program offers no further training option. Keep detailed sessions separate from connected summaries unless exactly linked. A connected summary never supplies exercises or sets. When the program is absent, historical evidence is proposal input only."
 );
 
 const dailyAssessmentGuidance =
-  "Treat this API-owned daily assessment as the sole decision authority: preserve and explain its exact status, reasons, missing data, limitations, confidence, movement context, and single recommended next action. Do not recalculate, replace, or embellish the policy decision. Do not add a duration, intensity, workout, medical rationale, trend, or substitute action that the result did not return. Completion is a separate exact-snapshot read and never changes this assessment. Call it only when the outcome can change the useful reply: an explicit progress question, a verified owning-domain fact relevant to the known current action, a reused current snapshot whose outcome matters, or the bounded previous recommendation candidate in a full today brief. Never perform background completion discovery for unrelated routine conversation. If timezone is required and the user has explicitly provided an unambiguous current timezone or location, call set_current_timezone and retry this read in the same turn. Otherwise ask one natural location clarification. Never construct a fallback recommendation.";
+  "This is a legacy API-owned recommendation snapshot. Preserve its exact status, action, evidence, and date when explaining that historical snapshot or evaluating its completion. For a new Daily Coach decision, read get_daily_decision_context and decide from its current facts; do not treat this legacy action as today's training permission. Never turn a completed recommendation into a completed owner-domain fact.";
+
+const dailyDecisionContextGuidance = coachResultContent(
+  "This read contains facts and verified Training options, not a daily recommendation or permission status. You are responsible for the current training decision. Consider the user's intent, recent training, reported wellbeing, Recovery observation times and quality, missing values, and personal comparisons. Give explicit reports of acute illness or injury concern serious weight and do not soften or omit them. Missing, stale, or poor-quality evidence is unknown, never reassuring evidence. Explain the material reasons and uncertainty; ask one useful clarification when needed. Use only the exact Training options returned for this date; never invent A/B identity, exercises, load, pulse zones, or a third option. complete_today and week_complete are factual program boundaries, and needs_classification means the workout identity is unknown. A weekly cardio target is not an immediate debt. The recommendation is conversational and does not create a completed fact or an immutable DailyAssessment snapshot. If timezone is required, retry after the user provides an unambiguous current location or timezone; otherwise ask one natural clarification."
+);
 
 function dailyAssessmentCoachContent(context: DailyAssessmentCoachContext): string {
   if (context.previousRecommendation === null) {
@@ -351,7 +352,7 @@ function dailyRecommendationCompletionResultContent(value: unknown): string {
 }
 
 const timezoneWriteResultContent = coachResultContent(
-  "The user's current IANA timezone was saved from their explicit context. Immediately retry the authoritative read that required it: get_daily_assessment for a Daily Coach request or get_current_recovery_context for a focused current Recovery request. Do not expose the timezone identifier unless the user asked for it, and do not claim a daily recommendation until get_daily_assessment succeeds."
+  "The user's current IANA timezone was saved from their explicit context. Immediately retry the read that required it: get_daily_decision_context for a Daily Coach request or get_current_recovery_context for a focused Recovery request. Do not expose the timezone identifier unless the user asked for it; base daily advice on a successful current context read."
 );
 
 const setCurrentTimezoneInputSchema = {
@@ -370,7 +371,7 @@ const trainingProgramConfirmationPolicy =
   "Praise without acceptance, a question, doubt, an alternative, a partial edit such as «да, но замени...», a reply to an unrelated yes/no question, or a reply after another program version does not confirm the program. Publish a fully revised snapshot after an edit and never invent missing exercises, order, loads, or progression. " +
   "When Coach publishes a complete version without already having authority to save it, end that same message with exactly one short question equivalent to «Сохраняю эту программу как активную?» in the user's language. Use the same one-question form whenever the later reference is genuinely ambiguous. Until persistence and a matching active read-back succeed, label every such program only Proposed now and never call it agreed, active, current, or our plan. " +
   "After unambiguous acceptance, call save_confirmed_training_program and then get_training_context in the same turn, comparing the entire active snapshot with the accepted version before claiming success. " +
-  "If the accepted complete version already matches the active program's name, note, workouts, exercise versions, and prescriptions but its accepted cadence is absent or different, do not make the user restate the program and do not infer the schedule from prose. Bind the cadence to the exact active version returned by get_training_context, materialize it as an immutable successor, then call get_training_context and get_daily_assessment in the same turn. Only those successful reads may support a claim about the active cadence or today's next action.";
+  "If the accepted complete version already matches the active program's name, note, workouts, exercise versions, and prescriptions but its accepted cadence is absent or different, do not make the user restate the program and do not infer the schedule from prose. Bind the cadence to the exact active version returned by get_training_context, materialize it as an immutable successor, then call get_training_context and get_daily_decision_context in the same turn. Only those successful reads may support a claim about the active cadence or today's next action.";
 
 function confirmedTrainingProgramWriteResultContent(result: unknown): string {
   if (isRecord(result) && result.outcome === "needs_clarification") {
@@ -390,7 +391,7 @@ function materializedTrainingProgramCadenceResultContent(
     ? "The exact active program already contained the accepted cadence; this was a semantic no-op and no new version was created."
     : "The accepted cadence was persisted as an immutable successor of the exact active program.";
   return coachResultContent(
-    `${persistence} MUST immediately call get_training_context and get_daily_assessment in this same turn. Confirm that the active version contains the accepted cadence and use only the assessment's returned action for today's recommendation. If either verification fails or differs, do not claim that the cadence is active and do not infer a next workout from prose. Never expose tool names, ids, fields, or storage mechanics.`
+    `${persistence} MUST immediately call get_training_context and get_daily_decision_context in this same turn. Confirm that the active version contains the accepted cadence, then decide today's advice from the verified facts and options. If either verification fails or differs, do not claim that the cadence is active and do not infer a next workout from prose. Never expose tool names, ids, fields, or storage mechanics.`
   );
 }
 
@@ -407,40 +408,17 @@ function classifiedExternalActivityResultContent(result: unknown): string {
     ? "The exact classification was already current; this was a semantic no-op."
     : "The explicit imported activity classification was persisted as an immutable Training fact.";
   return coachResultContent(
-    `${persistence} MUST call get_training_context and then get_daily_assessment in this same turn. Use only the fresh DailyAssessment for the visible next action. Never expose ids, fields, tool names, or persistence mechanics.`
+    `${persistence} MUST call get_training_context and then get_daily_decision_context in this same turn. Decide the visible next action from the fresh verified context. Never expose ids, fields, tool names, or persistence mechanics.`
   );
 }
 
 const dailyProjectionResultContent =
   "FACTUAL-ONLY DAILY PROJECTION: Use this exact-date projection only to summarize recorded owning-domain facts. " +
-  "It cannot authorize a daily status, confidence, reasons, limitations, or next action. " +
-  "If the user requested a daily decision and no matching API-owned daily assessment is included, state that the assessment is unavailable for this date and stop. " +
-  "Do not provide a nutrition, training, recovery, medical, or other recommendation from the projection, other reads, or conversation context.";
-
-const unavailableProjectionAssessmentContent =
-  "API-OWNED DAILY ASSESSMENT UNAVAILABLE: Keep the returned projection factual-only. " +
-  "If the user requested a daily decision, say that the current assessment could not be obtained and ask them only to retry the assessment later. " +
-  "Do not derive a status or propose any nutrition, training, recovery, medical, or other next action from the projection, other reads, or conversation context.";
-
-function dailyProjectionCompatibilityContent(
-  result: DailyProjectionCompatibilityResult
-): string {
-  const { assessmentContext, query } = result;
-  if (assessmentContext === null) {
-    return unavailableProjectionAssessmentContent;
-  }
-  const { assessment } = assessmentContext;
-  if (assessment.state === "available" && (
-    assessment.localDate !== query.localDate || assessment.timezone !== query.timezone
-  )) {
-    return dailyProjectionResultContent;
-  }
-  return `API-OWNED DAILY ASSESSMENT RESULT (exact JSON; preserve every decision field): ${JSON.stringify(assessment)} ${dailyAssessmentCoachContent(assessmentContext)}`;
-}
+  "For a current Daily Coach decision, read get_daily_decision_context and interpret its Recovery evidence and Training options. A projection alone does not establish current freshness or an exact next program option.";
 
 /** Durable operational policy published by the API-owned MCP server. */
 export const MCP_OPERATIONAL_INSTRUCTIONS =
-  "Shape of You PostgreSQL is authority. Full Daily Coach, day-status, and today's-next-action requests MUST call get_daily_assessment first; use it as the sole decision authority or fail closed. " +
+  "Shape of You PostgreSQL is fact authority. Full Daily Coach, day-status, and today's-next-action requests MUST call get_daily_decision_context first; decide from its verified facts and fail closed if the read is unavailable or inconsistent. " +
   "Keep internal mechanics invisible in user-facing replies. " +
   MCP_COACH_REPLY_POLICY + " " + routineCoachReplyShape + " " + dailyCoachReplyShape + " " + MCP_COACH_FINAL_RESPONSE_REQUIREMENT + " " +
   "This MCP is the only interactive writer. Keep tool, schema, status, identifier, storage, API, and implementation details out of user-facing replies. " +
@@ -451,16 +429,16 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
-  "When the user discusses how to perform the next active strength workout, including ordinary talk about its working weight, repetitions, or sets, do not wait for an explicit progression question. Read get_daily_assessment first, then get_training_context. Call get_training_progression once in this turn only when the current assessment is ready with follow_active_program and both reads identify the same exact active strength next step. Explain only its typed hold, add_reps, add_weight, or insufficient_evidence decision for each exercise. Skip progression reads for routine recording of a completed workout, unrelated facts, nutrition, general or focused recovery, an absent or ambiguous program or next step, completed-today or completed-week, or any assessment that restricts training, even when the user asks directly about progression. Unavailable or insufficient evidence never authorizes a weight or repetition increase. Current readiness is not a promise for a future workout: recheck on its actual day. A proposal is separate from accepting a candidate and activating a new program version. " +
-  "When training context returns one pending imported-strength classification, use a direct unambiguous user statement about that exact displayed activity and workout immediately; natural equivalents of the displayed workout name are sufficient. Never infer the answer from expected sequence, activity name, program note, time, or exercise similarity. If the user's statement does not identify one option, ask exactly the API-returned short question. After saving or an unchanged result, call get_training_context and then get_daily_assessment in the same turn, and use only that assessment for the visible next action. " +
+  "When the user discusses how to perform the next active strength workout, including working weight, repetitions, or sets, read get_daily_decision_context first, then get_training_context. Use progression guidance only when both reads identify the same exact eligible strength option; evaluate the current Recovery evidence yourself before proposing progression. Skip progression for routine recording, unrelated facts, general recovery, absent or ambiguous strength identity, or completed training. Unavailable guidance does not authorize invented load. Reassess current facts on the actual training day. " +
+  "When training context returns one pending imported-strength classification, use a direct unambiguous user statement about that exact displayed activity and workout immediately; natural equivalents of the displayed workout name are sufficient. Never infer the answer from expected sequence, activity name, program note, time, or exercise similarity. If the user's statement does not identify one option, ask exactly the API-returned short question. After saving or an unchanged result, call get_training_context and then get_daily_decision_context in the same turn, and decide the visible next action from current facts. " +
   trainingProgramConfirmationPolicy + " " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
-  "For a direct, unambiguous report about the Person's current physical wellbeing, record each explicitly reported qualitative subjective signal as an independent manual Recovery observation: feeling_well, fatigued, sore, acute_illness, or injury_concern. Never fill absent 1..5 scores or boolean answers, infer a signal from Garmin data, or turn a broad unclear phrase into illness or injury. Ask one short clarification only when the date or meaning is material and unclear. Do not request a wellbeing check-in after every response. After a write or correction, read back that localDate and call get_daily_assessment again; use only its returned status and action for training advice. A feeling_well report never overrides another restriction, and readiness for a future workout must be checked on that day. " +
+  "For a direct, unambiguous report about the Person's current physical wellbeing, record each explicitly reported qualitative subjective signal as an independent manual Recovery observation: feeling_well, fatigued, sore, acute_illness, or injury_concern. Never fill absent 1..5 scores or boolean answers, infer a signal from Garmin data, or turn a broad unclear phrase into illness or injury. Ask one short clarification only when the date or meaning is material and unclear. Do not request a wellbeing check-in after every response. After a write or correction, read back that localDate and call get_daily_decision_context again; decide from its current facts. A feeling_well report does not erase another observation, and future advice needs a fresh same-day read. " +
   "For a focused question about today's sleep, HRV, resting heart rate, Body Battery, or steps, call get_current_recovery_context. Treat its typed observations as value authority and its delivery state only as availability evidence. Never infer that Garmin or another provider failed from an empty observation set, never infer zero from absence, and never promise a later autonomous recheck without a real automation. " +
-  "For a full Daily Coach assessment, preserve the assessment status, reasons, missing data, limitations, confidence, and single recommended action. Never reconstruct or alter that decision from get_daily_projection, other typed reads, or conversation context. Do not add any nutrition, training, or recovery proposal beyond actions returned by the assessment. For a factual day record that does not ask for a status or next action, require an exact local date and IANA timezone and use get_daily_projection without turning it into a decision. " +
-  "Use recommendation completion contextually, never on every response. Call get_daily_recommendation_completion only for an exact known snapshot when an explicit progress question, a newly verified relevant owner fact, a reused current recommendation, or the bounded previous-day candidate makes the outcome useful. Never call get_daily_assessment merely to discover completion during unrelated routine capture. If the daily result provides no previous candidate, do not call completion for a previous recommendation and do not search older dates. Keep each completion paired with the action and local date from the same snapshot. Reliable observed completion suppresses did-you-complete-it questions; partial evidence names what is confirmed and missing; unknown is not failure; active self-reported corrections are attributed to the user; conflicts preserve both claims and honest uncertainty. Ask manually only when the answer changes the useful next step. " +
-  "When the user explicitly says the displayed daily recommendation was accepted, completed, skipped, too heavy, or unsuitable, immediately call record_daily_recommendation_feedback with that exact assessment snapshotId and one typed status. A free-text comment may only supplement the status. Never infer feedback from silence or unrelated behavior, never translate completed feedback into an owning-domain fact, and never claim that feedback automatically changed policy or future recommendations. " +
-  "When get_daily_assessment requires timezone, use set_current_timezone only from an explicit unambiguous statement about the user's current timezone or location, then retry the assessment in the same turn. Ask one natural clarification if the location is ambiguous. Never guess silently or expose a technical setup task. " +
+  "For a full Daily Coach answer, interpret the current Recovery facts, quality, coverage, and exact Training options together with the user's intent. You decide whether and how to recommend training; explain important uncertainty and reported illness or injury concerns without inventing a diagnosis. Do not add a third Training option. For a factual day record without a next-action request, require an exact local date and IANA timezone and use get_daily_projection. " +
+  "Use legacy recommendation completion only for an exact known DailyAssessment snapshot when the user asks about that recorded recommendation. The new conversational decision has no snapshot or automatic completion. Never call get_daily_assessment merely to discover completion during unrelated routine capture. Keep each legacy completion paired with its exact action and date. Observed completion suppresses duplicate questions; unknown is not failure, and self-reported corrections remain attributed to the user. " +
+  "When the user explicitly responds to a displayed legacy DailyAssessment recommendation with an exact snapshotId, record the typed feedback for that snapshot. New conversational decisions have no DailyAssessment snapshotId: do not attach feedback to an unrelated legacy snapshot or infer execution from conversation. " +
+  "When get_daily_decision_context requires timezone, use set_current_timezone only from an explicit unambiguous statement about the user's current timezone or location, then retry the context in the same turn. Ask one natural clarification if the location is ambiguous. Never guess silently or expose a technical setup task. " +
   "Outside a full Daily Coach assessment, present Planned, Proposed now, and Actually completed separately: only typed plan artifacts such as the active TrainingProgram are planned, conversation advice is proposed, and only owning-domain facts verified by typed reads are completed; an accepted recommendation is not executed. " +
   "Outside a full Daily Coach assessment, give one clear Next step plus at most one bounded nutrition, training, and recovery proposal grounded in available evidence, and state missing evidence instead of inventing a plan. " +
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
@@ -801,7 +779,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_training_context",
-      "Read the authorized person's active training authority, deterministic next step for an optional Person-local date, and separate bounded recent detailed sessions and connected activity summaries. Supply the known local date when asking what to do now. Treat the returned next step as authoritative: never infer A/B order from text or unlinked activity, never bypass a classification question, and never add training after a completed-today or completed-week result. If pendingActivityLinkQuestion exists, ask exactly that concrete pair question; only a direct Person answer authorizes confirm_workout_activity_link, then reread get_training_context and get_daily_assessment. Never infer the pair from time or a generic activity name alone. Use imported activities without requesting a screenshot or manual repeat, never infer exercises or sets from a summary, and do not double-count a possible match. When the active program is absent, historical evidence remains proposal input and is never a plan.",
+      "Read the authorized person's active training authority, Training-owned options for an optional Person-local date, and separate bounded recent detailed sessions and connected summaries. Supply the known local date when asking what to do now. Read get_daily_decision_context before choosing training and decide from its current evidence and exact options. Never infer A/B from text or an unlinked activity, bypass a classification question, or add training after completed-today or completed-week. If pendingActivityLinkQuestion exists, ask its exact pair question; only a direct Person answer authorizes confirm_workout_activity_link, then reread training context and get_daily_decision_context. Never infer the pair from time or a generic title. Imported summaries do not supply exercises or sets; avoid double-counting. With no active program, historical evidence is proposal input only.",
       TrainingContextQuerySchema,
       TrainingContextSchema,
       false,
@@ -812,7 +790,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "get_training_progression",
-      "Read current-day, read-only progression guidance for the exact next active strength workout. In an ordinary discussion of how to perform that workout, call once after the current Daily Assessment and training context confirm a ready, exact active strength next step; an explicit progression question is not required. Skip calls for unrelated capture or advice, restricted recovery even after a direct progression question, missing or ambiguous steps, and completed training. The API checks current Daily Assessment before evaluating detailed WorkoutSession sets. Explain the returned hold, add_reps, add_weight, or insufficient_evidence decision using only its typed target and performed set weights, repetitions, RIR, dates, and reason. Garmin activity and A/B classification never supply performed sets. A proposed increase is not a program change; do not call any program write action without a separate explicit user decision. For a future workout, check again on that day.",
+      "Read current-day, read-only progression evidence for the exact next active strength workout. In an ordinary discussion of how to perform that workout, call once after the current Daily Decision Context and training context confirm the same exact active strength option; an explicit progression question is not required. Skip calls for unrelated capture or advice, missing or ambiguous steps, and completed training. The returned hold, add_reps, add_weight, or insufficient_evidence value is a derived Training suggestion, not Recovery permission: Coach decides with current wellbeing evidence. Use only typed target and performed set weights, repetitions, RIR, dates, and reason. Garmin activity and A/B classification never supply performed sets. A proposed increase is not a program change; do not call any program write action without a separate explicit user decision. For a future workout, check again on that day.",
       emptyObjectSchema("GetTrainingProgressionInput"),
       TrainingProgressionGuidanceSchema,
       false,
@@ -834,7 +812,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "materialize_training_program_cadence",
-      "Materialize one already accepted complete cadence as an immutable successor of the exact active TrainingProgram without changing its name, note, workouts, exercise versions, order, loads, or progression. Use only after get_training_context proves those active contents match the accepted version and only the cadence is absent or different. Natural acceptance of that complete version is sufficient; never ask the user to restate it or confirm each workout. Bind to the returned active program id, active version id, and lock version. A repeated identical cadence is a no-op. After success, call get_training_context and get_daily_assessment in the same turn; do not claim an active cadence or next action until both reads succeed.",
+      "Materialize one already accepted complete cadence as an immutable successor of the exact active TrainingProgram without changing its name, note, workouts, exercise versions, order, loads, or progression. Use only after get_training_context proves those active contents match the accepted version and only the cadence is absent or different. Natural acceptance of that complete version is sufficient; never ask the user to restate it or confirm each workout. Bind to the returned active program id, active version id, and lock version. A repeated identical cadence is a no-op. After success, call get_training_context and get_daily_decision_context in the same turn; do not claim an active cadence or next action until both reads succeed.",
       MaterializeTrainingProgramCadenceSchema,
       MaterializeTrainingProgramCadenceResultSchema,
       true,
@@ -847,7 +825,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "classify_external_activity",
-      "Classify the exact imported strength activity currently returned by get_training_context. A direct unambiguous user statement naming one displayed workout or saying it was not this program authorizes the write without another question. Never infer from sequence, activity name, program note, time, or exercise similarity. Bind the exact activity, localDate, active program/version/lock, and current classification returned by the read. If identity is insufficient, ask exactly the returned question. After created, corrected, or unchanged, call get_training_context and then get_daily_assessment in the same turn and use only the assessment for the visible next action.",
+      "Classify the exact imported strength activity currently returned by get_training_context. A direct unambiguous user statement naming one displayed workout or saying it was not this program authorizes the write without another question. Never infer from sequence, activity name, program note, time, or exercise similarity. Bind the exact activity, localDate, active program/version/lock, and current classification returned by the read. If identity is insufficient, ask exactly the returned question. After created, corrected, or unchanged, call get_training_context and then get_daily_decision_context in the same turn; decide the visible next action from current facts.",
       ClassifyExternalActivitySchema,
       ClassifyExternalActivityResultSchema,
       true,
@@ -859,7 +837,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "set_trusted_external_activity_title",
-      "Confirm, replace, or revoke one external activity title for an exact active program workout. Use only when the user explicitly says that this title identifies this program workout, or explicitly withdraws that trust; never infer trust from a matching activity, a program name, or nearby time. Bind the active program id, version id, lock version, exact workout position, and current trusted title from get_training_context. A null title revokes trust. After success, read get_training_context and get_daily_assessment before describing a changed training decision. Unconfirmed activity titles remain unlinked unless they share exact source identity.",
+      "Confirm, replace, or revoke one external activity title for an exact active program workout. Use only when the user explicitly says that this title identifies this program workout, or explicitly withdraws that trust; never infer trust from a matching activity, a program name, or nearby time. Bind the active program id, version id, lock version, exact workout position, and current trusted title from get_training_context. A null title revokes trust. After success, read get_training_context and get_daily_decision_context before describing a changed training decision. Unconfirmed activity titles remain unlinked unless they share exact source identity.",
       SetTrustedExternalActivityTitleSchema,
       SetTrustedExternalActivityTitleResultSchema,
       true,
@@ -870,7 +848,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "set_activity_recording_mode",
-      "Confirm, replace, or revoke the Person's generic Garmin strength recording-mode title. Use only after an explicit Person statement that this title is the Garmin mode they use for strength workouts, independent of program or venue. Never infer this authority from an imported activity or one close time. Bind expectedLockVersion from get_training_context.activityRecordingMode; null title revokes. After a non-stale result, read get_training_context and get_daily_assessment before reporting a changed training decision. Do not use this tool to classify one activity as Ahilej A or B.",
+      "Confirm, replace, or revoke the Person's generic Garmin strength recording-mode title. Use only after an explicit Person statement that this title is the Garmin mode they use for strength workouts, independent of program or venue. Never infer this authority from an imported activity or one close time. Bind expectedLockVersion from get_training_context.activityRecordingMode; null title revokes. After a non-stale result, read get_training_context and get_daily_decision_context before reporting a changed training decision. Do not use this tool to classify one activity as Ahilej A or B.",
       SetActivityRecordingModeSchema,
       SetActivityRecordingModeResultSchema,
       true,
@@ -879,7 +857,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "confirm_workout_activity_link",
-      "Record the Person's direct answer confirming the exact current WorkoutSession and imported ExternalActivity pair shown in get_training_context.pendingActivityLinkQuestion. Bind both exact ids and expectedExternalActivityId:null; do not infer this pair from time, generic title, or venue. A stale outcome means no link was written: read get_training_context again. After created or unchanged, reread get_training_context and get_daily_assessment before describing the training decision. This explicit pair does not authorize a general recording-mode rule or activity classification.",
+      "Record the Person's direct answer confirming the exact current WorkoutSession and imported ExternalActivity pair shown in get_training_context.pendingActivityLinkQuestion. Bind both exact ids and expectedExternalActivityId:null; do not infer this pair from time, generic title, or venue. A stale outcome means no link was written: read get_training_context again. After created or unchanged, reread get_training_context and get_daily_decision_context before describing the training decision. This explicit pair does not authorize a general recording-mode rule or activity classification.",
       ConfirmWorkoutActivityLinkSchema,
       ConfirmWorkoutActivityLinkResultSchema,
       true,
@@ -948,7 +926,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_recovery_observation",
-      "Immediately record one independent recovery fact from a direct text or screenshot report. The report is manual provenance even when the text or image displays Garmin or another wearable; never classify it as a direct device connection. Use sleep_score for a wearable 0..100 score. A clear current physical wellbeing report may use a qualitative subjective signal without any invented 1..5 fields or absent false values; do not ask for a routine check-in. Continue other independent facts after an isolated failure, read back the date-level set, then get the recalculated Daily Assessment before giving training advice.",
+      "Immediately record one independent recovery fact from a direct text or screenshot report. The report is manual provenance even when the text or image displays Garmin or another wearable; never classify it as a direct device connection. Use sleep_score for a wearable 0..100 score. A clear current physical wellbeing report may use a qualitative subjective signal without any invented 1..5 fields or absent false values; do not ask for a routine check-in. Continue other independent facts after an isolated failure, read back the date-level set, then get_daily_decision_context before giving training advice.",
       createRecoveryObservationToolInputSchema,
       undefined,
       true,
@@ -1002,7 +980,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "set_current_timezone",
-      "Save only the authorized person's current IANA timezone after an explicit unambiguous statement about their current timezone or location, then retry the daily assessment in the same turn.",
+      "Save only the authorized person's current IANA timezone after an explicit unambiguous statement about their current timezone or location, then retry the daily decision context in the same turn.",
       setCurrentTimezoneInputSchema,
       PersonPreferencesSchema,
       true,
@@ -1012,8 +990,18 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       () => timezoneWriteResultContent
     ),
     defineTool(
+      "get_daily_decision_context",
+      "Read the current Person-local Recovery facts, coverage, personal comparisons, and verified Training options without an API training permission or recommended action. Use this for a new Daily Coach decision.",
+      emptyObjectSchema("GetDailyDecisionContextInput"),
+      DailyDecisionContextResultSchema,
+      false,
+      MCP_READ_SCOPE,
+      () => services.dailyDecisionContext?.read() ?? Promise.reject(new Error("Daily decision context service is unavailable")),
+      () => dailyDecisionContextGuidance
+    ),
+    defineTool(
       "get_daily_assessment",
-      "Read the deterministic API-owned assessment and explainable next action for the authorized Person's current local day. This is the mandatory and sole decision authority for a full Daily Coach answer; do not recreate or embellish the policy in prompts.",
+      "Read a legacy deterministic API-owned daily recommendation snapshot for compatibility and its exact completion or feedback. Use get_daily_decision_context for a new Daily Coach decision.",
       emptyObjectSchema("GetDailyAssessmentInput"),
       DailyAssessmentResultSchema,
       false,
@@ -1059,21 +1047,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       DailyProjectionSchema,
       false,
       MCP_READ_SCOPE,
-      async (input) => {
-        const query = input as DailyProjectionQuery;
-        const projection = await services.dailyProjection.projection(query);
-        let assessmentContext: DailyAssessmentCoachContext | null = null;
-        try {
-          assessmentContext = await services.dailyAssessment?.readCoachContext() ?? null;
-        } catch {
-          // A compatibility assessment must not hide an otherwise valid factual projection.
-        }
-        return { projection, query, assessmentContext } satisfies DailyProjectionCompatibilityResult;
-      },
-      (value) => dailyProjectionCompatibilityContent(
-        value as DailyProjectionCompatibilityResult
-      ),
-      (value) => (value as DailyProjectionCompatibilityResult).projection
+      (input) => services.dailyProjection.projection(input as DailyProjectionQuery),
+      () => dailyProjectionResultContent
     )
   ];
 }
@@ -1638,11 +1613,11 @@ function trainingProgramCadenceErrorResult(
   const instruction = reason === "invalid_cadence"
     ? "TRAINING CADENCE NOT SAVED: Re-read the active training context and rebuild only the already accepted complete cadence from the conversation. Retry once only when every cadence value and workout position is explicit; otherwise ask one short natural question for the single missing detail."
     : reason === "stale_active_program"
-      ? "TRAINING CADENCE NOT SAVED: Re-read the active training context. If that exact active version already contains the accepted cadence, continue to the daily assessment. If it differs, do not overwrite or retry automatically; ask one short natural question about applying the retained cadence to the current program without asking the user to repeat it."
-      : "TRAINING CADENCE SAVE NOT VERIFIED: Re-read the active training context. If the exact active version contains the accepted cadence, continue to the daily assessment. If the same expected active version remains unchanged, retry once; otherwise do not overwrite it automatically.";
+      ? "TRAINING CADENCE NOT SAVED: Re-read the active training context. If that exact active version already contains the accepted cadence, continue to the daily decision context. If it differs, do not overwrite or retry automatically; ask one short natural question about applying the retained cadence to the current program without asking the user to repeat it."
+      : "TRAINING CADENCE SAVE NOT VERIFIED: Re-read the active training context. If the exact active version contains the accepted cadence, continue to the daily decision context. If the same expected active version remains unchanged, retry once; otherwise do not overwrite it automatically.";
   return errorResult(
     coachFailureResultContent(
-      `${instruction} Until both the active-program read and daily assessment succeed, never claim the cadence is active or infer today's next workout. Keep all tool names, ids, fields, error categories, and recovery mechanics out of the user-facing reply.`
+      `${instruction} Until both the active-program read and daily decision context succeed, never claim the cadence is active or infer today's next workout. Keep all tool names, ids, fields, error categories, and recovery mechanics out of the user-facing reply.`
     ),
     {
       state: "not_saved",

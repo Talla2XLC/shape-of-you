@@ -152,6 +152,7 @@ describe("CurrentRecoveryContextService", () => {
       observations: {
         items: [{
           kind: "metric",
+          sourceChannel: "account",
           observedFrom: null,
           observedUntil: null,
           temporalPrecision: "local_date",

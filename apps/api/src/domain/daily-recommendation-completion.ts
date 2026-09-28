@@ -11,6 +11,7 @@ import type {
   DailyRecommendationEvidenceMode,
   DailyRecommendationFeedbackStatus
 } from "@shape-of-you/contracts";
+import type { NextTrainingStep } from "@shape-of-you/contracts";
 
 export const DAILY_COMPLETION_POLICY_VERSION = "daily-completion-v1" as const;
 
@@ -34,7 +35,10 @@ function criterion(
 }
 
 /** Attaches a closed, versioned completion contract to one policy-selected action. */
-export function withDailyCompletionSpecification(action: DailyNextAction): DailyNextActionV4 {
+export function withDailyCompletionSpecification(
+  action: DailyNextAction,
+  trainingNextStep?: NextTrainingStep
+): DailyNextActionV4 {
   let completionCriterion: DailyCompletionCriterion;
   switch (action.type) {
     case "record_weight":
@@ -44,9 +48,18 @@ export function withDailyCompletionSpecification(action: DailyNextAction): Daily
       completionCriterion = criterion("meal_recorded", "meal_recorded", "nutrition");
       break;
     case "follow_active_program":
+      // A conversational choice is not stored in the immutable daily snapshot.
+      // Its exact completion therefore requires the Person's confirmation.
+      if (trainingNextStep?.state === "training_options" &&
+          trainingNextStep.strength !== null && trainingNextStep.lightCardio !== null) {
+        completionCriterion = criterion("manual_confirmation", "manual_confirmation", "coaching");
+        break;
+      }
       completionCriterion = criterion(
-        "program_workout_completed",
-        "program_workout_completed",
+        trainingNextStep?.state === "training_options" && trainingNextStep.lightCardio !== null
+          ? "light_cardio_completed" : "program_workout_completed",
+        trainingNextStep?.state === "training_options" && trainingNextStep.lightCardio !== null
+          ? "light_cardio_completed" : "program_workout_completed",
         "training",
         { targetValue: null, trainingProgramVersionId: action.trainingProgramVersionId }
       );
@@ -78,13 +91,13 @@ export function withDailyCompletionSpecification(action: DailyNextAction): Daily
   return result;
 }
 
-const compatibleCriterion: Record<DailyNextAction["type"], DailyCompletionCriterion["type"]> = {
-  record_weight: "weight_recorded",
-  complete_nutrition_record: "meal_recorded",
-  follow_active_program: "program_workout_completed",
-  record_recovery_check_in: "recovery_check_in_recorded",
-  confirm_training_program: "training_program_confirmed",
-  recovery_first: "manual_confirmation"
+const compatibleCriterion: Record<DailyNextAction["type"], readonly DailyCompletionCriterion["type"][]> = {
+  record_weight: ["weight_recorded"],
+  complete_nutrition_record: ["meal_recorded"],
+  follow_active_program: ["program_workout_completed", "light_cardio_completed", "manual_confirmation"],
+  record_recovery_check_in: ["recovery_check_in_recorded"],
+  confirm_training_program: ["training_program_confirmed"],
+  recovery_first: ["manual_confirmation"]
 };
 
 /** Rejects incompatible or ambiguous action/criterion contracts before persistence. */
@@ -93,12 +106,13 @@ export function assertDailyCompletionSpecification(action: DailyNextActionV4): v
   if (action.completion.aggregation !== "all_of" || required.length === 0) {
     throw new Error("Daily completion requires at least one required all_of criterion");
   }
-  if (required.some((item) => item.type !== compatibleCriterion[action.type])) {
+  if (required.some((item) => !compatibleCriterion[action.type].includes(item.type))) {
     throw new Error(`Completion criterion is incompatible with action ${action.type}`);
   }
   if (action.type === "follow_active_program" && (
     action.trainingProgramVersionId === null ||
-    required.some((item) => item.trainingProgramVersionId !== action.trainingProgramVersionId)
+    required.some((item) => item.type !== "manual_confirmation" &&
+      item.trainingProgramVersionId !== action.trainingProgramVersionId)
   )) {
     throw new Error("Program completion criteria must reference the action program version");
   }

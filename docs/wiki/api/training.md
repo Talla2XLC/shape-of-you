@@ -59,7 +59,11 @@ warmup/work/cooldown phases. Cadence has no weekdays. Existing versions without
 it remain readable and return `schedule_unavailable`; the API never parses
 `note` as policy. Progression-created successor versions preserve cadence.
 
-`NextTrainingStep` returns an exact strength workout, typed light cardio,
+Current `NextTrainingStep` returns `training_options` with an exact next
+strength workout when its weekly target remains open, typed light cardio when
+its weekly target remains open, or both. It includes weekly progress and the
+last classified strength date; the options do not prescribe a fixed weekday
+or mandatory cardio between strength sessions. Other states include
 `complete_today`, `week_complete`, `needs_classification`, or an explicit
 absence/unavailable state. Sequence advances only from classified current
 occurrences, so missed days do not skip workouts. Same-program strength from a
@@ -74,14 +78,15 @@ without a fabricated detailed session. An external activity without A/B identity
 advances the strength sequence and may trigger one short classification
 question.
 
-The current evaluator emits `training-next-step-v3`. Its
+The current evaluator emits `training-next-step-v4`. Its
 `needs_classification` result identifies one exact current external activity,
 the active program-workout options, and one short API-generated question. The
 date-scoped target is computed from one shared policy through the requested
 Person-local date and is independent of the recent-history display limit.
-Historical Daily Assessment snapshots containing `training-next-step-v1` or
-`training-next-step-v2`
-remain readable.
+Historical Daily Assessment snapshots containing `training-next-step-v1`,
+`training-next-step-v2`, or `training-next-step-v3` remain readable. The
+[safe training options ADR](../../adr/20260928-let-coach-choose-safe-training-options.md)
+defines why Training returns options instead of fixing today's training type.
 
 The narrow MCP `classify_external_activity` command uses the existing
 `workout:write` scope and stores explicit user authority as a Training-owned
@@ -181,13 +186,13 @@ exercise versions, prescriptions, loads, RIR, and progression; only the
 accepted typed cadence changes. The immutable successor becomes current and
 active atomically. The old version remains unchanged, an identical cadence is
 a semantic no-op, and a stale expectation or invalid workout reference writes
-nothing. Coach must then read both Training context and Daily Assessment before
+nothing. Coach must then read both Training context and Daily Decision Context before
 claiming an active cadence or a concrete next action; prose in `note` is never
 used as schedule authority.
 
 After a classification is created, corrected, or found unchanged, Coach must
-read `get_training_context` and then `get_daily_assessment` in the same turn.
-Only the refreshed Daily Assessment may determine the visible next action.
+read `get_training_context` and then `get_daily_decision_context` in the same
+turn. Coach determines the visible next action from the refreshed facts.
 The MCP implementation exists in the repository, but publication or refresh
 of a deployed action catalog and its canary remain separate operational gates.
 

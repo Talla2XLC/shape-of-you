@@ -141,6 +141,29 @@ function action(type: DailyNextAction["type"], text: string, trainingProgramVers
 
 function activeProgramAction(facts: DailyAssessmentUsedFacts): DailyNextAction {
   const step = facts.trainingNextStep;
+  if (step?.state === "training_options") {
+    if (step.strength !== null && step.lightCardio !== null) {
+      return action(
+        "follow_active_program",
+        "Выбери одно допустимое занятие из активной программы с учётом текущего самочувствия и недавних тренировок: следующую силовую или лёгкое кардио.",
+        step.strength.programVersionId
+      );
+    }
+    if (step.strength !== null) {
+      return action(
+        "follow_active_program",
+        `Следующая силовая — «${step.strength.workoutName}» из активной программы без добавления упражнений или нагрузки вне неё.`,
+        step.strength.programVersionId
+      );
+    }
+    if (step.lightCardio !== null) {
+      return action(
+        "follow_active_program",
+        `Доступно лёгкое кардио ${Math.round(step.lightCardio.durationSeconds / 60)} минут со средним пульсом ${step.lightCardio.targetAverageHeartRateMin}–${step.lightCardio.targetAverageHeartRateMax}.`,
+        facts.activeTrainingProgramVersionId
+      );
+    }
+  }
   if (step?.state === "strength") {
     return action(
       "follow_active_program",

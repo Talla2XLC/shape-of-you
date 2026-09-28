@@ -4,6 +4,7 @@ import type { FastifyReply } from "fastify";
 import {
   CreateDailyRecommendationFeedbackSchema,
   DailyAssessmentResultSchema,
+  DailyDecisionContextResultSchema,
   DailyRecommendationFeedbackListSchema,
   DailyRecommendationCompletionAssessmentSchema,
   DailyRecommendationFeedbackSchema,
@@ -12,6 +13,7 @@ import {
   UpdatePersonPreferencesSchema,
   type CreateDailyRecommendationFeedback,
   type DailyAssessmentResult,
+  type DailyDecisionContextResult,
   type DailyRecommendationFeedback,
   type DailyRecommendationFeedbackList,
   type DailyRecommendationCompletionAssessment,
@@ -22,6 +24,7 @@ import {
 
 import { JsonSchemaPipe, JsonSchemaResponseInterceptor } from "../http/json-schema.js";
 import { DailyAssessmentService } from "./daily-assessment.service.js";
+import { DailyDecisionContextService } from "./daily-decision-context.service.js";
 
 const feedbackBodySchema = {
   ...CreateDailyRecommendationFeedbackSchema,
@@ -38,11 +41,18 @@ const feedbackBodySchema = {
 /** Authenticated Person preferences and API-owned daily assessment transport. */
 @Controller("v1/daily-assessment")
 export class DailyAssessmentController {
-  public constructor(@Inject(DailyAssessmentService) private readonly service: DailyAssessmentService) {}
+  public constructor(
+    @Inject(DailyAssessmentService) private readonly service: DailyAssessmentService,
+    @Inject(DailyDecisionContextService) private readonly decisionContext: DailyDecisionContextService
+  ) {}
 
   @Get()
   @UseInterceptors(new JsonSchemaResponseInterceptor(DailyAssessmentResultSchema))
   public read(): Promise<DailyAssessmentResult> { return this.service.read(); }
+
+  @Get("context")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(DailyDecisionContextResultSchema))
+  public context(): Promise<DailyDecisionContextResult> { return this.decisionContext.read(); }
 
   @Get(":snapshotId/completion")
   @UseInterceptors(new JsonSchemaResponseInterceptor(DailyRecommendationCompletionAssessmentSchema))

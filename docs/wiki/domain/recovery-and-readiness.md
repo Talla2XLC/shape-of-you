@@ -88,7 +88,11 @@ Unknown fields and raw Intervals JSON never become the Recovery domain model.
 
 Current focused Recovery reads compose typed observations with a separate
 provider-neutral delivery context. Observations remain the value authority;
-delivery evidence never changes a health value or DailyAssessment decision.
+delivery evidence explains availability, while Coach makes current advice
+from the complete Daily Decision Context. Legacy DailyAssessment decisions
+retain their stored policy meaning.
+The Coach-safe observation view includes a source channel without account,
+record, or consent identifiers.
 The v2 context reports a closed state for every supported field:
 `confirmed_present`, `confirmed_absent`, `retained_unconfirmed`, or `unknown`.
 Confirmed absence means only that a normalized current-consent record omitted

@@ -98,6 +98,7 @@ function toCurrentRecoveryObservation(
 ): CurrentRecoveryObservation {
   return {
     kind: observation.kind,
+    sourceChannel: observation.sourceReference.channel,
     observedFrom: observation.observedFrom,
     observedUntil: observation.observedUntil,
     temporalPrecision: observation.temporalPrecision,
