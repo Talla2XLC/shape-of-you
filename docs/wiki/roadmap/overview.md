@@ -12,24 +12,27 @@ tags:
 
 ## Summary
 
-The preliminary roadmap moves from foundation through backend extraction and
-controlled data migration to web and mobile clients.
+The roadmap records completed foundation and staging authority transfer,
+current backend and Web capabilities, and later scope without treating an
+unimplemented Intake parser or mobile client as delivered.
 
 ## Content
 
 1. **DEV-027 — Workspace and baseline — complete:** repository baseline,
    canonical Markdown Wiki/ADR, plans, and Product/Domain/Architecture docs.
-2. **DEV-023 — Backend API and domain extraction — in progress:** stable
-   backend contract and domain logic extracted without premature data-authority
-   transfer. Implemented: backend foundation, Person/access/provenance,
+2. **DEV-023 — Backend API and domain extraction — core domains implemented:**
+   backend foundation, Person/access/provenance,
    WeightMeasurement corrections, Physical State/Goals, Nutrition, Training,
    Recovery, Coaching, and a PostgreSQL Intake queue with the Weight route.
    Versioned daily closure and the bounded progress overview are implemented.
-   Missing: production parser and remaining Intake routes.
-3. **DEV-024 — PostgreSQL migration and cutover:** pull-based typed import,
-   backfill, reconciliation, and an exclusive-writer transition without
-   dual-write. All five bounded domain adapters, controlled apply for non-empty
-   domains, conflict-free staging reconciliation, deployed 23-tool MCP coverage,
+   A production parser and remaining Intake routes are not implemented and
+   are deferred from near-term delivery by the TASK-0149 product decision.
+   The existing Intake foundation remains in place.
+3. **DEV-024 — Staging PostgreSQL migration and cutover — complete:**
+   pull-based typed import, backfill, reconciliation, and an exclusive-writer
+   transition without dual-write. All five bounded domain adapters, controlled
+   apply for non-empty domains, conflict-free staging reconciliation, deployed
+   23-tool MCP coverage,
    14 writer/lifecycle canaries, the frozen switch-time checkpoint, and the
    ChatGPT MCP-only writer switch are complete. The bounded post-switch
    observation is Quality- and Architecture-accepted as `READY`: the project,
@@ -39,11 +42,12 @@ controlled data migration to web and mobile clients.
    non-authoritative frozen legacy workbook retained as an indefinite
    read-only reference. Archive, delete, and ACL disposition are not roadmap
    items. Any future rollback remains separately approved.
-4. **DEV-025 — Web MVP — in progress:** static passkey-first Nuxt client,
+4. **DEV-025 — Web client — current slice implemented:** static passkey-first Nuxt client,
    API-owned browser session, bounded progress overview, and dated daily
    drill-down are implemented. An authenticated one-action Coach launcher now
    opens the Person-bound persistent ChatGPT Work conversation with the
-   Shape of You Staging MCP source; broader MVP workflow remains future scope.
+   Shape of You Staging MCP source. Broader Web workflows require separate
+   product scope rather than following automatically from this roadmap.
 5. **DEV-026 — Mobile client:** mobile access through the same contract.
 
 Mandatory gates: product/context review before service design; ADR before
@@ -59,10 +63,13 @@ pattern for any future migration.
 ## Decisions
 
 - This sequence is directional, not a detailed schedule.
+- Intake expansion requires a concrete need beyond the current Coach workflow,
+  such as non-chat or offline ingestion or an API-owned resumable multi-fact
+  request; it is not a current delivery commitment (TASK-0149).
 
 ## Open questions
 
-- Remaining DEV-023 priority and DEV-024–026 scope/dependencies/estimates.
+- Which additional Web/mobile workflows warrant product approval.
 - Whether DEV numbering maps to an external tracker.
 
 ## Related material

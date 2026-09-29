@@ -7,20 +7,24 @@ recommendations.
 
 ## Current status
 
-The repository is a modular monorepo with one NestJS API, PostgreSQL
-persistence, Drizzle migrations, and implemented domain slices for Physical
-State and Goals, Nutrition, Training, Recovery, Coaching, and the foundation of
-asynchronous Intake.
+The modular monorepo contains a NestJS API, a separate Identity service, and a
+passkey-first Nuxt Web client. The API implements Physical State and Goals,
+Nutrition, Training, Recovery, Coaching, and the foundation of asynchronous
+Intake, with service-owned PostgreSQL persistence and Drizzle migrations.
 
-The operational `Fitness Tracker` Google Sheet remains authoritative for real
-fitness data until a verified dual-run and explicitly approved cutover.
+After the approved staging cutover, PostgreSQL is the operational authority
+for fitness data. The former `Fitness Tracker` Google Sheet is a frozen,
+non-authoritative read-only legacy reference. The ChatGPT Coach writes through
+the Person-authorized Shape of You Staging MCP connector; the Web client
+provides account access, factual progress, dated records, and a Coach entry
+point. A production Intake parser and routes beyond Weight are not implemented.
 
 ## Architecture position
 
 - Start as a modular monorepo.
 - Avoid premature microservices.
 - Forbid cross-service SQL.
-- Future deployable services communicate only through APIs or events.
+- Deployable services communicate only through APIs or events.
 - Model domain facts independently; do not create a broad `DayRecord`
   aggregate.
 - Treat `Daily_Log` primarily as a legacy read model.
@@ -47,13 +51,15 @@ guide is in [docs/README.md](docs/README.md).
 
 ## Delivery sequence
 
-The current sequence is:
+The roadmap tracks:
 
-1. `DEV-027` — workspace, discovery, inventory, and documentation baseline;
-2. `DEV-023` — backend API and domain extraction, currently in progress;
-3. `DEV-024` — PostgreSQL migration and verified dual-run;
-4. `DEV-025` — Web MVP;
-5. `DEV-026` — mobile client.
+1. `DEV-027` — workspace and documentation baseline, complete;
+2. `DEV-023` — core backend domains implemented; production Intake parsing and
+   routes beyond Weight are deferred from near-term delivery;
+3. `DEV-024` — staging PostgreSQL migration and authority transfer, complete;
+4. `DEV-025` — Web entry, account access, progress, dated records, and Coach
+   launcher implemented; broader Web scope is not yet defined;
+5. `DEV-026` — mobile client, later scope.
 
 Detailed scope is approved through plans, Architecture Review, and ADRs.
 

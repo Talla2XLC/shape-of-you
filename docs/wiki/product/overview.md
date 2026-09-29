@@ -65,7 +65,8 @@ Safety position:
 ## Evidence
 
 - Operator baseline supplied on 2026-07-28.
-- Current Google Sheets behavior is the operational reference.
+- The frozen `Fitness Tracker` workbook is historical migration evidence;
+  staging PostgreSQL became operational authority after TASK-0067.
 
 ## Decisions
 

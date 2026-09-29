@@ -36,13 +36,16 @@ corrections, Physical State and Goals, Nutrition, Training, Recovery, Coaching,
 and a durable Intake queue with the first Weight route. The independently
 deployed Identity service provides passkey authentication, TOTP recovery, and
 the initial OAuth profile. The API contains the accepted OAuth-protected MCP
-resource server with the deployed 23-tool typed writer/reference/lifecycle
-surface. PostgreSQL through the single Shape of You Staging connector is now
+resource server with a typed writer/reference/lifecycle tool surface.
+PostgreSQL through the single Shape of You Staging connector is now
 staging operational authority. The static Nuxt client now opens
 authenticated users on `/progress`, reads bounded factual trends, and drills
-down through canonical dated daily projections and closure history.
+down through canonical dated daily projections and closure history. It also
+opens the Person-bound persistent ChatGPT Coach conversation.
 
-A production Intake parser and remaining Intake routes are not implemented.
+A production Intake parser and remaining Intake routes are not implemented and
+are deferred from near-term delivery by TASK-0149. The existing foundation
+remains in place.
 The former Google Sheets authority is now a non-authoritative frozen legacy
 workbook; its ACL/archive disposition and any rollback writes remain separately
 approved operations.
@@ -56,10 +59,13 @@ approved operations.
 
 - This page is a navigation/current-stage summary. Detailed authority lives in
   the linked Wiki pages and ADRs.
+- Intake expansion is not a current delivery commitment; reopen its scope only
+  for a concrete need beyond the existing Coach workflow (TASK-0149).
 
 ## Open questions
 
-- Remaining DEV-023 ordering and the legacy workbook disposition.
+- Which future non-chat or resumable ingestion need, if any, would justify
+  reopening Intake scope.
 
 ## Related material
 

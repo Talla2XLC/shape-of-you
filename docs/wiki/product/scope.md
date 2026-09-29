@@ -37,12 +37,16 @@ product slice, later scope, and explicit non-goals.
   authenticated Web product without plugin search, repeated app selection,
   mentions, or chat switching.
 
-### Proposed MVP
+### Current usable slice
 
-After DEV-023 and DEV-024, provide a web-facing stable backend, PostgreSQL
-authority with a frozen legacy workbook, unified history/trends, confirmed input, and a safe
-daily plan based on the existing training program, recovery, load risk, and
-exercise progression rules.
+The staging API owns fitness facts in PostgreSQL; the former workbook is a
+frozen, non-authoritative reference. The authenticated Web client provides
+account access, factual progress, and dated records, and opens the persistent
+ChatGPT Coach. The Coach uses Person-authorized typed MCP tools for supported
+confirmed input and explains the API-owned daily assessment. Broader Web
+workflows remain separate scope decisions. A production asynchronous Intake
+parser and routes beyond Weight are deferred from near-term delivery; the
+existing Intake foundation remains in place.
 
 ### Later
 
@@ -69,11 +73,16 @@ exercise progression rules.
 ## Evidence
 
 - Capabilities and roadmap from the operator baseline.
-- MVP boundary is a proposed interpretation, not implementation authority.
+- Current-slice claims are grounded in accepted task outcomes and canonical
+  current-state API, Identity, and Web documentation.
 
 ## Decisions
 
-- MVP remains subject to review and approved plans.
+- Further Web scope remains subject to review and approved plans.
+- TASK-0149 defers Intake expansion beyond the existing foundation. Reconsider
+  it only for a concrete non-chat, batch, or offline source; an API-owned
+  resumable multi-fact need; measured Coach failure; or a separately approved
+  in-product assistant. Implementation still requires a separate approved plan.
 
 ## Open questions
 
