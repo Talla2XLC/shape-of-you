@@ -513,6 +513,7 @@ export class WeightMeasurementRepository
         eq(weightMeasurements.personId, personId),
         gte(weightMeasurements.localDate, from),
         lte(weightMeasurements.localDate, to),
+        isPersonContextEvidence(),
         notExists(
           this.database.db.select({ id: successor.id }).from(successor)
             .where(eq(successor.supersedesId, weightMeasurements.id))

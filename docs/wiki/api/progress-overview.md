@@ -14,9 +14,10 @@ tags:
 
 ## Summary
 
-The API exposes bounded read models for sparse factual progress and
-provider-neutral profile data coverage. Both coordinate existing module-owned
-reads without becoming a new fact owner or persistence boundary.
+The API exposes bounded read models for sparse factual progress,
+provider-neutral profile data coverage, and a Person fact timeline. They
+coordinate existing module-owned reads without becoming a new fact owner or
+persistence boundary.
 
 ## Content
 
@@ -79,6 +80,22 @@ link to the canonical dated record. It does not calculate coaching advice or
 fall back to progress history when the projection is unavailable, stale, or
 superseded.
 
+The MCP-only `get_person_fact_timeline` read uses the existing `person:read`
+scope and accepts an inclusive range of at most 32 recorded local dates plus
+an IANA timezone. It composes current Weight, Body, Meal, WorkoutSession,
+ExternalActivity, and RecoveryObservation facts. Source-local dates and exact
+event instants are preserved; the requested timezone does not rewrite an
+older fact's recorded local date. Date-only records have no invented time.
+Entries have brief safe values, source-owner identifiers and available detail
+or correction-history paths; external activities have no standalone detail
+route. Only an owner-confirmed Training activity lineage covered by a current
+Person-facing WorkoutSession is folded into that session. Unlinked activities
+remain separate. Operational-only evidence, hidden Recovery records, raw
+provider payloads, notes, and unpersisted Coach conversation decisions are
+outside this read. Later imports or corrections can change a past date's
+current-fact result; it is not a historical database snapshot. No Web timeline
+screen is provided by this phase.
+
 ## Evidence
 
 - Shared runtime schemas and OpenAPI route in `packages/contracts` and
@@ -97,6 +114,7 @@ superseded.
 - [Independent facts instead of a broad DayRecord](../../adr/20260728-prefer-independent-facts-over-broad-day-record.md)
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Operational evidence isolation](../../adr/20260913-separate-operational-evidence-from-person-context.md)
+- [Person fact timeline composition](../../adr/20260929-compose-person-fact-timeline-from-domain-reads.md)
 
 ## Open questions
 

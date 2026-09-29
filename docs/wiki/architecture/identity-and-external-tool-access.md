@@ -331,6 +331,11 @@ assessment read is unavailable, the projection still succeeds, but the result
 forbids deriving any daily status or domain action and permits only retrying the
 assessment later.
 
+`get_person_fact_timeline` is a separate `person:read` MCP read of current
+recorded facts over at most 32 local dates. It does not claim a complete
+history of Coach's conversational decisions, and its factual-only result does
+not require a new recommendation. It adds no OAuth scope or separate service.
+
 An existing MCP tool name is also a compatibility identity. Its published
 input schema evolves additively: new fields are optional, old fields remain,
 required sets do not grow, and enum values do not narrow. The API adapter may

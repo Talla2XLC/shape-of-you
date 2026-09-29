@@ -13,6 +13,7 @@ export * from "./integration-connection.js";
 export * from "./person.js";
 export * from "./physical-goal.js";
 export * from "./progress-overview.js";
+export * from "./person-fact-timeline.js";
 export * from "./progress-data-coverage.js";
 export * from "./recovery.js";
 export * from "./nutrition.js";

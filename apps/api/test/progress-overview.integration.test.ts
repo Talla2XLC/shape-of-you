@@ -7,6 +7,7 @@ import type { AppConfig } from "@shape-of-you/config";
 import { buildApp, getFastifyInstance } from "../src/app.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
+import { PersonFactTimelineService } from "../src/progress-overview/person-fact-timeline.service.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
@@ -58,6 +59,11 @@ describe("ProgressOverview PostgreSQL read model", () => {
     expect(body.metrics.find((metric: { key: string }) => metric.key === "weight_kg").points).toEqual([{ localDate: "2026-08-17", value: 79.5 }]);
     expect(body.days).toHaveLength(1);
     expect(body.days[0]).toMatchObject({ localDate: "2026-08-17", facts: { weightMeasurements: 1 } });
+    const timeline = app.get(PersonFactTimelineService);
+    expect((await timeline.read({ from: "2026-08-16", to: "2026-08-18", timezone: "UTC" })).items).toEqual([
+      expect.objectContaining({ id: corrected.json().id, kind: "weight", numericValue: 79.5,
+        historyPath: `/v1/weight-measurements/${corrected.json().id as string}/history` })
+    ]);
 
     const coverageResponse = await fastify.inject({
       method: "GET",
@@ -98,5 +104,6 @@ describe("ProgressOverview PostgreSQL read model", () => {
       lastDataDate: null,
       coverage28: { recordedDays: 0, usableDays: 0 }
     });
+    expect((await timeline.read({ from: "2026-08-16", to: "2026-08-18", timezone: "UTC" })).items).toEqual([]);
   });
 });

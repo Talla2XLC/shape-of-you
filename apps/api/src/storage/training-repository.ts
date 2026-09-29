@@ -496,6 +496,10 @@ async function readActivityLineageClassification(
                  on link.external_activity_id = member.id
                 and link.person_id = ${personId}
                join workout_sessions session on session.id = link.session_id
+               join source_references source
+                 on source.id = session.source_reference_id
+                and source.person_id = session.person_id
+                and source.evidence_purpose = 'person_context'
               where not exists (
                 select 1 from workout_sessions successor
                  where successor.supersedes_id = session.id
@@ -3007,13 +3011,16 @@ export class TrainingRepository implements TrainingStore {
   public async listWorkoutSessionsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly WorkoutSession[]> {
     return this.database.db.transaction(async (transaction) => {
       const successor = alias(workoutSessions, "range_workout_successor");
-      const rows = await transaction.select().from(workoutSessions).where(and(
+      const rows = await transaction.select({ session: workoutSessions }).from(workoutSessions)
+        .innerJoin(sourceReferences, and(eq(workoutSessions.sourceReferenceId, sourceReferences.id), eq(workoutSessions.personId, sourceReferences.personId)))
+        .where(and(
         eq(workoutSessions.personId, personId),
         gte(workoutSessions.localDate, from),
         lte(workoutSessions.localDate, to),
+        isPersonContextEvidence(),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, workoutSessions.id)))
       )).orderBy(desc(workoutSessions.localDate), desc(workoutSessions.occurredAt), desc(workoutSessions.id));
-      return Promise.all(rows.map((row) => this.serializeSession(transaction, row)));
+      return Promise.all(rows.map((row) => this.serializeSession(transaction, row.session)));
     });
   }
 

@@ -2354,6 +2354,10 @@ describe("MCP HTTP adapter", () => {
         dailyProjection: {
           projection: async () => result("get_daily_projection")
         },
+        personFactTimeline: {
+          read: async () => ({ from: "2026-09-02", to: "2026-09-02", timezone: "Europe/Moscow",
+            scope: "current_recorded_facts_only", items: [] })
+        },
         dailyAssessment: {
           read: readDailyAssessment,
           readCoachContext,
@@ -2476,7 +2480,8 @@ describe("MCP HTTP adapter", () => {
         comment: "Сделано без проблем",
         idempotencyKey: "coach-feedback-completed"
       }, "completed"],
-      ["get_daily_projection", { localDate: "2026-09-02", timezone: "Europe/Moscow" }, "get_daily_projection"]
+      ["get_daily_projection", { localDate: "2026-09-02", timezone: "Europe/Moscow" }, "get_daily_projection"],
+      ["get_person_fact_timeline", { from: "2026-09-02", to: "2026-09-02", timezone: "Europe/Moscow" }, "current_recorded_facts_only"]
     ] as const;
 
     const successfulContent = new Map<string, string>();
@@ -2500,7 +2505,7 @@ describe("MCP HTTP adapter", () => {
         const toolResult = response.json().result;
         successfulContent.set(name, toolResult.content[0].text);
         expect(toolResult.isError, name).not.toBe(true);
-        if (name !== "get_daily_projection") {
+        if (name !== "get_daily_projection" && name !== "get_person_fact_timeline") {
           expect(toolResult.content[0].text, name).toContain(MCP_COACH_REPLY_POLICY);
         }
         if (name === "get_current_recovery_context" || name === "get_daily_assessment" || name === "get_daily_decision_context") {
@@ -2508,7 +2513,7 @@ describe("MCP HTTP adapter", () => {
             "Never require Garmin Training Readiness or Recovery Time screenshots"
           );
         }
-        if (name !== "get_daily_projection") {
+        if (name !== "get_daily_projection" && name !== "get_person_fact_timeline") {
           expect(toolResult.content[0].text, name).toContain(MCP_COACH_FINAL_RESPONSE_REQUIREMENT);
           expect(toolResult.content[0].text, name).toMatch(
             /MANDATORY FINAL REPLY:[\s\S]*never silently omit the next step\.$/u
@@ -2562,6 +2567,10 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.content[0].text, name).toContain(
             "FACTUAL-ONLY DAILY PROJECTION"
           );
+        } else if (name === "get_person_fact_timeline") {
+          expect(toolResult.structuredContent, name).toMatchObject({ scope: marker, items: [] });
+          expect(toolResult.content[0].text, name).toContain("FACTUAL-ONLY PERSON HISTORY");
+          expect(toolResult.content[0].text, name).not.toContain(MCP_COACH_FINAL_RESPONSE_REQUIREMENT);
         } else if (name === "get_active_training_program") {
           expect(toolResult.structuredContent, name).toMatchObject({
             status: "active",

@@ -464,7 +464,10 @@ export class TrainingService {
   /** Reads complete current manual and connected facts for a bounded local-date window. */
   public async listTrainingFactsForLocalDateRange(from: string, to: string): Promise<{
     readonly sessions: readonly WorkoutSession[];
-    readonly externalActivities: readonly ExternalActivitySummary[];
+    readonly externalActivities: readonly (ExternalActivitySummary & {
+      readonly sessionCovered: boolean;
+      readonly supersedesId: string | null;
+    })[];
   }> {
     const dates: string[] = [];
     const cursor = new Date(`${from}T00:00:00.000Z`);
@@ -484,7 +487,11 @@ export class TrainingService {
     ]);
     return {
       sessions,
-      externalActivities: activityDays.flat().map(toExternalActivitySummary)
+      externalActivities: activityDays.flat().map((activity) => ({
+        ...toExternalActivitySummary(activity),
+        sessionCovered: activity.sessionCovered,
+        supersedesId: activity.supersedesId
+      }))
     };
   }
 

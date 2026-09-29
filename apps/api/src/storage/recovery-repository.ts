@@ -636,15 +636,18 @@ export class RecoveryRepository implements RecoveryStore {
   public listObservationsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly RecoveryObservation[]> {
     return this.database.db.transaction(async (transaction) => {
       const successor = alias(recoveryObservations, "range_recovery_successor");
-      const rows = await transaction.select().from(recoveryObservations).where(and(
+      const rows = await transaction.select({ observation: recoveryObservations }).from(recoveryObservations)
+        .innerJoin(sourceReferences, and(eq(recoveryObservations.sourceReferenceId, sourceReferences.id), eq(recoveryObservations.personId, sourceReferences.personId)))
+        .where(and(
         eq(recoveryObservations.personId, personId),
         gte(recoveryObservations.localDate, from),
         lte(recoveryObservations.localDate, to),
+        isPersonContextEvidence(),
         isNull(recoveryObservations.withdrawnAt),
         this.visibleObservation(transaction),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, recoveryObservations.id)))
       )).orderBy(desc(recoveryObservations.localDate), desc(recoveryObservations.observedUntil), desc(recoveryObservations.id));
-      return Promise.all(rows.map((row) => this.hydrateObservation(transaction, row)));
+      return Promise.all(rows.map((row) => this.hydrateObservation(transaction, row.observation)));
     });
   }
 

@@ -1332,17 +1332,20 @@ export class NutritionRepository implements NutritionStore {
   public listMealsForLocalDateRange(personId: string, from: string, to: string): Promise<readonly Meal[]> {
     return this.database.db.transaction(async (transaction) => {
       const successor = alias(meals, "range_meal_successor");
-      const rows = await transaction.select().from(meals).where(and(
+      const rows = await transaction.select({ meal: meals }).from(meals)
+        .innerJoin(sourceReferences, and(eq(meals.sourceReferenceId, sourceReferences.id), eq(meals.personId, sourceReferences.personId)))
+        .where(and(
         eq(meals.personId, personId),
         gte(meals.localDate, from),
         lte(meals.localDate, to),
+        isPersonContextEvidence(),
         notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, meals.id)))
       )).orderBy(
         desc(meals.localDate),
         sql`${meals.occurredAt} desc nulls last`,
         desc(meals.id)
       );
-      return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row)));
+      return Promise.all(rows.map((row) => this.serializeMealRow(transaction, row.meal)));
     });
   }
 

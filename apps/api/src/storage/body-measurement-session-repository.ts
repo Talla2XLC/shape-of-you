@@ -456,6 +456,7 @@ export class BodyMeasurementSessionRepository
         eq(bodyMeasurementSessions.personId, personId),
         gte(bodyMeasurementSessions.localDate, from),
         lte(bodyMeasurementSessions.localDate, to),
+        eq(sourceReferences.evidencePurpose, "person_context"),
         notExists(
           this.database.db.select({ id: successor.id }).from(successor)
             .where(eq(successor.supersedesId, bodyMeasurementSessions.id))

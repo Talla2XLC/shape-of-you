@@ -9,11 +9,13 @@ import { WeightMeasurementModule } from "../weight-measurements/weight-measureme
 import { ProgressOverviewController } from "./progress-overview.controller.js";
 import { ProgressOverviewService } from "./progress-overview.service.js";
 import { ProgressDataCoverageService } from "./progress-data-coverage.service.js";
+import { PersonFactTimelineService } from "./person-fact-timeline.service.js";
 
 /** Composes module-owned range reads without taking ownership of source facts. */
 @Module({
   imports: [WeightMeasurementModule, BodyMeasurementSessionModule, NutritionModule, TrainingModule, RecoveryModule, CoachingModule],
   controllers: [ProgressOverviewController],
-  providers: [ProgressOverviewService, ProgressDataCoverageService]
+  providers: [ProgressOverviewService, ProgressDataCoverageService, PersonFactTimelineService],
+  exports: [PersonFactTimelineService]
 })
 export class ProgressOverviewModule {}
