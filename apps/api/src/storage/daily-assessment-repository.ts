@@ -148,7 +148,7 @@ function evidenceRevisionQuery(personId: string, from: string, to: string) {
   ) as revision`;
 }
 
-async function readEvidenceRevision(
+export async function readEvidenceRevision(
   executor: Pick<DatabaseContext["db"], "execute"> | DatabaseTransaction,
   personId: string,
   from: string,

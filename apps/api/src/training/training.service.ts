@@ -2,6 +2,8 @@ import { Inject, Injectable } from "@nestjs/common";
 
 import type {
   AcceptProgressionCandidate,
+  AppliedWorkingWeight,
+  ApplyConfirmedWorkingWeight,
   ActivityRecordingMode,
   ActivateTrainingProgramVersion,
   ClassifyExternalActivity,
@@ -536,5 +538,15 @@ export class TrainingService {
       programId,
       input
     );
+  }
+
+  /** Applies one server-validated confirmation without exposing a generic version write to Coach. */
+  public applyConfirmedWorkingWeight(input: ApplyConfirmedWorkingWeight): Promise<AppliedWorkingWeight> {
+    return this.store.applyConfirmedWorkingWeight(this.personContext.getPersonId(), input);
+  }
+
+  /** Returns a completed exact retry before the original proposal becomes stale. */
+  public findAppliedWorkingWeight(input: ApplyConfirmedWorkingWeight): Promise<AppliedWorkingWeight | null> {
+    return this.store.findAppliedWorkingWeight(this.personContext.getPersonId(), input);
   }
 }

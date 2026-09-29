@@ -52,6 +52,9 @@ import {
   TrainingContextQuerySchema,
   TrainingContextSchema,
   TrainingProgressionGuidanceSchema,
+  WorkingWeightProposalListSchema,
+  ApplyConfirmedWorkingWeightSchema,
+  AppliedWorkingWeightSchema,
   TrainingProgramSchema,
   UpdatePersonPreferencesSchema,
   WeightMeasurementListSchema,
@@ -87,6 +90,7 @@ import {
   type SetTrustedExternalActivityTitle,
   type SetActivityRecordingMode,
   type TrainingContextQuery,
+  type ApplyConfirmedWorkingWeight,
 } from "@shape-of-you/contracts";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -155,7 +159,7 @@ interface McpServices {
   readonly personFactTimeline?: Pick<PersonFactTimelineService, "read">;
   readonly dailyAssessment?: Pick<
     DailyAssessmentService,
-    "read" | "readCoachContext" | "readCompletion" | "readTrainingProgression" | "updatePreferences" | "recordFeedback"
+    "read" | "readCoachContext" | "readCompletion" | "readTrainingProgression" | "readWorkingWeightProposals" | "applyConfirmedWorkingWeight" | "updatePreferences" | "recordFeedback"
   >;
   readonly currentRecoveryContext: Pick<CurrentRecoveryContextService, "read">;
   readonly dailyDecisionContext?: Pick<DailyDecisionContextService, "read">;
@@ -442,7 +446,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
-  "When the user discusses how to perform the next active strength workout, including working weight, repetitions, or sets, read get_daily_decision_context first, then get_training_context. Use progression guidance only when both reads identify the same exact eligible strength option; evaluate the current Recovery evidence yourself before proposing progression. Skip progression for routine recording, unrelated facts, general recovery, absent or ambiguous strength identity, or completed training. Unavailable guidance does not authorize invented load. Reassess current facts on the actual training day. " +
+  "When the user discusses how to perform the next active strength workout, including working weight, repetitions, or sets, read get_daily_decision_context first, then get_training_context. Use progression guidance only when both reads identify the same exact eligible strength option; evaluate the current Recovery evidence yourself before proposing progression. For a concrete working-weight change, use get_working_weight_proposals and show one exact exercise and old/new weight. Ask one clear question covering the change, confident technique and absence of pain. Call apply_confirmed_working_weight only after the user's unambiguous yes to that exact proposal; doubt, questions, revisions or unrelated yes never authorize it. Never silently raise any weight. Skip progression for routine recording, unrelated facts, general recovery, absent or ambiguous strength identity, or completed training. Unavailable guidance does not authorize invented load. Reassess current facts on the actual training day. " +
   "When training context returns one pending imported-strength classification, use a direct unambiguous user statement about that exact displayed activity and workout immediately; natural equivalents of the displayed workout name are sufficient. Never infer the answer from expected sequence, activity name, program note, time, or exercise similarity. If the user's statement does not identify one option, ask exactly the API-returned short question. After saving or an unchanged result, call get_training_context and then get_daily_decision_context in the same turn, and decide the visible next action from current facts. " +
   trainingProgramConfirmationPolicy + " " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
@@ -819,6 +823,28 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       false,
       MCP_READ_SCOPE,
       () => services.dailyAssessment?.readTrainingProgression() ?? Promise.reject(new Error("Daily assessment service is unavailable"))
+    ),
+    defineTool(
+      "get_working_weight_proposals",
+      "Read current-day, Recovery-gated exact working-weight proposals. Show at most one concrete exercise and old/new weight at a time and ask one understandable confirmation that includes confident technique and no pain. An empty or unavailable result never authorizes a weight change. Proposals are read-only and expire when evidence, recovery, date or the active version changes.",
+      emptyObjectSchema("GetWorkingWeightProposalsInput"),
+      WorkingWeightProposalListSchema,
+      false,
+      MCP_READ_SCOPE,
+      () => services.dailyAssessment?.readWorkingWeightProposals() ?? Promise.reject(new Error("Daily assessment service is unavailable"))
+    ),
+    defineTool(
+      "apply_confirmed_working_weight",
+      "Apply only the one exact working-weight proposal that the user just clearly approved after seeing its exercise and old/new weight and confirming confident technique without pain. A question, hesitation, changed amount, unrelated yes or lack of an explicit reply forbids this call. Set confirmed true only for that direct approval; never silently change a program. Use a new requestId for each approval and reuse it only for an exact retry. The API rechecks recovery, current detailed sessions, local date and active program under a Person lock before atomically activating one new immutable version. On stale conflict, show a fresh proposal and obtain fresh approval. After success reread get_training_context and get_daily_decision_context before claiming the new weight is active.",
+      ApplyConfirmedWorkingWeightSchema,
+      AppliedWorkingWeightSchema,
+      true,
+      MCP_WORKOUT_WRITE_SCOPE,
+      (input) => services.dailyAssessment?.applyConfirmedWorkingWeight(input as ApplyConfirmedWorkingWeight) ??
+        Promise.reject(new Error("Daily assessment service is unavailable")),
+      () => coachResultContent(
+        "The exact confirmed weight change was recorded. Immediately read get_training_context and get_daily_decision_context. Compare the active version with appliedVersionId before telling the user the new weight is active; if it differs, report uncertainty and do not infer today's training action."
+      )
     ),
     defineTool(
       "save_confirmed_training_program",

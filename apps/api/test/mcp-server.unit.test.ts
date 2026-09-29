@@ -552,6 +552,13 @@ describe("MCP HTTP adapter", () => {
     expect(progressionTool?.description).toContain("not Recovery permission");
     expect(progressionTool?.description).toContain("Garmin activity and A/B classification never supply performed sets");
     expect(progressionTool?.description).toContain("For a future workout, check again on that day");
+    const offerTool = tools.find((tool) => tool.name === "get_working_weight_proposals");
+    const applyTool = tools.find((tool) => tool.name === "apply_confirmed_working_weight");
+    expect(offerTool?.description).toContain("one understandable confirmation");
+    expect(applyTool?.description).toContain("only the one exact working-weight proposal");
+    expect(applyTool?.description).toContain("lack of an explicit reply forbids this call");
+    expect(applyTool?.description).toContain("reread get_training_context and get_daily_decision_context");
+    expect(policy).toContain("Never silently raise any weight");
   });
 
   it("publishes OAuth protected-resource metadata", async () => {
@@ -582,7 +589,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(34);
+    expect(body.result.tools).toHaveLength(36);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -612,6 +619,8 @@ describe("MCP HTTP adapter", () => {
       get_active_training_program: MCP_READ_SCOPE,
       get_training_context: MCP_READ_SCOPE,
       get_training_progression: MCP_READ_SCOPE,
+      get_working_weight_proposals: MCP_READ_SCOPE,
+      apply_confirmed_working_weight: MCP_WORKOUT_WRITE_SCOPE,
       save_confirmed_training_program: MCP_WORKOUT_WRITE_SCOPE,
       materialize_training_program_cadence: MCP_WORKOUT_WRITE_SCOPE,
       classify_external_activity: MCP_WORKOUT_WRITE_SCOPE,
@@ -2167,6 +2176,28 @@ describe("MCP HTTP adapter", () => {
       evidenceChecksum: "c".repeat(64)
     });
     const readCompletion = vi.fn().mockResolvedValue(completion("observed"));
+    const workingWeightProposal = {
+      programId: "00000000-0000-4000-8000-000000000145",
+      programLockVersion: 1,
+      programVersionId: "00000000-0000-4000-8000-000000000146",
+      workoutPosition: 1,
+      prescriptionPosition: 1,
+      exerciseId: "00000000-0000-4000-8000-000000000147",
+      exerciseVersionId: "00000000-0000-4000-8000-000000000148",
+      exerciseLabel: "Press",
+      currentTargetWeightKg: 50,
+      suggestedTargetWeightKg: 52.5,
+      evidenceSessionId: "00000000-0000-4000-8000-000000000149",
+      evidenceSessionIds: ["00000000-0000-4000-8000-000000000149", "00000000-0000-4000-8000-000000000150"],
+      localDate: "2026-09-02",
+      assessmentEvidenceChecksum: "a".repeat(64),
+      evidenceRevision: "b".repeat(64)
+    };
+    const applyConfirmedWorkingWeight = vi.fn().mockResolvedValue({
+      status: "applied", changeId: "00000000-0000-4000-8000-000000000151",
+      programId: workingWeightProposal.programId,
+      appliedVersionId: "00000000-0000-4000-8000-000000000152"
+    });
     const availableDailyAssessment: DailyAssessmentResult = {
       state: "available",
       snapshotId: "00000000-0000-4000-8000-000000000501",
@@ -2366,6 +2397,11 @@ describe("MCP HTTP adapter", () => {
             localDate: "2026-09-02", programVersionId: null,
             workoutPosition: null, workoutName: null, items: []
           }),
+          readWorkingWeightProposals: async () => ({
+            state: "available", reason: "ready", localDate: "2026-09-02",
+            items: [workingWeightProposal]
+          }),
+          applyConfirmedWorkingWeight,
           readCompletion,
           updatePreferences,
           recordFeedback
@@ -2474,6 +2510,11 @@ describe("MCP HTTP adapter", () => {
       ["get_daily_assessment", {}, "timezone_required"],
       ["get_daily_decision_context", {}, "timezone_required"],
       ["get_training_progression", {}, "recovery_not_ready"],
+      ["get_working_weight_proposals", {}, "available"],
+      ["apply_confirmed_working_weight", {
+        requestId: "00000000-0000-4000-8000-000000000153",
+        confirmed: true, proposal: workingWeightProposal
+      }, "applied"],
       ["record_daily_recommendation_feedback", {
         snapshotId: "00000000-0000-4000-8000-000000000501",
         status: "completed",
@@ -2580,10 +2621,34 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.structuredContent, name).toMatchObject({
             state: "unavailable", reason: marker, items: []
           });
+        } else if (name === "get_working_weight_proposals") {
+          expect(toolResult.structuredContent, name).toMatchObject({
+            state: marker, items: [{ suggestedTargetWeightKg: 52.5 }]
+          });
+        } else if (name === "apply_confirmed_working_weight") {
+          expect(toolResult.structuredContent, name).toMatchObject({ status: marker,
+            appliedVersionId: "00000000-0000-4000-8000-000000000152" });
+          expect(toolResult.content[0].text, name).toContain("Immediately read get_training_context and get_daily_decision_context");
+          expect(applyConfirmedWorkingWeight).toHaveBeenCalledWith({
+            requestId: "00000000-0000-4000-8000-000000000153",
+            confirmed: true, proposal: workingWeightProposal
+          });
         } else {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });
         }
       }
+
+      const unconfirmedWrite = await authorizedFastify.inject({
+        method: "POST", url: "/mcp",
+        headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
+        payload: { jsonrpc: "2.0", id: 299, method: "tools/call", params: {
+          name: "apply_confirmed_working_weight",
+          arguments: { requestId: "00000000-0000-4000-8000-000000000154",
+            confirmed: false, proposal: workingWeightProposal }
+        } }
+      });
+      expect(unconfirmedWrite.json().result.isError).toBe(true);
+      expect(applyConfirmedWorkingWeight).toHaveBeenCalledTimes(1);
 
       for (const name of [
         "record_weight_measurement",

@@ -1,0 +1,1 @@
+ALTER TABLE "training_program_weight_changes" ADD CONSTRAINT "training_weight_change_exercise_version_fk" FOREIGN KEY ("exercise_version_id") REFERENCES "public"."training_exercise_versions"("id") ON DELETE no action ON UPDATE no action;

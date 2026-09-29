@@ -20,5 +20,6 @@ export * from "./nutrition.js";
 export * from "./source-reference.js";
 export * from "./training.js";
 export * from "./training-progression.js";
+export * from "./working-weight-change.js";
 export * from "./user.js";
 export * from "./weight-measurement.js";

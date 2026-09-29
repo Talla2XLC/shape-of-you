@@ -243,7 +243,9 @@ const trainingStore: TrainingStore = {
   workoutSessionHistory: unreachable,
   personalRecords: unreachable,
   progressionCandidates: unreachable,
-  acceptProgressionCandidate: unreachable
+  acceptProgressionCandidate: unreachable,
+  applyConfirmedWorkingWeight: unreachable,
+  findAppliedWorkingWeight: unreachable
 };
 
 const recoveryStore: RecoveryStore = {

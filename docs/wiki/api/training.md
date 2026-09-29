@@ -17,7 +17,7 @@ Provides shared versioned exercises, Person-owned immutable program versions
 with optional typed cadence, immutable sessions/sets, deterministic next-step
 projection, explicit imported-activity classification, title trust for
 automatic activity matching, Person-confirmed Garmin recording context,
-personal records, and progression candidates.
+personal records, progression candidates, and confirmed working-weight changes.
 
 ## Content
 
@@ -231,6 +231,20 @@ program or next step changed, or the timezone is missing, it returns an
 explicit unavailable state. Guidance never saves or activates a program;
 Coach must refresh it on the actual future training day.
 
+The MCP `get_working_weight_proposals` read exposes exact current-day increases
+only when the API-owned Recovery assessment is ready and the next strength
+position, two current detailed sessions, and active program agree. After one
+clear Person confirmation, `apply_confirmed_working_weight` rechecks Recovery,
+the current local date, evidence revision, exact progression candidate, and
+active program under the Person lock. It copies one immutable program version,
+changes only the selected prescription's external working weight, activates
+the successor, and records a typed audit row in one transaction. Stale or
+unsafe proposals fail without a write; an identical request ID can be retried
+idempotently. Coach reads Training and Daily Decision Context back before
+claiming the new version is active. The existing candidate acceptance path
+still creates an inactive draft. See the
+[confirmed working-weight ADR](../../adr/20260929-confirm-working-weight-increase-atomically.md).
+
 ## Evidence
 
 - Training contracts/module/repository/integration tests.
@@ -244,6 +258,7 @@ Coach must refresh it on the actual future training day.
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
 - [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
+- [Confirmed working-weight change](../../adr/20260929-confirm-working-weight-increase-atomically.md).
 
 ## Open questions
 

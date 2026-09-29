@@ -2523,6 +2523,69 @@ export const workoutSessions = pgTable(
   ]
 );
 
+/** Immutable audit of one explicitly confirmed and atomically activated weight change. */
+export const trainingProgramWeightChanges = pgTable(
+  "training_program_weight_changes",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    personId: uuid("person_id").notNull(),
+    requestId: uuid("request_id").notNull(),
+    payloadHash: varchar("payload_hash", { length: 64 }).notNull(),
+    programId: uuid("program_id").notNull(),
+    baseVersionId: uuid("base_version_id").notNull(),
+    newVersionId: uuid("new_version_id").notNull(),
+    workoutPosition: smallint("workout_position").notNull(),
+    prescriptionPosition: smallint("prescription_position").notNull(),
+    exerciseVersionId: uuid("exercise_version_id").notNull(),
+    oldWeightKg: numeric("old_weight_kg", { precision: 9, scale: 3 }).notNull(),
+    newWeightKg: numeric("new_weight_kg", { precision: 9, scale: 3 }).notNull(),
+    evidenceSessionOneId: uuid("evidence_session_one_id").notNull(),
+    evidenceSessionTwoId: uuid("evidence_session_two_id").notNull(),
+    localDate: date("local_date", { mode: "string" }).notNull(),
+    assessmentChecksum: varchar("assessment_checksum", { length: 64 }).notNull(),
+    evidenceRevision: varchar("evidence_revision", { length: 64 }).notNull(),
+    confirmationSource: varchar("confirmation_source", { length: 32 }).notNull(),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
+  },
+  (table) => [
+    foreignKey({
+      name: "training_weight_change_program_fk",
+      columns: [table.programId, table.personId],
+      foreignColumns: [trainingPrograms.id, trainingPrograms.personId]
+    }),
+    foreignKey({
+      name: "training_weight_change_base_version_fk",
+      columns: [table.baseVersionId, table.programId, table.personId],
+      foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.programId, trainingProgramVersions.personId]
+    }),
+    foreignKey({
+      name: "training_weight_change_new_version_fk",
+      columns: [table.newVersionId, table.programId, table.personId],
+      foreignColumns: [trainingProgramVersions.id, trainingProgramVersions.programId, trainingProgramVersions.personId]
+    }),
+    foreignKey({
+      name: "training_weight_change_session_one_fk",
+      columns: [table.evidenceSessionOneId, table.personId],
+      foreignColumns: [workoutSessions.id, workoutSessions.personId]
+    }),
+    foreignKey({
+      name: "training_weight_change_session_two_fk",
+      columns: [table.evidenceSessionTwoId, table.personId],
+      foreignColumns: [workoutSessions.id, workoutSessions.personId]
+    }),
+    foreignKey({
+      name: "training_weight_change_exercise_version_fk",
+      columns: [table.exerciseVersionId],
+      foreignColumns: [trainingExerciseVersions.id]
+    }),
+    unique("training_weight_change_request_uq").on(table.personId, table.requestId),
+    unique("training_weight_change_new_version_uq").on(table.newVersionId),
+    check("training_weight_change_weight_increase", sql`${table.newWeightKg} > ${table.oldWeightKg}`),
+    check("training_weight_change_distinct_sessions", sql`${table.evidenceSessionOneId} <> ${table.evidenceSessionTwoId}`),
+    check("training_weight_change_source", sql`${table.confirmationSource} = 'coach_explicit_confirmation'`)
+  ]
+);
+
 export const trainingWorkoutSessionActivityLinks = pgTable(
   "training_workout_session_activity_links",
   {

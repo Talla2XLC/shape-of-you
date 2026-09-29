@@ -1,5 +1,6 @@
 import { Inject, Injectable } from "@nestjs/common";
 import { createHash } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 
 import type {
   CreateDailyRecommendationFeedback,
@@ -15,6 +16,9 @@ import type {
   PersonPreferences,
   RecoveryObservation,
   TrainingProgressionGuidance,
+  WorkingWeightProposalList,
+  AppliedWorkingWeight,
+  ApplyConfirmedWorkingWeight,
   NextTrainingStep,
   UpdatePersonPreferences
 } from "@shape-of-you/contracts";
@@ -52,7 +56,7 @@ import type {
 import { TrainingService } from "../training/training.service.js";
 import { WeightMeasurementService } from "../weight-measurements/weight-measurement.service.js";
 import { DailyContextNoteService } from "../daily-context-notes/daily-context-note.service.js";
-import { DailyAssessmentEvidenceChangedError } from "../domain/errors.js";
+import { ConflictError, DailyAssessmentEvidenceChangedError } from "../domain/errors.js";
 
 /** Retries a composition when its evidence revision changes, then fails closed. */
 export async function withDailyAssessmentConsistency<T>(
@@ -206,6 +210,60 @@ export class DailyAssessmentService {
         };
       })
     };
+  }
+
+  /** Offers bounded current-day increases only after the API-owned Recovery gate passes. */
+  public async readWorkingWeightProposals(): Promise<WorkingWeightProposalList> {
+    const unavailable = (
+      reason: WorkingWeightProposalList["reason"], localDate: string | null = null
+    ): WorkingWeightProposalList => ({ state: "unavailable", reason, localDate, items: [] });
+    const preferences = await this.store.getPreferences(this.personContext.getPersonId());
+    if (!preferences.timezone) return unavailable("timezone_required");
+    const localDate = derivePersonLocalDate(preferences.timezone);
+    const from = shiftLocalDate(localDate, -90);
+    const revisionBefore = await this.store.getEvidenceRevision(this.personContext.getPersonId(), from, localDate);
+    const assessment = await this.read();
+    if (assessment.state !== "available" || assessment.localDate !== localDate ||
+        assessment.policyVersion !== "daily-assessment-v6" || assessment.status !== "ready") {
+      return unavailable("recovery_not_ready", localDate);
+    }
+    const guidance = await this.readTrainingProgression();
+    if (guidance.state !== "available" || guidance.localDate !== localDate ||
+        guidance.programVersionId === null || guidance.workoutPosition === null) {
+      return unavailable("training_step_unavailable", localDate);
+    }
+    const candidates = await this.training.progressionCandidates();
+    const revisionAfter = await this.store.getEvidenceRevision(this.personContext.getPersonId(), from, localDate);
+    if (revisionBefore !== revisionAfter) return unavailable("evidence_changed", localDate);
+    const items: WorkingWeightProposalList["items"] = candidates.items.flatMap((candidate) => {
+      if (candidate.programVersionId !== guidance.programVersionId ||
+          candidate.workoutPosition !== guidance.workoutPosition) return [];
+      const decision = guidance.items.find((item) =>
+        item.prescriptionPosition === candidate.prescriptionPosition &&
+        item.action === "add_weight" &&
+        item.suggestedTargetWeightKg === candidate.suggestedTargetWeightKg &&
+        item.evidenceSessionIds.length === 2 &&
+        item.evidenceSessionIds[0] === candidate.evidenceSessionId
+      );
+      return decision ? [{
+        ...candidate, localDate, evidenceSessionIds: [...decision.evidenceSessionIds],
+        assessmentEvidenceChecksum: assessment.evidenceChecksum,
+        evidenceRevision: revisionAfter
+      }] : [];
+    });
+    return { state: "available", reason: "ready", localDate, items };
+  }
+
+  /** Rechecks the exact confirmed offer and delegates the atomic Training write. */
+  public async applyConfirmedWorkingWeight(input: ApplyConfirmedWorkingWeight): Promise<AppliedWorkingWeight> {
+    if (input.confirmed !== true) throw new ConflictError("Explicit confirmation is required");
+    const replay = await this.training.findAppliedWorkingWeight(input);
+    if (replay) return replay;
+    const fresh = await this.readWorkingWeightProposals();
+    if (fresh.state !== "available" || !fresh.items.some((item) => isDeepStrictEqual(item, input.proposal))) {
+      throw new ConflictError("Working-weight proposal changed; ask for a fresh confirmation");
+    }
+    return this.training.applyConfirmedWorkingWeight(input);
   }
 
   public preferences(): Promise<PersonPreferences> { return this.store.getPreferences(this.personContext.getPersonId()); }

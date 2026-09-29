@@ -48,8 +48,15 @@ Coach weighs current Recovery facts before advising how to train.
 The result includes target and actual weights, repetitions, RIR, dates, and
 typed limitations so Coach can explain a hold or a small increase without
 inventing Garmin sets. A current-day result is not a future readiness promise.
-No guidance writes a program, and explicit candidate acceptance still creates
-only an inactive draft requiring separate activation.
+The guidance read does not write a program. For a concrete eligible increase,
+Coach may show the exact old and new working weight and ask once whether the
+Person confirms it with sound technique and no pain. Only a clear acceptance
+of that proposal authorizes `apply_confirmed_working_weight`; doubt, an edit,
+or a different response does not. The API rechecks current Recovery, detailed
+sessions, and program version before changing one prescription and activating
+the immutable successor. Coach verifies Training and Daily Decision Context
+afterward. Candidate acceptance remains a separate inactive-draft path. See
+the [confirmed working-weight ADR](../../adr/20260929-confirm-working-weight-increase-atomically.md).
 
 The current `DailyDecisionContext` v1 contains Person-local daily fact
 summary, coverage, personal comparisons, current Recovery observations with
@@ -442,6 +449,8 @@ evaluation emits `training-next-step-v4`. See the
   read-only Coach delivery, and independent quality review.
 - TASK-0137 accepted ordinary next-strength progression routing with explicit
   skip conditions and unchanged Daily Assessment authority.
+- TASK-0145 accepted confirmation-gated weight activation with fresh Recovery,
+  Training, version, audit, and idempotency checks.
 
 ## Decisions
 
@@ -458,6 +467,7 @@ evaluation emits `training-next-step-v4`. See the
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
 - [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
 - [Ordinary next-strength progression routing](../../adr/20260927-invoke-progression-in-ordinary-next-strength-coaching.md).
+- [Confirmed working-weight change](../../adr/20260929-confirm-working-weight-increase-atomically.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).
 - [API-owned daily assessment and next action](../../adr/20260914-own-daily-assessment-and-next-action-in-api.md).
 - [Stable MCP read delivery for existing conversations](../../adr/20260915-deliver-daily-assessment-through-stable-mcp-reads.md).

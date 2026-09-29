@@ -63,4 +63,12 @@ describe("session-backed training progression", () => {
     expect(evaluateTrainingProgression(versionId, 1, prescription, [latest, previous], "2026-09-25", true))
       .toMatchObject({ action: "insufficient_evidence", reason: "ambiguous_prescription" });
   });
+
+  it("never turns body-weight or assisted evidence into an external-weight increase", () => {
+    for (const loadBasis of ["body_weight", "assisted"] as const) {
+      expect(evaluateTrainingProgression(versionId, 1,
+        { ...prescription, loadBasis }, [latest, previous], "2026-09-25"))
+        .toMatchObject({ action: "insufficient_evidence", reason: "unsupported_load_basis" });
+    }
+  });
 });

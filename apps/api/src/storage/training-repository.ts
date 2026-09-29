@@ -13,9 +13,12 @@ import {
   sql
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
+import { createHash } from "node:crypto";
 
 import type {
   AcceptProgressionCandidate,
+  AppliedWorkingWeight,
+  ApplyConfirmedWorkingWeight,
   ActivityRecordingMode,
   ActivateTrainingProgramVersion,
   ClassifyExternalActivity,
@@ -76,6 +79,7 @@ import {
   trainingProgramCadenceWorkouts,
   trainingPrograms,
   trainingProgramVersions,
+  trainingProgramWeightChanges,
   trainingProgramWorkouts,
   trainingProgramWorkoutActivityTitles,
   trainingActivityRecordingModes,
@@ -99,6 +103,7 @@ import {
 } from "../domain/training.js";
 import { evaluateTrainingProgression } from "../domain/training-progression.js";
 import { deriveLocalDate } from "../domain/weight-measurement.js";
+import { shiftLocalDate } from "../progress-overview/progress-data-coverage.policy.js";
 import {
   findAutomaticActivityLinks,
   type ActivityLinkExternalCandidate,
@@ -117,6 +122,7 @@ import {
   lockPersonEvidenceMutation,
   type DatabaseTransaction
 } from "./source-reference-repository.js";
+import { readEvidenceRevision } from "./daily-assessment-repository.js";
 
 /** Result of an idempotent workout create or correction command. */
 export interface CreateWorkoutSessionResult {
@@ -323,6 +329,16 @@ export interface TrainingStore {
     programId: string,
     input: AcceptProgressionCandidate
   ): Promise<TrainingProgram>;
+  /** Revalidates and atomically activates one explicitly confirmed weight change. */
+  applyConfirmedWorkingWeight(
+    personId: string,
+    input: ApplyConfirmedWorkingWeight
+  ): Promise<AppliedWorkingWeight>;
+  /** Finds a completed retry by exact request identity without creating a version. */
+  findAppliedWorkingWeight(
+    personId: string,
+    input: ApplyConfirmedWorkingWeight
+  ): Promise<AppliedWorkingWeight | null>;
 }
 
 type ProgramVersionInput =
@@ -3348,5 +3364,155 @@ export class TrainingRepository implements TrainingStore {
       }
       return this.serializeProgram(transaction, updated);
     });
+  }
+
+  /** Applies one fresh confirmed proposal and its audit row under the Person evidence lock. */
+  public async applyConfirmedWorkingWeight(
+    personId: string,
+    input: ApplyConfirmedWorkingWeight
+  ): Promise<AppliedWorkingWeight> {
+    if (input.confirmed !== true) throw new ConflictError("Explicit confirmation is required");
+    const proposal = input.proposal;
+    const payloadHash = createHash("sha256").update(JSON.stringify({ confirmed: input.confirmed, proposal })).digest("hex");
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const [existing] = await transaction.select().from(trainingProgramWeightChanges).where(and(
+        eq(trainingProgramWeightChanges.personId, personId),
+        eq(trainingProgramWeightChanges.requestId, input.requestId)
+      )).limit(1);
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) throw new ConflictError("Confirmation request was reused for a different proposal");
+        return { status: "already_applied", changeId: existing.id,
+          programId: existing.programId, appliedVersionId: existing.newVersionId };
+      }
+      const [person] = await transaction.select({ timezone: persons.timezone })
+        .from(persons).where(eq(persons.id, personId)).limit(1);
+      if (!person?.timezone || deriveLocalDate(new Date(), person.timezone) !== proposal.localDate) {
+        throw new ConflictError("Working-weight proposal is not for the current local date");
+      }
+      const revision = await readEvidenceRevision(
+        transaction, personId, shiftLocalDate(proposal.localDate, -90), proposal.localDate
+      );
+      if (revision !== proposal.evidenceRevision) {
+        throw new ConflictError("Training or recovery evidence changed after confirmation");
+      }
+      const current = await this.readProgram(transaction, personId, proposal.programId);
+      if (!current || current.lockVersion !== proposal.programLockVersion ||
+          current.activeVersionId !== proposal.programVersionId ||
+          current.currentVersion.id !== proposal.programVersionId) {
+        throw new ConflictError("Active TrainingProgram changed after proposal");
+      }
+      const candidates = await this.progressionCandidatesInTransaction(transaction, personId);
+      const candidate = candidates.items.find((item) =>
+        item.programId === proposal.programId &&
+        item.programLockVersion === proposal.programLockVersion &&
+        item.programVersionId === proposal.programVersionId &&
+        item.workoutPosition === proposal.workoutPosition &&
+        item.prescriptionPosition === proposal.prescriptionPosition &&
+        item.exerciseId === proposal.exerciseId &&
+        item.exerciseVersionId === proposal.exerciseVersionId &&
+        item.currentTargetWeightKg === proposal.currentTargetWeightKg &&
+        item.suggestedTargetWeightKg === proposal.suggestedTargetWeightKg &&
+        item.evidenceSessionId === proposal.evidenceSessionId
+      );
+      if (!candidate) throw new ConflictError("Working-weight proposal is no longer valid");
+      const replacement = alias(workoutSessions, "weight_change_replacement");
+      const evidence = await transaction.select({ id: workoutSessions.id }).from(workoutSessions)
+        .where(and(
+          eq(workoutSessions.personId, personId),
+          eq(workoutSessions.programVersionId, proposal.programVersionId),
+          eq(workoutSessions.programWorkoutPosition, proposal.workoutPosition),
+          lte(workoutSessions.localDate, proposal.localDate),
+          or(isNull(workoutSessions.occurredAt), lte(workoutSessions.occurredAt, new Date())),
+          notExists(transaction.select({ id: replacement.id }).from(replacement)
+            .where(eq(replacement.supersedesId, workoutSessions.id)))
+        ))
+        .orderBy(desc(workoutSessions.localDate), desc(workoutSessions.occurredAt), desc(workoutSessions.id))
+        .limit(2);
+      if (evidence.length !== 2 || evidence[0]!.id !== proposal.evidenceSessionIds[0] ||
+          evidence[1]!.id !== proposal.evidenceSessionIds[1]) {
+        throw new ConflictError("Progression sessions changed after proposal");
+      }
+      const active = current.activeVersion;
+      if (!active) throw new ConflictError("Active TrainingProgramVersion is unavailable");
+      const prescribed = active.workouts.find((workout) => workout.position === proposal.workoutPosition)
+        ?.prescriptions.find((item) => item.position === proposal.prescriptionPosition);
+      if (!prescribed || prescribed.exerciseVersionId !== proposal.exerciseVersionId ||
+          prescribed.targetWeightKg !== proposal.currentTargetWeightKg) {
+        throw new ConflictError("Program prescription changed after proposal");
+      }
+      const versionInput: CreateTrainingProgramVersion = {
+        expectedLockVersion: current.lockVersion,
+        name: active.name,
+        note: active.note,
+        ...(active.cadence === null ? {} : { cadence: active.cadence }),
+        workouts: active.workouts.map((workout) => ({
+          name: workout.name,
+          prescriptions: workout.prescriptions.map((item) => ({
+            exerciseVersionId: item.exerciseVersionId,
+            loadBasis: item.loadBasis,
+            targetWeightKg: workout.position === proposal.workoutPosition &&
+              item.position === proposal.prescriptionPosition
+              ? proposal.suggestedTargetWeightKg : item.targetWeightKg,
+            targetSets: item.targetSets,
+            targetRepsMin: item.targetRepsMin,
+            targetRepsMax: item.targetRepsMax,
+            targetRir: item.targetRir,
+            progressionIncrementKg: item.progressionIncrementKg,
+            note: item.note
+          }))
+        }))
+      };
+      const version = await this.insertProgramVersionContents(
+        transaction, personId, proposal.programId, active.version + 1, versionInput
+      );
+      const [updated] = await transaction.update(trainingPrograms).set({
+        currentVersionId: version.id,
+        activeVersionId: version.id,
+        lockVersion: current.lockVersion + 1
+      }).where(and(
+        eq(trainingPrograms.id, proposal.programId),
+        eq(trainingPrograms.personId, personId),
+        eq(trainingPrograms.lockVersion, current.lockVersion),
+        eq(trainingPrograms.activeVersionId, proposal.programVersionId)
+      )).returning();
+      if (!updated) throw new ConflictError("TrainingProgram changed concurrently");
+      const [change] = await transaction.insert(trainingProgramWeightChanges).values({
+        personId, requestId: input.requestId, payloadHash,
+        programId: proposal.programId,
+        baseVersionId: proposal.programVersionId,
+        newVersionId: version.id,
+        workoutPosition: proposal.workoutPosition,
+        prescriptionPosition: proposal.prescriptionPosition,
+        exerciseVersionId: proposal.exerciseVersionId,
+        oldWeightKg: proposal.currentTargetWeightKg.toFixed(3),
+        newWeightKg: proposal.suggestedTargetWeightKg.toFixed(3),
+        evidenceSessionOneId: proposal.evidenceSessionIds[0]!,
+        evidenceSessionTwoId: proposal.evidenceSessionIds[1]!,
+        localDate: proposal.localDate,
+        assessmentChecksum: proposal.assessmentEvidenceChecksum,
+        evidenceRevision: proposal.evidenceRevision,
+        confirmationSource: "coach_explicit_confirmation"
+      }).returning({ id: trainingProgramWeightChanges.id });
+      if (!change) throw new Error("TrainingProgramWeightChange insert failed");
+      return { status: "applied", changeId: change.id,
+        programId: proposal.programId, appliedVersionId: version.id };
+    });
+  }
+
+  /** Resolves an exact idempotent retry before a now-stale proposal is rechecked. */
+  public async findAppliedWorkingWeight(
+    personId: string,
+    input: ApplyConfirmedWorkingWeight
+  ): Promise<AppliedWorkingWeight | null> {
+    const payloadHash = createHash("sha256").update(JSON.stringify({ confirmed: input.confirmed, proposal: input.proposal })).digest("hex");
+    const [existing] = await this.database.db.select().from(trainingProgramWeightChanges).where(and(
+      eq(trainingProgramWeightChanges.personId, personId),
+      eq(trainingProgramWeightChanges.requestId, input.requestId)
+    )).limit(1);
+    if (!existing) return null;
+    if (existing.payloadHash !== payloadHash) throw new ConflictError("Confirmation request was reused for a different proposal");
+    return { status: "already_applied", changeId: existing.id,
+      programId: existing.programId, appliedVersionId: existing.newVersionId };
   }
 }

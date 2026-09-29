@@ -130,8 +130,12 @@ automatically.
   Garmin strength remains occurrence evidence only.
 - Weight progression candidates use the same two-session predicate and exact
   workout position. Acceptance rechecks the candidate and creates a new
-  inactive program version; explicit activation is separate. Coach weighs
-  current Recovery observations before suggesting an increase.
+  inactive program version; explicit activation is separate. A distinct
+  confirmed working-weight command requires current ready Recovery, an exact
+  current-day proposal and active version, and a fresh Person-locked evidence
+  check. It atomically activates a successor changing one prescription weight
+  and records a typed `TrainingProgramWeightChange` audit fact. Stale, unsafe,
+  bodyweight, and assisted proposals cannot use this command.
 
 ## Evidence
 
@@ -141,6 +145,7 @@ automatically.
 
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md).
 - [Training density and version changes ADR](../../adr/20260926-account-for-training-density-and-program-version-changes.md).
+- [Confirmed working-weight change](../../adr/20260929-confirm-working-weight-increase-atomically.md).
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md).
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md).
 - [Hybrid personal baselines for daily assessment](../../adr/20260915-use-hybrid-personal-baselines-for-daily-assessment.md).
