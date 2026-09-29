@@ -695,7 +695,9 @@ button.button {
 
 .coverage-heading h2,
 .coverage-card h3,
-.coverage-card p {
+.coverage-card p,
+.insight-card h3,
+.insight-card p {
   margin: 0;
 }
 
@@ -747,7 +749,8 @@ button.button {
   gap: 14px;
 }
 
-.coverage-card {
+.coverage-card,
+.insight-card {
   display: grid;
   align-content: start;
   gap: 10px;
@@ -764,8 +767,20 @@ button.button {
   gap: 14px;
 }
 
-.coverage-card h3 {
+.coverage-card h3,
+.insight-card h3 {
   font-size: 1.2rem;
+}
+
+.insight-card details summary {
+  width: fit-content;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.insight-card details summary:focus-visible {
+  outline: 2px solid var(--lime);
+  outline-offset: 4px;
 }
 
 .coverage-status {

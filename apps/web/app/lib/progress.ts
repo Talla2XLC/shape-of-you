@@ -35,6 +35,54 @@ export interface ProgressDataCoverage {
   readonly directions: readonly ProgressDataDirection[];
 }
 
+/** Browser projection of one API-calculated observational insight. */
+export interface PersonalInsight {
+  readonly kind: "weight_direction" | "training_rhythm" | "post_training_sleep_association";
+  readonly from: string;
+  readonly to: string;
+  readonly statement: string;
+  readonly uncertainty: "moderate" | "high";
+  readonly sampleDays: number;
+  readonly comparisonDays: number;
+  readonly limitation: string;
+  readonly evidence: {
+    readonly weightMeasurementIds: readonly string[];
+    readonly workoutSessionIds: readonly string[];
+    readonly externalActivityIds: readonly string[];
+    readonly recoveryObservationIds: readonly string[];
+  };
+}
+
+/** Versioned, read-only insight result from the API. */
+export interface PersonalInsightsResult {
+  readonly localDate: string;
+  readonly completedThrough: string;
+  readonly timezone: string;
+  readonly policyVersion: "personal-insights-v1";
+  readonly insights: readonly PersonalInsight[];
+  readonly suppressed: readonly { readonly kind: PersonalInsight["kind"]; readonly reason: string }[];
+}
+
+/** Names the owner facts used in an insight without interpreting its evidence. */
+export function insightSources(insight: PersonalInsight): string {
+  const sources = [
+    insight.evidence.weightMeasurementIds.length ? "weight measurements" : null,
+    insight.evidence.workoutSessionIds.length ? "workout sessions" : null,
+    insight.evidence.externalActivityIds.length ? "connected activities" : null,
+    insight.evidence.recoveryObservationIds.length ? "recovery observations" : null
+  ].filter((value): value is string => value !== null);
+  return sources.join(", ");
+}
+
+/** Builds owner-scoped source links only for fact types with a safe detail read. */
+export function insightEvidenceLinks(insight: PersonalInsight): readonly { readonly label: string; readonly href: string }[] {
+  return [
+    ...insight.evidence.weightMeasurementIds.map((id, index) => ({ label: `Weight measurement ${index + 1}`, href: `/api/v1/weight-measurements/${encodeURIComponent(id)}` })),
+    ...insight.evidence.workoutSessionIds.map((id, index) => ({ label: `Workout session ${index + 1}`, href: `/api/v1/training/sessions/${encodeURIComponent(id)}` })),
+    ...insight.evidence.recoveryObservationIds.map((id, index) => ({ label: `Recovery observation ${index + 1}`, href: `/api/v1/recovery/observations/${encodeURIComponent(id)}` }))
+  ];
+}
+
 const directionLabels: Readonly<Record<ProgressDataDirectionKey, string>> = {
   sleep: "Sleep",
   hrv: "HRV",
@@ -142,4 +190,12 @@ export async function fetchProgressDataCoverage(localDate: string, timezone: str
   const response = await fetch(`/api/v1/progress-data-coverage?${query.toString()}`, { credentials: "same-origin", headers: { accept: "application/json" } });
   if (!response.ok) throw Object.assign(new Error("Profile data coverage unavailable"), { status: response.status });
   return await response.json() as ProgressDataCoverage;
+}
+
+/** Fetches the same evidence-gated projection available to Coach. */
+export async function fetchPersonalInsights(localDate: string, timezone: string): Promise<PersonalInsightsResult> {
+  const query = new URLSearchParams({ localDate, timezone });
+  const response = await fetch(`/api/v1/personal-insights?${query.toString()}`, { credentials: "same-origin", headers: { accept: "application/json" } });
+  if (!response.ok) throw Object.assign(new Error("Personal insights unavailable"), { status: response.status });
+  return await response.json() as PersonalInsightsResult;
 }

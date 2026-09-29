@@ -5,6 +5,10 @@ import {
   ProgressDataCoverageSchema,
   ProgressOverviewQuerySchema,
   ProgressOverviewSchema,
+  PersonalInsightsQuerySchema,
+  PersonalInsightsResultSchema,
+  type PersonalInsightsQuery,
+  type PersonalInsightsResult,
   type ProgressDataCoverage,
   type ProgressDataCoverageQuery,
   type ProgressOverview,
@@ -14,13 +18,15 @@ import {
 import { JsonSchemaPipe, JsonSchemaResponseInterceptor } from "../http/json-schema.js";
 import { ProgressOverviewService } from "./progress-overview.service.js";
 import { ProgressDataCoverageService } from "./progress-data-coverage.service.js";
+import { PersonalInsightsService } from "./personal-insights.service.js";
 
 /** HTTP transport for the bounded progress read model. */
 @Controller("v1")
 export class ProgressOverviewController {
   public constructor(
     @Inject(ProgressOverviewService) private readonly service: ProgressOverviewService,
-    @Inject(ProgressDataCoverageService) private readonly coverage: ProgressDataCoverageService
+    @Inject(ProgressDataCoverageService) private readonly coverage: ProgressDataCoverageService,
+    @Inject(PersonalInsightsService) private readonly insights: PersonalInsightsService
   ) {}
 
   /** Reads a sparse factual overview for one inclusive local-date range. */
@@ -39,5 +45,14 @@ export class ProgressOverviewController {
     @Query(new JsonSchemaPipe<ProgressDataCoverageQuery>(ProgressDataCoverageQuerySchema, true)) query: ProgressDataCoverageQuery
   ): Promise<ProgressDataCoverage> {
     return this.coverage.read(query);
+  }
+
+  /** Reads evidence-gated observations over completed Person-local days. */
+  @Get("personal-insights")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(PersonalInsightsResultSchema))
+  public readInsights(
+    @Query(new JsonSchemaPipe<PersonalInsightsQuery>(PersonalInsightsQuerySchema, true)) query: PersonalInsightsQuery
+  ): Promise<PersonalInsightsResult> {
+    return this.insights.read(query);
   }
 }

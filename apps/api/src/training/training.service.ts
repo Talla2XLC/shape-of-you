@@ -471,25 +471,20 @@ export class TrainingService {
       readonly supersedesId: string | null;
     })[];
   }> {
-    const dates: string[] = [];
     const cursor = new Date(`${from}T00:00:00.000Z`);
     const end = new Date(`${to}T00:00:00.000Z`);
     if (Number.isNaN(cursor.valueOf()) || Number.isNaN(end.valueOf()) ||
         cursor > end || (end.valueOf() - cursor.valueOf()) / 86_400_000 > 31) {
       throw new Error("Training fact date range must cover at most 32 local days");
     }
-    while (cursor <= end) {
-      dates.push(cursor.toISOString().slice(0, 10));
-      cursor.setUTCDate(cursor.getUTCDate() + 1);
-    }
     const personId = this.personContext.getPersonId();
-    const [sessions, ...activityDays] = await Promise.all([
+    const [sessions, activities] = await Promise.all([
       this.store.listWorkoutSessionsForLocalDateRange(personId, from, to),
-      ...dates.map((date) => this.store.listExternalActivitiesForLocalDate(personId, date))
+      this.store.listExternalActivitiesForLocalDateRange(personId, from, to)
     ]);
     return {
       sessions,
-      externalActivities: activityDays.flat().map((activity) => ({
+      externalActivities: activities.map((activity) => ({
         ...toExternalActivitySummary(activity),
         sessionCovered: activity.sessionCovered,
         supersedesId: activity.supersedesId
@@ -500,6 +495,11 @@ export class TrainingService {
   /** Reads unioned manual and connected training evidence dates for Progress. */
   public getDataCoverage(from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
     return this.store.getDataCoverage(this.personContext.getPersonId(), from, to, asOf);
+  }
+
+  /** Indicates whether connected activity history can support a completed-day comparison. */
+  public hasCompleteConnectedActivityHistory(localDate: string, timezone: string): Promise<boolean> {
+    return this.store.hasCompleteConnectedActivityHistory(this.personContext.getPersonId(), localDate, timezone);
   }
 
   /** Reads the complete append-only correction chain for one session. */

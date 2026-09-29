@@ -10,12 +10,14 @@ import { ProgressOverviewController } from "./progress-overview.controller.js";
 import { ProgressOverviewService } from "./progress-overview.service.js";
 import { ProgressDataCoverageService } from "./progress-data-coverage.service.js";
 import { PersonFactTimelineService } from "./person-fact-timeline.service.js";
+import { PersonalInsightsService } from "./personal-insights.service.js";
+import { DailyContextNoteModule } from "../daily-context-notes/daily-context-note.module.js";
 
 /** Composes module-owned range reads without taking ownership of source facts. */
 @Module({
-  imports: [WeightMeasurementModule, BodyMeasurementSessionModule, NutritionModule, TrainingModule, RecoveryModule, CoachingModule],
+  imports: [WeightMeasurementModule, BodyMeasurementSessionModule, NutritionModule, TrainingModule, RecoveryModule, CoachingModule, DailyContextNoteModule],
   controllers: [ProgressOverviewController],
-  providers: [ProgressOverviewService, ProgressDataCoverageService, PersonFactTimelineService],
-  exports: [PersonFactTimelineService]
+  providers: [ProgressOverviewService, ProgressDataCoverageService, PersonFactTimelineService, PersonalInsightsService],
+  exports: [PersonFactTimelineService, PersonalInsightsService]
 })
 export class ProgressOverviewModule {}

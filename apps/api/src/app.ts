@@ -71,6 +71,7 @@ import { RecoveryService } from "./recovery/recovery.service.js";
 import { DailyContextNoteService } from "./daily-context-notes/daily-context-note.service.js";
 import { DailyProjectionService } from "./daily-projections/daily-projection.service.js";
 import { PersonFactTimelineService } from "./progress-overview/person-fact-timeline.service.js";
+import { PersonalInsightsService } from "./progress-overview/personal-insights.service.js";
 import { DailyAssessmentService } from "./coaching/daily-assessment.service.js";
 import { IdentitySubjectMappingRepository } from "./storage/identity-subject-mapping-repository.js";
 import { McpAuthorizer } from "./mcp/oauth.js";
@@ -355,6 +356,7 @@ export async function buildApp(
         dailyContextNotes: app.get(DailyContextNoteService),
         dailyProjection: app.get(DailyProjectionService),
         personFactTimeline: app.get(PersonFactTimelineService),
+        personalInsights: app.get(PersonalInsightsService),
         dailyAssessment: app.get(DailyAssessmentService),
         dailyDecisionContext: app.get(DailyDecisionContextService),
         currentRecoveryContext: app.get(CurrentRecoveryContextService)

@@ -240,6 +240,10 @@ export interface TrainingStore {
   listExternalActivities(personId: string, limit: number): Promise<readonly ExternalActivityFact[]>;
   /** Lists every current external-activity revision for one Person-local date. */
   listExternalActivitiesForLocalDate(personId: string, localDate: string): Promise<readonly ExternalActivityFact[]>;
+  /** Lists current external-activity revisions within one bounded Person-local date range. */
+  listExternalActivitiesForLocalDateRange(personId: string, from: string, to: string): Promise<readonly ExternalActivityFact[]>;
+  /** Reports whether connected activity history is complete enough for a comparison ending on the requested day. */
+  hasCompleteConnectedActivityHistory(personId: string, localDate: string, timezone: string): Promise<boolean>;
   /** Reads immutable workout names and title authority for current sessions on one date. */
   listActivityLinkProgramContextForLocalDate(
     personId: string, localDate: string
@@ -1120,6 +1124,28 @@ export class TrainingRepository implements TrainingStore {
     return this.database.db.transaction((transaction) =>
       this.readExternalActivities(transaction, personId, { from: localDate, to: localDate })
     );
+  }
+
+  /** {@inheritDoc TrainingStore.listExternalActivitiesForLocalDateRange} */
+  public listExternalActivitiesForLocalDateRange(personId: string, from: string, to: string): Promise<readonly ExternalActivityFact[]> {
+    return this.database.db.transaction((transaction) =>
+      this.readExternalActivities(transaction, personId, { from, to })
+    );
+  }
+
+  /** {@inheritDoc TrainingStore.hasCompleteConnectedActivityHistory} */
+  public async hasCompleteConnectedActivityHistory(personId: string, localDate: string, timezone: string): Promise<boolean> {
+    const connections = await this.database.db.select({
+      importEnabled: integrationConnections.importEnabled,
+      lifecycle: integrationConnections.lifecycle,
+      historicalImportStatus: integrationConnections.historicalImportStatus,
+      lastSuccessfulSyncAt: integrationConnections.lastSuccessfulSyncAt,
+      completedDayCutoff: sql<Date>`(${localDate}::date::timestamp at time zone ${timezone})`
+        .mapWith((value) => value instanceof Date ? value : new Date(String(value)))
+    }).from(integrationConnections).where(eq(integrationConnections.personId, personId));
+    return connections.every((connection) => connection.importEnabled && connection.lifecycle === "active" &&
+      connection.historicalImportStatus === "completed" && connection.lastSuccessfulSyncAt !== null &&
+      connection.lastSuccessfulSyncAt >= connection.completedDayCutoff);
   }
 
   /** {@inheritDoc TrainingStore.listActivityLinkProgramContextForLocalDate} */

@@ -69,6 +69,15 @@ recommendation snapshot. Its conversation choice has no automatic completion
 until a separate decision defines how to save that exact choice. See the
 [agent-owned decision ADR](../../adr/20260928-let-coach-decide-from-verified-daily-facts.md).
 
+For a question about multi-week personal patterns, Coach calls the read-only
+`get_personal_insights` tool with the current Person-local date and timezone.
+The API applies the same `personal-insights-v1` evidence gates used by Web
+Progress and returns only eligible observations, sample sizes, uncertainty,
+limitations, and owner-fact provenance. Coach does not recalculate a pattern,
+infer a cause or diagnosis, or use a pattern as permission to train today.
+Missing observations are not negative findings. See the
+[personal insights ADR](../../adr/20260929-compute-evidence-gated-personal-insights-on-read.md).
+
 The legacy `daily_next_action` recommendation is a lazily materialized immutable
 snapshot for the current Person-local date. The API gathers current typed
 Recovery, Training, Nutrition, and Weight facts, plus provider-neutral profile

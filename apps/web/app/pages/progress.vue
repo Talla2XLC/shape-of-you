@@ -2,7 +2,7 @@
 import { beginBrowserSignIn } from "~/lib/browser-auth";
 import { chatAssistantLaunchRoute, chatAssistantStopMessage } from "~/lib/chat-assistant";
 import { dayApi, DayApiError, type DailyProjection } from "~/lib/day-api";
-import { coverageDirectionLabel, coverageExplanation, coverageSummary, createLatestRequestGate, dayRoute, fetchProgressDataCoverage, fetchProgressOverview, formatCoverageFreshness, formatCoverageGap, trailingRange, type ProgressDataCoverage, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
+import { coverageDirectionLabel, coverageExplanation, coverageSummary, createLatestRequestGate, dayRoute, fetchPersonalInsights, fetchProgressDataCoverage, fetchProgressOverview, formatCoverageFreshness, formatCoverageGap, insightEvidenceLinks, insightSources, trailingRange, type PersonalInsightsResult, type ProgressDataCoverage, type ProgressMetricKey, type ProgressOverview } from "~/lib/progress";
 
 definePageMeta({ middleware: "api-session" });
 useHead({ bodyAttrs: { class: "page-progress" } });
@@ -20,6 +20,9 @@ const todayError = ref<string | null>(null);
 const coverage = ref<ProgressDataCoverage | null>(null);
 const coverageBusy = ref(false);
 const coverageError = ref<string | null>(null);
+const insights = ref<PersonalInsightsResult | null>(null);
+const insightsBusy = ref(false);
+const insightsError = ref<string | null>(null);
 const todayAutomaticRetryDelayMs = 1_000;
 const coachStopMessage = computed(() => chatAssistantStopMessage(route.query.coach));
 const requestGate = createLatestRequestGate();
@@ -113,8 +116,21 @@ async function loadCoverage(): Promise<void> {
     coverageBusy.value = false;
   }
 }
+async function loadInsights(): Promise<void> {
+  insightsBusy.value = true;
+  insightsError.value = null;
+  try {
+    insights.value = await fetchPersonalInsights(today, timezone);
+  } catch (caught) {
+    if (typeof caught === "object" && caught !== null && "status" in caught && caught.status === 401) {
+      beginBrowserSignIn(route.fullPath);
+      return;
+    }
+    insightsError.value = "Personal observations are temporarily unavailable.";
+  } finally { insightsBusy.value = false; }
+}
 function choosePeriod(value: 7 | 30 | 365): void { period.value = value; void load(); }
-onMounted(() => { void load(); void loadToday(); void loadCoverage(); });
+onMounted(() => { void load(); void loadToday(); void loadCoverage(); void loadInsights(); });
 </script>
 
 <template>
@@ -307,6 +323,86 @@ onMounted(() => { void load(); void loadToday(); void loadCoverage(); });
           </article>
         </div>
       </template>
+    </section>
+    <section
+      class="coverage-section"
+      aria-labelledby="insights-heading"
+    >
+      <div class="coverage-heading">
+        <h2 id="insights-heading">
+          Patterns in your records
+        </h2>
+      </div>
+      <p
+        v-if="insightsBusy"
+        role="status"
+      >
+        Checking recorded patterns…
+      </p>
+      <div
+        v-else-if="insightsError"
+        class="coverage-error"
+      >
+        <p
+          role="alert"
+          class="notice-error"
+        >
+          {{ insightsError }}
+        </p>
+        <button
+          type="button"
+          class="button button-secondary"
+          @click="loadInsights"
+        >
+          Try again
+        </button>
+      </div>
+      <p
+        v-else-if="insights && insights.insights.length === 0"
+        role="status"
+      >
+        There is not enough consistent recorded evidence for a useful observation yet.
+      </p>
+      <div
+        v-else-if="insights"
+        class="coverage-grid"
+      >
+        <article
+          v-for="insight in insights.insights"
+          :key="insight.kind"
+          class="insight-card"
+        >
+          <h3>{{ insight.kind === 'weight_direction' ? 'Weight records' : insight.kind === 'training_rhythm' ? 'Training records' : 'Training and sleep records' }}</h3>
+          <p>{{ insight.statement }}</p>
+          <p>{{ insight.sampleDays }} recent days · {{ insight.comparisonDays }} comparison days · {{ insight.uncertainty }} uncertainty</p>
+          <details>
+            <summary>Evidence and limits</summary>
+            <p>Recorded {{ insight.from }}–{{ insight.to }} · {{ insightSources(insight) }}</p>
+            <p>{{ insight.limitation }}</p>
+            <p v-if="insightEvidenceLinks(insight).length">
+              Source facts:
+            </p>
+            <ul v-if="insightEvidenceLinks(insight).length">
+              <li
+                v-for="source in insightEvidenceLinks(insight).slice(0, 5)"
+                :key="source.href"
+              >
+                <a
+                  :href="source.href"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >{{ source.label }}</a>
+              </li>
+            </ul>
+            <p v-if="insightEvidenceLinks(insight).length > 5">
+              {{ insightEvidenceLinks(insight).length - 5 }} more source facts are listed in the API evidence.
+            </p>
+            <p v-if="insight.evidence.externalActivityIds.length">
+              Connected activity records have no individual detail page.
+            </p>
+          </details>
+        </article>
+      </div>
     </section>
     <p
       v-if="busy"

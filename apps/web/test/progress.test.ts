@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { coverageDirectionLabel, coverageExplanation, coverageSummary, createLatestRequestGate, dayRoute, formatCoverageFreshness, formatCoverageGap, isIanaTimezone, isLocalDate, trailingRange, type ProgressDataDirection } from "../app/lib/progress";
+import { coverageDirectionLabel, coverageExplanation, coverageSummary, createLatestRequestGate, dayRoute, formatCoverageFreshness, formatCoverageGap, insightEvidenceLinks, insightSources, isIanaTimezone, isLocalDate, trailingRange, type PersonalInsight, type ProgressDataDirection } from "../app/lib/progress";
 
 describe("progress route contracts", () => {
   it("builds trailing inclusive presets", () => {
@@ -43,5 +43,16 @@ describe("progress route contracts", () => {
     expect(coverageSummary(direction)).toBe("Useful pattern context is available.");
     expect(formatCoverageGap(1)).toBe("1 day without usable data");
     expect(formatCoverageGap(2)).toBe("2 days without usable data");
+  });
+
+  it("labels only the evidence owners returned by the API", () => {
+    const insight: PersonalInsight = {
+      kind: "training_rhythm", from: "2026-08-01", to: "2026-09-25",
+      statement: "Recorded training days differ across periods.", uncertainty: "high",
+      sampleDays: 5, comparisonDays: 2, limitation: "Only recorded training is counted.",
+      evidence: { weightMeasurementIds: [], workoutSessionIds: ["s1"], externalActivityIds: ["a1"], recoveryObservationIds: [] }
+    };
+    expect(insightSources(insight)).toBe("workout sessions, connected activities");
+    expect(insightEvidenceLinks(insight)).toEqual([{ label: "Workout session 1", href: "/api/v1/training/sessions/s1" }]);
   });
 });

@@ -80,6 +80,18 @@ link to the canonical dated record. It does not calculate coaching advice or
 fall back to progress history when the projection is unavailable, stale, or
 superseded.
 
+`GET /v1/personal-insights?localDate=YYYY-MM-DD&timezone=Area%2FCity`
+composes current Person-scoped Weight, Training, Recovery, and DailyContextNote
+owner reads for the preceding 56 completed local days. The versioned
+`personal-insights-v1` policy evaluates weight direction over 28 days, recorded
+training-day rhythm over two 28-day windows, and an observational next-day
+sleep comparison. Each kind has its own minimum sample and ambiguity gate;
+suppressed kinds are not rendered as cards. The result includes periods,
+sample sizes, uncertainty, limitations, and exact owner-fact identifiers. Web
+Progress and MCP Coach use this one API calculation. It creates no persisted
+fact, medical conclusion, causal claim, or daily training decision. See the
+[personal insights ADR](../../adr/20260929-compute-evidence-gated-personal-insights-on-read.md).
+
 The MCP-only `get_person_fact_timeline` read uses the existing `person:read`
 scope and accepts an inclusive range of at most 32 recorded local dates plus
 an IANA timezone. It composes current Weight, Body, Meal, WorkoutSession,
@@ -115,6 +127,7 @@ screen is provided by this phase.
 - [Provider-neutral profile data coverage](../../adr/20260913-show-provider-neutral-profile-data-coverage.md)
 - [Operational evidence isolation](../../adr/20260913-separate-operational-evidence-from-person-context.md)
 - [Person fact timeline composition](../../adr/20260929-compose-person-fact-timeline-from-domain-reads.md)
+- [Evidence-gated personal insights](../../adr/20260929-compute-evidence-gated-personal-insights-on-read.md)
 
 ## Open questions
 

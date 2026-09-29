@@ -122,6 +122,8 @@ import {
   ProgressOverviewSchema,
   ProgressDataCoverageQuerySchema,
   ProgressDataCoverageSchema,
+  PersonalInsightsQuerySchema,
+  PersonalInsightsResultSchema,
   DisconnectIntegrationSchema,
   GarminIntervalsConnectionSchema,
   IntegrationAuthorizationStartSchema,
@@ -1365,6 +1367,20 @@ function progressOverviewPaths(): Record<string, object> {
         ],
         responses: {
           "200": { description: "Profile data coverage", content: { "application/json": { schema: ProgressDataCoverageSchema } } },
+          "400": { description: "Invalid Person-local context", content: { "application/json": { schema: ErrorResponseSchema } } }
+        }
+      }
+    },
+    "/v1/personal-insights": {
+      get: {
+        tags: ["progress-overview"],
+        summary: "Read evidence-gated personal observations over completed days",
+        parameters: [
+          schemaParameter("localDate", "query", true, PersonalInsightsQuerySchema.properties.localDate),
+          schemaParameter("timezone", "query", true, PersonalInsightsQuerySchema.properties.timezone)
+        ],
+        responses: {
+          "200": { description: "Current personal insights", content: { "application/json": { schema: PersonalInsightsResultSchema } } },
           "400": { description: "Invalid Person-local context", content: { "application/json": { schema: ErrorResponseSchema } } }
         }
       }

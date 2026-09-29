@@ -216,6 +216,8 @@ const trainingStore: TrainingStore = {
   confirmWorkoutActivityLink: unreachable,
   listExternalActivities: unreachable,
   listExternalActivitiesForLocalDate: unreachable,
+  listExternalActivitiesForLocalDateRange: unreachable,
+  hasCompleteConnectedActivityHistory: unreachable,
   listActivityLinkProgramContextForLocalDate: unreachable,
   classifyExternalActivity: unreachable,
   readNextTrainingStep: unreachable,

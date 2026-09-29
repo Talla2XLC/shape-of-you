@@ -437,6 +437,21 @@ test("day layout remains content-sized across phone, tablet, and desktop", async
 test("progress renders sparse facts and dated drill-down without exact-day fanout", async ({ page }) => {
   await mockApiSession(page, 204);
   await mockProgressDataCoverage(page);
+  await page.route("**/api/v1/personal-insights?*", (route) => fulfillJson(route, {
+    localDate: "2026-08-18", completedThrough: "2026-08-17", timezone: "UTC",
+    policyVersion: "personal-insights-v1",
+    insights: [{
+      kind: "weight_direction", from: "2026-07-21", to: "2026-08-17",
+      statement: "Recorded weight has been broadly stable across this period.",
+      uncertainty: "moderate", sampleDays: 5, comparisonDays: 4,
+      limitation: "This describes recorded measurements only; it does not assess health, goals, or what caused a change.",
+      evidence: { weightMeasurementIds: ["w1"], workoutSessionIds: [], externalActivityIds: [], recoveryObservationIds: [] }
+    }],
+    suppressed: [
+      { kind: "training_rhythm", reason: "insufficient_data" },
+      { kind: "post_training_sleep_association", reason: "insufficient_data" }
+    ]
+  }));
   await page.clock.setFixedTime(new Date("2026-08-18T12:00:00.000Z"));
   let overviewReads = 0;
   const overviewUrls: string[] = [];
@@ -473,6 +488,13 @@ test("progress renders sparse facts and dated drill-down without exact-day fanou
   await page.goto("/progress");
   await expect(page.getByRole("heading", { name: "Your shape, over time." })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Data readiness" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Patterns in your records" })).toBeVisible();
+  await expect(page.locator(".insight-card")).toHaveCount(1);
+  await expect(page.locator(".insight-card")).toContainText("Recorded weight has been broadly stable");
+  await page.locator(".insight-card").getByText("Evidence and limits").click();
+  await expect(page.locator(".insight-card").getByRole("link", { name: "Weight measurement 1" })).toHaveAttribute(
+    "href", "/api/v1/weight-measurements/w1"
+  );
   await expect(page.locator(".coverage-card")).toHaveCount(7);
   const sleepCoverage = page.locator(".coverage-card").filter({ hasText: "Sleep" });
   const nutritionCoverage = page.locator(".coverage-card").filter({ hasText: "Nutrition" });

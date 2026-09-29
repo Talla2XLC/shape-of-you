@@ -215,7 +215,8 @@ const unavailableServices = {
   },
   currentRecoveryContext: { read: unreachable },
   dailyContextNotes: { list: unreachable, create: unreachable, correct: unreachable },
-  dailyProjection: { projection: unreachable }
+  dailyProjection: { projection: unreachable },
+  personalInsights: { read: unreachable }
 };
 
 registerMcpRoutes({
@@ -574,6 +575,36 @@ describe("MCP HTTP adapter", () => {
     });
   });
 
+  it("delivers the unchanged personal-insights API result through the authorized Coach tool", async () => {
+    const server = Fastify();
+    const result = {
+      localDate: "2026-09-29", completedThrough: "2026-09-28", timezone: "UTC",
+      policyVersion: "personal-insights-v1" as const, insights: [],
+      suppressed: [
+        { kind: "weight_direction" as const, reason: "insufficient_data" as const },
+        { kind: "training_rhythm" as const, reason: "ambiguous_evidence" as const },
+        { kind: "post_training_sleep_association" as const, reason: "insufficient_data" as const }
+      ]
+    };
+    const read = vi.fn().mockResolvedValue(result);
+    registerMcpRoutes({
+      fastify: server, issuer: "https://identity.example.test", resource: "https://api.example.test/api/mcp",
+      authorizer: { authorize: async () => ({ personId: "00000000-0000-4000-8000-000000000001", roles: ["owner"] }) },
+      personContext: new RequestPersonContext(),
+      services: { ...unavailableServices, personalInsights: { read } }
+    });
+    try {
+      const response = await server.inject({ method: "POST", url: "/mcp", headers: {
+        accept: "application/json, text/event-stream", authorization: "Bearer test"
+      }, payload: { jsonrpc: "2.0", id: 144, method: "tools/call", params: {
+        name: "get_personal_insights", arguments: { localDate: "2026-09-29", timezone: "UTC" }
+      } } });
+      expect(response.statusCode).toBe(200);
+      expect(response.json().result.structuredContent).toEqual(result);
+      expect(read).toHaveBeenCalledWith({ localDate: "2026-09-29", timezone: "UTC" });
+    } finally { await server.close(); }
+  });
+
   it("advertises the scoped tools without exposing domain data", async () => {
     const response = await fastify.inject({
       method: "POST",
@@ -589,7 +620,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(36);
+    expect(body.result.tools).toHaveLength(37);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -642,7 +673,8 @@ describe("MCP HTTP adapter", () => {
       get_daily_assessment: MCP_READ_SCOPE,
       get_daily_recommendation_completion: MCP_READ_SCOPE,
       record_daily_recommendation_feedback: MCP_DAILY_RECOMMENDATION_FEEDBACK_WRITE_SCOPE,
-      get_daily_projection: MCP_READ_SCOPE
+      get_daily_projection: MCP_READ_SCOPE,
+      get_personal_insights: MCP_READ_SCOPE
     });
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
