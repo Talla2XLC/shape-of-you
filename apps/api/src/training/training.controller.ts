@@ -17,6 +17,14 @@ import {
   ActivityRecordingModeSchema,
   ActivateTrainingProgramVersionSchema,
   CorrectWorkoutSessionSchema,
+  CorrectWorkoutSessionV2Schema,
+  CreateWorkoutSessionV2Schema,
+  WorkoutSessionV2Schema,
+  WorkoutSessionListV2Schema,
+  WorkoutSessionHistoryV2Schema,
+  type CreateWorkoutSessionV2,
+  type CorrectWorkoutSessionV2,
+  type LegacyWorkoutSession,
   ConfirmWorkoutActivityLinkSchema,
   ConfirmWorkoutActivityLinkResultSchema,
   CreateExerciseSchema,
@@ -28,6 +36,7 @@ import {
   ExerciseSchema,
   ListWorkoutSessionsQuerySchema,
   PersonalRecordListSchema,
+  PersonalRecordListV2Schema,
   ProgressionCandidateListSchema,
   TrainingIdParamsSchema,
   TrainingProgramSchema,
@@ -75,6 +84,7 @@ import {
   JsonSchemaPipe,
   JsonSchemaResponseInterceptor
 } from "../http/json-schema.js";
+import { legacyWorkoutSession, legacyWorkoutList, legacyPersonalRecords } from "./workout-compatibility.js";
 import { TrainingService } from "./training.service.js";
 
 /** HTTP transport for shared and Person-private Exercise definitions. */
@@ -300,16 +310,16 @@ export class WorkoutSessionController {
     )
     input: CreateWorkoutSession,
     @Res({ passthrough: true }) reply: FastifyReply
-  ): Promise<WorkoutSession> {
+  ): Promise<LegacyWorkoutSession> {
     const result = await this.service.createWorkoutSession(input);
     void reply.code(result.created ? 201 : 200);
-    return result.session;
+    return legacyWorkoutSession(result.session);
   }
 
   /** Lists current sessions with an optional local-date filter. */
   @Get("sessions")
   @UseInterceptors(new JsonSchemaResponseInterceptor(WorkoutSessionListSchema))
-  public list(
+  public async list(
     @Query(
       new JsonSchemaPipe<ListWorkoutSessionsQuery>(
         ListWorkoutSessionsQuerySchema,
@@ -317,18 +327,18 @@ export class WorkoutSessionController {
       )
     )
     query: ListWorkoutSessionsQuery
-  ): Promise<WorkoutSessionList> {
-    return this.service.listWorkoutSessions(query);
+  ): Promise<{ items: LegacyWorkoutSession[] }> {
+    return legacyWorkoutList(await this.service.listWorkoutSessions(query));
   }
 
   /** Reads one immutable WorkoutSession. */
   @Get("sessions/:id")
   @UseInterceptors(new JsonSchemaResponseInterceptor(WorkoutSessionSchema))
-  public find(
+  public async find(
     @Param(new JsonSchemaPipe<TrainingIdParams>(TrainingIdParamsSchema, true))
     params: TrainingIdParams
-  ): Promise<WorkoutSession> {
-    return this.service.findWorkoutSession(params.id);
+  ): Promise<LegacyWorkoutSession> {
+    return legacyWorkoutSession(await this.service.findWorkoutSession(params.id));
   }
 
   /** Appends a full immutable replacement for one session. */
@@ -342,10 +352,10 @@ export class WorkoutSessionController {
     )
     input: CorrectWorkoutSession,
     @Res({ passthrough: true }) reply: FastifyReply
-  ): Promise<WorkoutSession> {
+  ): Promise<LegacyWorkoutSession> {
     const result = await this.service.correctWorkoutSession(params.id, input);
     void reply.code(result.created ? 201 : 200);
-    return result.session;
+    return legacyWorkoutSession(result.session);
   }
 
   /** Reads the complete append-only session correction chain. */
@@ -353,18 +363,18 @@ export class WorkoutSessionController {
   @UseInterceptors(
     new JsonSchemaResponseInterceptor(WorkoutSessionHistorySchema)
   )
-  public history(
+  public async history(
     @Param(new JsonSchemaPipe<TrainingIdParams>(TrainingIdParamsSchema, true))
     params: TrainingIdParams
-  ): Promise<WorkoutSessionHistory> {
-    return this.service.workoutSessionHistory(params.id);
+  ): Promise<{ items: LegacyWorkoutSession[] }> {
+    return legacyWorkoutList(await this.service.workoutSessionHistory(params.id));
   }
 
   /** Calculates current strength records from non-superseded sets. */
   @Get("personal-records")
   @UseInterceptors(new JsonSchemaResponseInterceptor(PersonalRecordListSchema))
-  public personalRecords(): Promise<PersonalRecordList> {
-    return this.service.personalRecords();
+  public async personalRecords() {
+    return legacyPersonalRecords(await this.service.personalRecords());
   }
 
   /** Calculates eligible progression suggestions without mutation. */
@@ -374,5 +384,65 @@ export class WorkoutSessionController {
   )
   public progressionCandidates(): Promise<ProgressionCandidateList> {
     return this.service.progressionCandidates();
+  }
+}
+
+
+/** V2 HTTP boundary for gradually reported workout facts and their correction chain. */
+@Controller("v2/training")
+export class WorkoutSessionV2Controller {
+  public constructor(@Inject(TrainingService) private readonly service: TrainingService) {}
+
+  /** Returns resolved strength records with honest day-only temporal precision. */
+  @Get("personal-records")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(PersonalRecordListV2Schema))
+  public personalRecords(): Promise<PersonalRecordList> {
+    return this.service.personalRecords();
+  }
+
+  /** Records known work without fabricating unresolved exercise identities or time. */
+  @Post("sessions")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(WorkoutSessionV2Schema))
+  public async create(
+    @Body(new JsonSchemaPipe<CreateWorkoutSessionV2>(CreateWorkoutSessionV2Schema)) input: CreateWorkoutSessionV2,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<WorkoutSession> {
+    const result = await this.service.createWorkoutSession(input);
+    void reply.code(result.created ? 201 : 200);
+    return result.session;
+  }
+
+  /** Returns every current fact, including in-progress and unresolved entries. */
+  @Get("sessions")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(WorkoutSessionListV2Schema))
+  public list(@Query(new JsonSchemaPipe<ListWorkoutSessionsQuery>(ListWorkoutSessionsQuerySchema, true)) query: ListWorkoutSessionsQuery): Promise<WorkoutSessionList> {
+    return this.service.listWorkoutSessions(query);
+  }
+
+  /** Reads one immutable V2 fact under the current Person scope. */
+  @Get("sessions/:id")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(WorkoutSessionV2Schema))
+  public find(@Param(new JsonSchemaPipe<TrainingIdParams>(TrainingIdParamsSchema, true)) params: TrainingIdParams): Promise<WorkoutSession> {
+    return this.service.findWorkoutSession(params.id);
+  }
+
+  /** Adds details or completion against the exact current immutable predecessor. */
+  @Post("sessions/:id/corrections")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(WorkoutSessionV2Schema))
+  public async correct(
+    @Param(new JsonSchemaPipe<TrainingIdParams>(TrainingIdParamsSchema, true)) params: TrainingIdParams,
+    @Body(new JsonSchemaPipe<CorrectWorkoutSessionV2>(CorrectWorkoutSessionV2Schema)) input: CorrectWorkoutSessionV2,
+    @Res({ passthrough: true }) reply: FastifyReply
+  ): Promise<WorkoutSession> {
+    const result = await this.service.correctWorkoutSession(params.id, input);
+    void reply.code(result.created ? 201 : 200);
+    return result.session;
+  }
+
+  /** Reads the complete chain without suppressing earlier incomplete evidence. */
+  @Get("sessions/:id/history")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(WorkoutSessionHistoryV2Schema))
+  public history(@Param(new JsonSchemaPipe<TrainingIdParams>(TrainingIdParamsSchema, true)) params: TrainingIdParams): Promise<WorkoutSessionHistory> {
+    return this.service.workoutSessionHistory(params.id);
   }
 }

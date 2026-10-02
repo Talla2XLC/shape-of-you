@@ -14,7 +14,8 @@ import type {
   DailyAssessmentResult,
   DailyRecommendationCompletionAssessment,
   ListRecoveryObservationsQuery,
-  RecoveryObservation
+  RecoveryObservation,
+  WorkoutSession
 } from "@shape-of-you/contracts";
 
 import { RequestPersonContext } from "../src/application/person-context.js";
@@ -373,7 +374,7 @@ describe("MCP HTTP adapter", () => {
       "they are not magic phrases"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "call save_confirmed_training_program and then get_training_context in the same turn"
+      "call save_confirmed_training_program and then get_training_context_v2 when available (otherwise get_training_context) in the same turn"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "do not make the user restate the program"
@@ -454,7 +455,7 @@ describe("MCP HTTP adapter", () => {
       "sound like a real coach"
     );
     expect(priorityInstructions).toContain(
-      "one useful evidence-grounded observation"
+      "Answer the actual message"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       MCP_COACH_FINAL_RESPONSE_REQUIREMENT
@@ -463,13 +464,13 @@ describe("MCP HTTP adapter", () => {
       "Never ask whether the user wants you to record, correct, estimate, analyze"
     );
     expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).toContain(
-      "MUST end with one direct, concrete recommendation or next step"
+      "A brief acknowledgement can be a complete answer"
     );
     expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).toContain(
-      "only confirms, records, calculates, or summarizes facts is incomplete"
+      "do not impose food, rest, or training instructions"
     );
     expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).toContain(
-      "never silently omit the next step"
+      "invent a cause of failure"
     );
     expect(MCP_COACH_REPLY_POLICY).toContain(
       "perform the action instead"
@@ -620,7 +621,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(37);
+    expect(body.result.tools).toHaveLength(41);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -658,6 +659,10 @@ describe("MCP HTTP adapter", () => {
       set_trusted_external_activity_title: MCP_WORKOUT_WRITE_SCOPE,
       set_activity_recording_mode: MCP_WORKOUT_WRITE_SCOPE,
       confirm_workout_activity_link: MCP_WORKOUT_WRITE_SCOPE,
+      get_training_context_v2: MCP_READ_SCOPE,
+      list_workout_sessions_v2: MCP_READ_SCOPE,
+      record_workout_session_v2: MCP_WORKOUT_WRITE_SCOPE,
+      correct_workout_session_v2: MCP_WORKOUT_WRITE_SCOPE,
       list_workout_sessions: MCP_READ_SCOPE,
       record_workout_session: MCP_WORKOUT_WRITE_SCOPE,
       correct_workout_session: MCP_WORKOUT_WRITE_SCOPE,
@@ -866,7 +871,7 @@ describe("MCP HTTP adapter", () => {
       "reply in natural coach language"
     );
     expect(recordMealTool?.description).toContain(
-      "Every accepted Coach Meal item must include"
+      "Estimate ordinary photo/text reports"
     );
     expect(recordMealTool?.inputSchema.properties.items.items).toMatchObject({
       required: ["label"],
@@ -884,7 +889,7 @@ describe("MCP HTTP adapter", () => {
     expect(recordMealTool?.inputSchema.properties.items.items.properties.amountKind.description)
       .toContain("Omitted values are inferred");
     expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients.description)
-      .toContain("server rejects an incomplete Meal before any write");
+      .toContain("Unknown values are allowed only when there is no reasonable estimation basis");
     for (const nutrient of ["caloriesKcal", "proteinG", "fatG", "carbsG"]) {
       expect(recordMealTool?.inputSchema.properties.items.items.properties.nutrients
         .properties[nutrient].type).toEqual(["number", "null"]);
@@ -1199,7 +1204,7 @@ describe("MCP HTTP adapter", () => {
       .mockResolvedValueOnce({
         status: "absent",
         program: null,
-        recentSessions: { items: [{ id: "historical-session" }] },
+        recentSessions: { items: [{ id: "historical-session", exercises: [] }] },
         recentExternalActivities: [{
           id: "00000000-0000-4000-8000-000000000403",
           occurredAt: "2026-09-13T06:00:00.000Z",
@@ -1442,7 +1447,7 @@ describe("MCP HTTP adapter", () => {
         structuredContent: {
           status: "absent",
           program: null,
-          recentSessions: { items: [{ id: "historical-session" }] },
+          recentSessions: { items: [{ id: "historical-session", exercises: [] }] },
           recentExternalActivities: [{ name: "Morning run" }]
         }
       });
@@ -1765,7 +1770,7 @@ describe("MCP HTTP adapter", () => {
     const jwk = await exportJWK(pair.publicKey);
     const token = await new SignJWT({
       client_id: "chatgpt-runtime",
-      scope: MCP_WORKOUT_WRITE_SCOPE
+      scope: `${MCP_WORKOUT_WRITE_SCOPE} ${MCP_READ_SCOPE}`
     })
       .setProtectedHeader({ alg: "ES256", kid: "workout-v1" })
       .setIssuer("https://identity.example.test")
@@ -1776,12 +1781,13 @@ describe("MCP HTTP adapter", () => {
       .sign(pair.privateKey);
     const createWorkoutSession = vi.fn().mockResolvedValue({
       created: true,
-      session: { id: "00000000-0000-4000-8000-000000000301" }
+      session: { id: "00000000-0000-4000-8000-000000000301", exercises: [] }
     });
     const correctWorkoutSession = vi.fn().mockResolvedValue({
       created: true,
-      session: { id: "00000000-0000-4000-8000-000000000303" }
+      session: { id: "00000000-0000-4000-8000-000000000303", exercises: [] }
     });
+    let currentV2: Record<string, unknown>;
     registerMcpRoutes({
       fastify: authorizedFastify,
       issuer: "https://identity.example.test",
@@ -1806,7 +1812,8 @@ describe("MCP HTTP adapter", () => {
         training: {
           ...unavailableServices.training,
           createWorkoutSession,
-          correctWorkoutSession
+          correctWorkoutSession,
+          listWorkoutSessions: async () => ({ items: [currentV2 as unknown as WorkoutSession] })
         }
       }
     });
@@ -1989,6 +1996,33 @@ describe("MCP HTTP adapter", () => {
         content: [{ text: expect.stringContaining("The requested fact was not saved") }]
       });
       expect(correctWorkoutSession).toHaveBeenCalledOnce();
+      const v2 = {
+        temporalPrecision: "local_date", localDate: "2026-10-02", timezone: "Europe/Belgrade",
+        completionState: "in_progress", workoutName: "A", sourceReference: workout.sourceReference,
+        dedupeKey: "v2-a", exercises: [
+          { exerciseLabel: "Smith", loadBasis: "external_weight", note: "60 кг блинов; RIR 1–2", sets: [{ weightKg: 60, reps: 10 }] },
+          { exerciseLabel: "Разведения", sets: [] }
+        ]
+      };
+      currentV2 = { ...v2, id: "00000000-0000-4000-8000-000000000301", exercises: v2.exercises.map((exercise) => ({ ...exercise, exerciseId: null, exerciseVersionId: null, loadBasis: exercise.loadBasis ?? null })) };
+      createWorkoutSession.mockResolvedValueOnce({ created: true, session: currentV2 });
+      const v2call = async (name: string, args: unknown) => (await authorizedFastify.inject({ method: "POST", url: "/mcp",
+        headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
+        payload: { jsonrpc: "2.0", id: 150, method: "tools/call", params: { name, arguments: args } }
+      })).json().result;
+      expect(await v2call("record_workout_session_v2", v2)).toMatchObject({ structuredContent: { completionState: "in_progress", localDate: "2026-10-02" } });
+      expect(createWorkoutSession.mock.lastCall![0]).toMatchObject({ occurredAt: null,
+        exercises: [{ exerciseVersionId: null, sets: [{ weightKg: 60, reps: 10, rir: null }] }, { exerciseVersionId: null, loadBasis: null, sets: [] }] });
+      expect(await v2call("list_workout_sessions_v2", { localDate: "2026-10-02" })).toMatchObject({ structuredContent: { items: [currentV2] } });
+      expect(await v2call("list_workout_sessions", { localDate: "2026-10-02" })).toMatchObject({ isError: true });
+      currentV2 = { ...currentV2, completionState: "completed" };
+      correctWorkoutSession.mockResolvedValueOnce({ created: true, session: currentV2 });
+      const v2correction = { ...v2, id: currentV2.id, completionState: "completed", dedupeKey: "v2-finish", correctionReason: "Закончил A" };
+      expect(await v2call("correct_workout_session_v2", v2correction)).toMatchObject({ structuredContent: { completionState: "completed" } });
+      expect(correctWorkoutSession.mock.lastCall![0]).toBe(currentV2.id);
+      expect(correctWorkoutSession.mock.lastCall![1]).toMatchObject({ completionState: "completed", exercises: [{ exerciseLabel: "Smith" }, { exerciseLabel: "Разведения", sets: [] }] });
+      expect(await v2call("record_workout_session_v2", { ...v2, occurredAt: "2026-10-02T12:00:00Z" })).toMatchObject({ isError: true });
+
     } finally {
       await authorizedFastify.close();
     }
@@ -2087,7 +2121,7 @@ describe("MCP HTTP adapter", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().result).toMatchObject({
-        content: [{ text: expect.stringContaining("MUST end with one direct, concrete recommendation or next step") }],
+        content: [{ text: expect.stringContaining("A brief acknowledgement can be a complete answer") }],
         structuredContent: { items: [], nextCursor: null }
       });
       expect(list).toHaveBeenCalledOnce();
@@ -2379,9 +2413,9 @@ describe("MCP HTTP adapter", () => {
         },
         training: {
           findActiveProgram: async () => result("get_active_training_program"),
-          listWorkoutSessions: async () => result("list_workout_sessions"),
-          createWorkoutSession: async () => created("session", "record_workout_session"),
-          correctWorkoutSession: async () => created("session", "correct_workout_session")
+          listWorkoutSessions: async () => ({ items: [] }),
+          createWorkoutSession: async () => ({ session: { ...result("record_workout_session"), exercises: [] } }),
+          correctWorkoutSession: async () => ({ session: { ...result("correct_workout_session"), exercises: [] } })
         },
         recovery: {
           listObservations: async () => result("list_recovery_observations"),
@@ -2589,7 +2623,7 @@ describe("MCP HTTP adapter", () => {
         if (name !== "get_daily_projection" && name !== "get_person_fact_timeline") {
           expect(toolResult.content[0].text, name).toContain(MCP_COACH_FINAL_RESPONSE_REQUIREMENT);
           expect(toolResult.content[0].text, name).toMatch(
-            /MANDATORY FINAL REPLY:[\s\S]*never silently omit the next step\.$/u
+            /CONTEXTUAL FINAL REPLY:[\s\S]*invent a cause of failure\.$/u
           );
         }
         if (name === "set_current_timezone") {
@@ -2665,6 +2699,8 @@ describe("MCP HTTP adapter", () => {
             requestId: "00000000-0000-4000-8000-000000000153",
             confirmed: true, proposal: workingWeightProposal
           });
+        } else if (name === "list_workout_sessions") {
+          expect(toolResult.structuredContent).toEqual({ items: [] });
         } else {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });
         }
@@ -2689,7 +2725,7 @@ describe("MCP HTTP adapter", () => {
         "list_recovery_observations"
       ]) {
         expect(successfulContent.get(name), `morning flow: ${name}`).toMatch(
-          /MANDATORY FINAL REPLY:[\s\S]*MUST end with one direct, concrete recommendation or next step[\s\S]*never silently omit the next step\.$/u
+          /CONTEXTUAL FINAL REPLY:[\s\S]*A brief acknowledgement can be a complete answer[\s\S]*invent a cause of failure\.$/u
         );
       }
       expect(createWeight).toHaveBeenCalledWith(weight);
@@ -2813,7 +2849,7 @@ describe("MCP HTTP adapter", () => {
           items: [{
             label: "Meal",
             nutrients: {
-              caloriesKcal: 100,
+              caloriesKcal: -100,
               proteinG: null,
               fatG: null,
               carbsG: null
@@ -3263,6 +3299,7 @@ describe("MCP HTTP adapter", () => {
     };
     const createMeal = vi.fn()
       .mockResolvedValueOnce({ created: true, meal: originalMeal })
+      .mockResolvedValueOnce({ created: true, meal: originalMeal })
       .mockResolvedValueOnce({ created: true, meal: photoMeal })
       .mockResolvedValueOnce({ created: true, meal: originalMeal });
     const correctMeal = vi.fn().mockResolvedValue({ created: true, meal: correctedMeal });
@@ -3513,49 +3550,19 @@ describe("MCP HTTP adapter", () => {
         dedupeKey: "chatgpt:meal:dinner:2026-08-30:invalid"
       })).json().result).toMatchObject({
         isError: true,
-        content: [{ text: expect.stringContaining("do not save an incomplete Meal") }]
+        content: [{ text: expect.stringContaining("Preserve genuinely unknown amounts or nutrients only when there is no reasonable estimation basis") }]
       });
       expect(createMeal).not.toHaveBeenCalled();
-      const incompleteTeriyakiLunchResult = (await call(101, "record_meal", {
-        occurredAt: "2026-09-02T09:35:00.000Z",
-        timezone: "Europe/Moscow",
-        kind: "lunch",
-        description: "Курица терияки с рисом, свежие огурцы и помидоры",
-        items: [
-          {
-            label: "Курица терияки с рисом",
-            amountKind: "estimated",
-            quantity: 350,
-            unit: "g",
-            amountDescription: "оценка по фото",
-            estimateMethod: "photo",
-            amountConfidence: 0.7
-          },
-          {
-            label: "Свежие огурцы и помидоры",
-            amountKind: "estimated",
-            quantity: 160,
-            unit: "g",
-            amountDescription: "оценка по фото",
-            estimateMethod: "photo",
-            amountConfidence: 0.75
-          }
-        ],
-        dedupeKey: "chatgpt:meal:lunch:2026-09-02:1235:photo"
+      const honestFallbackMealResult = (await call(101, "record_meal", {
+        occurredAt: "2026-09-02T09:35:00.000Z", timezone: "Europe/Moscow", kind: "lunch",
+        description: "Сообщён обед без описания состава или количества",
+        items: [{ label: "Обед", amountKind: "unknown" }],
+        dedupeKey: "chatgpt:meal:lunch:2026-09-02:no-estimation-basis"
       })).json().result;
-      expect(incompleteTeriyakiLunchResult).toMatchObject({
-        isError: true,
-        content: [{ text: expect.stringContaining("photo and text already present") }]
-      });
-      expect(incompleteTeriyakiLunchResult.content[0].text).toContain(
-        "numeric best-effort calories, protein, fat, and carbohydrates"
-      );
-      expect(incompleteTeriyakiLunchResult.content[0].text).toContain(
-        "Do not ask the user for values that can be reasonably estimated"
-      );
-      expect(incompleteTeriyakiLunchResult.content[0].text.toLowerCase())
-        .not.toContain("partial");
-      expect(createMeal).not.toHaveBeenCalled();
+      expect(honestFallbackMealResult.isError).not.toBe(true);
+      expect(createMeal).toHaveBeenCalledOnce();
+      expect(createMeal.mock.calls[0]![0].items[0].nutrients).toEqual({ caloriesKcal: null, proteinG: null, fatG: null, carbsG: null });
+      createMeal.mockClear();
       const recordMealResult = (await call(11, "record_meal", dinner)).json().result;
       expect(recordMealResult).toMatchObject({ structuredContent: originalMeal });
       expect(recordMealResult.content).toEqual([{
@@ -3570,7 +3577,7 @@ describe("MCP HTTP adapter", () => {
         .toMatchObject({ structuredContent: { items: [originalMeal] } });
       expect(firstMealReadResult.content).toEqual([{
         type: "text",
-        text: expect.stringContaining("MUST end with one direct, concrete recommendation or next step")
+        text: expect.stringContaining("A brief acknowledgement can be a complete answer")
       }]);
       const forbiddenMealPresentationTerms = [
         "partial",
@@ -3613,7 +3620,7 @@ describe("MCP HTTP adapter", () => {
           amountKind: "quantified",
           quantity: 200,
           unit: "g",
-          nutrients: { caloriesKcal: 414, proteinG: null, fatG: null, carbsG: null }
+          nutrients: { caloriesKcal: -414, proteinG: null, fatG: null, carbsG: null }
         }],
         dedupeKey: "chatgpt:meal:dinner:2026-08-30:1905:correction:invalid"
       })).json().result;
@@ -3630,7 +3637,7 @@ describe("MCP HTTP adapter", () => {
       expect(correctedMealReadResult)
         .toMatchObject({ structuredContent: { items: [correctedMeal] } });
       expect(correctedMealReadResult.content[0].text)
-        .toContain("MUST end with one direct, concrete recommendation or next step");
+        .toContain("A brief acknowledgement can be a complete answer");
       const photoMealResult = (await call(140, "record_meal", photoDinner)).json().result;
       expect(photoMealResult).toMatchObject({ structuredContent: photoMeal });
       expect(photoMealResult.content[0].text).toContain(
@@ -3766,7 +3773,7 @@ describe("MCP HTTP adapter", () => {
       })).json().result;
       expect(recoveryReadResult.structuredContent.items).toHaveLength(7);
       expect(recoveryReadResult.content[0].text)
-        .toContain("MUST end with one direct, concrete recommendation or next step");
+        .toContain("A brief acknowledgement can be a complete answer");
       expect(recoveryReadResult.content[0].text.toLowerCase()).not.toContain("schema");
       expect(createObservation).toHaveBeenNthCalledWith(1, expect.objectContaining({
         observedFrom: null,

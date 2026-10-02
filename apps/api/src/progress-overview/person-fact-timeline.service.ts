@@ -78,11 +78,11 @@ export class PersonFactTimelineService {
         };
       }),
       ...training.sessions.map((item): PersonFactTimelineEntry => {
-        const path = `/v1/training/sessions/${item.id}`;
+        const path = `/v2/training/sessions/${item.id}`;
         return {
           kind: "workout_session", id: item.id, localDate: item.localDate,
           occurredAt: eventInstant(item.occurredAt, item.temporalPrecision), temporalPrecision: item.temporalPrecision,
-          title: item.workoutName, numericValue: null, unit: null,
+          title: item.completionState === "in_progress" ? `${item.workoutName} (in progress)` : item.workoutName, numericValue: null, unit: null,
           supersedesId: item.supersedesId, linkedExternalActivityId: item.externalActivityId,
           detailPath: path, historyPath: historyPath(path, item.supersedesId)
         };

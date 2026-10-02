@@ -751,6 +751,7 @@ export function evaluateCompletionCriterion(
       return unknownCriterion(criterion);
     }
     const fact = facts.sessions.find((item) =>
+      item.completionState !== "in_progress" &&
       isFresh(item.createdAt) && item.programVersionId === criterion.trainingProgramVersionId &&
       (requiredPosition === null || item.programWorkoutPosition === requiredPosition)
     );

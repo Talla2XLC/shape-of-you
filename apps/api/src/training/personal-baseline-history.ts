@@ -111,6 +111,7 @@ export async function readTrainingBaselineDays(
          on source.id = session.source_reference_id
         and source.person_id = session.person_id
        where session.person_id = $1
+         and session.completion_state = 'completed'
          and session.local_date between $2 and $3
          and source.evidence_purpose = 'person_context'
          and not exists (

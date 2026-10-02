@@ -77,7 +77,7 @@ export class ProgressOverviewService {
     weights.forEach((item) => count(item.localDate, "weightMeasurements"));
     bodyMeasurements.forEach((item) => count(item.localDate, "bodyMeasurementSessions"));
     meals.forEach((item) => count(item.localDate, "meals"));
-    workouts.forEach((item) => count(item.localDate, "workoutSessions"));
+    workouts.filter((item) => item.completionState !== "in_progress").forEach((item) => count(item.localDate, "workoutSessions"));
     observations.forEach((item) => count(item.localDate, "recoveryObservations"));
     assessments.forEach((item) => count(item.localDate, "recoveryAssessments"));
     coaching.forEach((item) => count(deriveLocalDate(new Date(item.asOf), query.timezone), "coachingRecommendations"));
@@ -105,7 +105,7 @@ export class ProgressOverviewService {
       points.get("calories_kcal")!.delete(localDate);
       points.get("protein_g")!.delete(localDate);
     }
-    for (const workout of workouts) {
+    for (const workout of workouts.filter((item) => item.completionState !== "in_progress")) {
       points.get("workout_session_count")!.set(workout.localDate, (points.get("workout_session_count")!.get(workout.localDate) ?? 0) + 1);
     }
     for (const item of [...assessments].sort((a, b) => a.asOf.localeCompare(b.asOf) || a.id.localeCompare(b.id))) {

@@ -590,6 +590,15 @@ describe("next training step", () => {
     }
   });
 
+  it("does not complete today's workout or advance A/B from an in-progress report", () => {
+    const ongoing = { id: "ongoing", completionState: "in_progress", programVersionId: activeProgram.activeVersionId,
+      programWorkoutPosition: 1, externalActivityId: null, localDate: "2026-09-21", occurredAt: null } as WorkoutSession;
+    expect(evaluateNextTrainingStep({ program: activeProgram, localDate: "2026-09-21", sessions: [ongoing], externalActivities: [] }))
+      .toMatchObject({ state: "training_options", strength: { workoutPosition: 1 } });
+    expect(evaluateNextTrainingStep({ program: activeProgram, localDate: "2026-09-21", sessions: [{ ...ongoing, completionState: "completed" }], externalActivities: [] }))
+      .toMatchObject({ state: "complete_today" });
+  });
+
   it("continues A/B after an explicitly linked strength session and intervening cardio", () => {
     const session = {
       id: "00000000-0000-4000-8000-000000000206",

@@ -2,10 +2,10 @@
 id: "decisions-20260902-deliver-coach-reply-policy-in-every-relevant-mcp-result"
 kind: adr
 title: "Доставлять политику ответа Coach в каждом релевантном MCP result"
-status: accepted
+status: superseded
 date: 2026-09-02
 supersedes: []
-superseded_by: null
+superseded_by: "decisions-20261002-capture-incomplete-facts-and-use-contextual-coach-replies"
 tags:
   - architecture
   - coaching
@@ -15,6 +15,11 @@ tags:
 # Доставлять политику ответа Coach в каждом релевантном MCP result
 
 ## Context
+
+Политика пересмотрена [ADR от 2026-10-02](20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md):
+обязательный совет отменён, допускается объяснение подтверждённой причины на
+прямой технический вопрос. Per-result доставка и verified evidence сохраняются.
+Ниже оставлен исторический текст решения.
 
 Shape of You использует внешний ChatGPT как разговорную поверхность и не
 владеет его runtime или финальной генерацией текста. MCP initialization и tool

@@ -310,46 +310,39 @@ values remain partial/null; later precise input appends a correction. A bounded
 represent a relevant observation safely.
 
 Routine capture stays conversational. The Coach matches the user's language
-and tone and confirms the recorded or corrected facts in one to three natural
-sentences. A meaningful nutrition,
-training, recovery, or factual daily-summary interaction includes one useful
-evidence-grounded interpretation and concrete next step unless the user
-explicitly asks for raw facts only. A reply that only acknowledges or summarizes
-captured facts is incomplete. When a specific domain recommendation cannot be
-made safely, the Coach still ends with the safest useful next action supported
-by verified facts or asks for the single observation needed to make the next
-recommendation useful. For a full Daily Coach answer, Coach decides from the
-current `DailyDecisionContext` and explains important uncertainty. The
-Coach performs an unambiguous routine write or correction instead of asking
-whether the user wants it recorded, corrected, or estimated. It keeps tool names,
-arguments, identifiers, contract fields, completeness states, and transport
-details out of the reply. Validation, execution, and OAuth failures use a
-separate fail-closed presentation: the Coach does not claim success or advise
-from unverified facts and does not expose the internal reason. Daily-plan
-headings are reserved for an actual daily-plan answer and are not constrained
-to the routine one-to-three-sentence shape. The MCP adapter retains typed
-`structuredContent` for orchestration but uses a tool-specific Meal presentation
-instead of duplicating the raw domain DTO into model-facing text. When a reported
-Meal includes a sufficiently legible photo or useful size description, the Coach
-immediately makes a best-effort portion and calorie/macronutrient estimate with
-bounded confidence; measured grams are not a prerequisite. It reports the
-result as approximate and keeps later ordinary-language corrections available.
-The underlying Meal domain and legacy import retain unknown amount or nutrient
-evidence, but Coach MCP writes do not accept `amountKind = unknown` or null
-calories/macronutrients. If material foods or scale cannot be estimated
-reasonably, the Coach asks one natural clarification instead of claiming an
-incomplete Meal was recorded. No path invents a sentinel quantity.
+and tone and may simply acknowledge a verified write. An interpretation,
+recommendation, or question is added when useful or requested, rather than
+required after every report. Full Daily Coach answers still use the current
+`DailyDecisionContext` and explain important uncertainty. Unambiguous routine
+writes and corrections do not require another permission question. Tool names,
+arguments, identifiers, contract fields, and transport details stay out of
+ordinary replies. Failures receive a short honest explanation without success
+claims, speculation about the cause, or promises of later background saving.
+A direct technical question may receive a plain explanation of a verified cause.
+
+Meal photo/text capture still uses reasonable portion and nutrient estimates
+from available evidence and average product values, reports them as approximate,
+and supports later full-snapshot corrections. Missing measured grams do not
+require clarification. Only when estimation lacks a reasonable basis does
+capture preserve unknown/described amounts or null nutrients. No path invents
+a sentinel quantity. Workout V2 capture preserves reported exercise labels,
+unknown sets and measurements, day-only occurrence, and explicit completion.
+An in-progress report does not close a training day or become completed-session
+progression evidence. See the [fact-capture ADR](../../adr/20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md).
 
 For Training, `get_active_training_program` explicitly distinguishes an active
 program from valid absence. Only its typed `absent` result proves that no
 `Planned` training artifact is available; a tool failure remains unknown and
 stops dependent coaching without chat-history or Sheets fallback.
 
-`get_training_context` makes the same boundary durable while returning bounded
+`get_training_context_v2` (when available) makes the same boundary durable while
+returning bounded
 recent WorkoutSession evidence. With no active program, Coach may reconstruct a
 candidate from completed sessions only as `Proposed now`; it cannot label or
-activate that candidate as `Planned`. A material program change requires the
-user to confirm the complete workouts, exercise order, loads, and progression.
+activate that candidate as `Planned`. A new or complete revised Coach proposal
+requires confirmation of its workouts, exercise order, loads, and progression.
+An accepted uniquely targeted change to a current prescription does not require
+reconfirmation of the unchanged program.
 `save_confirmed_training_program` then performs one Person-scoped atomic
 create-or-version-and-activate command with optimistic expectations and
 duplicate no-op behavior. Coach verifies the complete active snapshot through
@@ -368,10 +361,12 @@ making the user repeat the program or confirm every other exercise.
 
 The confirmation is contextual rather than phrase-based. A complete program
 provided by the user with an unambiguous request to use it is immediately
-authorized. For a Coach proposal, a natural short acceptance refers only to the
+authorized. For a complete Coach proposal, a natural short acceptance refers only to the
 latest complete version offered for activation. Praise, questions, doubt,
-alternatives, partial edits, unrelated affirmative replies, or replies after a
-newer version do not authorize persistence. Coach asks one short save-as-active
+alternatives, ambiguous partial edits, unrelated affirmative replies, or replies
+after a newer version do not authorize that proposal. An explicit uniquely
+targeted current-prescription change is authorized under the substitution rule
+below. Coach asks one short save-as-active
 question when the reference is ambiguous and never requires the user to repeat
 an already complete program.
 
@@ -381,6 +376,14 @@ the accepted version is active. A different active version is not overwritten
 automatically; Coach keeps the accepted snapshot available and asks whether to
 replace the current program. Failed or inconsistent verification never permits
 an active, agreed, or current-plan claim.
+
+A reported Smith substitution is captured as performed and may prompt one
+question about whether it is temporary or should replace the prescription.
+An explicit targeted replacement request or clear acceptance authorizes that
+change through the existing immutable program lifecycle. The Coach reads the
+active snapshot, preserves untouched prescriptions and cadence, and does not
+ask the user to repeat or reconfirm those unchanged parts. Different exercise
+mechanisms do not silently inherit weights or progression rules.
 
 The same natural acceptance applies when the complete proposal adds a typed
 rolling cadence to an already active legacy program. The user does not restate

@@ -30,7 +30,7 @@ The fixed `progress-metrics-v1` set contains:
 
 - `weight_kg`: latest current WeightMeasurement for the local date;
 - `calories_kcal` and `protein_g`: sums over current Meals for the date;
-- `workout_session_count`: count of current WorkoutSessions for the date;
+- `workout_session_count`: count of current completed WorkoutSessions for the date;
 - `readiness_score`: latest RecoveryAssessment for the date.
 
 Metric series are sparse. A missing fact produces no point or marker. Web keeps
@@ -105,7 +105,9 @@ Person-facing WorkoutSession is folded into that session. Unlinked activities
 remain separate. Operational-only evidence, hidden Recovery records, raw
 provider payloads, notes, and unpersisted Coach conversation decisions are
 outside this read. Later imports or corrections can change a past date's
-current-fact result; it is not a historical database snapshot. No Web timeline
+current-fact result; it is not a historical database snapshot. Workout entries
+retain in-progress facts with an explicit title marker and
+V2 detail/history paths; completion counts exclude those facts. No Web timeline
 screen is provided by this phase.
 
 ## Evidence

@@ -4,6 +4,7 @@ import {
   TrainingCatalogController,
   TrainingActivityRecordingModeController,
   TrainingProgramController,
+  WorkoutSessionV2Controller,
   WorkoutSessionController
 } from "./training.controller.js";
 import { TrainingService } from "./training.service.js";
@@ -14,6 +15,7 @@ import { TrainingService } from "./training.service.js";
     TrainingCatalogController,
     TrainingActivityRecordingModeController,
     TrainingProgramController,
+    WorkoutSessionV2Controller,
     WorkoutSessionController
   ],
   providers: [TrainingService],

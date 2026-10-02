@@ -1073,6 +1073,70 @@ export type CorrectWorkoutSession = FromSchema<
   typeof CorrectWorkoutSessionSchema
 >;
 
+/** V2 capture preserves reported labels, unknown sets and day-only occurrence. */
+export const CreateWorkoutSessionV2Schema = {
+  $id: "CreateWorkoutSessionV2",
+  type: "object",
+  additionalProperties: false,
+  required: ["temporalPrecision", "timezone", "completionState", "workoutName", "exercises", "sourceReference", "dedupeKey"],
+  properties: {
+    ...workoutSessionInputProperties,
+    occurredAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+    temporalPrecision: { enum: ["instant", "local_date"] },
+    localDate: { type: "string", format: "date" },
+    completionState: { enum: ["in_progress", "completed"] },
+    exercises: {
+      type: "array", maxItems: 200,
+      items: {
+        type: "object", additionalProperties: false,
+        required: ["exerciseLabel", "sets"],
+        properties: {
+          exerciseLabel: { type: "string", minLength: 1, maxLength: 256 },
+          exerciseVersionId: nullableUuidSchema,
+          loadBasis: { anyOf: [TrainingLoadBasisSchema, { type: "null" }] },
+          feeling: nullableShortTextSchema,
+          note: nullableTextSchema,
+          sets: {
+            type: "array", maxItems: 100,
+            items: {
+              type: "object", additionalProperties: false,
+              properties: performedSetInputProperties,
+              anyOf: [
+                { required: ["weightKg"], properties: { weightKg: { type: "number" } } },
+                { required: ["reps"], properties: { reps: { type: "integer" } } },
+                { required: ["durationSeconds"], properties: { durationSeconds: { type: "integer" } } },
+                { required: ["distanceMeters"], properties: { distanceMeters: { type: "number" } } },
+                { required: ["rir"], properties: { rir: { type: "number" } } }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  anyOf: [
+    { required: ["occurredAt"], properties: { temporalPrecision: { const: "instant" }, occurredAt: { type: "string" } } },
+    { required: ["localDate"], properties: { temporalPrecision: { const: "local_date" }, occurredAt: { type: "null" } } }
+  ]
+} as const;
+
+/** Reported workout command; omitted optional measurements mean unknown. */
+export type CreateWorkoutSessionV2 = FromSchema<typeof CreateWorkoutSessionV2Schema>;
+
+/** Full V2 replacement bound to the exact current predecessor by the route id. */
+export const CorrectWorkoutSessionV2Schema = {
+  ...CreateWorkoutSessionV2Schema,
+  $id: "CorrectWorkoutSessionV2",
+  required: [...CreateWorkoutSessionV2Schema.required, "correctionReason"],
+  properties: {
+    ...CreateWorkoutSessionV2Schema.properties,
+    correctionReason: { type: "string", minLength: 1, maxLength: 512 }
+  }
+} as const;
+
+/** Immutable correction retaining unmodified facts from the current session. */
+export type CorrectWorkoutSessionV2 = FromSchema<typeof CorrectWorkoutSessionV2Schema>;
+
 export const PerformedSetSchema = {
   type: "object",
   additionalProperties: false,
@@ -1177,7 +1241,34 @@ export const WorkoutSessionSchema = {
 } as const;
 
 /** Immutable Person-owned workout session fact. */
-export type WorkoutSession = FromSchema<typeof WorkoutSessionSchema>;
+/** V2 result includes completion and unresolved reported exercise identities. */
+export const WorkoutSessionV2Schema = {
+  ...WorkoutSessionSchema,
+  $id: "WorkoutSessionV2",
+  required: [...WorkoutSessionSchema.required, "completionState"],
+  properties: {
+    ...WorkoutSessionSchema.properties,
+    completionState: { enum: ["in_progress", "completed"] },
+    exercises: {
+      type: "array",
+      items: {
+        ...PerformedExerciseSchema,
+        properties: {
+          ...PerformedExerciseSchema.properties,
+          exerciseId: nullableUuidSchema,
+          exerciseVersionId: nullableUuidSchema,
+          loadBasis: { anyOf: [TrainingLoadBasisSchema, { type: "null" }] }
+        }
+      }
+    }
+  }
+} as const;
+
+/** Current owner fact including completion and unresolved reported details. */
+export type WorkoutSession = FromSchema<typeof WorkoutSessionV2Schema>;
+
+/** Strict legacy output, retained for existing transports. */
+export type LegacyWorkoutSession = FromSchema<typeof WorkoutSessionSchema>;
 
 export const WorkoutSessionHistorySchema = {
   $id: "WorkoutSessionHistory",
@@ -1190,9 +1281,12 @@ export const WorkoutSessionHistorySchema = {
 } as const;
 
 /** Original-to-current correction chain for a workout session. */
-export type WorkoutSessionHistory = FromSchema<
-  typeof WorkoutSessionHistorySchema
->;
+/** V2 history preserves every immutable incomplete or completed predecessor. */
+export const WorkoutSessionHistoryV2Schema = {
+  ...WorkoutSessionHistorySchema, $id: "WorkoutSessionHistoryV2",
+  properties: { items: { type: "array", minItems: 1, items: WorkoutSessionV2Schema } }
+} as const;
+export type WorkoutSessionHistory = FromSchema<typeof WorkoutSessionHistoryV2Schema>;
 
 export const ListWorkoutSessionsQuerySchema = {
   $id: "ListWorkoutSessionsQuery",
@@ -1220,9 +1314,12 @@ export const WorkoutSessionListSchema = {
 } as const;
 
 /** Bounded current workout-session list. */
-export type WorkoutSessionList = FromSchema<
-  typeof WorkoutSessionListSchema
->;
+/** V2 current list never filters out unresolved reported facts. */
+export const WorkoutSessionListV2Schema = {
+  ...WorkoutSessionListSchema, $id: "WorkoutSessionListV2",
+  properties: { items: { type: "array", items: WorkoutSessionV2Schema } }
+} as const;
+export type WorkoutSessionList = FromSchema<typeof WorkoutSessionListV2Schema>;
 
 export const ExternalActivitySummarySchema = {
   $id: "ExternalActivitySummary",
@@ -1574,7 +1671,15 @@ export const TrainingContextSchema = {
 } as const;
 
 /** Active planned authority plus separate bounded manual and connected evidence. */
-export type TrainingContext = FromSchema<typeof TrainingContextSchema>;
+/** V2 training context carries incomplete current facts without inventing detail. */
+export const TrainingContextV2Schema = {
+  ...TrainingContextSchema, $id: "TrainingContextV2",
+  oneOf: [
+    { ...TrainingContextSchema.oneOf[0], properties: { ...TrainingContextSchema.oneOf[0].properties, recentSessions: WorkoutSessionListV2Schema } },
+    { ...TrainingContextSchema.oneOf[1], properties: { ...TrainingContextSchema.oneOf[1].properties, recentSessions: WorkoutSessionListV2Schema } }
+  ]
+} as const;
+export type TrainingContext = FromSchema<typeof TrainingContextV2Schema>;
 
 export const PersonalRecordSchema = {
   type: "object",
@@ -1616,10 +1721,22 @@ export const PersonalRecordListSchema = {
   }
 } as const;
 
-/** Current strength records calculated from non-superseded sets. */
-export type PersonalRecordList = FromSchema<
-  typeof PersonalRecordListSchema
->;
+/** V2 strength records retain known measurements without fabricating an event time. */
+export const PersonalRecordListV2Schema = {
+  ...PersonalRecordListSchema, $id: "TrainingPersonalRecordListV2",
+  properties: { items: { type: "array", items: {
+    ...PersonalRecordSchema,
+    required: [...PersonalRecordSchema.required, "localDate", "temporalPrecision"],
+    properties: {
+      ...PersonalRecordSchema.properties,
+      occurredAt: { anyOf: [{ type: "string", format: "date-time" }, { type: "null" }] },
+      localDate: { type: "string", format: "date" }, temporalPrecision: WorkoutTemporalPrecisionSchema
+    }
+  } } }
+} as const;
+
+/** Current resolved strength records derived only from completed measured sets. */
+export type PersonalRecordList = FromSchema<typeof PersonalRecordListV2Schema>;
 
 export const ProgressionCandidateSchema = {
   type: "object",

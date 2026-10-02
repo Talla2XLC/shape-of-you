@@ -64,6 +64,7 @@ export function evaluateTrainingProgression(
   duplicatePrescription = false
 ): TrainingProgressionDecision {
   const relevant = sessions.filter((session) =>
+    session.completionState !== "in_progress" &&
     session.programVersionId === programVersionId &&
     session.programWorkoutPosition === workoutPosition &&
     session.localDate <= throughLocalDate

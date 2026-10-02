@@ -34,8 +34,16 @@ automatically.
   is active; legacy versions without cadence remain valid and are never inferred
   from free text.
 - Immutable `WorkoutSession` contains performed exercises and individual sets
-  with actual weight/repetitions/RIR. It may pin the exact program-workout
-  position. Correction replaces the full session.
+  with reported measurements and `completionState = in_progress | completed`.
+  Exercise identity and load basis may be unknown; reported labels are retained.
+  Empty sets mean confirmed performance with unknown sets, and a partial set
+  requires at least one measurement. Unknown never means zero. Day-only facts
+  retain null occurrence time. It may pin the exact program-workout position.
+  Append-only correction replaces the full session under Person lock with
+  predecessor and idempotency checks. Only completed facts count toward cadence,
+  progression, personal records, completion assessments, and session-volume
+  projections; resolved exercise identity and measured evidence are additionally
+  required for exercise-specific results.
 - `TrainingRepository` also owns immutable connection-linked activity facts
   imported from Intervals.icu. They retain typed duration, distance, training
   load, heart-rate summary, device name, provider identity, and normalized
@@ -99,11 +107,11 @@ automatically.
   exercise, set, load, personal-record, or progression evidence.
   [Safe training options ADR](../../adr/20260928-let-coach-choose-safe-training-options.md)
   defines the choice boundary with Coach.
-- Profile coverage unions current WorkoutSession and external activity dates.
+- Profile coverage unions current completed WorkoutSession and external activity dates.
   One Person-local date is counted once regardless of source, and a date without
   a workout is not described as a missed training day.
 - The live personal-baseline reader exposes current Person-owned training-load
-  history, current session counts, and external activity counts without
+  history, current completed-session counts, and external activity counts without
   zero-filling missing dates. Internal WorkoutSessions and connection-backed
   activity facts remain distinct evidence streams. External load carries a
   provider-neutral typed `loadBasis` and `loadBasisVersion`; personal comparison
@@ -142,6 +150,8 @@ automatically.
 - Training schema, API, and integration tests.
 
 ## Decisions
+
+- [Incomplete fact capture and contextual Coach replies](../../adr/20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md).
 
 - [Training ADR](../../adr/20260731-model-versioned-training-programs-and-immutable-workout-sessions.md).
 - [Training density and version changes ADR](../../adr/20260926-account-for-training-density-and-program-version-changes.md).

@@ -249,7 +249,7 @@ export function evaluateNextTrainingStep(input: {
   let unknownVersionEvidence = false;
   let incompatibleSequenceEvidence = false;
   for (const session of input.sessions) {
-    if (session.localDate < weekStart || session.localDate > localDate ||
+    if (session.completionState === "in_progress" || session.localDate < weekStart || session.localDate > localDate ||
         session.programWorkoutPosition === null || session.programVersionId === null) continue;
     if (!priorVersions.has(session.programVersionId) && session.programVersionId !== active.id) {
       unknownVersionEvidence = true;
@@ -265,6 +265,7 @@ export function evaluateNextTrainingStep(input: {
   );
   const classifiedSessions = input.sessions
     .filter((session) =>
+      session.completionState !== "in_progress" &&
       session.programVersionId !== null && versionBelongsToProgram(session.programVersionId) &&
       session.programWorkoutPosition !== null &&
       session.localDate >= weekStart && session.localDate <= localDate

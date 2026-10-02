@@ -2443,6 +2443,7 @@ export const workoutSessions = pgTable(
     programWorkoutPosition: smallint("program_workout_position"),
     venueLabel: varchar("venue_label", { length: 256 }),
     workoutName: varchar("workout_name", { length: 256 }).notNull(),
+    completionState: varchar("completion_state", { length: 16 }).default("completed").notNull(),
     feeling: varchar("feeling", { length: 256 }),
     note: text("note"),
     source: sourceChannel("source").notNull(),
@@ -2497,6 +2498,7 @@ export const workoutSessions = pgTable(
       .on(table.supersedesId)
       .where(sql`${table.supersedesId} IS NOT NULL`),
     index("workout_sessions_person_date_idx").on(table.personId, table.localDate),
+    check("workout_sessions_completion_shape", sql`${table.completionState} IN ('in_progress', 'completed')`),
     check(
       "workout_sessions_temporal_shape",
       sql`(${table.temporalPrecision} = 'instant' AND ${table.occurredAt} IS NOT NULL)
@@ -2627,10 +2629,10 @@ export const performedExercises = pgTable(
     id: uuid("id").defaultRandom().primaryKey(),
     sessionId: uuid("session_id").notNull(),
     position: smallint("position").notNull(),
-    exerciseId: uuid("exercise_id").notNull(),
-    exerciseVersionId: uuid("exercise_version_id").notNull(),
+    exerciseId: uuid("exercise_id"),
+    exerciseVersionId: uuid("exercise_version_id"),
     exerciseLabel: varchar("exercise_label", { length: 256 }).notNull(),
-    loadBasis: trainingLoadBasis("load_basis").notNull(),
+    loadBasis: trainingLoadBasis("load_basis"),
     feeling: varchar("feeling", { length: 256 }),
     note: text("note")
   },
@@ -2649,6 +2651,7 @@ export const performedExercises = pgTable(
       table.sessionId,
       table.position
     ),
+    check("performed_exercises_identity_shape", sql`(${table.exerciseId} IS NULL) = (${table.exerciseVersionId} IS NULL)`),
     check("performed_exercises_position_positive", sql`${table.position} > 0`)
   ]
 );
@@ -2682,7 +2685,7 @@ export const performedSets = pgTable(
           AND (${table.reps} IS NULL OR ${table.reps} > 0)
           AND (${table.durationSeconds} IS NULL OR ${table.durationSeconds} > 0)
           AND (${table.distanceMeters} IS NULL OR ${table.distanceMeters} > 0)
-          AND (${table.reps} IS NOT NULL OR ${table.durationSeconds} IS NOT NULL OR ${table.distanceMeters} IS NOT NULL)
+          AND (${table.weightKg} IS NOT NULL OR ${table.reps} IS NOT NULL OR ${table.durationSeconds} IS NOT NULL OR ${table.distanceMeters} IS NOT NULL OR ${table.rir} IS NOT NULL)
           AND (${table.rir} IS NULL OR ${table.rir} >= 0)`
     )
   ]

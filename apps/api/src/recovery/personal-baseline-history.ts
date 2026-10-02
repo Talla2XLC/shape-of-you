@@ -129,6 +129,7 @@ export async function readRecoveryBaselineDays(
        join performed_sets performed_set
          on performed_set.performed_exercise_id = exercise.id
        where session.person_id = $1
+         and session.completion_state = 'completed'
          and not exists (
            select 1 from workout_sessions successor
            where successor.person_id = session.person_id

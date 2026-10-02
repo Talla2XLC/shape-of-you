@@ -40,11 +40,11 @@ The MCP `get_active_training_program` adapter preserves that domain distinction
 without changing HTTP semantics: it returns `status: active` with the program
 or `status: absent` with `program: null`. Other failures remain tool errors.
 
-The MCP `get_training_context` read composes the active program with separate
+The MCP `get_training_context_v2` read composes the active program with separate
 bounded lists of recent current `WorkoutSession` facts and connected
 `ExternalActivitySummary` facts. When a Person-local date is supplied it also
 returns a Training-owned `NextTrainingStep`. An active program is the only planned
-authority. When it is absent, both collections remain completed evidence that
+authority. When it is absent, only completed facts are evidence that
 may support a proposal but are not a plan. Connected activity summaries expose
 only safe typed occurrence, duration, distance, load, heart-rate, device, and
 normalized Garmin-attribution fields; provider identities, connection or
@@ -141,7 +141,7 @@ session.
 See the
 [recording-context ADR](../../adr/20260925-link-garmin-strength-with-recording-context.md).
 
-After the user explicitly confirms a complete program snapshot, MCP
+After the user confirms a complete program or an unambiguous targeted change, MCP
 `save_confirmed_training_program` atomically creates and activates its first
 version or appends and activates a new immutable version. The command uses the
 previously read active program id and lock version, rejects stale expectations,
@@ -165,10 +165,11 @@ A complete program supplied by the user together with an unambiguous request to
 use it is already confirmed. For a complete Coach proposal, ordinary natural
 acceptance applies only to the latest fully published version offered for
 activation; it does not require a special phrase. Questions, doubt,
-alternatives, partial edits, unrelated positive replies, and acceptance after a
-newer version are not confirmation. Coach publishes a complete revised snapshot
-after an edit and asks one short save-as-active question when the reference is
-ambiguous.
+alternatives, ambiguous partial edits, unrelated positive replies, and acceptance
+after a newer version are not confirmation of that proposal. Explicit uniquely
+targeted changes to a current prescription follow the substitution rule below.
+Coach publishes a revised proposal and asks one short save-as-active question
+when the reference is ambiguous.
 
 Until the atomic write and complete `get_training_context` read-back agree, the
 program remains `Proposed now` and cannot be described as active, agreed, or the
@@ -201,11 +202,32 @@ Person cannot have two active programs.
 
 Sessions:
 
-- `POST /v1/training/sessions`, current list, `GET /:id`;
-- `POST /v1/training/sessions/:id/corrections` and `GET /:id/history`.
+- Legacy `/v1/training/sessions` create/list/detail/correction/history keeps
+  the original completed, resolved-exercise contract.
+- `/v2/training/sessions` exposes the same operations for reported incomplete
+  facts; `/v2/training/personal-records` preserves day-only record precision.
+- MCP V2 record/correct/list/context tools use existing scopes and are preferred
+  when available. Legacy reads return explicit incompatibility for facts they
+  cannot represent instead of hiding facts or fabricating values.
 
-Sessions snapshot exercise version/name and each set's actual weight,
-repetitions, and RIR. Correction replaces the entire session.
+V2 writes require explicit `completionState`, allow empty exercises or sets,
+nullable exercise identity/load basis, partial measured sets, and day-only
+occurrence with no invented instant. Supplied identities must be Person-accessible
+and match the reported name. A wholly empty set is invalid. Corrections replace
+the full snapshot append-only and preserve unrelated reported facts. Only
+completed sessions contribute to cadence, progression, records, automatic
+activity matching, Recovery session counts, and completed training assessments.
+Exercise-specific analytics additionally require resolved identity and enough
+measured evidence. V1 personal records reject day-only results rather than
+inventing time; V2 returns the recorded local date and temporal precision.
+
+A Smith report records Smith as performed. The Coach may ask whether it is a
+one-off substitution or should change the program. A clear targeted request or
+acceptance authorizes the existing atomic program write; untouched assignments
+and cadence are copied from the active snapshot without another full-program
+confirmation. Old sessions stay immutable and different mechanisms do not
+silently share weights or progression rules. Substitution alone does not
+change the program.
 
 Projections:
 
@@ -214,8 +236,8 @@ Projections:
 - `POST /v1/training/programs/:id/progression-candidates/accept`.
 
 Records choose maximum weight, then repetitions. Candidate calculation never
-mutates a program. Weight candidacy now requires two latest current detailed
-sessions for the exact active version/workout position, with every prescribed
+mutates a program. Weight candidacy now requires two latest current completed
+detailed sessions for the exact active version/workout position, with every prescribed
 working set at the assigned external weight, upper repetition target, and
 adequate RIR. A missing or excessive program increment, incomplete evidence,
 future session, or ambiguous duplicate prescription yields no candidate.
@@ -252,6 +274,8 @@ still creates an inactive draft. See the
   migration, lineage, erasure, deduplication, and concurrency tests.
 
 ## Decisions
+
+- [Incomplete fact capture and contextual Coach replies](../../adr/20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md).
 
 - External catalog records remain staged; no scraper/name merge. Records and
   candidates are query projections, not mutable authority.

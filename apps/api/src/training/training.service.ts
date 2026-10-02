@@ -11,11 +11,13 @@ import type {
   ConfirmWorkoutActivityLink,
   ConfirmWorkoutActivityLinkResult,
   CorrectWorkoutSession,
+  CorrectWorkoutSessionV2,
   CreateExercise,
   CreateExerciseVersion,
   CreateTrainingProgram,
   CreateTrainingProgramVersion,
   CreateWorkoutSession,
+  CreateWorkoutSessionV2,
   Exercise,
   ExerciseOverlay,
   ExternalActivitySummary,
@@ -85,7 +87,7 @@ function pendingActivityLinkQuestion(
   if (recordingModeTitle === null || localDate === null) return null;
   const contextBySessionId = new Map(programContext.map((context) => [context.sessionId, context]));
   const candidates = findActivityLinkCandidates(
-    sessions.items.filter((session) => session.localDate === localDate &&
+    sessions.items.filter((session) => session.completionState !== "in_progress" && session.localDate === localDate &&
       session.externalActivityId === null).map((session) => ({
       id: session.id,
       localDate: session.localDate,
@@ -134,7 +136,7 @@ function pendingActivityLinkQuestion(
   const normalizedMode = recordingModeTitle.normalize("NFKC").trim()
     .replace(/\s+/gu, " ").toLocaleLowerCase("und");
   const dateOnlyPairs = sessions.items.filter((session) =>
-    session.localDate === localDate && session.occurredAt === null &&
+    session.completionState !== "in_progress" && session.localDate === localDate && session.occurredAt === null &&
     session.externalActivityId === null &&
     session.exercises.some((exercise) => exercise.sets.some((set) =>
       set.reps !== null || (set.weightKg ?? 0) > 0))
@@ -405,7 +407,7 @@ export class TrainingService {
 
   /** Creates one idempotent immutable WorkoutSession fact. */
   public createWorkoutSession(
-    input: CreateWorkoutSession
+    input: CreateWorkoutSession | CreateWorkoutSessionV2
   ): Promise<CreateWorkoutSessionResult> {
     return this.store.createWorkoutSession(
       this.personContext.getPersonId(),
@@ -416,7 +418,7 @@ export class TrainingService {
   /** Appends an idempotent full replacement for one WorkoutSession. */
   public correctWorkoutSession(
     id: string,
-    input: CorrectWorkoutSession
+    input: CorrectWorkoutSession | CorrectWorkoutSessionV2
   ): Promise<CreateWorkoutSessionResult> {
     return this.store.correctWorkoutSession(
       this.personContext.getPersonId(),

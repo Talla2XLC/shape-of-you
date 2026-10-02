@@ -353,20 +353,25 @@ fail-closed presentation that forbids success claims, advice based on unverified
 facts, and user-facing implementation details while preserving the OAuth
 challenge. This reaches already open conversations after their next actual tool
 call even when they retain older initialization metadata. The client answers in the user's language
-as a coach: it acknowledges captured facts, adds a useful evidence-grounded
-interpretation, and gives one concrete next step by default for meaningful
-nutrition, training, recovery, and daily-summary interactions. Except when the
-user explicitly requests raw facts only, the final reply must end with that
-next step; acknowledgement-only or summary-only replies are incomplete. If a
-specific recommendation is not safe, the next step is the safest useful action
-supported by verified evidence or the single observation needed next. Tool names, schema fields,
-storage states, transport failures, and other implementation mechanics are not
-part of the routine user-facing response. The one-to-three-sentence shape applies
-to routine captures, corrections, and short factual reads; the structured Daily
-Coach brief has no conflicting sentence limit and may not add an action beyond
-the API-owned assessment. Factual-only or assessment-unavailable projection
-results deliberately omit the generic Coach next-step policy so that it cannot
-override their fail-closed contract.
+and may simply acknowledge a verified routine capture or correction. Advice,
+interpretation, and questions depend on usefulness and the user's request.
+Failures remain honest without fabricated causes or promises of background
+saving. Ordinary replies omit tool/schema/storage mechanics; direct technical
+questions may receive a plain verified explanation. Full Daily Coach answers
+retain their API-owned decision-evidence boundary and have no routine sentence
+limit. Factual-only and unavailable projections cannot be overridden by a
+generic recommendation policy.
+
+Training V2 provides `record_workout_session_v2`,
+`correct_workout_session_v2`, `list_workout_sessions_v2`, and
+`get_training_context_v2` under existing scopes. These preserve incomplete
+reported facts and explicit completion. Training presenters prefer V2 when
+available; legacy tools remain for representable completed facts and return
+explicit incompatibility for unsupported facts. New catalog availability needs
+separate publication/refresh and client verification; per-result policy alone
+cannot install new tools into a cached conversation. A confirmed targeted
+program substitution uses the existing program lifecycle while preserving
+untouched assignments and cadence. See the [fact-capture ADR](../../adr/20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md).
 
 The MCP initialization response and every tool description publish the same
 PostgreSQL-authority, no-Google-Sheets-fallback, and fail-closed guidance.

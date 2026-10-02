@@ -889,6 +889,7 @@ export class RecoveryRepository implements RecoveryStore {
         .innerJoin(performedSets, eq(performedExercises.id, performedSets.performedExerciseId))
         .where(and(
           eq(workoutSessions.personId, personId),
+          eq(workoutSessions.completionState, "completed"),
           gte(workoutSessions.occurredAt, windowStart),
           lte(workoutSessions.occurredAt, asOf),
           notExists(transaction.select({ id: workoutSuccessor.id }).from(workoutSuccessor).where(eq(workoutSuccessor.supersedesId, workoutSessions.id)))

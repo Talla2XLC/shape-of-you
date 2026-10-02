@@ -26,11 +26,13 @@ import type {
   ConfirmWorkoutActivityLink,
   ConfirmWorkoutActivityLinkResult,
   CorrectWorkoutSession,
+  CorrectWorkoutSessionV2,
   CreateExercise,
   CreateExerciseVersion,
   CreateTrainingProgram,
   CreateTrainingProgramVersion,
   CreateWorkoutSession,
+  CreateWorkoutSessionV2,
   Exercise,
   ExerciseOverlay,
   ExternalActivityProgramClassification,
@@ -299,12 +301,12 @@ export interface TrainingStore {
   findActiveProgram(personId: string): Promise<TrainingProgram | null>;
   createWorkoutSession(
     personId: string,
-    input: CreateWorkoutSession
+    input: CreateWorkoutSession | CreateWorkoutSessionV2
   ): Promise<CreateWorkoutSessionResult>;
   correctWorkoutSession(
     personId: string,
     id: string,
-    input: CorrectWorkoutSession
+    input: CorrectWorkoutSession | CorrectWorkoutSessionV2
   ): Promise<CreateWorkoutSessionResult>;
   findWorkoutSession(
     personId: string,
@@ -881,6 +883,7 @@ export class TrainingRepository implements TrainingStore {
         left join training_workout_session_activity_links link
           on link.session_id = session.id
        where session.person_id = ${personId}
+         and session.completion_state = 'completed'
          and session.local_date = ${localDate}
          and not exists (
            select 1 from workout_sessions successor
@@ -1168,6 +1171,7 @@ export class TrainingRepository implements TrainingStore {
           on trusted_title.program_version_id = session.program_version_id
          and trusted_title.workout_position = session.program_workout_position
        where session.person_id = ${personId}
+         and session.completion_state = 'completed'
          and session.local_date = ${localDate}
          and not exists (
            select 1 from workout_sessions successor
@@ -1216,6 +1220,7 @@ export class TrainingRepository implements TrainingStore {
          and version.person_id = ${personId}
          and version.program_id = ${programId}
        where session.person_id = ${personId}
+         and session.completion_state = 'completed'
          and session.local_date < ${weekStart}
          and session.program_workout_position is not null
          and not exists (
@@ -2592,25 +2597,22 @@ export class TrainingRepository implements TrainingStore {
   private async resolveSessionExercises(
     transaction: DatabaseTransaction,
     personId: string,
-    exercises: CreateWorkoutSession["exercises"]
-  ): Promise<
-    Array<{
-      input: CreateWorkoutSession["exercises"][number];
-      exercise: TrainingExerciseRow;
-      version: TrainingExerciseVersionRow;
-    }>
-  > {
+    exercises: (CreateWorkoutSession | CreateWorkoutSessionV2)["exercises"]
+  ) {
     const result = [];
     for (const input of exercises) {
-      const resolved = await this.resolveExerciseVersion(
-        transaction,
-        personId,
-        input.exerciseVersionId
+      const resolved = input.exerciseVersionId == null ? null : await this.resolveExerciseVersion(
+        transaction, personId, input.exerciseVersionId
       );
-      if (!resolved) {
+      if (input.exerciseVersionId != null && !resolved) {
         throw new NotFoundError("Training ExerciseVersion was not found");
       }
-      result.push({ input, ...resolved });
+      if (resolved && "exerciseLabel" in input &&
+          input.exerciseLabel.normalize("NFKC").trim().toLocaleLowerCase() !==
+          resolved.version.name.normalize("NFKC").trim().toLocaleLowerCase()) {
+        throw new ConflictError("Reported exercise label does not match the supplied ExerciseVersion");
+      }
+      result.push({ input, exercise: resolved?.exercise ?? null, version: resolved?.version ?? null });
     }
     return result;
   }
@@ -2618,7 +2620,7 @@ export class TrainingRepository implements TrainingStore {
   private async insertSession(
     transaction: DatabaseTransaction,
     personId: string,
-    input: CreateWorkoutSession | CorrectWorkoutSession,
+    input: CreateWorkoutSession | CorrectWorkoutSession | CreateWorkoutSessionV2 | CorrectWorkoutSessionV2,
     supersedesId: string | null,
     correctionReason: string | null
   ): Promise<{ row: WorkoutSessionRow; created: boolean }> {
@@ -2697,26 +2699,29 @@ export class TrainingRepository implements TrainingStore {
       personId,
       input.sourceReference
     );
-    const occurredAt = new Date(input.occurredAt);
+    const occurredAt = input.occurredAt == null ? null : new Date(input.occurredAt);
+    const temporalPrecision = "temporalPrecision" in input ? input.temporalPrecision : "instant";
     const [session] = await transaction
       .insert(workoutSessions)
       .values({
         personId,
         occurredAt,
-        temporalPrecision: "instant",
-        localDate: deriveLocalDate(occurredAt, input.timezone),
+        temporalPrecision,
+        localDate: temporalPrecision === "local_date" && "localDate" in input
+          ? input.localDate! : deriveLocalDate(occurredAt!, input.timezone),
+        completionState: "completionState" in input ? input.completionState : "completed",
         timezone: input.timezone,
-        programVersionId: input.programVersionId,
+        programVersionId: input.programVersionId ?? null,
         programWorkoutPosition: input.programWorkoutPosition ?? null,
         venueLabel: input.venueLabel ?? null,
         workoutName: input.workoutName,
-        feeling: input.feeling,
-        note: input.note,
+        feeling: input.feeling ?? null,
+        note: input.note ?? null,
         source: input.sourceReference.channel,
         sourceReferenceId: sourceReference.row.id,
         dedupeKey: input.dedupeKey,
         confidence:
-          input.confidence === null ? null : input.confidence.toFixed(3),
+          input.confidence == null ? null : input.confidence.toFixed(3),
         supersedesId,
         correctionReason
       })
@@ -2753,27 +2758,27 @@ export class TrainingRepository implements TrainingStore {
         .values({
           sessionId: session.id,
           position: exerciseIndex + 1,
-          exerciseId: resolved.exercise.id,
-          exerciseVersionId: resolved.version.id,
-          exerciseLabel: resolved.version.name,
-          loadBasis: resolved.input.loadBasis,
-          feeling: resolved.input.feeling,
-          note: resolved.input.note
+          exerciseId: resolved.exercise?.id ?? null,
+          exerciseVersionId: resolved.version?.id ?? null,
+          exerciseLabel: "exerciseLabel" in resolved.input ? resolved.input.exerciseLabel : resolved.version!.name,
+          loadBasis: resolved.input.loadBasis ?? null,
+          feeling: resolved.input.feeling ?? null,
+          note: resolved.input.note ?? null
         })
         .returning();
       if (!performed) {
         throw new Error("PerformedExercise insert failed");
       }
-      await transaction.insert(performedSets).values(
+      if (resolved.input.sets.length > 0) await transaction.insert(performedSets).values(
         resolved.input.sets.map((set, index) => ({
           performedExerciseId: performed.id,
           position: index + 1,
-          weightKg: set.weightKg === null ? null : set.weightKg.toFixed(3),
-          reps: set.reps,
+          weightKg: set.weightKg == null ? null : set.weightKg.toFixed(3),
+          reps: set.reps ?? null,
           durationSeconds: set.durationSeconds ?? null,
           distanceMeters:
             set.distanceMeters == null ? null : set.distanceMeters.toFixed(3),
-          rir: set.rir === null ? null : set.rir.toFixed(1)
+          rir: set.rir == null ? null : set.rir.toFixed(1)
         }))
       );
     }
@@ -2839,7 +2844,7 @@ export class TrainingRepository implements TrainingStore {
           id: set.id,
           position: set.position,
           weightKg: numberOrNull(set.weightKg),
-          reps: set.reps,
+          reps: set.reps ?? null,
           durationSeconds: set.durationSeconds,
           distanceMeters: numberOrNull(set.distanceMeters),
           rir: numberOrNull(set.rir)
@@ -2858,6 +2863,7 @@ export class TrainingRepository implements TrainingStore {
       venueLabel: session.venueLabel,
       externalActivityId: (currentLink.rows[0] as { external_activity_id: string } | undefined)?.external_activity_id ?? null,
       workoutName: session.workoutName,
+      completionState: session.completionState as "in_progress" | "completed",
       feeling: session.feeling,
       note: session.note,
       exercises: publicExercises,
@@ -2872,7 +2878,7 @@ export class TrainingRepository implements TrainingStore {
 
   public async createWorkoutSession(
     personId: string,
-    input: CreateWorkoutSession
+    input: CreateWorkoutSession | CreateWorkoutSessionV2
   ): Promise<CreateWorkoutSessionResult> {
     return this.database.db.transaction(async (transaction) => {
       const result = await this.insertSession(
@@ -2895,7 +2901,7 @@ export class TrainingRepository implements TrainingStore {
   public async correctWorkoutSession(
     personId: string,
     id: string,
-    input: CorrectWorkoutSession
+    input: CorrectWorkoutSession | CorrectWorkoutSessionV2
   ): Promise<CreateWorkoutSessionResult> {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, personId);
@@ -3026,6 +3032,7 @@ export class TrainingRepository implements TrainingStore {
       const rows = await transaction.select().from(workoutSessions).where(and(
         eq(workoutSessions.personId, personId),
         eq(workoutSessions.programVersionId, programVersionId),
+        eq(workoutSessions.completionState, "completed"),
         eq(workoutSessions.programWorkoutPosition, workoutPosition),
         lte(workoutSessions.localDate, throughLocalDate),
         or(isNull(workoutSessions.occurredAt), lte(workoutSessions.occurredAt, new Date())),
@@ -3072,6 +3079,7 @@ export class TrainingRepository implements TrainingStore {
     const activitySuccessor = alias(integrationActivityFacts, "coverage_activity_successor");
     const currentSessions = and(
       eq(workoutSessions.personId, personId),
+      eq(workoutSessions.completionState, "completed"),
       isPersonContextEvidence(),
       lte(workoutSessions.localDate, asOf),
       notExists(this.database.db.select({ id: sessionSuccessor.id }).from(sessionSuccessor).where(eq(sessionSuccessor.supersedesId, workoutSessions.id)))
@@ -3144,7 +3152,9 @@ export class TrainingRepository implements TrainingStore {
       set_id: string;
       weight_kg: string;
       reps: number;
-      occurred_at: Date;
+      occurred_at: Date | null;
+      local_date: string;
+      temporal_precision: "instant" | "local_date";
     }>(
       `select distinct on (pe.exercise_id)
          pe.exercise_id,
@@ -3154,12 +3164,14 @@ export class TrainingRepository implements TrainingStore {
          ps.id as set_id,
          ps.weight_kg,
          ps.reps,
-         ws.occurred_at
+         ws.occurred_at, ws.local_date::text as local_date, ws.temporal_precision
        from workout_sessions ws
        join performed_exercises pe on pe.session_id = ws.id
        join performed_sets ps on ps.performed_exercise_id = pe.id
       where ws.person_id = $1
-        and ps.weight_kg is not null
+        and ws.completion_state = 'completed'
+        and pe.exercise_id is not null and pe.load_basis = 'external_weight'
+        and ps.weight_kg is not null and ps.reps is not null
         and not exists (
           select 1 from workout_sessions replacement
            where replacement.supersedes_id = ws.id
@@ -3167,7 +3179,7 @@ export class TrainingRepository implements TrainingStore {
       order by pe.exercise_id,
                ps.weight_kg desc,
                ps.reps desc,
-               ws.occurred_at desc,
+               ws.local_date desc, ws.occurred_at desc nulls last,
                ps.id desc`,
       [personId]
     );
@@ -3180,7 +3192,8 @@ export class TrainingRepository implements TrainingStore {
         performedSetId: row.set_id,
         weightKg: Number(row.weight_kg),
         reps: row.reps,
-        occurredAt: row.occurred_at.toISOString()
+        occurredAt: row.occurred_at?.toISOString() ?? null,
+        localDate: row.local_date, temporalPrecision: row.temporal_precision
       }))
     };
   }
@@ -3232,6 +3245,7 @@ export class TrainingRepository implements TrainingStore {
           .where(
             and(
               eq(workoutSessions.personId, personId),
+              eq(workoutSessions.completionState, "completed"),
               eq(workoutSessions.programVersionId, version.id),
               eq(workoutSessions.programWorkoutPosition, workout.position),
               lte(workoutSessions.localDate, throughDate),
@@ -3446,6 +3460,7 @@ export class TrainingRepository implements TrainingStore {
       const evidence = await transaction.select({ id: workoutSessions.id }).from(workoutSessions)
         .where(and(
           eq(workoutSessions.personId, personId),
+          eq(workoutSessions.completionState, "completed"),
           eq(workoutSessions.programVersionId, proposal.programVersionId),
           eq(workoutSessions.programWorkoutPosition, proposal.workoutPosition),
           lte(workoutSessions.localDate, proposal.localDate),

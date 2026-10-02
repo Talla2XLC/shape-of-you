@@ -100,7 +100,7 @@ export class DailyProjectionService {
         }))
       },
       training: {
-        workoutSessions: workoutSessions.map((item) => ({
+        workoutSessions: workoutSessions.filter((item) => item.completionState !== "in_progress").map((item) => ({
           id: item.id,
           occurredAt: item.occurredAt,
           temporalPrecision: item.temporalPrecision,

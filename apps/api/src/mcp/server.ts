@@ -12,6 +12,13 @@ import {
   CorrectRecoveryObservationSchema,
   CorrectWeightMeasurementSchema,
   CorrectWorkoutSessionSchema,
+  CorrectWorkoutSessionV2Schema,
+  CreateWorkoutSessionV2Schema,
+  WorkoutSessionV2Schema,
+  WorkoutSessionListV2Schema,
+  TrainingContextV2Schema,
+  type CreateWorkoutSessionV2,
+  type CorrectWorkoutSessionV2,
   ConfirmWorkoutActivityLinkSchema,
   ConfirmWorkoutActivityLinkResultSchema,
   CreateBodyMeasurementSessionSchema,
@@ -95,6 +102,7 @@ import {
   type TrainingContextQuery,
   type ApplyConfirmedWorkingWeight,
 } from "@shape-of-you/contracts";
+import { legacyWorkoutSession, legacyWorkoutList, legacyTrainingContext } from "../training/workout-compatibility.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
@@ -212,17 +220,17 @@ export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
 /** Current Coach behavior delivered with every successful MCP result. */
 export const MCP_COACH_REPLY_POLICY =
   "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
-  "For every meaningful nutrition, training, recovery, body, or daily-summary interaction, one useful evidence-grounded observation and one concrete next step are mandatory. " +
+  "Answer the actual message. Routine capture or correction may end with a short acknowledgement. Add an observation, advice, or a question only when it is useful in this context; never manufacture a next step. " +
   "For a factual get_person_fact_timeline request, report recorded facts and any gaps without inventing Coach decisions, workout completion, or a recommendation; give advice only if the user also asks for it. " +
   "Never require Garmin Training Readiness or Recovery Time screenshots for routine recovery or daily guidance. Base advice on verified current facts and available recovery observations; an absent Garmin value is unknown, not a reason by itself to withhold advice. When asked specifically for Recovery Time, call list_recovery_observations with metric=garmin_post_activity_recovery_time. Only a returned observation with sourceReference.channel=account and externalSystem=intervals_icu_activity_fit:garmin_140_9_v1 is an Intervals.icu activity FIT snapshot; state its estimated minute value and observation time. Never calculate a current countdown from it or let it replace current evidence. When asked for Garmin Training Readiness, give only a verified value with its known time or say it is unavailable; do not infer it from a generic readiness field. Do not ask for a screenshot to make routine guidance possible. A voluntarily supplied Garmin report is manual evidence, not connected-device data; do not record an unsupported Garmin score under another metric. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
   "Keep planned facts, proposed guidance, and verified completed facts distinct. State completed workouts only from verified Training or activity facts. Use the structured completion assessment only for claims about an exact legacy DailyAssessment recommendation; neither it nor manual feedback creates an owning-domain fact.";
 
-/** Mandatory ending delivered last in every successful MCP result. */
+/** Contextual reply guidance delivered last in every successful MCP result. */
 export const MCP_COACH_FINAL_RESPONSE_REQUIREMENT =
-  "MANDATORY FINAL REPLY: Unless the user explicitly requested raw facts only, the final user-facing reply MUST include one useful evidence-grounded observation and MUST end with one direct, concrete recommendation or next step. " +
-  "A reply that only confirms, records, calculates, or summarizes facts is incomplete. " +
-  "If a domain-specific recommendation cannot be made safely, end with the safest useful next action supported by the verified facts or the one observation the user should provide next; never silently omit the next step.";
+  "CONTEXTUAL FINAL REPLY: A brief acknowledgement can be a complete answer to routine capture or correction. " +
+  "When the user asks for advice, provide the useful evidence-grounded answer; do not impose food, rest, or training instructions on every factual report. " +
+  "Ask only when resolving material ambiguity changes the action. Never expose implementation mechanics in routine replies or invent a cause of failure.";
 
 const routineCoachReplyShape =
   "For a routine capture, correction, or short factual answer, reply in one to three natural sentences.";
@@ -231,7 +239,7 @@ const dailyCoachReplyShape =
   "For a full Daily Coach answer, use the requested brief structure without a sentence limit.";
 
 const coachFailurePolicy =
-  "Do not claim that an unverified read or failed change succeeded. Keep implementation mechanics invisible, do not repeat an obvious permission question, do not require Garmin Training Readiness or Recovery Time screenshots, and do not base guidance on unavailable or unverified facts.";
+  "Do not claim that an unverified read or failed change succeeded. Do not speculate about a failure cause or promise later autonomous persistence. Keep implementation mechanics invisible in routine replies; a direct technical question may receive a plain explanation of verified causes and uncertainty. Do not repeat an obvious permission question, do not require Garmin Training Readiness or Recovery Time screenshots, and do not base guidance on unavailable or unverified facts.";
 
 function coachResultContent(
   instruction: string,
@@ -254,7 +262,7 @@ const routineWriteResultContent = coachResultContent(
 
 const mealWriteResultContent = coachResultContent(
   "The reported meal has been saved. Continue the required workflow silently before replying. " +
-  "In the final reply, acknowledge what was eaten, interpret the approximate nutrition, and give one concrete useful next step. " +
+  "In the final reply, acknowledge what was eaten and speak approximately about estimated nutrition; add advice only when useful or requested. " +
   "When saved portions or nutrients are estimates, use them and clearly speak approximately rather than claiming measured precision. " +
   "Do not say calories are unavailable merely because exact grams were not measured."
 );
@@ -266,30 +274,34 @@ const mealCorrectionWriteResultContent = coachResultContent(
 );
 
 const mealReadResultContent = coachResultContent(
-  "Use these meal facts silently. Acknowledge what was eaten, interpret the nutrition, and give one concrete useful next step. " +
+  "Use these meal facts silently. Acknowledge what was eaten; give approximate nutrition when useful and advice only when useful or requested. " +
   "Use stored estimates as approximate values rather than hiding them because exact grams were not measured. " +
   "Only when the user's unambiguous Meal correction is still pending and no successful correction result has been returned for it, select the current matching Meal from this result, preserve its complete canonical fields and items, overlay only the user's clarification, and immediately perform the correction with that current id. " +
   "If a successful correction result was already returned, this optional day or totals read must not reapply that correction. Do not ask the user to repeat or confirm the correction."
 );
 
+const workoutV2RoutingPolicy = "WORKOUT V2 ROUTING: In every workflow below, prefer get_training_context_v2 and list_workout_sessions_v2 whenever available, including program, cadence, classification, linking and correction read-back. Legacy names are fallback only for clients without V2. If a legacy read cannot represent a V2 fact, do not treat that as missing data or ask the user to repeat it. ";
+
 const workoutWriteResultContent = coachResultContent(
+  workoutV2RoutingPolicy +
   "The reported workout has been saved. Complete the required date-scoped read-back silently before replying. " +
-  "Acknowledge the completed work, interpret it against available training and recovery evidence, and give one concrete useful next step."
+  "Acknowledge the reported work; For V2 call it completed only when completionState is completed; a successful legacy result represents completed work by its frozen contract. Unknown sets are not zero. Interpret or advise only when useful or requested."
 );
 
 const workoutReadResultContent = coachResultContent(
-  "Use these workout facts silently. Acknowledge the completed work, interpret it against available training and recovery evidence, and give one concrete useful next step."
+  workoutV2RoutingPolicy +
+  "Use these workout facts silently. Acknowledge the reported work; For V2 call it completed only when completionState is completed; a successful legacy result represents completed work by its frozen contract. Unknown sets are not zero. Interpret or advise only when useful or requested."
 );
 
 const recoveryWriteResultContent = coachResultContent(
   "The reported recovery fact has been saved. Continue capturing every other independent fact from the same report " +
   "before replying, even if one separate fact could not be saved. Then complete the required day-level check silently. " +
   "After a qualitative subjective signal, call get_daily_decision_context and decide from its current facts. " +
-  "Briefly acknowledge the useful recovery picture, interpret it, and give one concrete useful next step without inventing values."
+  "Briefly acknowledge the recovery report; interpret or advise when useful or requested without inventing values."
 );
 
 const recoveryReadResultContent = coachResultContent(
-  "Use these recovery facts silently. Summarize and interpret the useful recovery picture, then give one concrete useful next step without inventing values."
+  "Use these recovery facts silently. Answer the recovery question with verified facts; a next step is optional and must be useful."
 );
 
 const currentRecoveryContextResultContent = coachResultContent(
@@ -301,10 +313,12 @@ const currentRecoveryContextResultContent = coachResultContent(
 );
 
 const activeTrainingProgramResultContent = coachResultContent(
+  workoutV2RoutingPolicy +
   "Use only an active result as a planned training artifact. An absent result means no active program; an error does not."
 );
 
 const trainingContextResultContent = coachResultContent(
+  workoutV2RoutingPolicy +
   "Use an active program as planned authority and its Training-owned options as the only verified training identities for the requested Person-local date. Read get_daily_decision_context before recommending training; decide from its current Recovery facts, uncertainty, user intent, and Training options. A/B identity comes only from the exact strength option. Do not turn an unfilled weekly cardio target or a missed day into mandatory cardio. When explaining how to perform the next exact strength option, get_training_progression may supply derived set evidence; it does not decide Recovery suitability. Skip progression for unrelated facts, absent or ambiguous strength identity, or a completed workout or week. Never derive A/B order from names, notes, or an unlinked activity. A classification-needed result requires exactly its one short human question. A completed-today or completed-week result means the program offers no further training option. Keep detailed sessions separate from connected summaries unless exactly linked. A connected summary never supplies exercises or sets. When the program is absent, historical evidence is proposal input only."
 );
 
@@ -383,9 +397,9 @@ const setCurrentTimezoneInputSchema = {
 const trainingProgramConfirmationPolicy =
   "TRAINING PROGRAM CONFIRMATION: A complete program supplied by the user together with an unambiguous request such as «используй эту программу» or «сохрани как активную» is sufficient authority to persist it immediately; do not ask for another confirmation. " +
   "For a complete program proposed by Coach, bind acceptance only to the latest complete version that Coach published and offered for activation. Short natural replies such as «да» or yes, «го» or go ahead, «подходит» or works for me, «делаем так» or let's do it, and a clear affirmative emoji directly answering the save question are examples of valid acceptance; they are not magic phrases. " +
-  "Praise without acceptance, a question, doubt, an alternative, a partial edit such as «да, но замени...», a reply to an unrelated yes/no question, or a reply after another program version does not confirm the program. Publish a fully revised snapshot after an edit and never invent missing exercises, order, loads, or progression. " +
+  "Praise without acceptance, a question, doubt, an alternative, a partial edit such as «да, но замени...», a reply to an unrelated yes/no question, or a reply after another program version does not confirm the program. Publish a fully revised snapshot after an ambiguous edit and never invent missing exercises, order, loads, or progression. An explicit targeted replacement of a uniquely identified current prescription is different: read the current program, preserve all untouched prescriptions and cadence, resolve or describe the accepted replacement, and use save_confirmed_training_program without making the user repeat or reconfirm the unchanged program. If the user only reported doing Smith, first capture that fact and optionally ask whether it is for today or should replace the program exercise. Only a clear permanent-change decision authorizes the program write; clarify significant unspecified load or progression parameters instead of silently transferring them between equipment. " +
   "When Coach publishes a complete version without already having authority to save it, end that same message with exactly one short question equivalent to «Сохраняю эту программу как активную?» in the user's language. Use the same one-question form whenever the later reference is genuinely ambiguous. Until persistence and a matching active read-back succeed, label every such program only Proposed now and never call it agreed, active, current, or our plan. " +
-  "After unambiguous acceptance, call save_confirmed_training_program and then get_training_context in the same turn, comparing the entire active snapshot with the accepted version before claiming success. " +
+  "After unambiguous acceptance, call save_confirmed_training_program and then get_training_context_v2 when available (otherwise get_training_context) in the same turn, comparing the entire active snapshot with the accepted version before claiming success. " +
   "If the accepted complete version already matches the active program's name, note, workouts, exercise versions, and prescriptions but its accepted cadence is absent or different, do not make the user restate the program and do not infer the schedule from prose. Bind the cadence to the exact active version returned by get_training_context, materialize it as an immutable successor, then call get_training_context and get_daily_decision_context in the same turn. Only those successful reads may support a claim about the active cadence or today's next action.";
 
 function confirmedTrainingProgramWriteResultContent(result: unknown): string {
@@ -395,6 +409,7 @@ function confirmedTrainingProgramWriteResultContent(result: unknown): string {
     );
   }
   return coachResultContent(
+    workoutV2RoutingPolicy +
     "The accepted program snapshot and any missing Person-private exercises were persisted atomically. MUST immediately call get_training_context in this same turn and compare the complete active snapshot with the accepted version before claiming success. If verification fails or differs, say only that saving could not be verified and do not present it as agreed, current, active, or the user's plan."
   );
 }
@@ -406,6 +421,7 @@ function materializedTrainingProgramCadenceResultContent(
     ? "The exact active program already contained the accepted cadence; this was a semantic no-op and no new version was created."
     : "The accepted cadence was persisted as an immutable successor of the exact active program.";
   return coachResultContent(
+    workoutV2RoutingPolicy +
     `${persistence} MUST immediately call get_training_context and get_daily_decision_context in this same turn. Confirm that the active version contains the accepted cadence, then decide today's advice from the verified facts and options. If either verification fails or differs, do not claim that the cadence is active and do not infer a next workout from prose. Never expose tool names, ids, fields, or storage mechanics.`
   );
 }
@@ -416,6 +432,7 @@ function classifiedExternalActivityResultContent(result: unknown): string {
     : "stale";
   if (outcome === "stale" || outcome === "not_pending") {
     return coachResultContent(
+    workoutV2RoutingPolicy +
       "The imported activity classification was not saved because the current Training authority changed or the activity is no longer pending. Call get_training_context now and use at most its one returned classification question; never guess, retry stale identifiers, or claim persistence."
     );
   }
@@ -423,6 +440,7 @@ function classifiedExternalActivityResultContent(result: unknown): string {
     ? "The exact classification was already current; this was a semantic no-op."
     : "The explicit imported activity classification was persisted as an immutable Training fact.";
   return coachResultContent(
+    workoutV2RoutingPolicy +
     `${persistence} MUST call get_training_context and then get_daily_decision_context in this same turn. Decide the visible next action from the fresh verified context. Never expose ids, fields, tool names, or persistence mechanics.`
   );
 }
@@ -453,7 +471,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
   "When the user discusses how to perform the next active strength workout, including working weight, repetitions, or sets, read get_daily_decision_context first, then get_training_context. Use progression guidance only when both reads identify the same exact eligible strength option; evaluate the current Recovery evidence yourself before proposing progression. For a concrete working-weight change, use get_working_weight_proposals and show one exact exercise and old/new weight. Ask one clear question covering the change, confident technique and absence of pain. Call apply_confirmed_working_weight only after the user's unambiguous yes to that exact proposal; doubt, questions, revisions or unrelated yes never authorize it. Never silently raise any weight. Skip progression for routine recording, unrelated facts, general recovery, absent or ambiguous strength identity, or completed training. Unavailable guidance does not authorize invented load. Reassess current facts on the actual training day. " +
   "When training context returns one pending imported-strength classification, use a direct unambiguous user statement about that exact displayed activity and workout immediately; natural equivalents of the displayed workout name are sufficient. Never infer the answer from expected sequence, activity name, program note, time, or exercise similarity. If the user's statement does not identify one option, ask exactly the API-returned short question. After saving or an unchanged result, call get_training_context and then get_daily_decision_context in the same turn, and decide the visible next action from current facts. " +
-  trainingProgramConfirmationPolicy + " " +
+  workoutV2RoutingPolicy + trainingProgramConfirmationPolicy + " " +
   "For a Recovery text or screenshot report, record every unambiguous sleep and metric fact as an independent observation with a deterministic dedupe key, then call list_recovery_observations with localDate only to verify the expected set. Continue with the other independent facts if one fact fails. A wearable sleep score uses metric sleep_score with unit score; never put a 0..100 device score into the subjective 1..5 sleepQuality field. When no real interval is known, use exact localDate and timezone without inventing timestamps. " +
   "For a direct, unambiguous report about the Person's current physical wellbeing, record each explicitly reported qualitative subjective signal as an independent manual Recovery observation: feeling_well, fatigued, sore, acute_illness, or injury_concern. Never fill absent 1..5 scores or boolean answers, infer a signal from Garmin data, or turn a broad unclear phrase into illness or injury. Ask one short clarification only when the date or meaning is material and unclear. Do not request a wellbeing check-in after every response. After a write or correction, read back that localDate and call get_daily_decision_context again; decide from its current facts. A feeling_well report does not erase another observation, and future advice needs a fresh same-day read. " +
   "For a focused question about today's sleep, HRV, resting heart rate, Body Battery, or steps, call get_current_recovery_context. Treat its typed observations as value authority and its delivery state only as availability evidence. Never infer that Garmin or another provider failed from an empty observation set, never infer zero from absence, and never promise a later autonomous recheck without a real automation. " +
@@ -466,7 +484,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "For get_active_training_program, only status absent proves that no active program exists; a tool error leaves the plan unknown and must not be treated as absent. " +
   "If a required typed read fails, is unavailable, or returns incomplete or inconsistent data, label the affected field unknown: never infer absence, zero, no plan, or another dependent fact, and omit or explicitly qualify dependent proposals. " +
   "Preserve genuinely unknown optional values as null or partial inside typed data instead of inventing measured precision. For Meal items, use amountKind unknown only when available evidence is genuinely insufficient for a reasonable estimate, described for the user's own non-numeric wording, quantified for an explicit number and unit, and estimated for a best-effort text or photo estimate with method and confidence; never invent 1 serving or another sentinel amount. A sufficiently legible meal photo or useful text description authorizes and requires an immediate best-effort estimate of each identifiable item's quantity plus calories, protein, fat, and carbohydrates. Exact grams are not a prerequisite: use bounded confidence, save the approximate nutrition now, and let later user detail correct it. Ask only when material foods or scale are genuinely ambiguous. Use a typed DailyContextNote only when a relevant observation cannot yet be represented safely in its owning domain. " +
-  "After a routine Meal create or correction, say naturally what was recorded or corrected, state approximate calories or macros when estimated values were saved, and give one concrete useful evidence-grounded next step by default. Do not ask for duplicate confirmation before a reasonable estimate. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
+  "After a routine Meal create or correction, say naturally what was recorded or corrected, state approximate calories or macros when estimated values were saved, and add a useful evidence-grounded next step only when context warrants it. Do not ask for duplicate confirmation before a reasonable estimate. Never expose tool names, arguments, identifiers, property or enum names, null, partial, typed, read-back, transport details, or implementation status. Do not force Planned, Proposed now, or Actually completed headings onto a routine fact capture; reserve that structure for a full daily-plan answer. Natural reply examples: " +
   MCP_ROUTINE_COACH_RESPONSE_EXAMPLES.map((example) => `\"${example}\"`).join(" ") +
   " " +
   "Format user-facing answers as plain Markdown and never emit HTML entities or encoded whitespace. Destructive, credential, administrative, and material goal or program changes still require explicit confirmation.";
@@ -773,7 +791,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_meal",
-      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Every accepted Coach Meal item must include non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates. For a sufficiently legible photo or useful text description, estimate realistic quantities using method and bounded confidence; exact grams are not required. If material food or scale is genuinely unidentifiable, clarify instead of saving an incomplete Meal, and never invent a sentinel serving. Then read back with list_meals using localDate only and reply in natural coach language with approximate nutrition and useful guidance without exposing contract fields or tool mechanics.",
+      "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Estimate ordinary photo/text reports using reasonable portions and average food nutrients, even without exact grams; clearly say approximately. Preserve unknown amounts or nutrients only without a reasonable estimation basis. For a sufficiently legible photo or useful text description, estimate realistic quantities using method and bounded confidence; exact grams are not required. If material food or scale is genuinely unidentifiable, preserve known foods and clarify only if the ambiguity changes a useful action, and never invent a sentinel serving. Then read back with list_meals using localDate only and reply in natural coach language with approximate nutrition and useful guidance without exposing contract fields or tool mechanics.",
       createMealToolInputSchema,
       undefined,
       true,
@@ -785,7 +803,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_meal",
-      "Immediately append one idempotent full-replacement correction to a uniquely identified current Meal without duplicate confirmation. Preserve or improve every item and provide non-unknown amount evidence plus numeric best-effort calories, protein, fat, and carbohydrates; do not replace a useful estimate with an incomplete Meal. The returned canonical Meal is sufficient typed verification; use a later date-scoped read only when the user also requested the updated day or totals, and never reapply an already successful correction. Reply in natural coach language without exposing contract fields or tool mechanics.",
+      "Immediately append one idempotent full-replacement correction to a uniquely identified current Meal without duplicate confirmation. Preserve every unchanged item and its estimate. Recalculate only the corrected food or amount using reasonable average values; do not replace a useful estimate with unknown values merely because exact grams are absent. Preserve genuine unknowns when estimation has no reasonable basis. The returned canonical Meal is sufficient typed verification; use a later date-scoped read only when the user also requested the updated day or totals, and never reapply an already successful correction. Reply in natural coach language without exposing contract fields or tool mechanics.",
       withIdSchema("CorrectMealToolInput", correctMealToolInputSchema),
       undefined,
       true,
@@ -826,7 +844,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       false,
       MCP_READ_SCOPE,
       (input) =>
-        services.training.getTrainingContext(input as TrainingContextQuery),
+        services.training.getTrainingContext(input as TrainingContextQuery).then(legacyTrainingContext),
       () => trainingContextResultContent
     ),
     defineTool(
@@ -928,13 +946,37 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       (input) => services.training.confirmWorkoutActivityLink(input as ConfirmWorkoutActivityLink)
     ),
     defineTool(
+      "get_training_context_v2", "Read active authority and all reported workout facts, including in-progress sessions and unresolved exercise labels. Use completionState to distinguish ongoing work from completion; unknown sets never mean zero. Use this context for V2 write read-back and substitutions.",
+      TrainingContextQuerySchema, TrainingContextV2Schema, false, MCP_READ_SCOPE,
+      (input) => services.training.getTrainingContext(input as TrainingContextQuery),
+      () => trainingContextResultContent
+    ),
+    defineTool(
+      "list_workout_sessions_v2", "Read every current reported workout on an optional localDate, including incomplete exercise details and completionState. Before a correction read the current session and preserve all unchanged facts. After a write verify the returned session by id and its reported data; do not confuse an in-progress session with completion.",
+      ListWorkoutSessionsQuerySchema, WorkoutSessionListV2Schema, false, MCP_READ_SCOPE,
+      (input) => services.training.listWorkoutSessions(input as ListWorkoutSessionsQuery),
+      () => workoutReadResultContent
+    ),
+    defineTool(
+      "record_workout_session_v2", "Immediately preserve a direct workout report without asking whether to save. Assemble only known performed work from the conversation. Use in_progress during the workout and completed only when finishing is clear. Unknown sets are [], unresolved exercises retain their actual exerciseLabel with exerciseVersionId=null, and unknown loadBasis is null. Keep Smith distinct from free-bar squats and do not add unknown bar weight. If only the day is known, use temporalPrecision=local_date and localDate; never invent start time. Keep reported effort or RIR ranges in note rather than inventing a scalar. If this same session is already recorded, use a correction instead of a second create. Read back with list_workout_sessions_v2 before claiming success. A substitution may warrant asking whether it is for today or should update the program; an explicit permanent change authorizes the existing confirmed program lifecycle, not a silent edit.",
+      CreateWorkoutSessionV2Schema, WorkoutSessionV2Schema, true, MCP_WORKOUT_WRITE_SCOPE,
+      async (input) => (await services.training.createWorkoutSession(normalizeWorkoutV2Input(input, false) as CreateWorkoutSessionV2)).session,
+      () => workoutWriteResultContent
+    ),
+    defineTool(
+      "correct_workout_session_v2", "Read the unique current session with list_workout_sessions_v2, overlay the user's new details or completion, preserve every unchanged exercise and value, and append a full replacement against its current id. Do not require repeated permission or a complete restatement. On conflict reread current facts and never blindly overwrite another correction. Read back with list_workout_sessions_v2 before claiming success.",
+      withIdSchema("CorrectWorkoutSessionV2ToolInput", CorrectWorkoutSessionV2Schema), WorkoutSessionV2Schema, true, MCP_WORKOUT_WRITE_SCOPE,
+      async (input) => (await services.training.correctWorkoutSession(input.id as string, normalizeWorkoutV2Input(input, true) as CorrectWorkoutSessionV2)).session,
+      () => workoutWriteResultContent
+    ),
+    defineTool(
       "list_workout_sessions",
       "Read the authorized person's current workout sessions. For one-day Workout read-back pass localDate.",
       ListWorkoutSessionsQuerySchema,
       WorkoutSessionListSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.training.listWorkoutSessions(input as ListWorkoutSessionsQuery),
+      (input) => services.training.listWorkoutSessions(input as ListWorkoutSessionsQuery).then(legacyWorkoutList),
       () => workoutReadResultContent
     ),
     defineTool(
@@ -945,10 +987,10 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       true,
       MCP_WORKOUT_WRITE_SCOPE,
       async (input) =>
-        (await services.training.createWorkoutSession(normalizeWorkoutInput(
+        legacyWorkoutSession((await services.training.createWorkoutSession(normalizeWorkoutInput(
           input,
           validateCreateWorkoutSession
-        ) as CreateWorkoutSession)).session,
+        ) as CreateWorkoutSession)).session),
       () => workoutWriteResultContent
     ),
     defineTool(
@@ -961,10 +1003,10 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       undefined,
       true,
       MCP_WORKOUT_WRITE_SCOPE,
-      async (input) => (await services.training.correctWorkoutSession(
+      async (input) => legacyWorkoutSession((await services.training.correctWorkoutSession(
         input.id as string,
         normalizeWorkoutInput(input, validateCorrectWorkoutSession) as unknown as CorrectWorkoutSession
-      )).session,
+      )).session),
       () => workoutWriteResultContent
     ),
     defineTool(
@@ -1248,7 +1290,7 @@ function connectorMealSchema(
             ...itemSchema.properties,
             amountKind: {
               ...(itemSchema.properties.amountKind as Readonly<Record<string, unknown>>),
-              description: "Optional compatibility hint. Use estimated for a reasonable photo/text estimate, described only for the user's own non-numeric amount wording, or quantified for an explicit number and unit. Omitted values are inferred from the supplied evidence; unknown cannot produce an accepted Coach Meal write."
+              description: "Optional compatibility hint. Use estimated for a reasonable photo/text estimate, described only for the user's own non-numeric amount wording, or quantified for an explicit number and unit. Omitted values are inferred from the supplied evidence; unknown is reserved for cases without a reasonable basis for an estimate, not merely missing exact grams."
             },
             quantity: {
               ...(itemSchema.properties.quantity as Readonly<Record<string, unknown>>),
@@ -1269,7 +1311,7 @@ function connectorMealSchema(
             nutrients: {
               type: "object",
               additionalProperties: false,
-              description: "Provide complete best-effort calories, protein, fat, and carbohydrates for every accepted Coach Meal item. Historical clients may omit or send unknown values, but the server rejects an incomplete Meal before any write.",
+              description: "For useful photo or text evidence, calculate best-effort calories, protein, fat and carbohydrates using reasonable portions and average food values; tell the user these are approximate. Unknown values are allowed only when there is no reasonable estimation basis, never as the default for missing exact grams.",
               properties: {
                 caloriesKcal: {
                   ...(nutrientSchema.properties.caloriesKcal as Readonly<Record<string, unknown>>),
@@ -1390,7 +1432,6 @@ function normalizeMealInput(
       };
     })
   };
-  assertCompleteCoachMeal(normalized);
   if (!validate(normalized)) {
     throw new ConnectorInputError("Normalized Meal input does not match the domain contract");
   }
@@ -1409,23 +1450,6 @@ function normalizeWeightInput(
     );
   }
   return normalized;
-}
-
-function assertCompleteCoachMeal(meal: Record<string, unknown>): void {
-  const items = meal.items as Array<Record<string, unknown>>;
-  for (const item of items) {
-    const nutrients = item.nutrients as Record<string, unknown>;
-    if (
-      item.amountKind === "unknown" ||
-      !["caloriesKcal", "proteinG", "fatG", "carbsG"].every(
-        (key) => typeof nutrients[key] === "number" && Number.isFinite(nutrients[key])
-      )
-    ) {
-      throw new ConnectorInputError(
-        "Coach Meal writes require amount evidence and complete estimated nutrition"
-      );
-    }
-  }
 }
 
 function normalizeRecoveryInput(
@@ -1483,6 +1507,30 @@ function inferAmountKind(item: Record<string, unknown>): string {
     return "described";
   }
   return "unknown";
+}
+
+function normalizeWorkoutV2Input(input: Record<string, unknown>, correction: boolean): Record<string, unknown> {
+  const body = { ...input };
+  delete body.id;
+  const source = isRecord(body.sourceReference) ? body.sourceReference : {};
+  const normalized = {
+    ...body, occurredAt: body.occurredAt ?? null,
+    programVersionId: body.programVersionId ?? null, programWorkoutPosition: body.programWorkoutPosition ?? null,
+    externalActivityId: body.externalActivityId ?? null, venueLabel: body.venueLabel ?? null,
+    feeling: body.feeling ?? null, note: body.note ?? null, confidence: body.confidence ?? null,
+    sourceReference: { channel: source.channel ?? "manual", externalSystem: source.externalSystem ?? null,
+      externalRecordId: source.externalRecordId ?? null, occurredAt: source.occurredAt ?? body.occurredAt ?? null },
+    exercises: (body.exercises as Array<Record<string, unknown>>).map((exercise) => ({
+      ...exercise, exerciseVersionId: exercise.exerciseVersionId ?? null, loadBasis: exercise.loadBasis ?? null,
+      feeling: exercise.feeling ?? null, note: exercise.note ?? null,
+      sets: (exercise.sets as Array<Record<string, unknown>>).map((set) => ({ ...set,
+        weightKg: set.weightKg ?? null, reps: set.reps ?? null, durationSeconds: set.durationSeconds ?? null,
+        distanceMeters: set.distanceMeters ?? null, rir: set.rir ?? null }))
+    }))
+  };
+  const validate = compile(correction ? CorrectWorkoutSessionV2Schema : CreateWorkoutSessionV2Schema);
+  if (!validate(normalized)) throw new ConnectorInputError("Reported WorkoutSession does not match the V2 contract");
+  return normalized;
 }
 
 function normalizeWorkoutInput(
@@ -1610,7 +1658,7 @@ function inputErrorResult(toolName: string): CallToolResult {
   }
   if (toolName === "record_meal") {
     return errorResult(coachFailureResultContent(
-      "Retry the Meal once silently from the photo and text already present in the conversation. Every identifiable item must have non-unknown amount evidence and numeric best-effort calories, protein, fat, and carbohydrates; estimate realistic portions with text/photo method and bounded confidence because exact measured grams are not required. Do not ask the user for values that can be reasonably estimated, do not save an incomplete Meal, and do not mention internal completeness, tools, staging, APIs, contracts, fields, or this retry. If material food or scale is genuinely unidentifiable, ask one natural clarification instead of claiming it was saved."
+      "Retry the Meal once silently from the photo and text already present in the conversation. Estimate realistic portions and numeric best-effort calories, protein, fat, and carbohydrates from useful photo/text evidence and average food values, with method and bounded confidence because exact measured grams are not required. Preserve genuinely unknown amounts or nutrients only when there is no reasonable estimation basis. Do not ask the user for values that can be reasonably estimated, and do not mention internal completeness, tools, staging, APIs, contracts, fields, or this retry. If material food or scale is genuinely unidentifiable, ask one natural clarification instead of claiming it was saved."
     ));
   }
   if (toolName === "record_recovery_observation" || toolName === "correct_recovery_observation") {
@@ -1622,7 +1670,7 @@ function inputErrorResult(toolName: string): CallToolResult {
       "fact naturally without technical details and never claim it was recorded."
     ));
   }
-  if (toolName === "record_workout_session" || toolName === "correct_workout_session") {
+  if (["record_workout_session", "correct_workout_session", "record_workout_session_v2", "correct_workout_session_v2"].includes(toolName)) {
     return errorResult(coachFailureResultContent(
       "Retry this Workout once using the performed exercises and sets already present in the conversation plus exact " +
       "exercise version references from the active TrainingProgram when needed. Preserve genuinely unknown optional set " +

@@ -33,6 +33,13 @@ describe("session-backed training progression", () => {
     expect(evaluateTrainingProgression("00000000-0000-4000-8000-000000000099", 1, prescription, [latest, previous], "2026-09-25").action).toBe("insufficient_evidence");
   });
 
+  it("does not treat in-progress sessions or unresolved substitutions as progression evidence", () => {
+    const ongoing = { ...latest, completionState: "in_progress" as const };
+    expect(evaluateTrainingProgression(versionId, 1, prescription, [ongoing], "2026-09-25").reason).toBe("no_detailed_session");
+    const substituted = { ...latest, exercises: latest.exercises.map((exercise) => ({ ...exercise, exerciseVersionId: null })) };
+    expect(evaluateTrainingProgression(versionId, 1, prescription, [substituted, previous], "2026-09-25").action).toBe("insufficient_evidence");
+  });
+
   it("adds at most one repetition per set within the current range", () => {
     expect(evaluateTrainingProgression(versionId, 1, prescription,
       [session(latest.id, 1, [6, 7, 8])], "2026-09-25")).toMatchObject({
