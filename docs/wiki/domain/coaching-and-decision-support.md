@@ -296,7 +296,14 @@ steps, or Body Battery data.
 
 The provider-neutral `syncState` still describes whether a connected-data
 attempt is fresh, stale, failed, absent, or unavailable. It explains
-availability; Coach evaluates its relevance to a current decision. The read
+availability internally; Coach evaluates its relevance to a current decision.
+Ordinary replies use known current observations and briefly name only a
+relevant missing value and its practical limit. They do not narrate tool calls,
+checks, synchronization, verification, or efforts to avoid fabrication.
+A failed read does not establish missing source data. Neither missing values
+nor read failures require a screenshot or an unsolicited next step; delivery
+details belong in answers to direct technical questions. Error results carry
+the same natural-language guidance. The read
 is local and does not depend on provider
 availability, initiate refresh, create automation, or promise an autonomous
 recheck. Its public schema excludes Person, connection, consent, source-record,

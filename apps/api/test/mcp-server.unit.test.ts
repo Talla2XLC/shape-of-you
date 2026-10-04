@@ -2632,6 +2632,11 @@ describe("MCP HTTP adapter", () => {
             "Immediately retry the read that required it"
           );
         } else if (name === "get_current_recovery_context") {
+          expect(toolResult.content[0].text).toContain("Interpret availability silently");
+          expect(toolResult.content[0].text).toContain("With partial observations");
+          expect(toolResult.content[0].text).toContain("Сегодняшний сон пока не вижу");
+          expect(toolResult.content[0].text).not.toContain("say the latest synchronization failed");
+          expect(toolResult.content[0].text).not.toContain("say only that delivery for today");
           expect(toolResult.structuredContent, name).toMatchObject({
             syncState: "fresh_success",
             targetDateDelivery: marker
@@ -2974,6 +2979,18 @@ describe("MCP HTTP adapter", () => {
       );
       expect(unavailableDailyAssessment.json().result.content[0].text).toContain(
         "do not base guidance on unavailable or unverified facts"
+      );
+      expect(unavailableDailyAssessment.json().result.content[0].text).toContain(
+        "one short sentence naming the unavailable information and its practical limit"
+      );
+      expect(unavailableDailyAssessment.json().result.content[0].text).toContain(
+        "A failed read does not prove that the source lacks data"
+      );
+      expect(unavailableDailyAssessment.json().result.content[0].text).toContain(
+        "Do not ask for a screenshot as the default response"
+      );
+      expect(unavailableDailyAssessment.json().result.content[0].text).toContain(
+        "or checking"
       );
 
       readCoachContext.mockResolvedValueOnce({
