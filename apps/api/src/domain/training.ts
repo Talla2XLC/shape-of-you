@@ -145,7 +145,7 @@ export function trainingProgramSnapshotMatches(
   });
 }
 
-export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v4" as const;
+export const TRAINING_NEXT_STEP_POLICY_VERSION = "training-next-step-v5" as const;
 
 /** Whether a previous immutable version preserves the active A/B positions. */
 export function hasCompatibleWorkoutSequence(
@@ -166,11 +166,18 @@ export function hasCompatibleWorkoutSequence(
   });
 }
 
-/** Returns the Monday that bounds the shared rolling-week next-step policy. */
+/** Returns the Monday boundary used by the legacy calendar-week policy. */
 export function trainingPolicyWeekStart(localDate: string): string {
   const date = new Date(`${localDate}T00:00:00.000Z`);
   const day = date.getUTCDay() || 7;
   date.setUTCDate(date.getUTCDate() - day + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+/** Returns the inclusive start of seven Person-local dates ending on localDate. */
+export function trainingPolicyWindowStart(localDate: string): string {
+  const date = new Date(`${localDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - 6);
   return date.toISOString().slice(0, 10);
 }
 
@@ -238,7 +245,7 @@ export function evaluateNextTrainingStep(input: {
     return { state: "schedule_unavailable", policyVersion };
   }
 
-  const weekStart = trainingPolicyWeekStart(localDate);
+  const weekStart = trainingPolicyWindowStart(localDate);
   const priorVersions = new Map(input.priorVersions?.map((item) => [item.version.id, item]) ?? []);
   const versionBelongsToProgram = (versionId: string): boolean =>
     versionId === active.id || priorVersions.get(versionId)?.programId === input.program!.id;
@@ -296,6 +303,7 @@ export function evaluateNextTrainingStep(input: {
     }));
   const classified = [...classifiedSessions, ...classifiedExternal]
     .sort((left, right) =>
+      left.localDate.localeCompare(right.localDate) ||
       left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
     );
   if (input.externalActivities.some((activity) =>
@@ -313,6 +321,7 @@ export function evaluateNextTrainingStep(input: {
       qualifiesAsLightCardio(activity, cardio)
     )
     .sort((left, right) =>
+      left.localDate.localeCompare(right.localDate) ||
       left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
     );
   const todayEvidenceIds = [
@@ -337,6 +346,7 @@ export function evaluateNextTrainingStep(input: {
       activity.durationSeconds >= 1200
     )
     .sort((left, right) =>
+      right.localDate.localeCompare(left.localDate) ||
       right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
     )[0];
   if (unclassified) {
@@ -362,15 +372,6 @@ export function evaluateNextTrainingStep(input: {
   const cardioCount = qualifyingCardio.length;
   const strengthCount = classified.length;
   const cardioTarget = cardio?.sessionsPerWeek ?? 0;
-  if (strengthCount >= cadence.strengthSessionsPerWeek && cardioCount >= cardioTarget) {
-    return {
-      state: "week_complete",
-      policyVersion,
-      localDate,
-      reason: "weekly_targets_completed",
-      evidenceIds: [...classified.map((session) => session.id), ...qualifyingCardio.map((activity) => activity.id)]
-    };
-  }
 
   if (unknownVersionEvidence || incompatibleSequenceEvidence) {
     return { state: "schedule_unavailable", policyVersion };
@@ -380,7 +381,8 @@ export function evaluateNextTrainingStep(input: {
     ...(input.priorClassified ?? []).filter((item) => item.localDate < weekStart),
     ...classified
   ].sort((left, right) =>
-    left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
+    left.localDate.localeCompare(right.localDate) ||
+      left.occurredAt.localeCompare(right.occurredAt) || left.id.localeCompare(right.id)
   );
   const lastClassified = sequenceHistory.at(-1) ?? null;
   if (lastClassified !== null && !versionIsCompatible(lastClassified.programVersionId)) {
@@ -400,8 +402,6 @@ export function evaluateNextTrainingStep(input: {
     reason = expectedLast !== null && expectedLast !== lastClassified.workoutPosition
       ? "sequence_reanchored_after_deviation"
       : "sequence_continues";
-  } else if (cardioCount >= cardioTarget && cardioTarget > 0) {
-    reason = "cardio_target_completed";
   }
   const workout = active.workouts.find((candidate) => candidate.position === nextPosition);
   if (!workout) {
@@ -411,22 +411,25 @@ export function evaluateNextTrainingStep(input: {
     state: "training_options" as const,
     policyVersion,
     localDate,
-    weeklyProgress: {
+    recentProgress: {
+      from: weekStart,
+      to: localDate,
+      targetMeaning: "guidance" as const,
       strengthCompleted: strengthCount,
       strengthTarget: cadence.strengthSessionsPerWeek,
       cardioCompleted: cardioCount,
       cardioTarget
     },
     lastStrengthLocalDate: lastClassified?.localDate ?? null,
-    lastCardioThisWeekLocalDate: qualifyingCardio.at(-1)?.localDate ?? null
+    lastCardioLocalDate: qualifyingCardio.at(-1)?.localDate ?? null
   };
-  const strengthOption = strengthCount < cadence.strengthSessionsPerWeek ? {
+  const strengthOption = {
       programVersionId: active.id,
       workoutPosition: workout.position,
       workoutName: workout.name,
       reason
-    } : null;
-  const cardioOption = cardio !== null && cardioCount < cardio.sessionsPerWeek ? {
+    };
+  const cardioOption = cardio !== null ? {
       durationSeconds: cardio.durationSeconds,
       targetAverageHeartRateMin: cardio.targetAverageHeartRateMin,
       targetAverageHeartRateMax: cardio.targetAverageHeartRateMax,
@@ -434,11 +437,5 @@ export function evaluateNextTrainingStep(input: {
       workSeconds: cardio.workSeconds,
       cooldownSeconds: cardio.cooldownSeconds
     } : null;
-  if (strengthOption !== null) {
-    return { ...base, strength: strengthOption, lightCardio: cardioOption };
-  }
-  if (cardioOption !== null) {
-    return { ...base, strength: null, lightCardio: cardioOption };
-  }
-  throw new DomainValidationError("unfinished training week has no eligible option");
+  return { ...base, strength: strengthOption, lightCardio: cardioOption };
 }

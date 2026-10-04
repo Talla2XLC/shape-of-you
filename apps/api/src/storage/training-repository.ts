@@ -100,7 +100,7 @@ import {
   type ResolvedTrainingProgramSnapshot,
   trainingProgramSnapshotMatches,
   evaluateNextTrainingStep,
-  trainingPolicyWeekStart,
+  trainingPolicyWindowStart,
   validateTrainingProgramVersion
 } from "../domain/training.js";
 import { evaluateTrainingProgression } from "../domain/training-progression.js";
@@ -1227,7 +1227,7 @@ export class TrainingRepository implements TrainingStore {
            select 1 from workout_sessions successor
             where successor.supersedes_id = session.id
          )
-       order by occurred_at desc, session.id desc
+       order by session.local_date desc, occurred_at desc, session.id desc
        limit 2
     `);
     const externalResult = await transaction.execute(sql<AnchorRow>`
@@ -1280,7 +1280,7 @@ export class TrainingRepository implements TrainingStore {
                  where successor.supersedes_id = session.id
               )
          )
-       order by current.occurred_at desc, current.id desc
+       order by current.local_date desc, current.occurred_at desc, current.id desc
        limit 2
     `);
     return [
@@ -1290,11 +1290,14 @@ export class TrainingRepository implements TrainingStore {
       .map((row) => ({
         id: row.id,
         localDate: row.local_date,
-        occurredAt: new Date(row.occurred_at!).toISOString(),
+        occurredAt: row.occurred_at === null
+          ? `${row.local_date}T23:59:59.999Z`
+          : new Date(row.occurred_at).toISOString(),
         programVersionId: row.program_version_id,
         workoutPosition: row.workout_position
       }))
       .sort((left, right) =>
+        right.localDate.localeCompare(left.localDate) ||
         right.occurredAt.localeCompare(left.occurredAt) || right.id.localeCompare(left.id)
       )
       .slice(0, 2);
@@ -1316,7 +1319,7 @@ export class TrainingRepository implements TrainingStore {
     const program = programRow
       ? await this.serializeProgram(transaction, programRow)
       : null;
-    const weekStart = trainingPolicyWeekStart(localDate);
+    const weekStart = trainingPolicyWindowStart(localDate);
     const replacement = alias(workoutSessions, "next_step_session_successor");
     const sessionRows = await transaction
       .select()

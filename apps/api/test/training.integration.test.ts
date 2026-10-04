@@ -383,7 +383,7 @@ describe("Training PostgreSQL vertical", () => {
     await record("2026-09-25", second.program.activeVersionId, 1);
     const context = await service.getTrainingContext({ localDate: "2026-09-26", historyLimit: 1 });
     expect(context.nextStep).toMatchObject({
-      state: "training_options", policyVersion: "training-next-step-v4",
+      state: "training_options", policyVersion: "training-next-step-v5",
       strength: { workoutPosition: 2, workoutName: "B" }
     });
     expect(context.recentSessions.items).toHaveLength(1);
@@ -1071,7 +1071,7 @@ describe("Training PostgreSQL vertical", () => {
     };
     const created = await service.classifyExternalActivity(command);
     expect(created).toMatchObject({ outcome: "created" });
-    await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
+    await expect(service.getTrainingContext({ localDate: "2026-10-05", historyLimit: 1 }))
       .resolves.toMatchObject({ nextStep: {
         state: "training_options", strength: { workoutPosition: 2, workoutName: "B" }
       } });
@@ -1090,7 +1090,7 @@ describe("Training PostgreSQL vertical", () => {
       classification: { kind: "program_workout", workoutPosition: 2 }
     });
     expect(corrected).toMatchObject({ outcome: "corrected" });
-    await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
+    await expect(service.getTrainingContext({ localDate: "2026-10-05", historyLimit: 1 }))
       .resolves.toMatchObject({ nextStep: {
         state: "training_options", strength: { workoutPosition: 1, workoutName: "A" }
       } });
@@ -1272,7 +1272,7 @@ describe("Training PostgreSQL vertical", () => {
       confidence: 1
     });
     expect(crossWeekSession.created).toBe(true);
-    await expect(service.getTrainingContext({ localDate: "2026-09-28", historyLimit: 1 }))
+    await expect(service.getTrainingContext({ localDate: "2026-10-05", historyLimit: 1 }))
       .resolves.toMatchObject({ nextStep: {
         state: "training_options", strength: { workoutPosition: 2, workoutName: "B",
           reason: "sequence_continues" }
@@ -1898,7 +1898,7 @@ describe("Training PostgreSQL vertical", () => {
         recentExternalActivities: [],
         trustedExternalTitles: [],
         activityRecordingMode: { title: null, lockVersion: 0, updatedAt: null },
-        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v4" }
+        nextStep: { state: "no_active_program", policyVersion: "training-next-step-v5" }
       });
     const exercise = await repository.createExercise(personA, {
       visibility: "shared",

@@ -47,7 +47,7 @@ import type { PersonContext } from "../application/person-context.js";
 import type { DataCoverageEvidence } from "../domain/data-coverage.js";
 import { PERSON_CONTEXT, TRAINING_STORE } from "../application/tokens.js";
 import { NotFoundError } from "../domain/errors.js";
-import { evaluateNextTrainingStep } from "../domain/training.js";
+import { evaluateNextTrainingStep, trainingPolicyWindowStart } from "../domain/training.js";
 import { findActivityLinkCandidates } from "../domain/automatic-activity-link.js";
 import type {
   ActivityLinkProgramContext,
@@ -367,10 +367,26 @@ export class TrainingService {
     const recentExternalActivities = externalActivities.map(
       toExternalActivitySummary
     );
-    const pendingQuestion = pendingActivityLinkQuestion(
+    let pendingQuestion = pendingActivityLinkQuestion(
       { items: [...dateSessions] }, dateActivities, dateProgramContext,
       activityRecordingMode.title, localDate
     );
+    if (localDate !== null && nextStep?.state === "needs_classification") {
+      const blockingActivity = dateActivities.find((activity) => activity.id === nextStep.externalActivityId) ??
+        (await this.store.listExternalActivitiesForLocalDateRange(
+          personId, trainingPolicyWindowStart(localDate), localDate
+        )).find((activity) => activity.id === nextStep.externalActivityId);
+      if (blockingActivity && blockingActivity.localDate !== localDate) {
+        const [blockingDateSessions, blockingDateContext] = await Promise.all([
+          this.store.listWorkoutSessionsForLocalDate(personId, blockingActivity.localDate),
+          this.store.listActivityLinkProgramContextForLocalDate(personId, blockingActivity.localDate)
+        ]);
+        pendingQuestion = pendingActivityLinkQuestion(
+          { items: [...blockingDateSessions] }, [blockingActivity], blockingDateContext,
+          activityRecordingMode.title, blockingActivity.localDate
+        ) ?? pendingQuestion;
+      }
+    }
     const resolvedNextStep = nextStep ?? evaluateNextTrainingStep({
       program,
       localDate: null,

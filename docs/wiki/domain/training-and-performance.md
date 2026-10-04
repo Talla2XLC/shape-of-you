@@ -61,7 +61,9 @@ automatically.
 - Initial classification uses the expected Person-local date and recomputes the
   same exact `needs_classification` projection under the Person lock. It writes
   only when the expected current activity is still the date-scoped pending
-  target for the expected active program/version/lock. Stale authority, a
+  target for the expected active program/version/lock. The expected date belongs
+  to the context displaying the question, which can differ from the event date.
+  Stale authority, a
   different pending activity, a future or old-week activity, or a newly created
   session fails closed without a partial write.
 - A separate Person-scoped association identifies one external activity as
@@ -75,6 +77,10 @@ automatically.
   recording mode are revocable Person-owned authority, never an implicit
   program edit or activity classification. Training asks about the exact pair
   when evidence is ambiguous; a direct answer creates an explicit association.
+  A historical activity blocking today's next step exposes its exact pending
+  pair in today's context, independently of the recent-history display limit.
+  The lookup stays within the policy week and requires explicit confirmation;
+  Coach resolves the pair before classifying the same activity separately.
   Current corrections and late imports recheck automatic links. One linked
   pair counts as one training occurrence; external load remains external,
   while performed sets remain in the session. A linked session takes
@@ -83,30 +89,24 @@ automatically.
   connected-data erasure removes association and classification without
   mutating the session. See the
   [recording-context ADR](../../adr/20260925-link-garmin-strength-with-recording-context.md).
-- `NextTrainingStep` is a deterministic read projection over the active cadence
-  and current Training facts. Weekly strength/cardio targets reset each
-  Person-local Monday, while A/B continues from the last current, explicitly
-  classified event of the same program, even after a missed week. Missed days
-  do not move its sequence; explicit repeats or reordering become the next
-  anchor. The current projection returns eligible exact strength and typed
-  light-cardio options with weekly progress; it does not force cardio after a
-  strength session or carry a cardio debt through missed days. A qualifying
-  external cardio activity may satisfy the current weekly target from typed
-  duration, distance, and heart-rate facts. External
-  strength without an exact program-workout identity cannot advance A/B and
-  produces a bounded classification need instead of a guess, including when it
-  precedes a later classified strength session in the same local week. Strength
-  occurrences from earlier versions of the same program still count toward the
-  weekly target. An earlier A/B position anchors the active sequence only when
-  cadence and ordered exercise identities match; incompatible or unavailable
-  version evidence cannot produce an exact next A/B. Legacy cadence, missing
-  local date, current-day completion, and completed weekly targets are explicit
-  states. Current projections emit `training-next-step-v4`; historical v1-v3
-  snapshots remain readable. A classified external strength activity can
-  advance only cadence and never becomes
-  exercise, set, load, personal-record, or progression evidence.
-  [Safe training options ADR](../../adr/20260928-let-coach-choose-safe-training-options.md)
-  defines the choice boundary with Coach.
+- `NextTrainingStep` is a deterministic read projection over active cadence
+  and current Training facts. Current `training-next-step-v5` counts completed
+  strength and qualifying cardio over seven inclusive Person-local dates.
+  Frequency targets are guidance and do not close the exact next strength or
+  programmed cardio option. Coach chooses the activity from current Recovery,
+  recent load, user intent, and training gaps; alternation is a contextual
+  preference. `complete_today` and identity/version uncertainty still guard
+  exact options. A/B continues from the last compatible classified event even
+  outside the window; missed days never skip positions. Explicit repeats or
+  reordering become the anchor. Local date precedes instant when ordering
+  mixed date-only and timed events. Same-program earlier versions contribute
+  to frequency but anchor A/B only with compatible cadence and exercise
+  identities. Linked summaries and sessions count once. Unclassified
+  substantial strength inside the window produces one bounded question,
+  independent of display history limits. External strength advances only
+  cadence, never exercise, set, load, personal-record, or progression evidence.
+  Legacy v1-v4 snapshots retain their original calendar-week meaning. See the
+  [rolling guidance ADR](../../adr/20261004-use-rolling-training-frequency-as-coach-guidance.md).
 - Profile coverage unions current completed WorkoutSession and external activity dates.
   One Person-local date is counted once regardless of source, and a date without
   a workout is not described as a missed training day.

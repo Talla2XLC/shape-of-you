@@ -53,47 +53,49 @@ It also exposes Person-confirmed external titles for the exact active program
 version, separately from the immutable workout snapshot.
 
 New immutable versions may carry a closed `rolling_weekly` cadence: strength
-sessions per local week, an ordered cycle of program-workout positions, and an
+frequency targets, an ordered cycle of program-workout positions, and an
 optional light-cardio target with duration, average-heart-rate range, and
 warmup/work/cooldown phases. Cadence has no weekdays. Existing versions without
 it remain readable and return `schedule_unavailable`; the API never parses
 `note` as policy. Progression-created successor versions preserve cadence.
 
-Current `NextTrainingStep` returns `training_options` with an exact next
-strength workout when its weekly target remains open, typed light cardio when
-its weekly target remains open, or both. It includes weekly progress and the
-last classified strength date; the options do not prescribe a fixed weekday
-or mandatory cardio between strength sessions. Other states include
-`complete_today`, `week_complete`, `needs_classification`, or an explicit
-absence/unavailable state. Sequence advances only from classified current
-occurrences, so missed days do not skip workouts. Same-program strength from a
-prior version contributes to the weekly count; its A/B position anchors the
-current sequence only when cadence and ordered exercise identities match.
-Incompatible version evidence leaves the exact schedule unavailable. An older
-unclassified substantial strength activity can still change the weekly quota
-and triggers a question before an exact A/B recommendation. Explicit repeats
-or reordering anchor the next step and expose a deviation reason. A distance,
-duration, and heart-rate-qualified external cardio activity may satisfy cardio
-without a fabricated detailed session. An external activity without A/B identity never
-advances the strength sequence and may trigger one short classification
-question.
+Current `NextTrainingStep` emits `training-next-step-v5`. Its `training_options`
+contains the exact next strength workout and the programmed light-cardio
+option. `recentProgress` counts completed occurrences from the requested
+Person-local date minus six days through that date, inclusive, and declares
+`targetMeaning: guidance`. Targets do not hide options or create a debt or
+`week_complete`. `lastStrengthLocalDate` retains the compatible sequence anchor
+even outside the window; `lastCardioLocalDate` identifies the last qualifying
+cardio inside the window. Coach chooses strength, cardio, or rest using current
+Recovery, recent load, user intent, and the actual training gap. Alternation is
+a contextual preference. A request to explain the choice does not itself
+reverse it.
 
-The current evaluator emits `training-next-step-v4`. Its
-`needs_classification` result identifies one exact current external activity,
-the active program-workout options, and one short API-generated question. The
-date-scoped target is computed from one shared policy through the requested
-Person-local date and is independent of the recent-history display limit.
-Historical Daily Assessment snapshots containing `training-next-step-v1`,
-`training-next-step-v2`, or `training-next-step-v3` remain readable. The
-[safe training options ADR](../../adr/20260928-let-coach-choose-safe-training-options.md)
-defines why Training returns options instead of fixing today's training type.
+`complete_today`, `needs_classification`, and explicit absence/unavailable
+states remain. Missed days do not skip A/B. Earlier versions of the same
+program contribute to frequency; an A/B anchor is usable only when cadence
+and ordered exercise identities remain compatible. Events are ordered by
+Person-local date before instant so mixed date-only and timed records near
+midnight retain the correct sequence. An unclassified substantial strength
+activity in the window triggers one exact classification question independent
+of the recent-history display limit. Explicit repeats or reordering reanchor
+the sequence. Qualifying external cardio counts without a fabricated detailed
+session; imported strength without A/B identity never advances the sequence.
+Linked summaries and sessions count once.
+
+Historical v1-v4 snapshots remain readable with their original calendar-week
+meaning. The [rolling guidance ADR](../../adr/20261004-use-rolling-training-frequency-as-coach-guidance.md)
+defines the current window and Coach choice boundary.
 
 The narrow MCP `classify_external_activity` command uses the existing
 `workout:write` scope and stores explicit user authority as a Training-owned
 append-only classification. It binds the exact current external activity,
 requested local date, active program/version/lock, current classification
 expectation, and either one `program_workout` position or
-`not_program_workout`. Under the Person lock, an initial write recomputes the
+`not_program_workout`. `expectedLocalDate` is `nextStep.localDate` from the
+context that displayed the pending question, not the historical activity date
+mentioned in the question. Subsequent reads retain that original context date.
+Under the Person lock, an initial write recomputes the
 same date-scoped `needs_classification` policy and succeeds only when the exact
 activity is still pending. Identical retries are `unchanged`; corrections
 append a successor; stale or no-longer-pending authority writes nothing.
@@ -130,10 +132,15 @@ The MCP
 one title under `workout:write`; it does not classify an individual activity.
 `set_activity_recording_mode` confirms or revokes the generic mode under an
 optimistic lock. `get_training_context` returns a date-scoped
-`pendingActivityLinkQuestion` when multiple current pairs remain plausible;
+`pendingActivityLinkQuestion` when multiple current pairs remain plausible or
+a date-only detailed session needs explicit confirmation. If today's next step
+is blocked by a historical activity, its exact pair is also exposed in today's
+context using the activity's date and the current policy-week bound;
 it uses the exact immutable program version even for historical sessions and
 does not depend on the bounded display history. A direct Person answer to
 that question authorizes `confirm_workout_activity_link` for the exact pair.
+Coach resolves that pair before a separate A/B classification question for the
+same activity, then rereads the original requested date.
 Title trust is scoped to one program version. Late imports and corrections
 recheck automatic associations; explicit links retain priority. Deleting
 connected evidence removes its association without mutating the immutable

@@ -177,7 +177,7 @@ describe("Training context", () => {
         garminAttributed: true,
         classification: null
       }],
-      nextStep: { state: "no_active_program", policyVersion: "training-next-step-v4" }
+      nextStep: { state: "no_active_program", policyVersion: "training-next-step-v5" }
     });
     expect(findActiveProgram).toHaveBeenCalledWith(personId);
     expect(listWorkoutSessions).toHaveBeenCalledWith(personId, 3);
@@ -258,8 +258,34 @@ describe("next training step", () => {
       program: activeProgram, localDate: "2026-09-28", sessions: [], externalActivities: []
     });
     expect(validate(options)).toBe(true);
-    if (options.state === "training_options") {
+    if (options.state === "training_options" && options.policyVersion === "training-next-step-v5") {
       expect(validate({ ...options, strength: null, lightCardio: null })).toBe(false);
+      const { recentProgress, lastCardioLocalDate, ...shared } = options;
+      const { strengthCompleted, strengthTarget, cardioCompleted, cardioTarget } = recentProgress;
+      const legacyProgress = { strengthCompleted, strengthTarget, cardioCompleted, cardioTarget };
+      expect(validate({ ...shared, policyVersion: "training-next-step-v4",
+        weeklyProgress: legacyProgress, lastCardioThisWeekLocalDate: lastCardioLocalDate })).toBe(true);
+      expect(validate({ state: "week_complete", policyVersion: "training-next-step-v5",
+        localDate: "2026-09-28", reason: "weekly_targets_completed", evidenceIds: [] })).toBe(false);
+    }
+  });
+
+  it("counts seven inclusive local dates across Monday without closing strength or cardio options", () => {
+    const sessions = ["2026-09-27", "2026-09-28", "2026-09-30", "2026-10-02", "2026-10-03"].map((date, index) => ({
+      id: `session-${index}`, localDate: date, occurredAt: null, completionState: "completed",
+      programVersionId: activeProgram.activeVersionId, programWorkoutPosition: index % 2 + 1,
+      externalActivityId: null
+    }) as WorkoutSession);
+    const externalActivities = ["2026-09-27", "2026-09-28", "2026-10-01", "2026-10-03"].map((date, index) => ({
+      ...cardio, id: `cardio-${index}`, localDate: date, occurredAt: `${date}T12:00:00.000Z`
+    }));
+    for (const [localDate, from, strengthCompleted, cardioCompleted] of [
+      ["2026-10-04", "2026-09-28", 4, 3], ["2026-10-05", "2026-09-29", 3, 2]
+    ] as const) {
+      expect(evaluateNextTrainingStep({ program: activeProgram, localDate, sessions, externalActivities }))
+        .toMatchObject({ state: "training_options", policyVersion: "training-next-step-v5",
+          recentProgress: { from, to: localDate, targetMeaning: "guidance", strengthCompleted, cardioCompleted },
+          strength: { workoutPosition: 2 }, lightCardio: { durationSeconds: 2400 } });
     }
   });
 
@@ -314,7 +340,7 @@ describe("next training step", () => {
       externalActivities: [classifiedActivity]
     })).toMatchObject({
       state: "training_options",
-      policyVersion: "training-next-step-v4",
+      policyVersion: "training-next-step-v5",
       strength: { workoutPosition: 2, workoutName: "B" },
       lightCardio: null
     });
@@ -391,14 +417,12 @@ describe("next training step", () => {
     expect(evaluateNextTrainingStep({
       program: noCardio, localDate: "2026-09-26", sessions: [previous, current],
       externalActivities: [], priorVersions
-    })).toMatchObject({ state: "training_options", strength: { workoutPosition: 2 }, policyVersion: "training-next-step-v4" });
+    })).toMatchObject({ state: "training_options", strength: { workoutPosition: 2 }, policyVersion: "training-next-step-v5" });
     expect(evaluateNextTrainingStep({
       program: noCardio, localDate: "2026-09-26",
       sessions: [session("00000000-0000-4000-8000-000000000223", oldVersion.id, "2026-09-21", 1), previous, current],
       externalActivities: [], priorVersions
-    })).toMatchObject({ state: "week_complete", evidenceIds: [
-      "00000000-0000-4000-8000-000000000223", previous.id, current.id
-    ] });
+    })).toMatchObject({ state: "training_options", recentProgress: { strengthCompleted: 3, strengthTarget: 3 }, strength: { workoutPosition: 2 } });
   });
 
   it("does not infer A/B across incompatible versions or before classifying an earlier strength activity", () => {
@@ -448,7 +472,7 @@ describe("next training step", () => {
     })).toMatchObject({ state: "training_options", strength: { workoutPosition: 1 } });
   });
 
-  it("continues A/B across Monday and a missed week without carrying over weekly quota", () => {
+  it("continues A/B after a pause without turning expired frequency counts into a reset", () => {
     const noCardio = {
       ...activeProgram,
       activeVersion: {
@@ -462,42 +486,42 @@ describe("next training step", () => {
       { id: "00000000-0000-4000-8000-000000000232", localDate: "2026-09-25",
         occurredAt: "2026-09-25T06:00:00.000Z", programVersionId: noCardio.activeVersionId!, workoutPosition: 1 }
     ];
-    for (const localDate of ["2026-09-28", "2026-10-12"]) {
+    for (const localDate of ["2026-10-05", "2026-10-12"]) {
       expect(evaluateNextTrainingStep({
         program: noCardio, localDate, sessions: [], externalActivities: [], priorClassified
       })).toMatchObject({
         state: "training_options", strength: { workoutPosition: 2, workoutName: "B", reason: "sequence_continues" },
-        weeklyProgress: { strengthCompleted: 0, cardioCompleted: 0 }
+        recentProgress: { strengthCompleted: 0, cardioCompleted: 0 }
       });
     }
     expect(evaluateNextTrainingStep({
-      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      program: noCardio, localDate: "2026-10-05", sessions: [], externalActivities: [],
       priorClassified: [{ ...priorClassified[1]!, workoutPosition: 2 }]
     })).toMatchObject({ state: "training_options", strength: { workoutPosition: 1 } });
   });
 
-  it("offers strength B and light cardio after Friday A across a week boundary or missed days", () => {
+  it("offers strength B and light cardio after a pause without forgetting the last A", () => {
     const fridayA = {
       id: "00000000-0000-4000-8000-000000000236",
       localDate: "2026-09-25", occurredAt: "2026-09-25T06:00:00.000Z",
       programVersionId: activeProgram.activeVersionId!, workoutPosition: 1
     };
-    for (const localDate of ["2026-09-28", "2026-10-12"]) {
+    for (const localDate of ["2026-10-05", "2026-10-12"]) {
       const step = evaluateNextTrainingStep({
         program: activeProgram, localDate, sessions: [], externalActivities: [],
         priorClassified: [fridayA]
       });
       expect(step).toMatchObject({
-        state: "training_options", policyVersion: "training-next-step-v4",
+        state: "training_options", policyVersion: "training-next-step-v5",
         lastStrengthLocalDate: "2026-09-25",
-        weeklyProgress: { strengthCompleted: 0, strengthTarget: 3, cardioCompleted: 0, cardioTarget: 2 },
+        recentProgress: { strengthCompleted: 0, strengthTarget: 3, cardioCompleted: 0, cardioTarget: 2 },
         strength: { workoutPosition: 2, workoutName: "B" },
         lightCardio: { durationSeconds: 2400 }
       });
     }
   });
 
-  it("removes cardio after two qualifying sessions in the new week", () => {
+  it("retains cardio when its rolling frequency target has been reached", () => {
     const activities = ["2026-09-28", "2026-09-29"].map((localDate, index) => ({
       ...cardio,
       id: `00000000-0000-4000-8000-00000000024${index}`,
@@ -508,13 +532,13 @@ describe("next training step", () => {
       program: activeProgram, localDate: "2026-09-30", sessions: [],
       externalActivities: activities,
       priorClassified: [{ id: "00000000-0000-4000-8000-000000000242",
-        localDate: "2026-09-25", occurredAt: "2026-09-25T06:00:00.000Z",
+        localDate: "2026-09-23", occurredAt: "2026-09-23T06:00:00.000Z",
         programVersionId: activeProgram.activeVersionId!, workoutPosition: 1 }]
     })).toMatchObject({
       state: "training_options",
-      weeklyProgress: { cardioCompleted: 2, cardioTarget: 2 },
+      recentProgress: { cardioCompleted: 2, cardioTarget: 2 },
       strength: { workoutPosition: 2 },
-      lightCardio: null
+      lightCardio: { durationSeconds: 2400 }
     });
   });
 
@@ -550,15 +574,15 @@ describe("next training step", () => {
       }))
     } as TrainingProgramVersion;
     expect(evaluateNextTrainingStep({
-      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      program: noCardio, localDate: "2026-10-05", sessions: [], externalActivities: [],
       priorClassified: [anchor], priorVersions: [{ programId: noCardio.id, version: compatibleVersion }]
     })).toMatchObject({ state: "training_options", strength: { workoutPosition: 2 } });
     expect(evaluateNextTrainingStep({
-      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      program: noCardio, localDate: "2026-10-05", sessions: [], externalActivities: [],
       priorClassified: [anchor], priorVersions: [{ programId: noCardio.id, version: oldVersion }]
     })).toMatchObject({ state: "schedule_unavailable" });
     expect(evaluateNextTrainingStep({
-      program: noCardio, localDate: "2026-09-28", sessions: [], externalActivities: [],
+      program: noCardio, localDate: "2026-10-05", sessions: [], externalActivities: [],
       priorClassified: [anchor]
     })).toMatchObject({ state: "schedule_unavailable" });
   });
@@ -583,7 +607,7 @@ describe("next training step", () => {
     expect(result.state).toBe("needs_classification");
     if (
       result.state === "needs_classification" &&
-      result.policyVersion === "training-next-step-v4"
+      result.policyVersion === "training-next-step-v5"
     ) {
       expect(result.question.length).toBeLessThanOrEqual(256);
       expect(result.options).toHaveLength(2);
@@ -687,6 +711,6 @@ describe("next training step", () => {
       localDate: "2026-09-22",
       sessions: [],
       externalActivities: []
-    })).toEqual({ state: "schedule_unavailable", policyVersion: "training-next-step-v4" });
+    })).toEqual({ state: "schedule_unavailable", policyVersion: "training-next-step-v5" });
   });
 });

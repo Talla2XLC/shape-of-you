@@ -865,7 +865,11 @@ export const ClassifyExternalActivitySchema = {
   }
 } as const;
 
-/** Optimistic command classifying one exact current imported activity. */
+/**
+ * Optimistic command classifying one exact current imported activity.
+ * expectedLocalDate pins the next-step context that displayed the pending
+ * activity, which may differ from the activity's historical local date.
+ */
 export type ClassifyExternalActivity = FromSchema<
   typeof ClassifyExternalActivitySchema
 >;
@@ -1432,7 +1436,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion"],
       properties: {
         state: { enum: ["no_active_program", "local_date_required", "schedule_unavailable"] },
-        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3", "training-next-step-v4"] }
+        policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3", "training-next-step-v4", "training-next-step-v5"] }
       }
     },
     {
@@ -1453,7 +1457,7 @@ export const NextTrainingStepSchema = {
       required: ["state", "policyVersion", "localDate", "externalActivityId", "options", "question"],
       properties: {
         state: { const: "needs_classification" },
-        policyVersion: { enum: ["training-next-step-v2", "training-next-step-v3", "training-next-step-v4"] },
+        policyVersion: { enum: ["training-next-step-v2", "training-next-step-v3", "training-next-step-v4", "training-next-step-v5"] },
         localDate: { type: "string", format: "date" },
         externalActivityId: uuidSchema,
         options: {
@@ -1482,6 +1486,18 @@ export const NextTrainingStepSchema = {
         policyVersion: { enum: ["training-next-step-v1", "training-next-step-v2", "training-next-step-v3", "training-next-step-v4"] },
         localDate: { type: "string", format: "date" },
         reason: { enum: ["training_already_completed_today", "weekly_targets_completed"] },
+        evidenceIds: { type: "array", items: uuidSchema, uniqueItems: true }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "reason", "evidenceIds"],
+      properties: {
+        state: { const: "complete_today" },
+        policyVersion: { const: "training-next-step-v5" },
+        localDate: { type: "string", format: "date" },
+        reason: { const: "training_already_completed_today" },
         evidenceIds: { type: "array", items: uuidSchema, uniqueItems: true }
       }
     },
@@ -1548,6 +1564,64 @@ export const NextTrainingStepSchema = {
         },
         lastStrengthLocalDate: { anyOf: [{ type: "string", format: "date" }, { type: "null" }] },
         lastCardioThisWeekLocalDate: { anyOf: [{ type: "string", format: "date" }, { type: "null" }] },
+        strength: {
+          anyOf: [{
+            type: "object",
+            additionalProperties: false,
+            required: ["programVersionId", "workoutPosition", "workoutName", "reason"],
+            properties: {
+              programVersionId: uuidSchema,
+              workoutPosition: { type: "integer", minimum: 1, maximum: 100 },
+              workoutName: { type: "string", minLength: 1, maxLength: 256 },
+              reason: { enum: ["sequence_start", "sequence_continues", "after_cardio", "sequence_reanchored_after_deviation", "cardio_target_completed"] }
+            }
+          }, { type: "null" }]
+        },
+        lightCardio: {
+          anyOf: [{
+            type: "object",
+            additionalProperties: false,
+            required: ["durationSeconds", "targetAverageHeartRateMin", "targetAverageHeartRateMax", "warmupSeconds", "workSeconds", "cooldownSeconds"],
+            properties: {
+              durationSeconds: { type: "integer" },
+              targetAverageHeartRateMin: { type: "integer" },
+              targetAverageHeartRateMax: { type: "integer" },
+              warmupSeconds: { type: "integer" },
+              workSeconds: { type: "integer" },
+              cooldownSeconds: { type: "integer" }
+            }
+          }, { type: "null" }]
+        }
+      }
+    },
+    {
+      type: "object",
+      additionalProperties: false,
+      required: ["state", "policyVersion", "localDate", "recentProgress", "lastStrengthLocalDate", "lastCardioLocalDate", "strength", "lightCardio"],
+      anyOf: [
+        { properties: { strength: { type: "object" } } },
+        { properties: { lightCardio: { type: "object" } } }
+      ],
+      properties: {
+        state: { const: "training_options" },
+        policyVersion: { const: "training-next-step-v5" },
+        localDate: { type: "string", format: "date" },
+        recentProgress: {
+          type: "object",
+          additionalProperties: false,
+          required: ["from", "to", "targetMeaning", "strengthCompleted", "strengthTarget", "cardioCompleted", "cardioTarget"],
+          properties: {
+            from: { type: "string", format: "date" },
+            to: { type: "string", format: "date" },
+            targetMeaning: { const: "guidance" },
+            strengthCompleted: { type: "integer", minimum: 0 },
+            strengthTarget: { type: "integer", minimum: 1 },
+            cardioCompleted: { type: "integer", minimum: 0 },
+            cardioTarget: { type: "integer", minimum: 0 }
+          }
+        },
+        lastStrengthLocalDate: { anyOf: [{ type: "string", format: "date" }, { type: "null" }] },
+        lastCardioLocalDate: { anyOf: [{ type: "string", format: "date" }, { type: "null" }] },
         strength: {
           anyOf: [{
             type: "object",

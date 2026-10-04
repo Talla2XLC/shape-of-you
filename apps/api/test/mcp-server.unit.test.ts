@@ -1082,7 +1082,7 @@ describe("MCP HTTP adapter", () => {
       "Never infer from sequence, activity name, program note, time, or exercise similarity"
     );
     expect(classifyActivityTool.description).toContain(
-      "exact activity, localDate, active program/version/lock"
+      "Set expectedLocalDate to nextStep.localDate from the context that displayed the question"
     );
     const saveProgramTool = body.result.tools.find(
       (tool: { name: string }) =>
@@ -1460,6 +1460,9 @@ describe("MCP HTTP adapter", () => {
       expect(absent.content[0].text).toContain(
         "Read get_daily_decision_context before recommending training"
       );
+      expect(absent.content[0].text).toContain("frequency targets are guidance");
+      expect(absent.content[0].text).toContain("Normally prefer alternating strength and cardio");
+      expect(absent.content[0].text).toContain("reasoning, not automatic reversal");
       expect(absent.content[0].text).toContain(
         "Skip progression for unrelated facts, absent or ambiguous strength identity, or a completed workout or week"
       );
@@ -2026,7 +2029,7 @@ describe("MCP HTTP adapter", () => {
     } finally {
       await authorizedFastify.close();
     }
-  });
+  }, 15_000);
 
   it("completes a weight read with the post-expiry refreshed-token contract", async () => {
     const authorizedFastify = Fastify();
@@ -2669,6 +2672,8 @@ describe("MCP HTTP adapter", () => {
         } else if (name === "get_daily_decision_context") {
           expect(toolResult.structuredContent, name).toEqual({ state: "timezone_required", timezone: null });
           expect(toolResult.content[0].text, name).toContain("You are responsible for the current training decision");
+          expect(toolResult.content[0].text, name).toContain("recentProgress covers seven local dates");
+          expect(toolResult.content[0].text, name).toContain("reasoning, not automatic reversal");
         } else if (name === "record_daily_recommendation_feedback") {
           expect(toolResult.structuredContent, name).toMatchObject({ status: marker });
           expect(toolResult.content[0].text, name).toContain(

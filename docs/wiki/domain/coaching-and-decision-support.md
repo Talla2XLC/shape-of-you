@@ -429,13 +429,19 @@ reads Training context and then Daily Decision Context in the same turn. Coach
 chooses from the verified options using the user's intent and current Recovery
 evidence. A stale or
 no-longer-pending result requires fresh Training context and permits at most
-its new single question. Coach adds no training after `complete_today` or
-`week_complete`. Explicit illness or injury concern is supplied as a current
-fact for Coach to weigh. Unfilled weekly cardio is not an immediate obligation.
-Legacy programs without typed cadence keep the explicit schedule-unavailable
-limitation. Historical v1-v3 snapshots remain readable while current
-evaluation emits `training-next-step-v4`. See the
-[safe training options ADR](../../adr/20260928-let-coach-choose-safe-training-options.md).
+its new single question. Coach adds no program training after `complete_today`.
+Current `training-next-step-v5` supplies seven inclusive Person-local dates of
+frequency guidance; reaching a target does not remove strength/cardio options
+or create a debt. Coach chooses strength, light cardio, or rest using current
+Recovery, recent training, preferences, and the actual gap. Normally alternating
+strength and cardio is a contextual preference, not a rigid schedule. A question
+about why cardio was not chosen asks for an explanation; a changed recommendation
+requires new facts or an explicitly explained reassessment. A/B identity remains
+Training-owned and survives pauses. Explicit illness or injury concern remains
+current evidence for Coach to weigh. Legacy programs without typed cadence keep
+the schedule-unavailable limitation; historical v1-v4 snapshots preserve their
+original semantics, including `week_complete`. See the
+[rolling guidance ADR](../../adr/20261004-use-rolling-training-frequency-as-coach-guidance.md).
 
 ## Evidence
 
