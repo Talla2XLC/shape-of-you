@@ -685,7 +685,7 @@ describe("MCP HTTP adapter", () => {
     });
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
-    )?.description).toContain("follow with typed read-back");
+    )?.description).toContain("Read back with list_daily_context_notes");
     const detailsTool = body.result.tools.find((tool: { name: string }) => tool.name === "get_external_activity_details");
     expect(detailsTool).toMatchObject({ annotations: { readOnlyHint: true }, inputSchema: { additionalProperties: false, required: ["activityId"] } });
     expect(detailsTool.description).toContain("never reconstruct a timeline from workout averages");
@@ -933,6 +933,13 @@ describe("MCP HTTP adapter", () => {
     expect(qualitativeDetailSchema.properties.signal.enum).toContain("fatigued");
     expect(qualitativeDetailSchema.properties).not.toHaveProperty("energy");
     expect(recordRecoveryTool?.description).toContain("do not ask for a routine check-in");
+    expect(recordRecoveryTool?.description).toContain("never a seven-day average");
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("a report of resleep does not prove");
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("Do not flip from rest to strength solely because HRV changed");
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("Never retry a safety-blocked fact through a different tool");
+    const contextNoteTool = body.result.tools.find((tool: { name: string }) => tool.name === "record_daily_context_note");
+    expect(contextNoteTool?.description).toContain("labelled seven-day HRV");
+    expect(contextNoteTool?.description).toContain("bypass a safety-blocked write");
     const sleepDetailSchema = recoveryDetailSchemas.find((detail: {
       properties: { type: { const: string } };
     }) => detail.properties.type.const === "sleep");

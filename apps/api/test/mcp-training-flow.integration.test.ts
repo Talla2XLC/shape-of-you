@@ -5,6 +5,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { activityFit } from "./fixtures/activity-fit.js";
 import { parseFitActivityDetails } from "../src/integrations/intervals-icu/fit-activity-details.js";
 import { IntegrationRepository } from "../src/storage/integration-repository.js";
+import { RecoveryService } from "../src/recovery/recovery.service.js";
+import { DailyContextNoteService } from "../src/daily-context-notes/daily-context-note.service.js";
+import { DailyContextNoteRepository } from "../src/storage/daily-context-note-repository.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 import { IntegrationService } from "../src/integrations/integration.service.js";
 import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
@@ -61,8 +64,8 @@ async function fixture() {
       weights: { list: unavailable, create: unavailable, correct: unavailable },
       bodyMeasurements: { list: unavailable, create: unavailable, correct: unavailable },
       nutrition: { listMeals: unavailable, createMeal: unavailable, correctMeal: unavailable },
-      recovery: { listObservations: unavailable, createObservation: unavailable, correctObservation: unavailable },
-      dailyContextNotes: { list: unavailable, create: unavailable, correct: unavailable },
+      recovery: new RecoveryService(new RecoveryRepository(database), context),
+      dailyContextNotes: new DailyContextNoteService(new DailyContextNoteRepository(database), context),
       dailyProjection: { projection: unavailable },
       currentRecoveryContext: { read: unavailable }
     } satisfies McpRouteOptions["services"]
@@ -292,6 +295,49 @@ describe("MCP training conversation flow with PostgreSQL", () => {
       expect(await call("classify_external_activity", command)).toMatchObject({ outcome: "stale" });
       const after = await call("get_training_context_v2", { localDate: "2026-10-04", historyLimit: 1 });
       expect(after.nextStep).toMatchObject({ state: "training_options", strength: { workoutPosition: 2 } });
+    } finally { await fastify.close(); }
+  });
+});
+
+
+describe("MCP HRV screenshot and resleep capture", () => {
+  it("preserves account nightly values, manual nightly values and labelled context without inventing full sleep", async () => {
+    const { fastify, call, personId, recoveryConnectionId, consentId } = await fixture();
+    try {
+      const localDate = "2026-10-05", timezone = "Europe/Belgrade";
+      const repository = new RecoveryRepository(database);
+      await database.pool.query("insert into recovery_consent_kinds (consent_id, kind) values ($1, 'metric'), ($1, 'sleep')", [consentId]);
+      const base = { localDate, timezone, observedFrom: null, observedUntil: null,
+        temporalPrecision: "local_date" as const, quality: "reliable" as const,
+        connectionId: recoveryConnectionId, consentId,
+        sourceReference: { channel: "account" as const, externalSystem: "intervals_icu_wellness",
+          externalRecordId: "synthetic-night", occurredAt: null } };
+      await repository.createObservation(personId, { ...base, kind: "metric", dedupeKey: "account-hrv",
+        detail: { type: "metric", metric: "hrv_rmssd", value: 41, unit: "ms" } });
+      await repository.createObservation(personId, { ...base, kind: "sleep", dedupeKey: "account-sleep",
+        detail: { type: "sleep", totalSleepMinutes: 285, sleepQuality: null } });
+      const nightly = { localDate, timezone, kind: "metric", dedupeKey: "photo-nightly",
+        detail: { type: "metric", metric: "hrv_rmssd", value: 51, unit: "ms" } };
+      const saved = await call("record_recovery_observation", nightly);
+      expect((await call("record_recovery_observation", nightly)).id).toBe(saved.id);
+      const note = { localDate, timezone, dedupeKey: "photo-context", contextKind: "general",
+        text: "Garmin: HRV за 7 дней 53 мс, baseline 44–66 мс, balanced. Досып после пробуждения; полная длительность сна неизвестна.",
+        sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null } };
+      const savedNote = await call("record_daily_context_note", note);
+      expect((await call("record_daily_context_note", note)).id).toBe(savedNote.id);
+      const facts = (await call("list_recovery_observations", { localDate })).items;
+      expect(facts).toHaveLength(3);
+      expect(facts.filter((fact: { detail: { type: string } }) => fact.detail.type === "metric")
+        .map((fact: { detail: { value: number }; sourceReference: { channel: string } }) =>
+          [fact.detail.value, fact.sourceReference.channel])).toEqual(expect.arrayContaining([[41, "account"], [51, "manual"]]));
+      expect(facts.find((fact: { detail: { type: string } }) => fact.detail.type === "sleep").detail.totalSleepMinutes).toBe(285);
+      expect(saved.connectionId).toBeNull();
+      expect(saved.consentId).toBeNull();
+      expect(saved.localDate).toBe(localDate);
+      const notes = (await call("list_daily_context_notes", { localDate })).items;
+      expect(notes).toHaveLength(1);
+      expect(notes[0].text).toBe(note.text);
+      expect(notes[0].sourceReference.channel).toBe("manual");
     } finally { await fastify.close(); }
   });
 });

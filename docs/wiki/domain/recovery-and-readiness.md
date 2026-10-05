@@ -56,6 +56,24 @@ unambiguous facts, and date-level read-back verifies the resulting set. A
 screenshot is manual provenance; it never fabricates a device connection or
 consent.
 
+Coach distinguishes explicitly labelled last-night HRV from seven-day averages,
+baseline ranges and wearable status. An explicitly labelled last-night value
+supplied in a user screenshot or direct report is a manual `hrv_rmssd`
+observation; imported account values retain account provenance. Unsupported
+aggregation and status semantics remain labelled
+`general` DailyContextNote text. Resleep without a known full duration is also
+context, never invented sleep minutes or an overwrite of account-imported sleep.
+A note is not a workaround for a safety-blocked write.
+
+Before revised training advice, Coach reads the date-level observations and
+`list_daily_context_notes`, then fresh current Recovery and Daily Decision
+contexts. Note text is obtained from the notes read, not from Daily Decision
+Context. Manual evidence remains distinct from account imports; resleep alone
+does not prove the provider has updated the full night, and an HRV change alone
+does not justify reversing the recommendation. These are published Coach
+instructions; deterministic tests verify persistence and delivery of the policy,
+while actual model behavior requires a separate conversation check.
+
 Device observations require active matching consent; revocation stops future
 collection but is not erasure. Corrections replace full observations.
 
