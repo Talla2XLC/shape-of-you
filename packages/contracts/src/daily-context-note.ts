@@ -18,17 +18,31 @@ const noteInputProperties = {
   localDate: localDateSchema,
   timezone: { type: "string", minLength: 1, maxLength: 64 },
   text: { type: "string", minLength: 1, maxLength: 4_000 },
-  contextKind: { type: "string", enum: ["general", "travel"] },
-  baselineEligibility: { type: "string", enum: ["include", "exclude"] },
+  contextKind: {
+    type: "string", enum: ["general", "travel"],
+    description: "Defaults to general. Use travel only for an explicitly reported travel context."
+  },
+  baselineEligibility: {
+    type: "string", enum: ["include", "exclude"],
+    description: "Omit to derive from contextKind: general requires include, travel requires exclude. A general HRV or resleep note cannot exclude the day from baseline."
+  },
   sourceReference: SourceReferenceInputSchema,
   dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
   confidence: nullableConfidenceSchema
 } as const;
 
+// Match the existing domain invariant while preserving optional-field defaults.
+const baselineEligibilityConstraints = [{
+  if: { required: ["contextKind"], properties: { contextKind: { const: "travel" } } },
+  then: { properties: { baselineEligibility: { const: "exclude" } } },
+  else: { properties: { baselineEligibility: { const: "include" } } }
+}] as const;
+
 export const DailyContextNoteSchema = {
   $id: "DailyContextNote",
   type: "object",
   additionalProperties: false,
+  allOf: baselineEligibilityConstraints,
   required: [
     "id",
     "personId",
@@ -67,6 +81,7 @@ export const CreateDailyContextNoteSchema = {
   $id: "CreateDailyContextNote",
   type: "object",
   additionalProperties: false,
+  allOf: baselineEligibilityConstraints,
   required: [
     "localDate",
     "timezone",
@@ -86,6 +101,7 @@ export const CorrectDailyContextNoteSchema = {
   $id: "CorrectDailyContextNote",
   type: "object",
   additionalProperties: false,
+  allOf: baselineEligibilityConstraints,
   required: [
     "localDate",
     "timezone",

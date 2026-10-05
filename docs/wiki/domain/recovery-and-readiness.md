@@ -65,6 +65,22 @@ aggregation and status semantics remain labelled
 context, never invented sleep minutes or an overwrite of account-imported sleep.
 A note is not a workaround for a safety-blocked write.
 
+DailyContextNote schemas and writers enforce the same existing baseline rule:
+`general` uses `include`, while explicitly reported `travel` uses `exclude`.
+Omitted fields retain those defaults. General HRV or resleep context does not
+exclude a day from baseline by itself. Create and correction MCP schemas both
+preserve this constraint; contradictions receive a bounded failure reason.
+
+Recovery and context-note write failures distinguish invalid input/domain
+rules, stale or conflicting targets, and execution failure. An execution
+failure carries a server-generated diagnostic ID in both text and structured
+content so clients that discard structured errors retain correlation. The
+server logs only fixed event/tool/category metadata, that ID, and a recognized
+PostgreSQL SQLSTATE when available; it never logs the fact payload, raw
+exception, SQL or parameters. Unknown causes remain unknown and do not justify
+blind retries. Routine Coach replies keep these mechanics invisible; a direct
+technical question can receive the verified failure reason or diagnostic ID.
+
 Before revised training advice, Coach reads the date-level observations and
 `list_daily_context_notes`, then fresh current Recovery and Daily Decision
 contexts. Note text is obtained from the notes read, not from Daily Decision

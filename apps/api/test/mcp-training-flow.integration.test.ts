@@ -316,13 +316,25 @@ describe("MCP HRV screenshot and resleep capture", () => {
         detail: { type: "metric", metric: "hrv_rmssd", value: 41, unit: "ms" } });
       await repository.createObservation(personId, { ...base, kind: "sleep", dedupeKey: "account-sleep",
         detail: { type: "sleep", totalSleepMinutes: 285, sleepQuality: null } });
-      const nightly = { localDate, timezone, kind: "metric", dedupeKey: "photo-nightly",
+      const nightly = { localDate, timezone, kind: "metric", temporalPrecision: "local_date", quality: "reliable",
+        sourceReference: { channel: "manual", externalSystem: "wearable_screenshot_report",
+          externalRecordId: "synthetic:nightly-screenshot", occurredAt: null }, dedupeKey: "photo-nightly",
         detail: { type: "metric", metric: "hrv_rmssd", value: 51, unit: "ms" } };
       const saved = await call("record_recovery_observation", nightly);
       expect((await call("record_recovery_observation", nightly)).id).toBe(saved.id);
       const note = { localDate, timezone, dedupeKey: "photo-context", contextKind: "general",
         text: "Garmin: HRV за 7 дней 53 мс, baseline 44–66 мс, balanced. Досып после пробуждения; полная длительность сна неизвестна.",
-        sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null } };
+        confidence: 1,
+        sourceReference: { channel: "manual", externalSystem: "wearable_screenshot_report",
+          externalRecordId: "synthetic:context-screenshot", occurredAt: null } };
+      const rejected = await fastify.inject({ method: "POST", url: "/mcp",
+        headers: { accept: "application/json, text/event-stream", authorization: "Bearer test" },
+        payload: { jsonrpc: "2.0", id: "invalid-eligibility", method: "tools/call",
+          params: { name: "record_daily_context_note", arguments: { ...note, baselineEligibility: "exclude" } } }
+      });
+      expect(rejected.json().result).toMatchObject({ isError: true,
+        structuredContent: { outcome: "not_saved", reason: "invalid_baseline_eligibility" } });
+      expect((await call("list_daily_context_notes", { localDate })).items).toHaveLength(0);
       const savedNote = await call("record_daily_context_note", note);
       expect((await call("record_daily_context_note", note)).id).toBe(savedNote.id);
       const facts = (await call("list_recovery_observations", { localDate })).items;

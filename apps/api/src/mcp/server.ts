@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
 import type { FastifyInstance, FastifyRequest } from "fastify";
@@ -632,6 +633,14 @@ function createServer(
       ));
     }
     if (!definition.validate(call.params.arguments ?? {})) {
+      const input = call.params.arguments ?? {};
+      if ((definition.tool.name === "record_daily_context_note" ||
+        definition.tool.name === "correct_daily_context_note") &&
+        ((input.contextKind === "travel" && input.baselineEligibility === "include") ||
+          ((input.contextKind === undefined || input.contextKind === "general") &&
+            input.baselineEligibility === "exclude"))) {
+        return recoveryContextWriteErrorResult(definition.tool.name, "invalid_baseline_eligibility");
+      }
       return inputErrorResult(definition.tool.name);
     }
 
@@ -659,6 +668,27 @@ function createServer(
       }
       if (error instanceof ConnectorInputError) {
         return inputErrorResult(definition.tool.name);
+      }
+      if (isRecoveryContextWriter(definition.tool.name)) {
+        if (error instanceof DomainValidationError) {
+          return recoveryContextWriteErrorResult(
+            definition.tool.name,
+            error.message === "DailyContextNote baseline eligibility is incompatible with context kind"
+              ? "invalid_baseline_eligibility" : "invalid_fact"
+          );
+        }
+        if (error instanceof ConflictError || error instanceof NotFoundError) {
+          return recoveryContextWriteErrorResult(definition.tool.name, "stale_or_conflicting_fact");
+        }
+        const diagnosticId = randomUUID();
+        request.log.error({
+          event: "mcp_fact_write_failed",
+          tool: definition.tool.name,
+          diagnosticId,
+          failureCategory: "execution_failure",
+          ...safeDatabaseFailureCode(error)
+        }, "MCP fact write failed");
+        return recoveryContextWriteErrorResult(definition.tool.name, "write_failed", diagnosticId);
       }
       if (
         definition.tool.name === "correct_meal" &&
@@ -1089,7 +1119,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_daily_context_note",
-      "Record one idempotent relevant context note when no more specific typed fact can represent the report safely. Use general notes for labelled seven-day HRV, baseline range, Garmin status and resleep with unknown full duration; preserve their meaning and manual provenance. Do not duplicate saved facts or use this tool to bypass a safety-blocked write. Read back with list_daily_context_notes, then get_daily_decision_context before advice.",
+      "Record one idempotent relevant context note when no more specific typed fact can represent the report safely. Use general notes for labelled seven-day HRV, baseline range, Garmin status and resleep with unknown full duration; preserve their meaning and manual provenance. Omit baselineEligibility to use the kind's default: general requires include, travel requires exclude. Never classify resleep or HRV alone as travel. Do not duplicate saved facts or use this tool to bypass a safety-blocked write. Read back with list_daily_context_notes, then get_daily_decision_context before advice.",
       CreateDailyContextNoteSchema,
       undefined,
       true,
@@ -1099,7 +1129,8 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     defineTool(
       "correct_daily_context_note",
       "Append one idempotent correction to a uniquely identified context note; follow with typed read-back.",
-      withIdSchema("CorrectDailyContextNoteToolInput", CorrectDailyContextNoteSchema),
+      { ...withIdSchema("CorrectDailyContextNoteToolInput", CorrectDailyContextNoteSchema),
+        allOf: CorrectDailyContextNoteSchema.allOf },
       undefined,
       true,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
@@ -1663,7 +1694,64 @@ function errorResult(
   };
 }
 
+function isRecoveryContextWriter(toolName: string): boolean {
+  return ["record_recovery_observation", "correct_recovery_observation",
+    "record_daily_context_note", "correct_daily_context_note"].includes(toolName);
+}
+
+/** Selects only a bounded SQLSTATE; never serializes a database error or its cause. */
+function safeDatabaseFailureCode(error: unknown): { readonly databaseCode?: string } {
+  const recognizedCodes = new Set([
+    "08001", "08003", "08006", "22001", "22003", "22007", "22008", "22P02",
+    "23502", "23503", "23505", "23514", "25P02", "40001", "40P01", "42501",
+    "42703", "42P01", "53300", "53400", "57P01", "XX000"
+  ]);
+  let current = error;
+  for (let depth = 0; depth < 4 && isRecord(current); depth += 1) {
+    if (typeof current.code === "string" && recognizedCodes.has(current.code)) {
+      return { databaseCode: current.code };
+    }
+    current = current.cause;
+  }
+  return {};
+}
+
+type RecoveryContextWriteFailureReason = "invalid_input" | "invalid_baseline_eligibility" |
+  "invalid_fact" | "stale_or_conflicting_fact" | "write_failed";
+
+function recoveryContextWriteErrorResult(
+  toolName: string,
+  reason: RecoveryContextWriteFailureReason,
+  diagnosticId?: string
+): CallToolResult {
+  const note = toolName === "record_daily_context_note" || toolName === "correct_daily_context_note";
+  const guidance = reason === "invalid_baseline_eligibility"
+    ? "The context note was not saved. General notes require baselineEligibility=include; travel notes require exclude. " +
+      "Omitting contextKind means general; omitting baselineEligibility uses the kind's default. " +
+      "For an ordinary HRV or resleep report use general and omit baselineEligibility or use include. " +
+      "Never relabel a report as travel to make it pass. Retry a corrected input once using the report already present, then read back."
+    : reason === "invalid_input"
+      ? `${note ? "The context note" : "The recovery fact"} was not saved because the input does not match its published schema. ` +
+        "Retry once with the existing report and exact local date and timezone; do not invent absent values."
+    : reason === "invalid_fact"
+      ? "The requested fact was not saved because it violates the fact's domain rules. " +
+        "Check the exact reported date, timezone, metric/unit and meaning; do not invent missing values or change the report to force acceptance."
+      : reason === "stale_or_conflicting_fact"
+        ? "The requested fact was not saved because its target is missing, stale or conflicting. " +
+          "Read the date-level facts again before choosing the matching current target; do not guess identifiers."
+        : "The requested fact was not saved because execution failed; this does not establish invalid input or missing source data. " +
+          "Do not speculate about the cause or retry blindly. The diagnosticId may be given only when the user asks for technical diagnostics.";
+  return errorResult(coachFailureResultContent(
+    guidance + (diagnosticId ? ` Diagnostic ID: ${diagnosticId}.` : "")
+  ), {
+    outcome: "not_saved", reason, ...(diagnosticId ? { diagnosticId } : {})
+  });
+}
+
 function inputErrorResult(toolName: string): CallToolResult {
+  if (toolName === "record_daily_context_note" || toolName === "correct_daily_context_note") {
+    return recoveryContextWriteErrorResult(toolName, "invalid_input");
+  }
   if (toolName === "correct_meal") {
     return mealCorrectionErrorResult("invalid_replacement");
   }
@@ -1691,7 +1779,7 @@ function inputErrorResult(toolName: string): CallToolResult {
       "Continue saving the other independent facts from the same report. Do not mention tools, staging, APIs, " +
       "contracts, fields, or this retry to the user. If this fact still cannot be saved, describe that one missing " +
       "fact naturally without technical details and never claim it was recorded."
-    ));
+    ), { outcome: "not_saved", reason: "invalid_input" });
   }
   if (["record_workout_session", "correct_workout_session", "record_workout_session_v2", "correct_workout_session_v2"].includes(toolName)) {
     return errorResult(coachFailureResultContent(
