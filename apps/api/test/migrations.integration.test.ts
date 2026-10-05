@@ -44,10 +44,12 @@ interface AppliedMigration {
 
 let container: StartedPostgreSqlContainer;
 let priorMigrationsFolder: string;
-let journal: MigrationJournal;
 let expectedMigrations: AppliedMigration[];
 
 const migrationsFolder = new URL("../drizzle/", import.meta.url);
+const journal = JSON.parse(
+  await readFile(new URL("meta/_journal.json", migrationsFolder), "utf8")
+) as MigrationJournal;
 const syntheticPersonId = "00000000-0000-4000-8000-000000000001";
 const task0063EvidenceIds = [
   "TASK-0063:body:correct",
@@ -105,9 +107,6 @@ beforeAll(async () => {
     .withUsername("shape_of_you")
     .withPassword("shape_of_you")
     .start();
-  journal = JSON.parse(
-    await readFile(new URL("meta/_journal.json", migrationsFolder), "utf8")
-  ) as MigrationJournal;
   expectedMigrations = await Promise.all(
     journal.entries.map(async (entry) => {
       const contents = await readFile(
@@ -576,43 +575,44 @@ describe("API migration chain", () => {
     }
   });
 
-  it("upgrades every committed journal prefix through the production runner", async () => {
+  it.each(journal.entries.slice(0, -1).map((entry, index) => ({
+    prefixLength: index + 1,
+    tag: entry.tag
+  })))("upgrades journal prefix $prefixLength ($tag) through the production runner", async ({ prefixLength }) => {
     const adminPool = new Pool({ connectionString: container.getConnectionUri() });
     try {
-      for (let prefixLength = 1; prefixLength < journal.entries.length; prefixLength += 1) {
-        const databaseName = `shape_of_you_migration_prefix_${prefixLength}`;
-        await adminPool.query(`create database ${databaseName}`);
-        const url = databaseUrl(databaseName);
-        const prefixJournal: MigrationJournal = {
-          ...journal,
-          entries: journal.entries.slice(0, prefixLength)
-        };
-        await writeFile(
-          path.join(priorMigrationsFolder, "meta", "_journal.json"),
-          JSON.stringify(prefixJournal)
-        );
+      const databaseName = `shape_of_you_migration_prefix_${prefixLength}`;
+      await adminPool.query(`create database ${databaseName}`);
+      const url = databaseUrl(databaseName);
+      const prefixJournal: MigrationJournal = {
+        ...journal,
+        entries: journal.entries.slice(0, prefixLength)
+      };
+      await writeFile(
+        path.join(priorMigrationsFolder, "meta", "_journal.json"),
+        JSON.stringify(prefixJournal)
+      );
 
-        const prefixDatabase = createDatabase(databaseConfig(url));
-        try {
-          await migrate(prefixDatabase.db, {
-            migrationsFolder: priorMigrationsFolder
-          });
-        } finally {
-          await prefixDatabase.pool.end();
-        }
-
-        expect(await appliedMigrations(url)).toEqual(
-          expectedMigrations.slice(0, prefixLength)
-        );
-        await runMigrations(url);
-        expect(await appliedMigrations(url)).toEqual(expectedMigrations);
-        await runMigrations(url);
-        expect(await appliedMigrations(url)).toEqual(expectedMigrations);
+      const prefixDatabase = createDatabase(databaseConfig(url));
+      try {
+        await migrate(prefixDatabase.db, {
+          migrationsFolder: priorMigrationsFolder
+        });
+      } finally {
+        await prefixDatabase.pool.end();
       }
+
+      expect(await appliedMigrations(url)).toEqual(
+        expectedMigrations.slice(0, prefixLength)
+      );
+      await runMigrations(url);
+      expect(await appliedMigrations(url)).toEqual(expectedMigrations);
+      await runMigrations(url);
+      expect(await appliedMigrations(url)).toEqual(expectedMigrations);
     } finally {
       await adminPool.end();
     }
-  }, 120_000);
+  });
 
   it("backfills v1 daily evidence before Recovery erasure removes the legacy snapshot", async () => {
     const databaseName = "shape_of_you_daily_evidence_upgrade";

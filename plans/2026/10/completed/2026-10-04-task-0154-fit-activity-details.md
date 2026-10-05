@@ -53,3 +53,18 @@ Commit/push/deploy и реальный Coach gate остаются открыт�
 SDK не поддерживает compressed timestamp headers; этот случай честно
 возвращает unsupported_fit. Все данные Intervals не заявляются импортированными:
 scope ограничен согласованными типизированными измерениями без raw/GPS.
+
+## Коррекция CI 2026-10-05
+
+После разрешённых commit/push commit `09a16f2` прошёл 478 проверок API, но
+Publish staging images `37273447593` остановился: единый тест обновления
+всех исторических prefixes превысил 120 секунд на hosted runner. Кандидат
+не опубликован, Promote не запускался.
+
+В рамках delivery verification каждый из 58 prefixes вынесен в отдельный
+последовательный параметризованный тест с действующим timeout 30 секунд.
+Список prefixes, проверка исходных hashes, upgrade через production runner и
+повторный idempotent run сохранены. Runtime и миграции не изменены.
+Коррекция независимо принята: `task-0154-quality-ci-prefix-20261005`.
+Migration suite 76/76, API typecheck/lint и docs validator пройдены.
+Hosted CI остаётся отдельной проверкой доставки.
