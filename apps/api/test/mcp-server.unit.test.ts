@@ -197,6 +197,7 @@ const unavailableServices = {
   bodyMeasurements: { list: unreachable, create: unreachable, correct: unreachable },
   nutrition: { listMeals: unreachable, createMeal: unreachable, correctMeal: unreachable },
   training: {
+    getExternalActivityDetails: unreachable,
     listWorkoutSessions: unreachable,
     createWorkoutSession: unreachable,
     correctWorkoutSession: unreachable,
@@ -621,7 +622,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(41);
+    expect(body.result.tools).toHaveLength(42);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -650,6 +651,7 @@ describe("MCP HTTP adapter", () => {
       correct_meal: MCP_MEAL_WRITE_SCOPE,
       get_active_training_program: MCP_READ_SCOPE,
       get_training_context: MCP_READ_SCOPE,
+      get_external_activity_details: MCP_READ_SCOPE,
       get_training_progression: MCP_READ_SCOPE,
       get_working_weight_proposals: MCP_READ_SCOPE,
       apply_confirmed_working_weight: MCP_WORKOUT_WRITE_SCOPE,
@@ -684,6 +686,10 @@ describe("MCP HTTP adapter", () => {
     expect(body.result.tools.find((tool: { name: string }) =>
       tool.name === "record_daily_context_note"
     )?.description).toContain("follow with typed read-back");
+    const detailsTool = body.result.tools.find((tool: { name: string }) => tool.name === "get_external_activity_details");
+    expect(detailsTool).toMatchObject({ annotations: { readOnlyHint: true }, inputSchema: { additionalProperties: false, required: ["activityId"] } });
+    expect(detailsTool.description).toContain("never reconstruct a timeline from workout averages");
+    expect(detailsTool.description).toContain("Provider total training load must not be divided into segment loads");
     const dailyAssessmentTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "get_daily_assessment"
     );

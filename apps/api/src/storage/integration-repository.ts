@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
-import type { GarminIntervalsConnection } from "@shape-of-you/contracts";
+import type { ActivityDetailsIssue, GarminIntervalsConnection } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
 import {
@@ -553,6 +553,15 @@ export class IntegrationRepository implements IntegrationStore {
       return { state: "process", receiptId: inserted[0].id };
     });
   }
+  /** {@inheritDoc IntegrationStore.setActivityDetailsIssue} */
+  public async setActivityDetailsIssue(id: string, consentId: string, receiptId: string, issue: ActivityDetailsIssue | null): Promise<boolean> {
+    const rows = await this.database.db.update(integrationInbox).set({ activityDetailsIssue: issue, activityDetailsAttemptedAt: sql`clock_timestamp()` }).where(and(
+      eq(integrationInbox.id, receiptId), eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId), eq(integrationInbox.kind, "activity"),
+      sql`exists (select 1 from integration_connections c where c.id = ${id} and c.consent_id = ${consentId} and c.import_enabled = true)`
+    )).returning({ id: integrationInbox.id });
+    return rows.length > 0;
+  }
+
   public async completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean> {
     const rows = await this.database.db.update(integrationInbox).set({ status: "normalized", normalizedAt: new Date(), failureCode: null }).where(and(eq(integrationInbox.id, receiptId), eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId), sql`exists (select 1 from integration_connections c where c.id = ${id} and c.consent_id = ${consentId} and c.import_enabled = true)`)).returning({ id: integrationInbox.id });
     return rows.length > 0;

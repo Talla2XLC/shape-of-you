@@ -17,9 +17,10 @@ import type { TrainingStore } from "../storage/training-repository.js";
 import type { ConnectionCredentialCipher } from "./credential-cipher.js";
 import type { ActiveIntegrationConnection, IntegrationStore } from "./integration-store.js";
 import type { HealthDataProvider, ProviderWellnessRecord } from "./provider.js";
-import { IntegrationProviderError } from "./provider.js";
+import { ActivityDetailsReadError, IntegrationProviderError } from "./provider.js";
 import { normalizedChecksum } from "./intervals-icu/normalizer.js";
 import { parseGarminRecoverySnapshot } from "./intervals-icu/fit-recovery.js";
+import { parseFitActivityDetails, activityDetailsNormalizationVersion } from "./intervals-icu/fit-activity-details.js";
 import { ConflictError, DomainValidationError } from "../domain/errors.js";
 
 const transactionTtlMs = 10 * 60_000;
@@ -229,7 +230,7 @@ export class IntegrationService {
       ));
       // Recheck FIT once per UTC day because the original file can change without summary changes.
       const inboxChecksum = activity.fileType === "fit"
-        ? normalizedChecksum({ activityChecksum, fitImportVersion: 1, fitReviewDate: isoDate(new Date()) })
+        ? normalizedChecksum({ activityChecksum, fitImportVersion: 2, fitReviewDate: isoDate(new Date()) })
         : activityChecksum;
       const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "activity", activity.identity, inboxChecksum);
       if (inbox.state !== "process") continue;
@@ -267,18 +268,43 @@ export class IntegrationService {
     receiptId: string,
     timezone: string
   ): Promise<boolean> {
-    const file = await this.provider!.originalActivityFile(token, activityId);
-    if (file === null) return false;
+    let file: Uint8Array | null;
+    try { file = await this.provider!.originalActivityFile(token, activityId); }
+    catch (error) {
+      await this.store!.setActivityDetailsIssue(connection.id, connection.consentId, receiptId,
+        error instanceof ActivityDetailsReadError ? error.issue : error instanceof IntegrationProviderError && error.failureCode === "provider_response_invalid" ? "invalid_fit" : "provider_unavailable");
+      throw error;
+    }
+    const fileChecksum = createHash("sha256").update(file ?? new Uint8Array()).digest("hex");
+    let detailsChanged = false;
+    if (file === null) {
+      const changed = await this.training.importExternalActivityDetails({ personId: connection.personId,
+        connectionId: connection.id, consentId: connection.consentId, providerIdentity: activityId,
+        fileChecksum, normalizationVersion: activityDetailsNormalizationVersion, payload: null });
+      await this.store!.setActivityDetailsIssue(connection.id, connection.consentId, receiptId, "source_file_unavailable");
+      return changed;
+    }
+    try {
+      const payload = parseFitActivityDetails(file);
+      const supported = payload.sessions.some((session) => session.records.length || session.laps.length);
+      detailsChanged = await this.training.importExternalActivityDetails({ personId: connection.personId,
+        connectionId: connection.id, consentId: connection.consentId, providerIdentity: activityId,
+        fileChecksum, normalizationVersion: activityDetailsNormalizationVersion, payload: supported ? payload : null });
+      await this.store!.setActivityDetailsIssue(connection.id, connection.consentId, receiptId, supported ? null : "no_supported_measurements");
+    } catch (error) {
+      if (!(error instanceof IntegrationProviderError && error.failureCode === "provider_response_invalid")) throw error;
+      await this.store!.setActivityDetailsIssue(connection.id, connection.consentId, receiptId, error instanceof ActivityDetailsReadError ? error.issue : "invalid_fit");
+    }
     let snapshot: ReturnType<typeof parseGarminRecoverySnapshot>;
     try {
       snapshot = parseGarminRecoverySnapshot(file);
     } catch (error) {
-      if (error instanceof IntegrationProviderError && error.failureCode === "provider_response_invalid") return false;
+      if (error instanceof IntegrationProviderError && error.failureCode === "provider_response_invalid") return detailsChanged;
       throw error;
     }
     const current = await this.store!.recoveryFact(connection.id, activityId, fitFactKey);
     if (!snapshot) {
-      if (!current || current.checksum === "removed") return false;
+      if (!current || current.checksum === "removed") return detailsChanged;
       const withdrawn = await this.recovery.withdrawObservation(
         connection.personId, current.observationId,
         `intervals:${activityId}:${fitFactKey}:removed:${current.observationId}`,
@@ -286,13 +312,12 @@ export class IntegrationService {
         { connectionId: connection.recoveryConnectionId, consentId: connection.consentId }
       );
       await this.store!.linkRecoveryFact(connection.id, connection.consentId, activityId, receiptId, fitFactKey, "removed", withdrawn.observation.id);
-      return withdrawn.created;
+      return withdrawn.created || detailsChanged;
     }
-    const fileChecksum = createHash("sha256").update(file).digest("hex");
     const checksum = normalizedChecksum({ fileChecksum, snapshot });
     if (current?.checksum === checksum) {
       await this.store!.linkRecoveryFact(connection.id, connection.consentId, activityId, receiptId, fitFactKey, checksum, current.observationId);
-      return false;
+      return detailsChanged;
     }
     const base: CreateRecoveryObservation = {
       kind: "metric", observedFrom: snapshot.observedAt, observedUntil: snapshot.observedAt,
@@ -309,7 +334,7 @@ export class IntegrationService {
       ? await this.recovery.correctObservation(connection.personId, current.observationId, { ...base, reason: "provider_record_changed" })
       : await this.recovery.createObservation(connection.personId, base);
     await this.store!.linkRecoveryFact(connection.id, connection.consentId, activityId, receiptId, fitFactKey, checksum, persisted.observation.id);
-    return persisted.created;
+    return persisted.created || detailsChanged;
   }
 
   private async importWellness(connection: ActiveIntegrationConnection, wellness: ProviderWellnessRecord): Promise<boolean> {

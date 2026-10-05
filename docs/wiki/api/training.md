@@ -274,6 +274,24 @@ claiming the new version is active. The existing candidate acceptance path
 still creates an inactive draft. See the
 [confirmed working-weight ADR](../../adr/20260929-confirm-working-weight-increase-atomically.md).
 
+The read-only MCP `get_external_activity_details` reads locally imported FIT
+details for a current Person-scoped activity. It returns session boundaries,
+measured channels, laps, and bounded pages of records or time buckets. Its
+cursor pins both the query and immutable details version. Provenance includes
+the source activity version, file checksum, normalization version, and import
+time; summary-context privacy boundaries remain unchanged.
+
+Buckets expose time-weighted averages, measured extrema, coverage, and active
+time. Each sample holds for at most ten seconds and stops at a recorded pause;
+gaps remain uncovered. Zone time requires explicit analysis-supplied boundaries.
+Missing HR does not suppress other measurements. Coach must read details before
+claiming that only averages are available and must not divide total training
+load across segments. Availability and `latestImportIssue` distinguish absence,
+failed imports, unsupported FIT, and retained prior data. This implementation
+has isolated MCP/PostgreSQL verification; staging delivery and a real Coach
+reply remain unverified. See the
+[FIT details ADR](../../adr/20261004-import-fit-activity-details-for-coach.md).
+
 ## Evidence
 
 - Training contracts/module/repository/integration tests.

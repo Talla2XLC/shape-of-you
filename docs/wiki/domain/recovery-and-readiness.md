@@ -149,6 +149,14 @@ without it being displaced by more frequent wellness observations.
 See [the FIT snapshot ADR](../../adr/20260924-import-garmin-post-activity-recovery-snapshot-from-intervals-fit.md)
 for the evidence boundary and accepted interpretation.
 
+The same bounded original-file download also feeds Training-owned standard FIT
+activity details through the Garmin SDK. Training records and laps remain
+separate from the narrow empirical Recovery Time mapping. A failure in one
+decoder does not discard valid evidence from the other. The rolling fourteen-day
+import revisits FIT files with a twenty-download budget per pass; MCP reads local
+versions rather than calling the provider. No manual historical backfill is
+implied. See the [FIT details ADR](../../adr/20261004-import-fit-activity-details-for-coach.md).
+
 Connection erasure uses an API-owned durable request.
 Fresh passkey authentication quarantines the connection immediately, while an
 idempotent worker removes connection-derived observations, assessments, and

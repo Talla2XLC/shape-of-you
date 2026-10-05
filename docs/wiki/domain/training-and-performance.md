@@ -52,6 +52,20 @@ automatically.
 - Repeated external identity plus checksum is a no-op. Changed content creates
   an immutable successor, including a later return to a previously seen value.
   Current reads expose only the latest fact.
+- Training owns immutable `ExternalActivityDetails` versions over the stable
+  activity lineage and current connection/consent generation. One bounded
+  normalized JSONB payload holds standard FIT sessions, records, laps, and timer
+  events. Supported measurements include HR, speed, distance, cadence, power,
+  altitude, temperature, respiration, vertical oscillation, stance time, and
+  step length. Raw files, routes, GPS, and arbitrary provider fields are not
+  stored. Unchanged checksum/normalizer is a no-op; changed files append details
+  even when the summary is unchanged. Successful absence replaces prior data;
+  failed decoding preserves the last valid version. Existing IntegrationInbox
+  receipts retain a closed diagnostic and actual attempt time, so an unattempted
+  receipt cannot erase an earlier failure. Reads expose only current authorized
+  consent and erasure cascades through detail versions. The official SDK cannot
+  decode compressed timestamp headers; these files return `unsupported_fit`.
+  See the [FIT details ADR](../../adr/20261004-import-fit-activity-details-for-coach.md).
 - `ExternalActivityProgramClassification` is a separate Training-owned
   append-only fact over the stable correction lineage of one imported activity.
   It pins the exact active TrainingProgramVersion and records either one

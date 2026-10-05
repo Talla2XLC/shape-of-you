@@ -1,4 +1,5 @@
 import type {
+  ActivityDetailsIssue,
   ConnectedRecoveryMetricDeliveryState,
   ConnectedRecoveryMetricKey,
   GarminIntervalsConnection
@@ -116,6 +117,8 @@ export interface IntegrationStore {
   markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void>;
   recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<IntegrationInboxOutcome>;
   completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean>;
+  /** Records a closed detail outcome on an existing activity receipt under the current enabled consent. */
+  setActivityDetailsIssue(id: string, consentId: string, receiptId: string, issue: ActivityDetailsIssue | null): Promise<boolean>;
   recoveryFact(id: string, identity: string, factKey: string): Promise<RecoveryFactPointer | null>;
   linkRecoveryFact(id: string, consentId: string, identity: string, receiptId: string, factKey: string, checksum: string, observationId: string): Promise<boolean>;
 }

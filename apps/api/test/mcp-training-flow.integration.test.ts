@@ -1,7 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import Fastify from "fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { activityFit } from "./fixtures/activity-fit.js";
+import { parseFitActivityDetails } from "../src/integrations/intervals-icu/fit-activity-details.js";
+import { IntegrationRepository } from "../src/storage/integration-repository.js";
+import { RecoveryRepository } from "../src/storage/recovery-repository.js";
+import { IntegrationService } from "../src/integrations/integration.service.js";
+import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
+import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
+import { SyntheticPersonContext } from "../src/application/person-context.js";
+import { IntegrationProviderError } from "../src/integrations/provider.js";
 
 import { RequestPersonContext } from "../src/application/person-context.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
@@ -33,7 +42,7 @@ async function fixture() {
   const context = new RequestPersonContext(personId);
   const repository = new TrainingRepository(database);
   const training = new TrainingService(repository, context);
-  await database.pool.query("insert into persons (id, kind, status) values ($1, 'real', 'active')", [personId]);
+  await database.pool.query("insert into persons (id, kind, status, timezone) values ($1, 'real', 'active', 'Europe/Belgrade')", [personId]);
   const providerId = randomUUID(), recoveryConnectionId = randomUUID();
   const consentId = randomUUID(), connectionId = randomUUID();
   await database.pool.query("insert into recovery_providers (id, key, name) values ($1, $2, 'MCP flow test')", [providerId, personId]);
@@ -91,10 +100,116 @@ async function fixture() {
       sourceProvider: "intervals_icu", garminAttributed: true });
     return (await repository.listExternalActivities(personId, 20)).find((item) => item.providerIdentity === providerIdentity)!;
   };
-  return { fastify, call, program, importActivity };
+  return { fastify, call, program, importActivity, repository, personId, connectionId, consentId, recoveryConnectionId };
 }
 
 describe("MCP training conversation flow with PostgreSQL", () => {
+  it("imports a FIT once and delivers actual segment evidence through MCP, then corrects and withdraws without summary changes", async () => {
+    const { fastify, call, repository, personId, connectionId, consentId } = await fixture();
+    try {
+      const cipher = new ConnectionCredentialCipher("test", new Map([["test", Buffer.alloc(32, 1)]]));
+      const credential = cipher.encrypt("synthetic-token", `intervals_icu:${personId}:${connectionId}`);
+      await database.pool.query("update integration_connections set credential_key_id=$2, credential_nonce=$3, credential_ciphertext=$4, credential_tag=$5 where id=$1",
+        [connectionId, credential.keyId, credential.nonce, credential.ciphertext, credential.tag]);
+      const provider = new FakeHealthDataProvider();
+      const identity = randomUUID();
+      provider.reconciliation = { wellness: [], activities: [{ identity, fileType: "fit", occurredAt: "2026-10-04T14:00:00Z",
+        localDate: "2026-10-04", timezone: "Europe/Belgrade", name: "Бег на дорожке", durationSeconds: 22,
+        distanceMeters: 90, trainingLoad: 20, trainingLoadBasis: "relative_training_stress", trainingLoadBasisVersion: "1",
+        averageHeartRate: 130, maximumHeartRate: 180, deviceName: "Garmin", garminAttributed: true }] };
+      const initialDamage = activityFit(); initialDamage[initialDamage.length - 1]! ^= 1;
+      provider.activityFiles.set(identity, initialDamage);
+      const integrations = new IntegrationRepository(database);
+      const service = new IntegrationService(new SyntheticPersonContext(personId), integrations, provider, cipher, new RecoveryRepository(database), repository);
+      await service.reconcilePerson(personId);
+      const context = await call("get_training_context_v2", { localDate: "2026-10-04" });
+      const activityId = context.recentExternalActivities[0].id;
+      expect(await call("get_external_activity_details", { activityId })).toMatchObject({ availability: "unavailable", latestImportIssue: "invalid_fit", buckets: [] });
+      await database.pool.query("delete from integration_inbox where connection_id=$1", [connectionId]);
+      provider.activityFiles.set(identity, activityFit());
+      await service.reconcilePerson(personId);
+      const first = await call("get_external_activity_details", { activityId, bucketSeconds: 30, zoneBoundariesBpm: [130, 160] });
+      expect(first).toMatchObject({ availability: "available", latestImportIssue: null, sourceActivityVersion: activityId, zoneBasis: "analysis_supplied",
+        buckets: [{ activeSeconds: 22, channels: { heartRateBpm: { maximum: 180, coveredSeconds: 19, average: 2520 / 19 } }, zoneSeconds: [12, 1, 6] }] });
+      expect(first.channels).toContain("powerW");
+      await service.reconcilePerson(personId);
+      expect(provider.activityFileCalls).toHaveLength(2);
+      expect((await database.pool.query("select id from external_activity_details where person_id=$1", [personId])).rowCount).toBe(1);
+      // A fresh daily review of the same summary must inspect the corrected original file.
+      const review = async () => {
+        await database.pool.query("delete from integration_inbox where connection_id=$1", [connectionId]);
+        await service.reconcilePerson(personId);
+      };
+      provider.activityFiles.set(identity, activityFit(190));
+      await review();
+      const corrected = await call("get_external_activity_details", { activityId });
+      expect(corrected.detailsVersion).not.toBe(first.detailsVersion);
+      expect(corrected.buckets[0].channels.heartRateBpm.maximum).toBe(190);
+      expect((await repository.listExternalActivities(personId, 20))).toHaveLength(1);
+      await review();
+      expect((await database.pool.query("select id from external_activity_details where person_id=$1", [personId])).rowCount).toBe(2);
+      const damaged = activityFit(); damaged[damaged.length - 1]! ^= 1;
+      provider.activityFiles.set(identity, damaged);
+      await review();
+      expect(await call("get_external_activity_details", { activityId })).toMatchObject({ availability: "available", latestImportIssue: "invalid_fit", detailsVersion: corrected.detailsVersion });
+      const unattempted = await integrations.recordInbox(connectionId, consentId, "activity", identity, "a".repeat(64));
+      expect(unattempted.state).toBe("process");
+      expect((await call("get_external_activity_details", { activityId })).latestImportIssue).toBe("invalid_fit");
+      if (unattempted.state !== "process") throw new Error("Expected a pending receipt");
+      await integrations.setActivityDetailsIssue(connectionId, consentId, unattempted.receiptId, null);
+      expect((await call("get_external_activity_details", { activityId })).latestImportIssue).toBeNull();
+      provider.activityFiles.set(identity, new Uint8Array(2000001));
+      await review();
+      expect(await call("get_external_activity_details", { activityId })).toMatchObject({ availability: "available", latestImportIssue: "limit_exceeded", detailsVersion: corrected.detailsVersion });
+      vi.spyOn(provider, "originalActivityFile").mockRejectedValueOnce(new IntegrationProviderError("provider_timeout"));
+      await review();
+      expect(await call("get_external_activity_details", { activityId })).toMatchObject({ availability: "available", latestImportIssue: "provider_unavailable", detailsVersion: corrected.detailsVersion });
+      provider.activityFiles.set(identity, activityFit(190));
+      const pending = (await database.pool.query("select id from integration_inbox where connection_id=$1", [connectionId])).rows[0].id;
+      await service.reconcilePerson(personId);
+      expect((await database.pool.query("select id, activity_details_issue from integration_inbox where connection_id=$1", [connectionId])).rows).toEqual([{ id: pending, activity_details_issue: null }]);
+      expect((await call("get_external_activity_details", { activityId })).latestImportIssue).toBeNull();
+      provider.activityFiles.set(identity, null);
+      await review();
+      expect(await call("get_external_activity_details", { activityId })).toMatchObject({ availability: "no_supported_data", latestImportIssue: "source_file_unavailable", records: [], buckets: [] });
+      expect(await repository.importExternalActivityDetails({ personId, connectionId, consentId: randomUUID(), providerIdentity: identity,
+        fileChecksum: "c".repeat(64), normalizationVersion: "standard-fit-details-v1", payload: parseFitActivityDetails(activityFit()) })).toBe(false);
+    } finally { await fastify.close(); }
+  });
+
+  it("scopes detail reads to Person and current consent, preserves summary lineage and erases stored samples", async () => {
+    const { fastify, call, importActivity, repository, personId, connectionId, consentId, recoveryConnectionId } = await fixture();
+    try {
+      const activity = await importActivity("2026-10-04", "Бег на дорожке", 30);
+      const input = { personId, connectionId, consentId, providerIdentity: activity.providerIdentity, fileChecksum: "a".repeat(64),
+        normalizationVersion: "standard-fit-details-v1", payload: parseFitActivityDetails(activityFit()) };
+      expect(await repository.importExternalActivityDetails(input)).toBe(true);
+      const integrations = new IntegrationRepository(database);
+      const receipt = await integrations.recordInbox(connectionId, consentId, "activity", activity.providerIdentity, "f".repeat(64));
+      if (receipt.state !== "process") throw new Error("Missing test receipt");
+      expect(await integrations.setActivityDetailsIssue(connectionId, consentId, receipt.receiptId, "unsupported_fit")).toBe(true);
+      await expect(repository.readExternalActivityDetails(randomUUID(), activity.id)).rejects.toThrow("not found");
+      const details = await call("get_external_activity_details", { activityId: activity.id });
+      expect(details.latestImportIssue).toBe("unsupported_fit");
+      await repository.importExternalActivity({ ...activity, consentId, name: "Corrected title", normalizedChecksum: "b".repeat(64) });
+      const current = (await repository.listExternalActivities(personId, 20))[0]!;
+      const linked = await call("get_external_activity_details", { activityId: current.id });
+      expect(linked.detailsVersion).toBe(details.detailsVersion);
+      expect(linked.sourceActivityVersion).toBe(activity.id);
+      await expect(repository.readExternalActivityDetails(personId, activity.id)).rejects.toThrow("not found");
+      const newConsent = randomUUID();
+      await database.pool.query("insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1,$2,$3,'training','indefinite')", [newConsent, personId, recoveryConnectionId]);
+      await database.pool.query("update integration_connections set consent_id=$2 where id=$1", [connectionId, newConsent]);
+      expect(await call("get_external_activity_details", { activityId: current.id })).toMatchObject({ availability: "not_imported", latestImportIssue: null, records: [] });
+      expect(await integrations.setActivityDetailsIssue(connectionId, consentId, receipt.receiptId, "invalid_fit")).toBe(false);
+      expect(await repository.importExternalActivityDetails(input)).toBe(false);
+      expect(await repository.importExternalActivityDetails({ ...input, consentId: newConsent })).toBe(true);
+      await database.pool.query("update recovery_consents set status='revoked', revoked_at=now(), revocation_reason='test' where id=$1", [newConsent]);
+      expect((await call("get_external_activity_details", { activityId: current.id })).availability).toBe("not_imported");
+      await database.pool.query("delete from recovery_connections where id=$1", [recoveryConnectionId]);
+      expect((await database.pool.query("select id from external_activity_details where person_id=$1", [personId])).rowCount).toBe(0);
+    } finally { await fastify.close(); }
+  });
   it("keeps frequency advisory across Monday and preserves mixed-precision A/B after the window expires", async () => {
     const { fastify, call, program } = await fixture();
     try {

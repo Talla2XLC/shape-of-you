@@ -16,6 +16,8 @@ import { alias } from "drizzle-orm/pg-core";
 import { createHash } from "node:crypto";
 
 import type {
+  ActivityDetailsPayload,
+  ActivityDetailsIssue,
   AcceptProgressionCandidate,
   AppliedWorkingWeight,
   ApplyConfirmedWorkingWeight,
@@ -68,6 +70,8 @@ import {
   performedSets,
   externalActivityProgramClassifications,
   integrationActivityFacts,
+  integrationInbox,
+  externalActivityDetails,
   integrationConnections,
   persons,
   sourceReferences,
@@ -224,7 +228,38 @@ export interface ActivityLinkProgramContext {
 }
 
 /** Persistence contract for Training catalog, plans, facts, and projections. */
+export interface ImportActivityDetails {
+  readonly personId: string;
+  readonly connectionId: string;
+  readonly consentId: string;
+  readonly providerIdentity: string;
+  readonly fileChecksum: string;
+  readonly normalizationVersion: string;
+  readonly payload: ActivityDetailsPayload | null;
+}
+
+/** Local immutable detail version returned only after activity and consent authorization. */
+export interface StoredActivityDetails {
+  readonly id: string;
+  readonly sourceActivityVersion: string;
+  readonly normalizationVersion: string;
+  readonly payload: ActivityDetailsPayload | null;
+  readonly fileChecksum: string;
+  readonly importedAt: Date;
+}
+
+/** Authorized composition of retained measurements and the latest current-consent receipt outcome. */
+export interface ActivityDetailsRead {
+  readonly details: StoredActivityDetails | null;
+  readonly latestImportIssue: ActivityDetailsIssue | null;
+}
+
+/** Persistence contract for Training catalog, plans, facts, and projections. */
 export interface TrainingStore {
+  /** Imports one bounded immutable FIT version under the current enabled consent; null records successful absence. */
+  importExternalActivityDetails(input: ImportActivityDetails): Promise<boolean>;
+  /** Reads latest authorized details for a current activity; missing or inaccessible activity throws NotFoundError. */
+  readExternalActivityDetails(personId: string, activityId: string): Promise<ActivityDetailsRead>;
   importExternalActivity(input: ImportExternalActivity): Promise<"created" | "corrected" | "unchanged" | "stopped">;
   /** Rechecks recent current session/activity pairs after an otherwise unchanged sync. */
   reconcileRecentActivityLinks(personId: string, from: string, to: string): Promise<void>;
@@ -584,6 +619,69 @@ async function lockPerson(
 /** PostgreSQL implementation of the Training persistence boundary. */
 export class TrainingRepository implements TrainingStore {
   public constructor(private readonly database: DatabaseContext) {}
+
+  /** {@inheritDoc TrainingStore.importExternalActivityDetails} */
+  public importExternalActivityDetails(input: ImportActivityDetails): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, input.personId);
+      const connection = await transaction.query.integrationConnections.findFirst({ columns: { id: true }, where: and(
+        eq(integrationConnections.id, input.connectionId), eq(integrationConnections.personId, input.personId),
+        eq(integrationConnections.consentId, input.consentId), eq(integrationConnections.importEnabled, true), inArray(integrationConnections.lifecycle, ["active", "degraded"]),
+        sql`exists (select 1 from recovery_consents consent join recovery_connections recovery on recovery.id = consent.connection_id where consent.id = ${input.consentId} and consent.person_id = ${input.personId} and consent.status = 'active' and recovery.status = 'active' and recovery.erasure_requested_at is null)`
+      ) });
+      if (!connection) return false;
+      const activitySuccessor = alias(integrationActivityFacts, "details_activity_successor");
+      const [activity] = await transaction.select({ id: integrationActivityFacts.id }).from(integrationActivityFacts).where(and(
+        eq(integrationActivityFacts.connectionId, input.connectionId), eq(integrationActivityFacts.personId, input.personId),
+        eq(integrationActivityFacts.providerIdentity, input.providerIdentity),
+        notExists(transaction.select({ id: activitySuccessor.id }).from(activitySuccessor).where(eq(activitySuccessor.supersedesId, integrationActivityFacts.id)))
+      )).limit(1);
+      if (!activity) return false;
+      const lineage = await readActivityLineageClassification(transaction, input.personId, activity.id);
+      if (!lineage) throw new Error("Activity detail lineage is broken");
+      const successor = alias(externalActivityDetails, "details_successor");
+      const [current] = await transaction.select().from(externalActivityDetails).where(and(
+        eq(externalActivityDetails.lineageRootActivityId, lineage.root_id), eq(externalActivityDetails.consentId, input.consentId),
+        notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, externalActivityDetails.id)))
+      )).limit(1);
+      if (current?.fileChecksum === input.fileChecksum && current.normalizationVersion === input.normalizationVersion) return false;
+      await transaction.insert(externalActivityDetails).values({ personId: input.personId, connectionId: input.connectionId,
+        consentId: input.consentId, fileChecksum: input.fileChecksum, normalizationVersion: input.normalizationVersion, payload: input.payload,
+        lineageRootActivityId: lineage.root_id, sourceActivityVersion: activity.id, supersedesId: current?.id ?? null });
+      return true;
+    });
+  }
+
+  /** {@inheritDoc TrainingStore.readExternalActivityDetails} */
+  public readExternalActivityDetails(personId: string, activityId: string): Promise<ActivityDetailsRead> {
+    return this.database.db.transaction(async (transaction) => {
+      const successor = alias(integrationActivityFacts, "details_read_activity_successor");
+      const [activity] = await transaction.select({ connectionId: integrationActivityFacts.connectionId, providerIdentity: integrationActivityFacts.providerIdentity }).from(integrationActivityFacts)
+        .where(and(eq(integrationActivityFacts.id, activityId), eq(integrationActivityFacts.personId, personId),
+          notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, integrationActivityFacts.id))))).limit(1);
+      if (!activity) throw new NotFoundError("External activity was not found");
+      const connection = await transaction.query.integrationConnections.findFirst({ columns: { consentId: true }, where: and(
+        eq(integrationConnections.id, activity.connectionId), eq(integrationConnections.personId, personId),
+        inArray(integrationConnections.lifecycle, ["active", "degraded"]), eq(integrationConnections.importEnabled, true),
+        sql`exists (select 1 from recovery_consents consent join recovery_connections recovery on recovery.id = consent.connection_id where consent.id = ${integrationConnections.consentId} and consent.person_id = ${personId} and consent.status = 'active' and recovery.status = 'active' and recovery.erasure_requested_at is null)`
+      ) });
+      if (!connection) return { details: null, latestImportIssue: null };
+      const lineage = await readActivityLineageClassification(transaction, personId, activityId);
+      if (!lineage) throw new Error("Activity detail lineage is broken");
+      const detailSuccessor = alias(externalActivityDetails, "details_read_successor");
+      const [details] = await transaction.select().from(externalActivityDetails).where(and(
+        eq(externalActivityDetails.personId, personId), eq(externalActivityDetails.lineageRootActivityId, lineage.root_id),
+        eq(externalActivityDetails.connectionId, activity.connectionId), eq(externalActivityDetails.consentId, connection.consentId),
+        notExists(transaction.select({ id: detailSuccessor.id }).from(detailSuccessor).where(eq(detailSuccessor.supersedesId, externalActivityDetails.id)))
+      )).limit(1);
+      const receipt = await transaction.query.integrationInbox.findFirst({ columns: { activityDetailsIssue: true }, where: and(
+        eq(integrationInbox.connectionId, activity.connectionId), eq(integrationInbox.consentId, connection.consentId),
+        eq(integrationInbox.kind, "activity"), eq(integrationInbox.providerIdentity, activity.providerIdentity),
+        sql`${integrationInbox.activityDetailsAttemptedAt} is not null`
+      ), orderBy: [desc(integrationInbox.activityDetailsAttemptedAt), desc(integrationInbox.id)] });
+      return { details: details ?? null, latestImportIssue: receipt?.activityDetailsIssue ?? null };
+    });
+  }
 
   public listPersonalBaselineDays(
     personId: string,

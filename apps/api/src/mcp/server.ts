@@ -3,6 +3,9 @@ import addFormats from "ajv-formats";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
+  GetExternalActivityDetailsSchema,
+  ExternalActivityDetailsResultSchema,
+  type GetExternalActivityDetails,
   BodyMeasurementSessionListSchema,
   ClassifyExternalActivityResultSchema,
   ClassifyExternalActivitySchema,
@@ -164,6 +167,7 @@ interface McpServices {
     | "setActivityRecordingMode"
     | "confirmWorkoutActivityLink"
     | "getTrainingContext"
+    | "getExternalActivityDetails"
   >;
   readonly recovery: Pick<RecoveryService, "listObservations" | "createObservation" | "correctObservation">;
   readonly dailyContextNotes: Pick<DailyContextNoteService, "list" | "create" | "correct">;
@@ -221,6 +225,7 @@ export const MCP_ROUTINE_COACH_RESPONSE_EXAMPLES = [
 export const MCP_COACH_REPLY_POLICY =
   "COACH RESPONSE: Always use the user's language, sound like a real coach, and keep implementation mechanics invisible. " +
   "Answer the actual message. Routine capture or correction may end with a short acknowledgement. Add an observation, advice, or a question only when it is useful in this context; never manufacture a next step. " +
+  "When asked about cardio by sections, pulse or pace over time, peaks, laps, or zones, get the exact activity from get_training_context_v2 and call get_external_activity_details before analysis or claiming only averages are available. Use the available measured channels and coverage; do not ask the user to upload an already imported file. Computed intensity is not measured segment training load, and explicitly supplied analysis zones are not historical watch settings. Keep the explanation focused on what happened during training. " +
   "For a factual get_person_fact_timeline request, report recorded facts and any gaps without inventing Coach decisions, workout completion, or a recommendation; give advice only if the user also asks for it. " +
   "Never require Garmin Training Readiness or Recovery Time screenshots for routine recovery or daily guidance. Base advice on verified current facts and available recovery observations; an absent Garmin value is unknown, not a reason by itself to withhold advice. When asked specifically for Recovery Time, call list_recovery_observations with metric=garmin_post_activity_recovery_time. Only a returned observation with sourceReference.channel=account and externalSystem=intervals_icu_activity_fit:garmin_140_9_v1 is an Intervals.icu activity FIT snapshot; state its estimated minute value and observation time. Never calculate a current countdown from it or let it replace current evidence. When asked for Garmin Training Readiness, give only a verified value with its known time or say it is unavailable; do not infer it from a generic readiness field. Do not ask for a screenshot to make routine guidance possible. A voluntarily supplied Garmin report is manual evidence, not connected-device data; do not record an unsupported Garmin score under another metric. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when a direct unambiguous report already authorizes the routine low-risk action; perform the action instead. " +
@@ -909,6 +914,16 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
           input as MaterializeTrainingProgramCadence
         ),
       materializedTrainingProgramCadenceResultContent
+    ),
+    defineTool(
+      "get_external_activity_details",
+      "Read measured cardio details for an internal activity id from get_training_context_v2. When the user asks about pulse, pace, peaks, intervals, laps, zones, or load over time, call this tool before analysis; never reconstruct a timeline from workout averages. Default mode buckets gives computed one-minute segments with time-weighted mean, measured min/max and channel coverage. mode records gives actual samples; mode laps gives recorded laps. Select each session separately and follow nextCursor with identical query fields for additional pages. Missing measurements remain unknown. timerEventsAvailable:false means pauses were not recorded and active time is assumed across the elapsed session. Values bridge at most ten seconds and never a recorded pause. Supply zone boundaries only when explicitly known for this analysis; these are not historical watch zones. Provider total training load must not be divided into segment loads. Describe observed intensity and duration; avoid invented TRIMP/EPOC or causal diagnoses. If unavailable, use latestImportIssue to explain the factual reason briefly and still use available summary facts. A latest issue with available data means use the retained version as of importedAt, not a newly verified file. Never claim this capability is absent without checking it, and keep ids/parser/storage mechanics out of the conversation.",
+      GetExternalActivityDetailsSchema,
+      ExternalActivityDetailsResultSchema,
+      false,
+      MCP_READ_SCOPE,
+      (input) => services.training.getExternalActivityDetails(input as GetExternalActivityDetails),
+      () => routineReadResultContent
     ),
     defineTool(
       "classify_external_activity",

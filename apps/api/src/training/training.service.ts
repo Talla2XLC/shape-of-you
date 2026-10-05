@@ -1,6 +1,8 @@
 import { Inject, Injectable } from "@nestjs/common";
 
 import type {
+  GetExternalActivityDetails,
+  ExternalActivityDetailsResult,
   AcceptProgressionCandidate,
   AppliedWorkingWeight,
   ApplyConfirmedWorkingWeight,
@@ -56,6 +58,7 @@ import type {
   TrainingStore
 } from "../storage/training-repository.js";
 import type { TrainingBaselineDay } from "./personal-baseline-history.js";
+import { projectActivityDetails } from "./activity-details.js";
 
 function toExternalActivitySummary(
   activity: ExternalActivityFact
@@ -177,6 +180,11 @@ function pendingActivityLinkQuestion(
 /** Application boundary for Training reference data, plans, facts, and projections. */
 @Injectable()
 export class TrainingService {
+  /** Reads locally imported activity details for the authenticated Person without provider calls or writes. */
+  public async getExternalActivityDetails(input: GetExternalActivityDetails): Promise<ExternalActivityDetailsResult> {
+    const read = await this.store.readExternalActivityDetails(this.personContext.getPersonId(), input.activityId);
+    return projectActivityDetails(input, read.details, read.latestImportIssue);
+  }
   public constructor(
     @Inject(TRAINING_STORE)
     private readonly store: TrainingStore,

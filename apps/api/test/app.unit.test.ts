@@ -207,6 +207,8 @@ const nutritionStore: NutritionStore = {
 };
 
 const trainingStore: TrainingStore = {
+  importExternalActivityDetails: unreachable,
+  readExternalActivityDetails: unreachable,
   importExternalActivity: unreachable,
   reconcileRecentActivityLinks: unreachable,
   listTrustedExternalActivityTitles: unreachable,

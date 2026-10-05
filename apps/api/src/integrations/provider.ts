@@ -1,3 +1,5 @@
+import type { ActivityDetailsIssue } from "@shape-of-you/contracts";
+
 /** Safe provider failure classes persisted in the connection projection. */
 export type IntegrationFailureCode =
   | "authorization_required"
@@ -82,5 +84,13 @@ export class IntegrationProviderError extends Error {
   ) {
     super(message);
     this.name = "IntegrationProviderError";
+  }
+}
+
+/** Sanitized original-file or FIT decoder failure recorded in the existing import receipt. */
+export class ActivityDetailsReadError extends IntegrationProviderError {
+  public constructor(public readonly issue: ActivityDetailsIssue) {
+    super("provider_response_invalid", "Activity details could not be read");
+    this.name = "ActivityDetailsReadError";
   }
 }

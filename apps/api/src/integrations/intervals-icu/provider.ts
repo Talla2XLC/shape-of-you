@@ -5,7 +5,7 @@ import type {
   ProviderAuthorization,
   ProviderReconciliation
 } from "../provider.js";
-import { IntegrationProviderError } from "../provider.js";
+import { ActivityDetailsReadError, IntegrationProviderError } from "../provider.js";
 import { gunzipSync } from "node:zlib";
 import {
   normalizeIntervalsActivity,
@@ -141,13 +141,13 @@ export class IntervalsIcuProvider implements HealthDataProvider {
         contentType === "application/xml" || contentType === "application/xhtml+xml"
       )) invalid();
       const declared = Number(response.headers.get("content-length"));
-      if (Number.isFinite(declared) && declared > maxResponseBytes) invalid();
+      if (Number.isFinite(declared) && declared > maxResponseBytes) throw new ActivityDetailsReadError("limit_exceeded");
       if (!response.body) invalid();
       const chunks: Uint8Array[] = [];
       let length = 0;
       for await (const chunk of response.body) {
         length += chunk.byteLength;
-        if (length > maxResponseBytes) invalid();
+        if (length > maxResponseBytes) throw new ActivityDetailsReadError("limit_exceeded");
         chunks.push(chunk);
       }
       const body = Buffer.concat(chunks);
@@ -157,8 +157,11 @@ export class IntervalsIcuProvider implements HealthDataProvider {
         file = body[0] === 0x1f && body[1] === 0x8b
           ? gunzipSync(body, { maxOutputLength: maxResponseBytes })
           : body;
-      } catch { invalid(); }
-      if (file.length > maxResponseBytes) invalid();
+      } catch (error) {
+        if (error instanceof Error && "code" in error && error.code === "ERR_BUFFER_TOO_LARGE") throw new ActivityDetailsReadError("limit_exceeded");
+        invalid();
+      }
+      if (file.length > maxResponseBytes) throw new ActivityDetailsReadError("limit_exceeded");
       return file;
     } catch (error) {
       if (error instanceof IntegrationProviderError) throw error;

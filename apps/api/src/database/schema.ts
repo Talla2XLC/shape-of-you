@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { ActivityDetailsPayload, ActivityDetailsIssue } from "@shape-of-you/contracts";
 import {
   boolean,
   check,
@@ -3396,6 +3397,8 @@ export const integrationInbox = pgTable(
     status: integrationInboxStatus("status").default("pending").notNull(),
     failureCode: integrationSyncFailure("failure_code"),
     receivedAt: timestamp("received_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+    activityDetailsIssue: varchar("activity_details_issue", { length: 64 }).$type<ActivityDetailsIssue>(),
+    activityDetailsAttemptedAt: timestamp("activity_details_attempted_at", { withTimezone: true, mode: "date" }),
     normalizedAt: timestamp("normalized_at", { withTimezone: true, mode: "date" })
   },
   (table) => [
@@ -3516,6 +3519,27 @@ export const integrationActivityFacts = pgTable(
     )
   ]
 );
+
+/** Immutable normalized activity detail versions owned by Training, scoped to one consent generation. */
+export const externalActivityDetails = pgTable("external_activity_details", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  personId: uuid("person_id").notNull(), connectionId: uuid("connection_id").notNull(), consentId: uuid("consent_id").notNull(),
+  lineageRootActivityId: uuid("lineage_root_activity_id").notNull(), sourceActivityVersion: uuid("source_activity_version").notNull(),
+  fileChecksum: varchar("file_checksum", { length: 64 }).notNull(), normalizationVersion: varchar("normalization_version", { length: 64 }).notNull(),
+  payload: jsonb("payload").$type<ActivityDetailsPayload>(), supersedesId: uuid("supersedes_id"),
+  importedAt: timestamp("imported_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
+}, (table) => [
+  foreignKey({ name: "activity_details_person_fk", columns: [table.personId], foreignColumns: [persons.id] }).onDelete("cascade"),
+  foreignKey({ name: "activity_details_connection_fk", columns: [table.connectionId], foreignColumns: [integrationConnections.id] }).onDelete("cascade"),
+  foreignKey({ name: "activity_details_consent_fk", columns: [table.consentId], foreignColumns: [recoveryConsents.id] }).onDelete("cascade"),
+  foreignKey({ name: "activity_details_root_person_fk", columns: [table.lineageRootActivityId, table.personId], foreignColumns: [integrationActivityFacts.id, integrationActivityFacts.personId] }).onDelete("cascade"),
+  foreignKey({ name: "activity_details_source_person_fk", columns: [table.sourceActivityVersion, table.personId], foreignColumns: [integrationActivityFacts.id, integrationActivityFacts.personId] }).onDelete("cascade"),
+  foreignKey({ name: "activity_details_successor_person_fk", columns: [table.supersedesId, table.personId], foreignColumns: [table.id, table.personId] }).onDelete("cascade"),
+  unique("activity_details_id_person_uq").on(table.id, table.personId),
+  uniqueIndex("activity_details_successor_uq").on(table.supersedesId).where(sql`${table.supersedesId} IS NOT NULL`),
+  index("activity_details_root_consent_idx").on(table.lineageRootActivityId, table.consentId),
+  check("activity_details_checksum_shape", sql`${table.fileChecksum} ~ '^[0-9a-f]{64}$'`)
+]);
 
 /** Append-only user authority relating one external activity lineage to a program. */
 export const externalActivityProgramClassifications = pgTable(

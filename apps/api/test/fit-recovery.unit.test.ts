@@ -127,6 +127,7 @@ describe("bounded Garmin FIT recovery evidence", () => {
     let pointer: RecoveryFactPointer | null = null;
     const currentPointer = (): RecoveryFactPointer | null => pointer;
     const store = {
+      setActivityDetailsIssue: vi.fn(async () => true),
       personTimezone: vi.fn(async () => "Europe/Belgrade"),
       recordInbox: vi.fn(async (_id: string, _consent: string, _kind: string, identity: string, checksum: string) =>
         receipts.get(identity) === checksum ? { state: "unchanged" } : { state: "process", receiptId: identity }),
@@ -154,6 +155,7 @@ describe("bounded Garmin FIT recovery evidence", () => {
     const recovery = { createObservation, correctObservation, withdrawObservation } as unknown as RecoveryStore;
     const training = {
       importExternalActivity: vi.fn(async () => "unchanged"),
+      importExternalActivityDetails: vi.fn(async () => false),
       reconcileRecentActivityLinks: vi.fn(async () => {})
     } as unknown as TrainingStore;
     const service = new IntegrationService(new SyntheticPersonContext(personId), store, provider, cipher, recovery, training);
@@ -229,6 +231,7 @@ describe("bounded Garmin FIT recovery evidence", () => {
     const markSyncPartial = vi.fn();
     const markSyncSucceeded = vi.fn();
     const store = {
+      setActivityDetailsIssue: vi.fn(async () => true),
       personTimezone: vi.fn(async () => "UTC"),
       recordInbox: vi.fn(async (_id: string, _consent: string, _kind: string, identity: string, checksum: string) => {
         pending.set(identity, checksum);
@@ -245,6 +248,7 @@ describe("bounded Garmin FIT recovery evidence", () => {
     } as unknown as IntegrationStore;
     const training = {
       importExternalActivity: vi.fn(async () => "unchanged"),
+      importExternalActivityDetails: vi.fn(async () => false),
       reconcileRecentActivityLinks: vi.fn(async () => {})
     } as unknown as TrainingStore;
     const service = new IntegrationService(new SyntheticPersonContext(personId), store, provider, cipher,
