@@ -33,6 +33,12 @@ coordinate.
 
 ### Delivery
 
+Accepted controller source now includes scoped Docker image retention under the
+existing deployment lock, protecting current/previous/candidate and container
+references. Installation of that source change remains pending; the
+[retention ADR](../../adr/20261006-bound-staging-docker-image-retention.md) and
+[staging runbook](../operations/temporary-vm-deployment.md) define its boundaries.
+
 Pushes to `main` that include any path outside Markdown, `docs/**`, and
 `plans/**` run quality and publish SHA-linked GHCR images, but do not contact
 the VM. Documentation-only and plan-only pushes do not start the publication

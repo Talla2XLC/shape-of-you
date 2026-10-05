@@ -463,6 +463,12 @@ IDENTITY_UPDATE_REQUIRED=$DEPLOY_IDENTITY
 EOF
 fi
 
+python3 "$CONTROL_STAGING/scripts/image-retention.py" \
+  --root "$DEPLOY_ROOT" \
+  --candidate "$RELEASE_ENV" \
+  --namespace "$GHCR_NAMESPACE" \
+  --apply
+
 DOCKER_CONFIG_DIR=$(mktemp -d)
 printf '%s' "$GHCR_TOKEN" | DOCKER_CONFIG="$DOCKER_CONFIG_DIR" \
   docker login ghcr.io --username "$GHCR_ACTOR" --password-stdin >/dev/null

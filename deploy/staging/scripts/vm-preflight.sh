@@ -9,6 +9,7 @@ IDENTITY_RUNTIME_ENV=${IDENTITY_RUNTIME_ENV:-/etc/shape-of-you/staging/identity.
 RELEASE_ENV=${1:-}
 COMPOSE_PROJECT=${COMPOSE_PROJECT:-shape-of-you-staging}
 
+command -v python3 >/dev/null 2>&1
 command -v docker >/dev/null 2>&1
 command -v curl >/dev/null 2>&1
 command -v timeout >/dev/null 2>&1

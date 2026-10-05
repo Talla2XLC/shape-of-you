@@ -81,6 +81,9 @@ jobs:
       - name: Test Identity incident maintenance phases
         run: sh deploy/staging/scripts/tests/identity-incident-maintenance.sh
 
+      - name: Test scoped staging image retention
+        run: python3 deploy/staging/scripts/tests/image-retention.test.py
+
       - name: Test
         run: pnpm test
 

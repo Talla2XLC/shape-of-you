@@ -31,7 +31,7 @@ configuration or credential material into the repository.
 - Environment `staging` contains required secrets/variables.
 - Both `staging.shape-of-you.ru` and `identity.staging.shape-of-you.ru` resolve
   publicly to `STAGING_PUBLIC_IPV4`.
-- VM has Docker Engine, Compose plugin, GNU `timeout`, `curl`, `getent`, `flock`,
+- VM has Python 3.7+, Docker Engine, Compose plugin, GNU `timeout`, `curl`, `getent`, `flock`,
   systemd, and `visudo`; ports `80` and `443` are allowed by the provider
   firewall.
 - In `shared-ingress` mode, `/opt/shared-vm-ingress` exclusively owns those
@@ -183,6 +183,34 @@ The versioned controller pulls each required image service sequentially: API,
 changed Identity, edge, then Certbot. Unchanged Identity is not pulled. This
 trades deployment duration for lower concurrent image extraction and page-cache
 pressure on the constrained shared VM.
+
+### Scoped image retention (source accepted, delivery pending)
+
+The controller source invokes `image-retention.py` before image pulls under the
+existing root-managed deployment lock. The helper uses Python 3 standard library,
+reads only release image coordinates, and defaults to dry-run; controller use
+passes `--apply`. It protects current/previous releases, the candidate, every
+existing container (including stopped containers), and three newest images per
+exact Shape API/Identity/edge/Certbot repository. Images with unrelated references
+or no repository identity are excluded. Creation timestamps are ordered by
+instant and nanoseconds, including variable fractional precision.
+
+Missing protected images, unsafe release pointers/coordinates, changed inventory,
+or Docker failures stop cleanup. Deletion uses exact image IDs without force;
+no global prune, volume, database, log, or neighboring-project cleanup is allowed.
+Available bytes and inodes are reported; zero availability fails closed. Positive
+availability does not prove that the next image fits. Reserve thresholds remain
+unset pending a separately agreed resource budget. Older release metadata is
+retained; an older rollback may need an exact digest pull from GHCR.
+
+Operator-approved one-time cleanup removed 597 old Shape images on 2026-10-06
+(Person-local date), retaining 21 images including rollback/container references.
+Free inode capacity recovered and the existing runtimes remained healthy. This
+live cleanup does not prove installation of the new retention helper: its commit,
+push and rollout remain pending. See the
+[retention ADR](../../adr/20261006-bound-staging-docker-image-retention.md).
+
+### Deployment execution
 
 The Actions SSH client sends a keepalive every 30 seconds and fails only after
 six unanswered probes; `BatchMode`, the dedicated key, and strict known-host
