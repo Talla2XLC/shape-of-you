@@ -27,6 +27,7 @@ const session: OAuthBrowserSession = {
 };
 
 interface BrowserFixture {
+  readonly completionOrigin: string;
   readonly callbackOrigin: string;
   readonly callbackReferers: readonly string[];
   readonly close: () => Promise<void>;
@@ -53,11 +54,23 @@ function close(server: Server): Promise<void> {
 
 async function startBrowserFixture(
   forceFreshPasskey = false,
-  hasApplicationSession = true
+  hasApplicationSession = true,
+  chainedCallback = false,
+  invalidReturnTo?: string
 ): Promise<BrowserFixture> {
+  const completionServer = createServer((_request, response) => {
+    response.end("<h1>App connected</h1>");
+  });
+  await listen(completionServer);
+  const completionOrigin = `http://127.0.0.1:${(completionServer.address() as AddressInfo).port}`;
   const callbackReferers: string[] = [];
   const callbackServer = createServer((request, response) => {
     callbackReferers.push(request.headers.referer ?? "");
+    if (chainedCallback) {
+      response.writeHead(302, { location: `${completionOrigin}/complete` });
+      response.end();
+      return;
+    }
     const url = new URL(request.url ?? "/", "http://127.0.0.1");
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
     response.end(`<h1>Client callback</h1><p>${url.searchParams.toString()}</p>`);
@@ -78,6 +91,14 @@ async function startBrowserFixture(
     try {
       const url = new URL(request.url ?? "/", origin || "http://localhost");
       if (request.method === "POST") submissionOrigins.push(request.headers.origin ?? "");
+      if (url.pathname === `/oauth/authorize/${interactionCredential}`) {
+        const callback = new URL("/client/callback", callbackOrigin);
+        callback.searchParams.set(decision === "deny" ? "error" : "code",
+          decision === "deny" ? "access_denied" : "browser-code");
+        response.writeHead(303, { location: callback.toString() });
+        response.end();
+        return;
+      }
       if (
         request.method === "POST" &&
         url.pathname === "/v1/webauthn/authentication/options"
@@ -139,6 +160,13 @@ async function startBrowserFixture(
     }
   } as unknown as OAuthBrowserUiDependencies["authentication"];
   const runtime = {
+    saveBrowserConsent: async (
+      _request: unknown, _response: unknown,
+      result: { readonly error?: string }
+    ) => {
+      decision = result.error === "access_denied" ? "deny" : "allow";
+      return invalidReturnTo ?? `${origin}/oauth/authorize/${interactionCredential}`;
+    },
     interactionDetails: async () => ({
       uid: interactionCredential,
       prompt: { name: forceFreshPasskey ? "login" : "consent" },
@@ -177,9 +205,10 @@ async function startBrowserFixture(
     runtime
   });
   return {
+    completionOrigin,
     callbackOrigin,
     callbackReferers,
-    close: () => Promise.all([close(identityServer), close(callbackServer)]).then(() => undefined),
+    close: () => Promise.all([close(identityServer), close(callbackServer), close(completionServer)]).then(() => undefined),
     decision: () => decision,
     origin,
     submissionCount: () => submissionCount,
@@ -246,6 +275,79 @@ test("Deny posts the exact browser Origin and returns cross-origin access_denied
     await fixture.close();
   }
 });
+
+for (const action of ["Allow", "Deny"] as const) {
+  test(`${action} reaches an app after a callback redirects to a third origin`, async ({ page }) => {
+    const fixture = await startBrowserFixture(false, true, true);
+    const cspErrors: string[] = [];
+    page.on("console", (message) => {
+      if (message.text().includes("form-action")) cspErrors.push(message.text());
+    });
+    try {
+      await openConsent(page, fixture.origin);
+      const handoffResponse = page.waitForResponse((response) =>
+        response.request().method() === "POST" && response.url().endsWith("/consent"));
+      await page.getByRole("button", { name: action }).click();
+      const handoff = await handoffResponse;
+      expect(handoff.status()).toBe(200);
+      expect(handoff.headers()["cache-control"]).toBe("no-store");
+      expect(handoff.headers()["referrer-policy"]).toBe("no-referrer");
+      expect(handoff.headers()["content-security-policy"]).toContain("form-action 'self'");
+      await expect(page.getByRole("heading", { name: "App connected" })).toBeVisible();
+      await expect(page).toHaveURL(`${fixture.completionOrigin}/complete`);
+      expect(fixture.submissionOrigins).toEqual([fixture.origin]);
+      expect(fixture.submissionCount()).toBe(1);
+      expect(fixture.decision()).toBe(action.toLowerCase());
+      expect(fixture.callbackReferers).toEqual([""]);
+      expect(cspErrors).toEqual([]);
+    } finally {
+      await fixture.close();
+    }
+  });
+}
+
+test("native consent without JavaScript offers a GET link through the chained callback", async ({ browser }) => {
+  const fixture = await startBrowserFixture(false, true, true);
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  try {
+    await openConsent(page, fixture.origin);
+    await page.getByRole("button", { name: "Allow" }).click();
+    await expect(page.getByText("Returning to your app…")).toBeVisible();
+    await page.getByRole("link", { name: "Continue" }).click();
+    await expect(page.getByRole("heading", { name: "App connected" })).toBeVisible();
+    expect(fixture.submissionCount()).toBe(1);
+    expect(fixture.callbackReferers).toEqual([""]);
+  } finally {
+    await context.close();
+    await fixture.close();
+  }
+});
+
+for (const returnTo of [
+  "https://attacker.example.test/oauth/authorize/" + interactionCredential,
+  "/oauth/authorize/" + interactionCredential + "?code=untrusted",
+  "/oauth/authorize/" + interactionCredential + "#fragment",
+  "/other/../oauth/authorize/" + interactionCredential,
+  "/oauth/authorize/short",
+  "javascript:alert(1)"
+]) {
+  test(`consent rejects an invalid provider resume target ${returnTo}`, async ({ page }) => {
+    const fixture = await startBrowserFixture(false, true, false, returnTo);
+    try {
+      await openConsent(page, fixture.origin);
+      const failedResponse = page.waitForResponse((response) =>
+        response.request().method() === "POST" && response.url().endsWith("/consent"));
+      await page.getByRole("button", { name: "Allow" }).click();
+      expect((await failedResponse).status()).toBe(500);
+      expect(fixture.callbackReferers).toEqual([]);
+      expect(fixture.submissionCount()).toBe(1);
+      expect(new URL(page.url()).origin).toBe(fixture.origin);
+    } finally {
+      await fixture.close();
+    }
+  });
+}
 
 test("prompt=login and max_age=0 ignores an existing session and requires a passkey", async ({
   page

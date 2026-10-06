@@ -1995,7 +1995,16 @@ describe("Identity migration chain", () => {
           body: new URLSearchParams({ action, csrfToken: consentCsrfToken }),
           redirect: "manual"
         });
-        expect(consent.status).toBe(303);
+        expect(consent.status).toBe(200);
+        expect(consent.headers.get("location")).toBeNull();
+        expect(consent.headers.get("cache-control")).toBe("no-store");
+        expect(consent.headers.get("referrer-policy")).toBe("no-referrer");
+        expect(consent.headers.get("content-security-policy")).toContain("form-action 'self'");
+        const handoffHtml = await consent.text();
+        const resumeHref = handoffHtml.match(/<a href="([^"]+)">Continue<\/a>/)?.[1];
+        expect(resumeHref).toMatch(new RegExp(`^${issuer}/oauth/authorize/[A-Za-z0-9_-]{43}$`));
+        expect(handoffHtml).not.toContain("runtime-state");
+        expect(handoffHtml).not.toContain("code=");
         applyCookies(consent);
         const interactionCredential = initialLocation.split("/").at(-1)!;
         const storedConsent = await createOAuthProviderAdapterFactory({
@@ -2009,7 +2018,7 @@ describe("Identity migration chain", () => {
           ? { result: { consent: { grantId: expect.any(String) } } }
           : { result: { error: "access_denied" } });
         const consentResume = await fetch(
-          new URL(consent.headers.get("location")!, issuer),
+          new URL(resumeHref!, issuer),
           {
             headers: { cookie: cookieHeader() },
             redirect: "manual"

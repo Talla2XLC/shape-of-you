@@ -138,7 +138,7 @@ export class OAuthBrowserUi {
       return;
     }
     if (body.action === "deny") {
-      await this.dependencies.runtime.finishInteraction(request, response, {
+      await this.completeConsent(request, response, {
         error: "access_denied",
         error_description: "End-user denied access"
       });
@@ -155,9 +155,34 @@ export class OAuthBrowserUi {
       existingGrantId: details.grantId,
       scopes
     });
-    await this.dependencies.runtime.finishInteraction(request, response, {
+    await this.completeConsent(request, response, {
       consent: { grantId }
     });
+  }
+
+  private async completeConsent(
+    request: IncomingMessage,
+    response: ServerResponse,
+    result: Parameters<OAuthRuntime["saveBrowserConsent"]>[2]
+  ): Promise<void> {
+    const returnTo = await this.dependencies.runtime.saveBrowserConsent(request, response, result);
+    const resume = new URL(returnTo, this.dependencies.publicOrigin);
+    if (
+      resume.origin !== this.dependencies.publicOrigin ||
+      (returnTo !== resume.href && returnTo !== resume.pathname) ||
+      resume.username || resume.password || resume.search || resume.hash ||
+      !/^\/oauth\/authorize\/[A-Za-z0-9_-]{43}$/.test(resume.pathname)
+    ) throw new Error("OAuth provider resume URL is invalid");
+    const nonce = randomBytes(18).toString("base64url");
+    response.writeHead(200, {
+      "cache-control": "no-store",
+      "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`,
+      "content-type": "text/html; charset=utf-8",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+      "x-frame-options": "DENY"
+    });
+    response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Continue · Shape of You</title></head><body><p>Returning to your app…</p><a href="${escapeHtml(resume.href)}">Continue</a><script nonce="${nonce}">location.replace(${JSON.stringify(resume.href)})</script></body></html>`);
   }
 }
 

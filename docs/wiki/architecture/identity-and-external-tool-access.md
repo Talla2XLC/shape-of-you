@@ -194,6 +194,17 @@ login and consent. It reuses the passkey session and CSRF contract, renders only
 validated client/scope information, and completes the provider interaction.
 The general product UI and visual design remain outside Identity.
 
+Native Allow/Deny submissions preserve exact Origin, session binding, and CSRF
+checks. Identity saves the provider interaction and returns a nonce-protected,
+`no-store`, `no-referrer` document that starts a separate GET navigation to the
+validated same-origin provider resume URL. A same-origin Continue link supports
+browsers without JavaScript. This lets the external callback follow further GET
+redirects without inheriting the consent form's `form-action` restriction.
+The callback allowlist remains exact. The handoff document permits only its
+nonce-bound script and same-origin form actions; it contains no authorization
+code, callback state, or tokens.
+See the [consent navigation ADR](../../adr/20261006-complete-consent-through-same-origin-navigation.md).
+
 The first general browser UI is an edge-served static Nuxt client. Enrollment,
 sign-in, and security-management pages run only on the configured exact
 Identity origin and call relative `/v1/...` routes, so no CORS policy or cookie,
@@ -530,6 +541,7 @@ lifecycle.
 - [Progress overview authenticated default](../../adr/20260818-make-progress-overview-the-authenticated-default.md)
 - [Refresh tokens by registered client policy](../../adr/20260825-issue-refresh-tokens-by-registered-client-policy.md)
 - [Stable ChatGPT connector callback](../../adr/20260827-adopt-stable-chatgpt-connector-platform-oauth-callback.md)
+- [Consent navigation through a same-origin document](../../adr/20261006-complete-consent-through-same-origin-navigation.md)
 - [Training and raw Recovery import](../../adr/20260825-import-training-and-raw-recovery-observations.md)
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md)
 - [Backward-compatible MCP tool schemas](../../adr/20260902-evolve-mcp-tool-schemas-backward-compatibly.md)

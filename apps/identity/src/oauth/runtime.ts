@@ -229,6 +229,21 @@ export class OAuthRuntime {
     });
   }
 
+  /**
+   * Saves native consent and returns only the provider-owned resume URL.
+   * The browser adapter must validate this URL before starting GET navigation.
+   * Provider/session errors propagate; this method does not send a redirect.
+   */
+  public async saveBrowserConsent(
+    request: IncomingMessage,
+    response: ServerResponse,
+    result: InteractionResults
+  ): Promise<string> {
+    return this.provider.interactionResult(request, response, result, {
+      mergeWithLastSubmission: false
+    });
+  }
+
   /** Creates, reuses, or extends one consent grant with disjoint protocol and resource scopes. */
   public async grantConsentScopes(input: {
     readonly accountId: string;
