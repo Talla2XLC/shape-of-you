@@ -18,7 +18,7 @@ import { IntegrationProviderError } from "../src/integrations/provider.js";
 import { RequestPersonContext } from "../src/application/person-context.js";
 import { createDatabase, type DatabaseContext } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
-import { registerMcpRoutes, type McpRouteOptions } from "../src/mcp/server.js";
+import { MCP_RECOVERY_RETRY_POLICY, registerMcpRoutes, type McpRouteOptions } from "../src/mcp/server.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
 import { TrainingService } from "../src/training/training.service.js";
 
@@ -40,7 +40,7 @@ afterAll(async () => {
   await container?.stop();
 });
 
-async function fixture() {
+async function fixture(lostAcknowledgementTool?: string) {
   const personId = randomUUID();
   const context = new RequestPersonContext(personId);
   const repository = new TrainingRepository(database);
@@ -54,6 +54,30 @@ async function fixture() {
   await database.pool.query("insert into integration_connections (id, person_id, recovery_connection_id, consent_id, provider_key, external_user_id) values ($1, $2, $3, $4, 'intervals_icu', $5)", [connectionId, personId, recoveryConnectionId, consentId, personId]);
   const unavailable = async (): Promise<never> => { throw new Error("Unrelated service called"); };
   const fastify = Fastify();
+  const recovery = new RecoveryService(new RecoveryRepository(database), context);
+  const dailyContextNotes = new DailyContextNoteService(new DailyContextNoteRepository(database), context);
+  // Only the acknowledgement is faulted: the actual PostgreSQL operation finishes first.
+  if (lostAcknowledgementTool) {
+    let lost = false;
+    const afterCommit = async <T>(operation: Promise<T>): Promise<T> => {
+      const committed = await operation;
+      if (!lost) { lost = true; throw new Error("Synthetic acknowledgement loss after commit"); }
+      return committed;
+    };
+    if (lostAcknowledgementTool === "record_recovery_observation") {
+      const original = recovery.createObservation.bind(recovery);
+      vi.spyOn(recovery, "createObservation").mockImplementation((input) => afterCommit(original(input)));
+    } else if (lostAcknowledgementTool === "correct_recovery_observation") {
+      const original = recovery.correctObservation.bind(recovery);
+      vi.spyOn(recovery, "correctObservation").mockImplementation((id, input) => afterCommit(original(id, input)));
+    } else if (lostAcknowledgementTool === "record_daily_context_note") {
+      const original = dailyContextNotes.create.bind(dailyContextNotes);
+      vi.spyOn(dailyContextNotes, "create").mockImplementation((input) => afterCommit(original(input)));
+    } else {
+      const original = dailyContextNotes.correct.bind(dailyContextNotes);
+      vi.spyOn(dailyContextNotes, "correct").mockImplementation((id, input) => afterCommit(original(id, input)));
+    }
+  }
   registerMcpRoutes({
     fastify, issuer: "https://identity.example.test", resource: "https://api.example.test/mcp",
     // OAuth cryptography has its own suite; domain results here are never mocked.
@@ -64,14 +88,14 @@ async function fixture() {
       weights: { list: unavailable, create: unavailable, correct: unavailable },
       bodyMeasurements: { list: unavailable, create: unavailable, correct: unavailable },
       nutrition: { listMeals: unavailable, createMeal: unavailable, correctMeal: unavailable },
-      recovery: new RecoveryService(new RecoveryRepository(database), context),
-      dailyContextNotes: new DailyContextNoteService(new DailyContextNoteRepository(database), context),
+      recovery,
+      dailyContextNotes,
       dailyProjection: { projection: unavailable },
       currentRecoveryContext: { read: unavailable }
     } satisfies McpRouteOptions["services"]
   });
   let requestId = 0;
-  const call = async (name: string, args: object = {}) => {
+  const rawCall = async (name: string, args: object = {}) => {
     const response = await fastify.inject({ method: "POST", url: "/mcp",
       headers: { accept: "application/json, text/event-stream", authorization: "Bearer test" },
       payload: { jsonrpc: "2.0", id: ++requestId, method: "tools/call", params: { name, arguments: args } }
@@ -79,6 +103,10 @@ async function fixture() {
     expect(response.statusCode).toBe(200);
     const result = response.json().result;
     expect(result, JSON.stringify(response.json())).toBeDefined();
+    return result;
+  };
+  const call = async (name: string, args: object = {}) => {
+    const result = await rawCall(name, args);
     expect(result.isError, result.content?.[0]?.text).not.toBe(true);
     return result.structuredContent;
   };
@@ -103,8 +131,74 @@ async function fixture() {
       sourceProvider: "intervals_icu", garminAttributed: true });
     return (await repository.listExternalActivities(personId, 20)).find((item) => item.providerIdentity === providerIdentity)!;
   };
-  return { fastify, call, program, importActivity, repository, personId, connectionId, consentId, recoveryConnectionId };
+  return { fastify, call, rawCall, program, importActivity, repository, personId, connectionId, consentId, recoveryConnectionId };
 }
+
+describe("Recovery MCP retries after lost acknowledgement with PostgreSQL", () => {
+  it.each(["record_recovery_observation", "correct_recovery_observation",
+    "record_daily_context_note", "correct_daily_context_note"])(
+    "%s preserves the committed fact on an exact retry and keeps distinct reports separate", async (tool) => {
+      const { fastify, call, rawCall, personId } = await fixture(tool);
+      try {
+        const localDate = "2026-09-14", timezone = "Europe/Belgrade";
+        const isNote = tool.includes("context_note");
+        const readTool = isNote ? "list_daily_context_notes" : "list_recovery_observations";
+        const createTool = isNote ? "record_daily_context_note" : "record_recovery_observation";
+        const sourceReference = { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null };
+        const base = isNote
+          ? { localDate, timezone, sourceReference, text: "Synthetic resleep of unknown duration", contextKind: "general" }
+          : { kind: "metric", localDate, timezone, temporalPrecision: "local_date", quality: "reliable", sourceReference,
+            detail: { type: "metric", metric: "hrv_rmssd", value: 57, unit: "ms" } };
+        const original = tool.startsWith("correct")
+          ? await call(createTool, { ...base, dedupeKey: "synthetic:original-report" }) : null;
+        const command = { ...base, dedupeKey: "synthetic:stable-command",
+          ...(original ? { id: original.id, reason: "Synthetic correction" } : {}) };
+        const failed = await rawCall(tool, command);
+        expect(failed).toMatchObject({ isError: true, structuredContent: { outcome: "unknown", reason: "write_failed" } });
+        expect(failed.content[0].text).toContain(MCP_RECOVERY_RETRY_POLICY);
+        const read = await rawCall(readTool, { localDate });
+        expect(read.content[0].text).toContain(MCP_RECOVERY_RETRY_POLICY);
+        expect(read.structuredContent.items).toHaveLength(1);
+        const committed = read.structuredContent.items[0];
+        expect(committed.dedupeKey).toBe(command.dedupeKey);
+        expect(committed.supersedesId).toBe(original?.id ?? null);
+        const sourcesBefore = await database.pool.query("select id from source_references where person_id=$1", [personId]);
+        const repeated = await rawCall(tool, command);
+        expect(repeated.isError).not.toBe(true);
+        expect(repeated.structuredContent).toEqual(committed);
+        expect(repeated.content[0].text).toContain(MCP_RECOVERY_RETRY_POLICY);
+        expect((await call(readTool, { localDate })).items).toEqual([committed]);
+        expect((await database.pool.query("select id from source_references where person_id=$1", [personId])).rowCount)
+          .toBe(sourcesBefore.rowCount);
+        if (original) {
+          const stale = await rawCall(tool, { ...command, dedupeKey: "synthetic:different-correction" });
+          expect(stale).toMatchObject({ isError: true, structuredContent: {
+            outcome: "not_saved", reason: "stale_or_conflicting_fact" } });
+          expect((await call(readTool, { localDate })).items).toEqual([committed]);
+        }
+        // This new report intentionally has the same value and date, but a distinct identity.
+        const separate = await call(createTool, { ...base, dedupeKey: "synthetic:distinct-report" });
+        expect(separate.id).not.toBe(committed.id);
+        expect((await call(readTool, { localDate })).items).toHaveLength(2);
+        const initialized = await fastify.inject({ method: "POST", url: "/mcp",
+          headers: { accept: "application/json, text/event-stream", authorization: "Bearer test" },
+          payload: { jsonrpc: "2.0", id: "retry-policy", method: "initialize", params: {
+            protocolVersion: "2025-03-26", capabilities: {}, clientInfo: { name: "test", version: "1" } } } });
+        expect(initialized.json().result.instructions).toContain(MCP_RECOVERY_RETRY_POLICY);
+        const catalog = await fastify.inject({ method: "POST", url: "/mcp",
+          headers: { accept: "application/json, text/event-stream", authorization: "Bearer test" },
+          payload: { jsonrpc: "2.0", id: "retry-tools", method: "tools/list", params: {} } });
+        for (const published of catalog.json().result.tools.filter((item: { name: string }) =>
+          ["record_recovery_observation", "correct_recovery_observation", "list_recovery_observations",
+            "record_daily_context_note", "correct_daily_context_note", "list_daily_context_notes"].includes(item.name))) {
+          expect(published.description).toContain(MCP_RECOVERY_RETRY_POLICY);
+          if (published.name.startsWith("record") || published.name.startsWith("correct")) {
+            expect(published.inputSchema.properties.dedupeKey.description).toContain("original key");
+          }
+        }
+      } finally { await fastify.close(); }
+    });
+});
 
 describe("MCP training conversation flow with PostgreSQL", () => {
   it("imports a FIT once and delivers actual segment evidence through MCP, then corrects and withdraws without summary changes", async () => {

@@ -27,7 +27,8 @@ const noteInputProperties = {
     description: "Omit to derive from contextKind: general requires include, travel requires exclude. A general HRV or resleep note cannot exclude the day from baseline."
   },
   sourceReference: SourceReferenceInputSchema,
-  dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
+  dedupeKey: { type: "string", minLength: 1, maxLength: 256,
+    description: "Stable key for one report or correction. Reuse the original key for an exact retry, including after an uncertain result; never add an attempt suffix. Distinct reports require distinct keys even when values are equal." },
   confidence: nullableConfidenceSchema
 } as const;
 

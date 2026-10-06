@@ -100,7 +100,7 @@ describe("Recovery and context note MCP failure diagnostics", () => {
         const result = await call(tool, { ...base, dedupeKey: secretMarker,
           ...(tool.startsWith("correct") ? { id: "00000000-0000-4000-8000-000000000002",
             reason: secretMarker } : {}) });
-        expect(result).toMatchObject({ isError: true, structuredContent: { outcome: "not_saved", reason: "write_failed" } });
+        expect(result).toMatchObject({ isError: true, structuredContent: { outcome: "unknown", reason: "write_failed" } });
         expect(result.structuredContent.diagnosticId).toMatch(/^[0-9a-f-]{36}$/u);
         expect(result.content[0].text).toContain(`Diagnostic ID: ${result.structuredContent.diagnosticId}`);
         expect(write).toHaveBeenCalledOnce();

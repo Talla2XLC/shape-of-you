@@ -405,7 +405,7 @@ describe("MCP HTTP adapter", () => {
       "Always require a typed owning-domain result before claiming success"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
-      "A routine create does not require a pre-read"
+      "A new routine create does not require a pre-read; an uncertain Recovery or context-note retry requires the date-level read"
     );
     expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain(
       "Before a Meal correction, call list_meals with localDate only"

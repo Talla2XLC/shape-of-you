@@ -72,14 +72,30 @@ exclude a day from baseline by itself. Create and correction MCP schemas both
 preserve this constraint; contradictions receive a bounded failure reason.
 
 Recovery and context-note write failures distinguish invalid input/domain
-rules, stale or conflicting targets, and execution failure. An execution
-failure carries a server-generated diagnostic ID in both text and structured
+rules, stale or conflicting targets, and execution failure. Known validation
+and target failures return `outcome=not_saved`; an execution failure returns
+`outcome=unknown` because persistence may have completed before acknowledgement.
+An execution failure carries a server-generated diagnostic ID in both text and structured
 content so clients that discard structured errors retain correlation. The
 server logs only fixed event/tool/category metadata, that ID, and a recognized
 PostgreSQL SQLSTATE when available; it never logs the fact payload, raw
 exception, SQL or parameters. Unknown causes remain unknown and do not justify
 blind retries. Routine Coach replies keep these mechanics invisible; a direct
 technical question can receive the verified failure reason or diagnostic ID.
+
+Recovery and context-note retries retain the original command's `dedupeKey`.
+After an uncertain result, Coach reads the exact local date first and reuses a
+verified matching fact without another write. An exact retry is allowed with
+the original key and payload only when a successful read finds no match;
+unavailable reads or uncertain report identity do not authorize a new key.
+Equal values alone do not prove two reports are the same. Distinct reports
+remain independent. A repeated context-note correction returns its existing
+immediate successor for the same source and key; a different correction key
+against the superseded target remains a conflict. Initialization, relevant
+tool descriptions, schema annotations and result/error content deliver this
+policy. PostgreSQL tests fault the acknowledgement after a real commit and
+verify stable records across exact retries; actual Coach behavior requires a
+separate conversation check.
 
 Before revised training advice, Coach reads the date-level observations and
 `list_daily_context_notes`, then fresh current Recovery and Daily Decision

@@ -430,7 +430,8 @@ const observationInputProperties = {
   quality: RecoveryObservationQualitySchema,
   connectionId: { anyOf: [uuid, { type: "null" }] },
   consentId: { anyOf: [uuid, { type: "null" }] },
-  dedupeKey: { type: "string", minLength: 1, maxLength: 256 },
+  dedupeKey: { type: "string", minLength: 1, maxLength: 256,
+    description: "Stable key for one report or correction. Reuse the original key for an exact retry, including after an uncertain result; never add an attempt suffix. Distinct reports require distinct keys even when values are equal." },
   sourceReference: RecoverySourceReferenceInputSchema,
   detail: {
     oneOf: [SleepObservationDetailSchema, MetricObservationDetailSchema, SubjectiveObservationDetailSchema,

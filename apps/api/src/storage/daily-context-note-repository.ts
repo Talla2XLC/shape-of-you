@@ -164,8 +164,9 @@ export class DailyContextNoteRepository implements DailyContextNoteStore {
       }
       const superseder = alias(dailyContextNotes, "daily_context_note_superseder");
       const superseded = await transaction
-        .select({ id: superseder.id })
+        .select({ note: superseder, sourceReference: sourceReferences })
         .from(superseder)
+        .innerJoin(sourceReferences, eq(superseder.sourceReferenceId, sourceReferences.id))
         .where(
           and(
             eq(superseder.personId, personId),
@@ -174,6 +175,10 @@ export class DailyContextNoteRepository implements DailyContextNoteStore {
         )
         .limit(1);
       if (superseded[0]) {
+        const successor = superseded[0];
+        if (successor.note.source === input.sourceReference.channel && successor.note.dedupeKey === input.dedupeKey) {
+          return { created: false, note: serialize(successor) };
+        }
         throw new ConflictError("DailyContextNote was already superseded");
       }
       return createInTransaction(transaction, personId, input, {

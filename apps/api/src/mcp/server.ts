@@ -299,7 +299,21 @@ const workoutReadResultContent = coachResultContent(
   "Use these workout facts silently. Acknowledge the reported work; For V2 call it completed only when completionState is completed; a successful legacy result represents completed work by its frozen contract. Unknown sets are not zero. Interpret or advise only when useful or requested."
 );
 
+/** Stable-command retry policy for Recovery observations and daily context notes. */
+export const MCP_RECOVERY_RETRY_POLICY =
+  "RECOVERY RETRY POLICY: For the same reported fact or exact correction, retain the original dedupeKey across retries and turns. " +
+  "Never append :v2, attempt suffixes, timestamps or random values to escape an uncertain result. " +
+  "After an execution error, timeout or lost acknowledgement, the write outcome is unknown, not proof that nothing was saved. " +
+  "Before retrying, call list_recovery_observations or list_daily_context_notes for the exact localDate. " +
+  "Match the original dedupeKey and report meaning against the current canonical facts; if the matching fact is present, reuse it without another write. " +
+  "Equal numeric values alone do not identify the same report: genuinely distinct reports may have equal values. " +
+  "If a successful date-level read finds no matching fact and the original key and payload are available, retry the exact command once with that same key. " +
+  "If the read is unavailable or report identity cannot be verified, keep the outcome unconfirmed and do not invent a replacement key. " +
+  "Known pre-write validation failures may be corrected using the original report key. A genuinely new report or correction has its own key. " +
+  "Never retry or reroute a safety-blocked or authorization-denied write through another tool. ";
+
 const recoveryWriteResultContent = coachResultContent(
+  MCP_RECOVERY_RETRY_POLICY +
   "The reported recovery fact has been saved. Continue capturing every other independent fact from the same report " +
   "before replying, even if one separate fact could not be saved. Then complete the required day-level check silently. " +
   "After a qualitative subjective signal, call get_daily_decision_context and decide from its current facts. " +
@@ -307,6 +321,7 @@ const recoveryWriteResultContent = coachResultContent(
 );
 
 const recoveryReadResultContent = coachResultContent(
+  MCP_RECOVERY_RETRY_POLICY +
   "Use these recovery facts silently. Answer the recovery question with verified facts; a next step is optional and must be useful."
 );
 
@@ -477,7 +492,8 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   "After a routine fact capture or correction, acknowledge the fact and never invent precision. " +
   "The Google Sheets Fitness Tracker is a non-authoritative read-only legacy reference: never use it as current truth, a write target, or a fallback. " +
   "Use only the authorized Person-scoped typed tools. A direct relevant user report authorizes one routine low-risk idempotent create or correction without a duplicate confirmation question. Always require a typed owning-domain result before claiming success and fail closed when MCP authorization or a required tool is unavailable or inconsistent. " +
-  "A routine create does not require a pre-read. Before a Meal correction, call list_meals with localDate only, select the current Meal, preserve the complete canonical snapshot, and overlay the user's clarification before calling correct_meal. A successful correct_meal result already contains the committed canonical Meal and is sufficient typed verification; do not perform another list solely to prove success. After a Meal create, call list_meals with localDate only for read-back. Never pass timezone or write fields to list_meals. " +
+  MCP_RECOVERY_RETRY_POLICY +
+  "A new routine create does not require a pre-read; an uncertain Recovery or context-note retry requires the date-level read described above. Before a Meal correction, call list_meals with localDate only, select the current Meal, preserve the complete canonical snapshot, and overlay the user's clarification before calling correct_meal. A successful correct_meal result already contains the committed canonical Meal and is sufficient typed verification; do not perform another list solely to prove success. After a Meal create, call list_meals with localDate only for read-back. Never pass timezone or write fields to list_meals. " +
   "Never ask whether the user wants you to record, correct, estimate, analyze, or provide an obvious next step when their direct unambiguous report already authorizes the routine low-risk action; perform it instead. " +
   "For Workout capture, a direct report of performed exercises or sets, or a clear signal that the workout is finished, authorizes immediate recording of the session from the current message and accumulated conversation context. Do not ask whether to record it and do not make the user restate the workout. Use the active TrainingProgram typed read when exact exercise version references are needed, preserve genuinely unknown optional set values, then call list_workout_sessions with localDate for read-back. Ask only when the performed exercise or set itself is genuinely ambiguous. " +
   "Outside a full Daily Coach assessment, before focused training or recovery advice, read the composed training context. Only its active program is planned authority. Use recent connected activities, including imported runs, without asking the user to send a screenshot or repeat an already imported fact. A connected activity summary does not contain exercises or sets: never invent those details or automatically record it as a WorkoutSession. If a connected activity and a detailed session may describe the same physical event, do not count both as separate training without sufficient identity evidence. If no active program exists, use recent completed sessions and connected activities only as evidence for a clearly proposed program and never activate or describe that reconstruction as planned. " +
@@ -1063,7 +1079,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "list_recovery_observations",
-      "Read the authorized person's current raw recovery observations. For a Garmin post-activity Recovery Time question pass metric=garmin_post_activity_recovery_time; this is a historical estimate, not a current timer. For one-day set read-back pass localDate only.",
+      MCP_RECOVERY_RETRY_POLICY + "Read the authorized person's current raw recovery observations. For a Garmin post-activity Recovery Time question pass metric=garmin_post_activity_recovery_time; this is a historical estimate, not a current timer. For one-day set read-back pass localDate only.",
       ListRecoveryObservationsQuerySchema,
       RecoveryObservationListSchema,
       false,
@@ -1083,7 +1099,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "record_recovery_observation",
-      "Immediately record one independent recovery fact from a direct text or screenshot report. The report is manual provenance even when the text or image displays Garmin or another wearable; never classify it as a direct device connection. Use hrv_rmssd only for an explicitly labelled last-night HRV, never a seven-day average. Store seven-day HRV, baseline and status as labelled general context notes. A report of resleep without a known full duration does not authorize inventing or correcting sleep minutes. Never reroute a safety-blocked write through another tool. Use sleep_score for a wearable 0..100 score. A clear current physical wellbeing report may use a qualitative subjective signal without any invented 1..5 fields or absent false values; do not ask for a routine check-in. Continue other independent facts after an isolated failure, read back the date-level set, then get_daily_decision_context before giving training advice.",
+      MCP_RECOVERY_RETRY_POLICY + "Immediately record one independent recovery fact from a direct text or screenshot report. The report is manual provenance even when the text or image displays Garmin or another wearable; never classify it as a direct device connection. Use hrv_rmssd only for an explicitly labelled last-night HRV, never a seven-day average. Store seven-day HRV, baseline and status as labelled general context notes. A report of resleep without a known full duration does not authorize inventing or correcting sleep minutes. Never reroute a safety-blocked write through another tool. Use sleep_score for a wearable 0..100 score. A clear current physical wellbeing report may use a qualitative subjective signal without any invented 1..5 fields or absent false values; do not ask for a routine check-in. Continue other independent facts after an isolated failure, read back the date-level set, then get_daily_decision_context before giving training advice.",
       createRecoveryObservationToolInputSchema,
       undefined,
       true,
@@ -1097,7 +1113,7 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "correct_recovery_observation",
-      "Append one idempotent correction to a uniquely identified recovery observation. Text and screenshot reports are manual provenance even when they display wearable data; then read back the date-level set without exposing internal mechanics.",
+      MCP_RECOVERY_RETRY_POLICY + "Append one idempotent correction to a uniquely identified recovery observation. Text and screenshot reports are manual provenance even when they display wearable data; then read back the date-level set without exposing internal mechanics.",
       withIdSchema("CorrectRecoveryObservationToolInput", correctRecoveryObservationToolInputSchema),
       undefined,
       true,
@@ -1110,31 +1126,34 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
     ),
     defineTool(
       "list_daily_context_notes",
-      "Read current context notes for one authorized Person-local date.",
+      MCP_RECOVERY_RETRY_POLICY + "Read current context notes for one authorized Person-local date.",
       ListDailyContextNotesQuerySchema,
       DailyContextNoteListSchema,
       false,
       MCP_READ_SCOPE,
-      (input) => services.dailyContextNotes.list(input as ListDailyContextNotesQuery)
+      (input) => services.dailyContextNotes.list(input as ListDailyContextNotesQuery),
+      () => recoveryReadResultContent
     ),
     defineTool(
       "record_daily_context_note",
-      "Record one idempotent relevant context note when no more specific typed fact can represent the report safely. Use general notes for labelled seven-day HRV, baseline range, Garmin status and resleep with unknown full duration; preserve their meaning and manual provenance. Omit baselineEligibility to use the kind's default: general requires include, travel requires exclude. Never classify resleep or HRV alone as travel. Do not duplicate saved facts or use this tool to bypass a safety-blocked write. Read back with list_daily_context_notes, then get_daily_decision_context before advice.",
+      MCP_RECOVERY_RETRY_POLICY + "Record one idempotent relevant context note when no more specific typed fact can represent the report safely. Use general notes for labelled seven-day HRV, baseline range, Garmin status and resleep with unknown full duration; preserve their meaning and manual provenance. Omit baselineEligibility to use the kind's default: general requires include, travel requires exclude. Never classify resleep or HRV alone as travel. Do not duplicate saved facts or use this tool to bypass a safety-blocked write. Read back with list_daily_context_notes, then get_daily_decision_context before advice.",
       CreateDailyContextNoteSchema,
       undefined,
       true,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-      async (input) => (await services.dailyContextNotes.create(input as CreateDailyContextNote)).note
+      async (input) => (await services.dailyContextNotes.create(input as CreateDailyContextNote)).note,
+      () => coachResultContent(MCP_RECOVERY_RETRY_POLICY + "The context note has been saved. Read the date-level notes silently before acknowledging the report.")
     ),
     defineTool(
       "correct_daily_context_note",
-      "Append one idempotent correction to a uniquely identified context note; follow with typed read-back.",
+      MCP_RECOVERY_RETRY_POLICY + "Append one idempotent correction to a uniquely identified context note; follow with typed read-back.",
       { ...withIdSchema("CorrectDailyContextNoteToolInput", CorrectDailyContextNoteSchema),
         allOf: CorrectDailyContextNoteSchema.allOf },
       undefined,
       true,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
-      async (input) => (await services.dailyContextNotes.correct(input.id as string, input as unknown as CorrectDailyContextNote)).note
+      async (input) => (await services.dailyContextNotes.correct(input.id as string, input as unknown as CorrectDailyContextNote)).note,
+      () => coachResultContent(MCP_RECOVERY_RETRY_POLICY + "The context note correction has been saved. Read the date-level notes silently before acknowledging the report.")
     ),
     defineTool(
       "set_current_timezone",
@@ -1739,12 +1758,12 @@ function recoveryContextWriteErrorResult(
       : reason === "stale_or_conflicting_fact"
         ? "The requested fact was not saved because its target is missing, stale or conflicting. " +
           "Read the date-level facts again before choosing the matching current target; do not guess identifiers."
-        : "The requested fact was not saved because execution failed; this does not establish invalid input or missing source data. " +
+        : "The write outcome is unconfirmed because execution failed; the fact may already have been saved. This does not establish invalid input or missing source data. " +
           "Do not speculate about the cause or retry blindly. The diagnosticId may be given only when the user asks for technical diagnostics.";
   return errorResult(coachFailureResultContent(
-    guidance + (diagnosticId ? ` Diagnostic ID: ${diagnosticId}.` : "")
+    MCP_RECOVERY_RETRY_POLICY + guidance + (diagnosticId ? ` Diagnostic ID: ${diagnosticId}.` : "")
   ), {
-    outcome: "not_saved", reason, ...(diagnosticId ? { diagnosticId } : {})
+    outcome: reason === "write_failed" ? "unknown" : "not_saved", reason, ...(diagnosticId ? { diagnosticId } : {})
   });
 }
 
@@ -1773,7 +1792,7 @@ function inputErrorResult(toolName: string): CallToolResult {
   }
   if (toolName === "record_recovery_observation" || toolName === "correct_recovery_observation") {
     return errorResult(coachFailureResultContent(
-      "Retry this recovery fact once using the exact local date and timezone plus only the reported value. " +
+      MCP_RECOVERY_RETRY_POLICY + "Retry this recovery fact once using the exact local date and timezone plus only the reported value. " +
       "A wearable 0..100 sleep score is metric sleep_score with unit score, never sleepQuality. " +
       "Only explicitly labelled last-night HRV belongs in hrv_rmssd; preserve seven-day averages and baseline/status as labelled general context instead. Unknown full sleep after resleep must remain unknown. Never use another tool to bypass a safety rejection. " +
       "Continue saving the other independent facts from the same report. Do not mention tools, staging, APIs, " +
