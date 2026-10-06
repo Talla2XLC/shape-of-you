@@ -303,7 +303,30 @@ checks, synchronization, verification, or efforts to avoid fabrication.
 A failed read does not establish missing source data. Neither missing values
 nor read failures require a screenshot or an unsolicited next step; delivery
 details belong in answers to direct technical questions. Error results carry
-the same natural-language guidance. The read
+the same natural-language guidance.
+
+When `get_daily_decision_context` fails, Coach may report a separately verified
+Training sequence or frequency as facts, but cannot use them, resleep,
+individual fallback reads, or chat history to establish today's training
+suitability. It briefly states that current recovery cannot be assessed,
+does not assume normal wellbeing without a user report, and does not promise
+recovery tomorrow. A successful daily context with a missing individual metric
+still supports cautious advice from its verified facts and material uncertainty.
+A failed focused Recovery read does not invalidate a separately successful
+current daily context.
+
+Execution failures of `get_current_recovery_context` and
+`get_daily_decision_context` carry `outcome=unknown`, `reason=read_failed`, and a
+server-generated diagnostic UUID in text and structured content. One safe log
+correlates the UUID with fixed tool/category and an allowlisted SQLSTATE when
+present; it excludes arguments, personal values, source identities, SQL, parameters,
+raw exception messages, stacks, and arbitrary causes. Input and authorization
+failures keep their distinct handling. The UUID belongs only in a direct
+technical diagnostic answer, never an ordinary Coach reply. Correlation helps
+investigate a future failure; it does not recover a previously suppressed
+exception or prove its cause.
+
+The read
 is local and does not depend on provider
 availability, initiate refresh, create automation, or promise an autonomous
 recheck. Its public schema excludes Person, connection, consent, source-record,

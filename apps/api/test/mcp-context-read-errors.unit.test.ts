@@ -1,0 +1,146 @@
+import Fastify from "fastify";
+import { describe, expect, it, vi } from "vitest";
+
+import { RequestPersonContext } from "../src/application/person-context.js";
+import { McpAuthorizationError, MCP_READ_SCOPE } from "../src/mcp/oauth.js";
+import { registerMcpRoutes } from "../src/mcp/server.js";
+
+const tools = ["get_current_recovery_context", "get_daily_decision_context"] as const;
+async function unavailable(): Promise<never> { throw new Error("Unrelated service called"); }
+
+function fixture() {
+  const logs: string[] = [];
+  const server = Fastify({ logger: { level: "error", stream: { write: (line: string) => logs.push(line) } } });
+  const read = vi.fn(async () => ({ state: "timezone_required" as const, timezone: null }));
+  const authorize = vi.fn(async () => ({ personId: "00000000-0000-4000-8000-000000000001", roles: ["owner"] as const }));
+  registerMcpRoutes({ fastify: server, issuer: "https://identity.example.test", resource: "https://api.example.test/mcp",
+    authorizer: { authorize }, personContext: new RequestPersonContext(),
+    services: {
+      weights: { list: unavailable, create: unavailable, correct: unavailable },
+      bodyMeasurements: { list: unavailable, create: unavailable, correct: unavailable },
+      nutrition: { listMeals: unavailable, createMeal: unavailable, correctMeal: unavailable },
+      training: { listWorkoutSessions: unavailable, createWorkoutSession: unavailable,
+        correctWorkoutSession: unavailable, findActiveProgram: unavailable,
+        getTrainingContext: unavailable, saveConfirmedProgram: unavailable, materializeProgramCadence: unavailable,
+        classifyExternalActivity: unavailable, setTrustedExternalActivityTitle: unavailable,
+        setActivityRecordingMode: unavailable, confirmWorkoutActivityLink: unavailable, getExternalActivityDetails: unavailable },
+      recovery: { listObservations: unavailable, createObservation: unavailable, correctObservation: unavailable },
+      dailyContextNotes: { list: unavailable, create: unavailable, correct: unavailable },
+      currentRecoveryContext: { read }, dailyDecisionContext: { read }, dailyProjection: { projection: unavailable }
+    }
+  });
+  const call = async (name: string, args: object = {}) => {
+    const response = await server.inject({ method: "POST", url: "/mcp",
+      headers: { accept: "application/json, text/event-stream", authorization: "Bearer synthetic-private-token" },
+      payload: { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } } });
+    expect(response.statusCode).toBe(200);
+    return response.json().result;
+  };
+  return { server, call, read, authorize, logs };
+}
+
+describe("Composed Recovery MCP read failures", () => {
+  it.each(tools)("%s correlates a transient failure privately and does not retain it after a successful read", async (tool) => {
+    const { server, call, read, authorize, logs } = fixture();
+    const privateMarker = "synthetic-private-health-person-sql-marker";
+    read.mockRejectedValueOnce(new Error(privateMarker, { cause: { code: "08006", message: privateMarker, query: privateMarker } }));
+    try {
+      const failed = await call(tool);
+      expect(authorize).toHaveBeenCalledWith("Bearer synthetic-private-token", MCP_READ_SCOPE, false);
+      expect(failed).toMatchObject({ isError: true,
+        structuredContent: { outcome: "unknown", reason: "read_failed", diagnosticId: expect.any(String) } });
+      const id = failed.structuredContent.diagnosticId;
+      expect(id).toMatch(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/u);
+      expect(failed.content[0].text).toContain(`Diagnostic ID: ${id}`);
+      expect(logs).toHaveLength(1);
+      const log = JSON.parse(logs[0]!);
+      expect(log).toMatchObject({ event: "mcp_context_read_failed", tool, diagnosticId: id,
+        failureCategory: "execution_failure", databaseCode: "08006" });
+      expect(Object.keys(log).sort()).toEqual(["level", "time", "pid", "hostname", "msg", "reqId",
+        "event", "tool", "diagnosticId", "failureCategory", "databaseCode"].sort());
+      for (const output of [JSON.stringify(failed), logs.join("")]) {
+        expect(output).not.toContain(privateMarker);
+        expect(output).not.toContain("synthetic-private-token");
+        expect(output).not.toContain("00000000-0000-4000-8000-000000000001");
+      }
+      expect(failed.structuredContent).not.toHaveProperty("databaseCode");
+      const text = failed.content[0].text;
+      expect(text).toContain("does not establish invalid input or missing source data");
+      expect(text).toContain("do not recommend today's strength workout");
+      expect(text).toContain("Resleep alone does not establish readiness");
+      expect(text).toContain("never assume normal wellbeing unless the user reported it");
+      expect(text).toContain("never promise recovery or training suitability tomorrow");
+      expect(text).toContain("A successful daily context with a missing individual metric is different");
+      expect(text).toContain("A failed focused Recovery read does not invalidate a separately successful current daily context");
+      expect(text).toContain("Do not include diagnosticId in an ordinary Coach reply");
+      const success = await call(tool);
+      expect(success.isError).not.toBe(true);
+      expect(success.structuredContent).toEqual({ state: "timezone_required", timezone: null });
+      expect(JSON.stringify(success)).not.toContain(id);
+      expect(logs).toHaveLength(1);
+      expect(read).toHaveBeenCalledTimes(2);
+    } finally { await server.close(); }
+  });
+
+  it.each(tools)("%s rejects invalid input before authorization and does not log execution failure", async (tool) => {
+    const { server, call, read, authorize, logs } = fixture();
+    try {
+      const result = await call(tool, { localDate: "synthetic-private-invalid-field" });
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent?.reason).not.toBe("read_failed");
+      expect(JSON.stringify(result)).not.toContain("synthetic-private-invalid-field");
+      expect(read).not.toHaveBeenCalled();
+      expect(authorize).not.toHaveBeenCalled();
+      expect(logs).toHaveLength(0);
+    } finally { await server.close(); }
+  });
+
+  it.each(tools)("%s preserves authorization failure without calling or logging the read", async (tool) => {
+    const { server, call, read, authorize, logs } = fixture();
+    authorize.mockRejectedValueOnce(new McpAuthorizationError("Insufficient scope", "insufficient_scope"));
+    try {
+      const result = await call(tool);
+      expect(result.isError).toBe(true);
+      expect(result._meta["mcp/www_authenticate"][0]).toContain("insufficient_scope");
+      expect(result.structuredContent?.reason).not.toBe("read_failed");
+      expect(read).not.toHaveBeenCalled();
+      expect(logs).toHaveLength(0);
+    } finally { await server.close(); }
+  });
+
+  it.each(["ALICE", "TOKEN", "12345", "synthetic-private-code"])("omits arbitrary error code %s and handles cyclic causes", async (code) => {
+    const { server, call, read, logs } = fixture();
+    const cause: Record<string, unknown> = { code };
+    cause.cause = cause;
+    read.mockRejectedValueOnce(new Error("synthetic-private-message", { cause }));
+    try {
+      await call("get_daily_decision_context");
+      expect(JSON.parse(logs[0]!)).not.toHaveProperty("databaseCode");
+      expect(logs.join("")).not.toContain(code);
+      expect(logs.join("")).not.toContain("synthetic-private-message");
+    } finally { await server.close(); }
+  });
+
+  it.each(tools)("%s does not label an unexpected authorization exception as a context execution failure", async (tool) => {
+    const { server, call, read, authorize, logs } = fixture();
+    authorize.mockRejectedValueOnce(new Error("synthetic-private-auth-backend-error"));
+    try {
+      const result = await call(tool);
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toBeUndefined();
+      expect(JSON.stringify(result)).not.toContain("synthetic-private-auth-backend-error");
+      expect(read).not.toHaveBeenCalled();
+      expect(logs).toHaveLength(0);
+    } finally { await server.close(); }
+  });
+
+  it("does not widen diagnostics to unrelated reads", async () => {
+    const { server, call, logs } = fixture();
+    try {
+      const result = await call("list_recovery_observations");
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toBeUndefined();
+      expect(logs).toHaveLength(0);
+    } finally { await server.close(); }
+  });
+});

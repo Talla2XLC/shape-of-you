@@ -341,9 +341,14 @@ const activeTrainingProgramResultContent = coachResultContent(
 const rollingTrainingChoiceGuidance =
   "For training-next-step-v5, recentProgress covers seven local dates including today; frequency targets are guidance, never debt, a deadline, or an automatic ban. Choose strength, light cardio, or rest from verified facts, recovery, recent load, the user's preferences and the actual gap since training. Normally prefer alternating strength and cardio when it fits that context; do not apply a fixed gap threshold or change A/B order. A question about why you chose strength rather than cardio asks for reasoning, not automatic reversal: explain the material reason and alternative, and change your advice only for new information or an explicitly explained reassessment. ";
 
+const dailyContextUnavailableGuidance =
+  "If get_daily_decision_context fails, current Recovery suitability is unverified. You may report a separately verified Training sequence or frequency as facts, but do not recommend today's strength workout from that sequence, an unfilled target, resleep, individual fallback reads, or chat history. Resleep alone does not establish readiness; never assume normal wellbeing unless the user reported it, and never promise recovery or training suitability tomorrow. Briefly state that current recovery cannot be assessed and preserve the useful factual answer. " +
+  "A successful daily context with a missing individual metric is different from a failed context: weigh its verified facts and material uncertainty for cautious contextual advice, without treating unknown values as normal or imposing a blanket ban. A failed focused Recovery read does not invalidate a separately successful current daily context. ";
+
 const trainingContextResultContent = coachResultContent(
   workoutV2RoutingPolicy +
   rollingTrainingChoiceGuidance +
+  dailyContextUnavailableGuidance +
   "If pendingActivityLinkQuestion exists, resolve that exact session/activity pair first with confirm_workout_activity_link after the user's direct confirmation; do not ask A/B or call classify_external_activity for that same pair. Then reread this context using the original requested localDate, not the historical activity date, and get_daily_decision_context. For a separate classification question, expectedLocalDate must equal nextStep.localDate from the context that displayed it; the activity date mentioned in the question is not the context date. " +
   "Use an active program as planned authority and its Training-owned options as the only verified training identities for the requested Person-local date. Read get_daily_decision_context before recommending training; decide from its current Recovery facts, uncertainty, user intent, and Training options. A/B identity comes only from the exact strength option. Do not turn an unfilled weekly cardio target or a missed day into mandatory cardio. When explaining how to perform the next exact strength option, get_training_progression may supply derived set evidence; it does not decide Recovery suitability. Skip progression for unrelated facts, absent or ambiguous strength identity, or a completed workout or week. Never derive A/B order from names, notes, or an unlinked activity. A classification-needed result requires exactly its one short human question. A completed-today or completed-week result means the program offers no further training option. Keep detailed sessions separate from connected summaries unless exactly linked. A connected summary never supplies exercises or sets. When the program is absent, historical evidence is proposal input only."
 );
@@ -660,12 +665,14 @@ function createServer(
       return inputErrorResult(definition.tool.name);
     }
 
+    let executionStarted = false;
     try {
       const authorized = await options.authorizer.authorize(
         request.headers.authorization,
         definition.scope,
         definition.write
       );
+      executionStarted = true;
       const result = await options.personContext.run(authorized.personId, () =>
         definition.execute((call.params.arguments ?? {}) as Record<string, unknown>)
       );
@@ -684,6 +691,23 @@ function createServer(
       }
       if (error instanceof ConnectorInputError) {
         return inputErrorResult(definition.tool.name);
+      }
+      if (executionStarted && (definition.tool.name === "get_current_recovery_context" ||
+        definition.tool.name === "get_daily_decision_context")) {
+        const diagnosticId = randomUUID();
+        request.log.error({
+          event: "mcp_context_read_failed",
+          tool: definition.tool.name,
+          diagnosticId,
+          failureCategory: "execution_failure",
+          ...safeDatabaseFailureCode(error)
+        }, "MCP context read failed");
+        return errorResult(coachFailureResultContent(
+          "The requested current facts could not be retrieved. This does not establish invalid input or missing source data. " +
+          dailyContextUnavailableGuidance +
+          "Do not include diagnosticId in an ordinary Coach reply; give it only for a direct technical diagnostic request. " +
+          `Diagnostic ID: ${diagnosticId}.`
+        ), { outcome: "unknown", reason: "read_failed", diagnosticId });
       }
       if (isRecoveryContextWriter(definition.tool.name)) {
         if (error instanceof DomainValidationError) {

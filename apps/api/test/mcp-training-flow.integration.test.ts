@@ -9,6 +9,8 @@ import { RecoveryService } from "../src/recovery/recovery.service.js";
 import { DailyContextNoteService } from "../src/daily-context-notes/daily-context-note.service.js";
 import { DailyContextNoteRepository } from "../src/storage/daily-context-note-repository.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
+import { DailyAssessmentRepository } from "../src/storage/daily-assessment-repository.js";
+import { CurrentRecoveryContextService } from "../src/coaching/current-recovery-context.service.js";
 import { IntegrationService } from "../src/integrations/integration.service.js";
 import { FakeHealthDataProvider } from "../src/integrations/fake-provider.js";
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
@@ -55,6 +57,10 @@ async function fixture(lostAcknowledgementTool?: string) {
   const unavailable = async (): Promise<never> => { throw new Error("Unrelated service called"); };
   const fastify = Fastify();
   const recovery = new RecoveryService(new RecoveryRepository(database), context);
+  const integrations = new IntegrationRepository(database);
+  const currentRecovery = new CurrentRecoveryContextService(
+    context, new DailyAssessmentRepository(database), integrations, recovery
+  );
   const dailyContextNotes = new DailyContextNoteService(new DailyContextNoteRepository(database), context);
   // Only the acknowledgement is faulted: the actual PostgreSQL operation finishes first.
   if (lostAcknowledgementTool) {
@@ -91,7 +97,7 @@ async function fixture(lostAcknowledgementTool?: string) {
       recovery,
       dailyContextNotes,
       dailyProjection: { projection: unavailable },
-      currentRecoveryContext: { read: unavailable }
+      currentRecoveryContext: { read: () => currentRecovery.read(new Date("2026-10-06T12:00:00.000Z")) }
     } satisfies McpRouteOptions["services"]
   });
   let requestId = 0;
@@ -131,8 +137,45 @@ async function fixture(lostAcknowledgementTool?: string) {
       sourceProvider: "intervals_icu", garminAttributed: true });
     return (await repository.listExternalActivities(personId, 20)).find((item) => item.providerIdentity === providerIdentity)!;
   };
-  return { fastify, call, rawCall, program, importActivity, repository, personId, connectionId, consentId, recoveryConnectionId };
+  return { fastify, call, rawCall, program, importActivity, repository, personId, connectionId, consentId, recoveryConnectionId, integrations };
 }
+
+describe("Current Recovery MCP composition with PostgreSQL", () => {
+  it("keeps night sleep and resleep distinct, diagnoses an owner read failure and then reads successfully", async () => {
+    const { fastify, call, rawCall, integrations, personId } = await fixture();
+    try {
+      for (const [key, minutes] of [["synthetic-night", 360], ["synthetic-resleep", 50]] as const) {
+        await call("record_recovery_observation", {
+          localDate: "2026-10-06", timezone: "Europe/Belgrade", kind: "sleep",
+          quality: "estimated", dedupeKey: key,
+          detail: { type: "sleep", totalSleepMinutes: minutes }
+        });
+      }
+      const delivery = vi.spyOn(integrations, "connectedRecoveryDelivery");
+      delivery.mockRejectedValueOnce(new Error("Synthetic owner read interruption"));
+      const failed = await rawCall("get_current_recovery_context");
+      expect(failed).toMatchObject({ isError: true,
+        structuredContent: { outcome: "unknown", reason: "read_failed", diagnosticId: expect.any(String) } });
+      expect(failed.content[0].text).toContain(`Diagnostic ID: ${failed.structuredContent.diagnosticId}`);
+      expect(JSON.stringify(failed)).not.toContain("Synthetic owner read interruption");
+      const context = await call("get_current_recovery_context");
+      expect(delivery).toHaveBeenLastCalledWith(personId, "2026-10-06");
+      expect(context).toMatchObject({ state: "available", localDate: "2026-10-06", timezone: "Europe/Belgrade" });
+      expect(context.observations.items.map((item: { detail: { totalSleepMinutes: number } }) =>
+        item.detail.totalSleepMinutes).sort((a: number, b: number) => a - b)).toEqual([50, 360]);
+      expect(context.observations.items).toHaveLength(2);
+      expect(context.metricDelivery).toHaveLength(10);
+      expect(context.observations.items.every((item: object) => !Object.hasOwn(item, "personId"))).toBe(true);
+      expect(JSON.stringify(context)).not.toContain(personId);
+      const facts = await call("list_recovery_observations", { localDate: "2026-10-06" });
+      expect(facts.items).toHaveLength(2);
+      const training = await rawCall("get_training_context_v2", { localDate: "2026-10-06" });
+      expect(training.isError).not.toBe(true);
+      expect(training.content[0].text).toContain("do not recommend today's strength workout");
+      expect(training.content[0].text).toContain("A successful daily context with a missing individual metric is different");
+    } finally { vi.restoreAllMocks(); await fastify.close(); }
+  });
+});
 
 describe("Recovery MCP retries after lost acknowledgement with PostgreSQL", () => {
   it.each(["record_recovery_observation", "correct_recovery_observation",
