@@ -29,7 +29,7 @@ export const TrainingProgressionGuidanceSchema = {
           targetRepsMax: { type: "integer", minimum: 1 },
           targetRir: { anyOf: [{ type: "number", minimum: 0 }, { type: "null" }] },
           action: { enum: ["hold", "add_reps", "add_weight", "insufficient_evidence"] },
-          reason: { enum: ["no_detailed_session", "incomplete_sets", "ambiguous_exercise", "ambiguous_prescription", "unsupported_load_basis", "weight_mismatch", "rir_missing", "below_repetition_range", "rir_below_target", "repetitions_available", "second_session_needed", "increment_missing", "increment_too_large", "two_sessions_qualified"] },
+          reason: { enum: ["no_detailed_session", "incomplete_sets", "ambiguous_exercise", "ambiguous_prescription", "unsupported_load_basis", "weight_mismatch", "rir_missing", "below_repetition_range", "rir_below_target", "repetitions_available", "second_session_needed", "increment_missing", "increment_too_large", "two_sessions_qualified", "single_session_high_reserve"] },
           suggestedReps: { anyOf: [{ type: "array", items: { type: "integer", minimum: 1 } }, { type: "null" }] },
           suggestedTargetWeightKg: { anyOf: [{ type: "number", minimum: 0 }, { type: "null" }] },
           evidenceSessionIds: { type: "array", items: uuid, uniqueItems: true },

@@ -421,6 +421,13 @@
       "when": 1791404725071,
       "tag": "20261007202525_natural_workout_report_links",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1791407610796,
+      "tag": "20261007211330_single_session_weight_audit",
+      "breakpoints": true
     }
   ]
 }

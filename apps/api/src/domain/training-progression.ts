@@ -10,14 +10,14 @@ export interface TrainingProgressionDecision {
     | "unsupported_load_basis" | "weight_mismatch" | "rir_missing"
     | "below_repetition_range" | "rir_below_target" | "repetitions_available"
     | "second_session_needed" | "increment_missing" | "increment_too_large"
-    | "two_sessions_qualified";
+    | "two_sessions_qualified" | "single_session_high_reserve";
   readonly suggestedReps: readonly number[] | null;
   readonly suggestedTargetWeightKg: number | null;
   readonly evidenceSessionIds: readonly string[];
 }
 
 type SessionResult =
-  | { readonly state: "complete"; readonly reps: readonly number[]; readonly allAtMax: boolean }
+  | { readonly state: "complete"; readonly reps: readonly number[]; readonly allAtMax: boolean; readonly highReserve: boolean }
   | { readonly state: "incomplete"; readonly reason: TrainingProgressionDecision["reason"] };
 
 function assessSession(
@@ -48,7 +48,9 @@ function assessSession(
   if (prescription.targetRir !== null && sets.some((set) => set.rir! < prescription.targetRir!)) {
     return { state: "incomplete", reason: "rir_below_target" };
   }
-  return { state: "complete", reps, allAtMax: reps.every((value) => value >= prescription.targetRepsMax) };
+  return { state: "complete", reps, allAtMax: reps.every((value) => value >= prescription.targetRepsMax),
+    highReserve: prescription.targetRir !== null &&
+      sets.every((set) => set.rir! >= Math.max(3, prescription.targetRir! + 2)) };
 }
 
 /**
@@ -69,7 +71,7 @@ export function evaluateTrainingProgression(
     session.programWorkoutPosition === workoutPosition &&
     session.localDate <= throughLocalDate
   ).slice(0, 2);
-  const ids = relevant.map((session) => session.id);
+  let ids = relevant.map((session) => session.id);
   const result = (
     action: TrainingProgressionDecision["action"],
     reason: TrainingProgressionDecision["reason"],
@@ -89,12 +91,18 @@ export function evaluateTrainingProgression(
   if (!latest.allAtMax) {
     return result("add_reps", "repetitions_available", latest.reps.map((reps) => Math.min(prescription.targetRepsMax, reps + 1)));
   }
-  if (relevant.length < 2) return result("hold", "second_session_needed");
-  const previous = assessSession(prescription, relevant[1]!);
-  if (previous.state !== "complete" || !previous.allAtMax) return result("hold", "second_session_needed");
+  let reason: TrainingProgressionDecision["reason"] = "single_session_high_reserve";
+  if (latest.highReserve) {
+    ids = [relevant[0]!.id];
+  } else {
+    if (relevant.length < 2) return result("hold", "second_session_needed");
+    const previous = assessSession(prescription, relevant[1]!);
+    if (previous.state !== "complete" || !previous.allAtMax) return result("hold", "second_session_needed");
+    reason = "two_sessions_qualified";
+  }
   const increment = prescription.progressionIncrementKg;
   if (increment === null || increment <= 0) return result("hold", "increment_missing");
   if (increment > 5 || increment / prescription.targetWeightKg > 0.1) return result("hold", "increment_too_large");
-  return result("add_weight", "two_sessions_qualified", null,
+  return result("add_weight", reason, null,
     Math.round((prescription.targetWeightKg + increment) * 1000) / 1000);
 }

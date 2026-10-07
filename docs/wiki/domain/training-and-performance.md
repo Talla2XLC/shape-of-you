@@ -151,17 +151,22 @@ automatically.
   the prescription. One eligible session can suggest one more repetition per
   set within the range. Two consecutive eligible sessions at the upper bound
   can suggest only the program's explicit increment, capped at 10% and 5 kg.
+  A single latest session can also qualify when all prescribed sets reach the
+  upper bound at the assigned external weight and every RIR meets
+  `max(3, targetRir + 2)` with an explicit target RIR. This path reports only
+  that session as evidence; a merely easy feeling does not supply numeric RIR.
   Missing or conflicting sets, duplicate exercise prescriptions without a
   performed-assignment identity, and bodyweight or assisted loads fail closed.
   The projection exposes the target and actual sets for explanation; imported
   Garmin strength remains occurrence evidence only.
-- Weight progression candidates use the same two-session predicate and exact
+- Weight progression candidates use the same shared one- or two-session predicate and exact
   workout position. Acceptance rechecks the candidate and creates a new
   inactive program version; explicit activation is separate. A distinct
   confirmed working-weight command requires current ready Recovery, an exact
   current-day proposal and active version, and a fresh Person-locked evidence
   check. It atomically activates a successor changing one prescription weight
-  and records a typed `TrainingProgramWeightChange` audit fact. Stale, unsafe,
+  and records a typed `TrainingProgramWeightChange` audit fact, retaining one
+  or two exact evidence session references. Stale, unsafe,
   bodyweight, and assisted proposals cannot use this command.
 
 ## Evidence
@@ -185,7 +190,7 @@ automatically.
 - [Cross-week training sequence](../../adr/20260927-continue-training-sequence-across-weeks.md).
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
-- [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
+- [Single-session high-reserve progression](../../adr/20261006-allow-single-session-high-reserve-progression.md).
 
 ## Open questions
 

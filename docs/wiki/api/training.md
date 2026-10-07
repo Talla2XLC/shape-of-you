@@ -271,10 +271,12 @@ Projections:
 - `POST /v1/training/programs/:id/progression-candidates/accept`.
 
 Records choose maximum weight, then repetitions. Candidate calculation never
-mutates a program. Weight candidacy now requires two latest current completed
-detailed sessions for the exact active version/workout position, with every prescribed
-working set at the assigned external weight, upper repetition target, and
-adequate RIR. A missing or excessive program increment, incomplete evidence,
+mutates a program. Weight candidacy uses current completed detailed sessions for the exact active
+version/workout position. The ordinary path requires the two latest sessions
+at the assigned external weight, upper repetition target, and adequate RIR.
+`single_session_high_reserve` instead uses only the latest session when every
+prescribed set reaches the upper repetition target at the assigned weight and
+RIR is at least `max(3, targetRir + 2)`; the target RIR must be explicit. A missing or excessive program increment, incomplete evidence,
 future session, or ambiguous duplicate prescription yields no candidate.
 Acceptance rechecks current evidence, creates a new inactive version, and
 blocks duplicate pending acceptance.
@@ -290,17 +292,20 @@ Coach must refresh it on the actual future training day.
 
 The MCP `get_working_weight_proposals` read exposes exact current-day increases
 only when the API-owned Recovery assessment is ready and the next strength
-position, two current detailed sessions, and active program agree. After one
+position, the exact one- or two-session evidence, and active program agree. After one
 clear Person confirmation, `apply_confirmed_working_weight` rechecks Recovery,
 the current local date, evidence revision, exact progression candidate, and
 active program under the Person lock. It copies one immutable program version,
 changes only the selected prescription's external working weight, activates
-the successor, and records a typed audit row in one transaction. Stale or
+the successor, and records a typed audit row in one transaction. The first
+evidence session is mandatory; the second is NULL for the high-reserve path.
+The command recomputes the shared predicate and exact ordered evidence IDs
+under the Person lock. Stale or
 unsafe proposals fail without a write; an identical request ID can be retried
 idempotently. Coach reads Training and Daily Decision Context back before
 claiming the new version is active. The existing candidate acceptance path
 still creates an inactive draft. See the
-[confirmed working-weight ADR](../../adr/20260929-confirm-working-weight-increase-atomically.md).
+[single-session audit ADR](../../adr/20261007-allow-single-session-working-weight-audit.md).
 
 The read-only MCP `get_external_activity_details` reads locally imported FIT
 details for a current Person-scoped activity. It returns session boundaries,
@@ -334,7 +339,7 @@ reply remain unverified. See the
   candidates are query projections, not mutable authority.
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
-- [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
+- [Single-session high-reserve progression](../../adr/20261006-allow-single-session-high-reserve-progression.md).
 - [Confirmed working-weight change](../../adr/20260929-confirm-working-weight-increase-atomically.md).
 
 ## Open questions

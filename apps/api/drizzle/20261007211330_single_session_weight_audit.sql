@@ -1,0 +1,1 @@
+ALTER TABLE "training_program_weight_changes" ALTER COLUMN "evidence_session_two_id" DROP NOT NULL;

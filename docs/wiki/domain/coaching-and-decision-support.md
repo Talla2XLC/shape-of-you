@@ -47,7 +47,9 @@ Training supplies an exact A/B progression suggestion from detailed sets;
 Coach weighs current Recovery facts before advising how to train.
 The result includes target and actual weights, repetitions, RIR, dates, and
 typed limitations so Coach can explain a hold or a small increase without
-inventing Garmin sets. A current-day result is not a future readiness promise.
+inventing Garmin sets. `single_session_high_reserve` identifies one measured
+qualifying session; Coach must not present it as two-session confirmation or
+infer numeric RIR from an easy feeling. A current-day result is not a future readiness promise.
 The guidance read does not write a program. For a concrete eligible increase,
 Coach may show the exact old and new working weight and ask once whether the
 Person confirms it with sound technique and no pain. Only a clear acceptance
@@ -56,7 +58,7 @@ or a different response does not. The API rechecks current Recovery, detailed
 sessions, and program version before changing one prescription and activating
 the immutable successor. Coach verifies Training and Daily Decision Context
 afterward. Candidate acceptance remains a separate inactive-draft path. See
-the [confirmed working-weight ADR](../../adr/20260929-confirm-working-weight-increase-atomically.md).
+the [single-session audit ADR](../../adr/20261007-allow-single-session-working-weight-audit.md).
 
 The current `DailyDecisionContext` v1 contains Person-local daily fact
 summary, coverage, personal comparisons, current Recovery observations with
@@ -513,7 +515,7 @@ original semantics, including `week_complete`. See the
 - [Atomic accepted-cadence materialization](../../adr/20260923-materialize-confirmed-training-program-cadence-atomically.md).
 - [Imported activity classification](../../adr/20260923-classify-imported-strength-activity-against-training-program.md).
 - [Proof-based session/activity links](../../adr/20260925-link-proven-workout-sessions-to-external-activities.md).
-- [Session-backed progression](../../adr/20260925-explain-session-backed-training-progression.md).
+- [Single-session high-reserve progression](../../adr/20261006-allow-single-session-high-reserve-progression.md).
 - [Ordinary next-strength progression routing](../../adr/20260927-invoke-progression-in-ordinary-next-strength-coaching.md).
 - [Confirmed working-weight change](../../adr/20260929-confirm-working-weight-increase-atomically.md).
 - [Connected activity summaries in Training context](../../adr/20260913-expose-connected-activity-summaries-in-training-context.md).

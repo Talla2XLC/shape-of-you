@@ -2,10 +2,10 @@
 id: "decisions-20260929-confirm-working-weight-increase-atomically"
 kind: adr
 title: "Применять прибавку рабочего веса только после явного подтверждения"
-status: accepted
+status: superseded
 date: 2026-09-29
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261007-allow-single-session-working-weight-audit
 tags:
   - architecture
   - training

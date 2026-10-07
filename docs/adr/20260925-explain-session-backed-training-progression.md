@@ -2,10 +2,10 @@
 id: "decisions-20260925-explain-session-backed-training-progression"
 kind: adr
 title: "Предлагать прогрессию по двум подробным тренировкам и текущему восстановлению"
-status: accepted
+status: superseded
 date: 2026-09-25
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261006-allow-single-session-high-reserve-progression
 tags:
   - architecture
   - training

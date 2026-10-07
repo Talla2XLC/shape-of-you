@@ -1,3 +1,5 @@
+import { randomUUID } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import {
   PostgreSqlContainer,
   type StartedPostgreSqlContainer
@@ -145,6 +147,175 @@ describe("Training PostgreSQL vertical", () => {
     }
   });
 
+  it("projects, confirms and audits one high-reserve session with stale-evidence protection", async () => {
+    const personId = "00000000-0000-4000-8000-000000000162";
+    await database.pool.query("insert into persons (id, kind, status, timezone) values ($1, 'real', 'active', 'UTC')", [personId]);
+    const scopedApp = await buildApp({ config: { ...testConfig, SYNTHETIC_PERSON_ID: personId }, database });
+    try {
+      const service = scopedApp.get(DailyAssessmentService);
+      const training = scopedApp.get(TrainingService);
+      const recovery = new RecoveryRepository(database);
+      const exercise = await training.createExercise({
+        visibility: "private", name: "TASK-0162 recovery press", category: "strength",
+        movementPattern: null, equipment: null, instructions: null, note: null
+      });
+      const created = await training.createProgram({
+        name: "TASK-0162 recovery program", note: null,
+        cadence: { kind: "rolling_weekly", strengthSessionsPerWeek: 1,
+          workoutSequence: [1], lightCardio: null },
+        workouts: [{ name: "A", prescriptions: [{
+          exerciseVersionId: exercise.currentVersion.id, loadBasis: "external_weight",
+          targetWeightKg: 50, targetSets: 1, targetRepsMin: 6, targetRepsMax: 8,
+          targetRir: 2, progressionIncrementKg: 2.5, note: null
+        }] }]
+      });
+      await training.activateProgramVersion(created.id, created.currentVersion.id, { expectedLockVersion: 0 });
+      for (const [index, daysAgo] of [8].entries()) {
+        const occurredAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+        await training.createWorkoutSession({
+          occurredAt, timezone: "UTC", programVersionId: created.currentVersion.id,
+          programWorkoutPosition: 1, externalActivityId: null, venueLabel: null,
+          workoutName: "A", feeling: null, note: null,
+          exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+            loadBasis: "external_weight", feeling: null, note: null,
+            sets: [{ weightKg: 50, reps: 8, rir: 4 }] }],
+          sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt },
+          dedupeKey: `task-0162-recovery-session-${index}`, confidence: 1
+        });
+      }
+      const localDate = new Date().toISOString().slice(0, 10);
+      for (const [metric, value, unit] of [
+        ["hrv_rmssd", 60, "ms"], ["resting_heart_rate", 60, "bpm"]
+      ] as const) {
+        await recovery.createObservation(personId, {
+          kind: "metric", observedFrom: null, observedUntil: null,
+          temporalPrecision: "local_date", localDate, timezone: "UTC", quality: "reliable",
+          connectionId: null, consentId: null, dedupeKey: `task-0162-${metric}`,
+          sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null },
+          detail: { type: "metric", metric, value, unit }
+        });
+      }
+      const guidance = await service.readTrainingProgression();
+      expect(guidance.items[0]).toMatchObject({ action: "add_weight", reason: "single_session_high_reserve" });
+      expect(guidance.items[0]!.evidenceSessionIds).toHaveLength(1);
+      expect(guidance.items[0]!.evidence).toHaveLength(1);
+      const offered = await service.readWorkingWeightProposals();
+      expect(offered.items[0]!.evidenceSessionIds).toEqual(guidance.items[0]!.evidenceSessionIds);
+      const original = (await training.listWorkoutSessions({ limit: 10 })).items[0]!;
+      const correct = (rir: number, key: string) => training.correctWorkoutSession(original.id, {
+        occurredAt: original.occurredAt!, timezone: "UTC", programVersionId: created.currentVersion.id,
+        programWorkoutPosition: 1, externalActivityId: null, venueLabel: null,
+        workoutName: "A", feeling: null, note: null,
+        exercises: [{ exerciseVersionId: exercise.currentVersion.id, loadBasis: "external_weight",
+          feeling: null, note: null, sets: [{ weightKg: 50, reps: 8, rir }] }],
+        sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: original.occurredAt },
+        dedupeKey: key, confidence: 1, correctionReason: "Correct synthetic reserve"
+      });
+      const correction = await correct(3, "task-0162-low-reserve");
+      await expect(service.applyConfirmedWorkingWeight({ requestId: randomUUID(), confirmed: true,
+        proposal: offered.items[0]! })).rejects.toThrow("changed");
+      expect((await service.readWorkingWeightProposals()).items).toHaveLength(0);
+      await training.correctWorkoutSession(correction.session.id, {
+        occurredAt: original.occurredAt!, timezone: "UTC", programVersionId: created.currentVersion.id,
+        programWorkoutPosition: 1, externalActivityId: null, venueLabel: null,
+        workoutName: "A", feeling: null, note: null,
+        exercises: [{ exerciseVersionId: exercise.currentVersion.id, loadBasis: "external_weight",
+          feeling: null, note: null, sets: [{ weightKg: 50, reps: 8, rir: 4 }] }],
+        sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: original.occurredAt },
+        dedupeKey: "task-0162-restored-reserve", confidence: 1, correctionReason: "Restore synthetic reserve"
+      });
+      const fresh = (await service.readWorkingWeightProposals()).items[0]!;
+      expect(fresh.evidenceSessionIds).toHaveLength(1);
+      // Repository rechecks exact cardinality, even when the revision and candidate are otherwise fresh.
+      await expect(training.applyConfirmedWorkingWeight({ requestId: randomUUID(), confirmed: true,
+        proposal: { ...fresh, evidenceSessionIds: [fresh.evidenceSessionId, original.id] } }))
+        .rejects.toThrow("Progression sessions changed");
+      const command = { requestId: randomUUID(), confirmed: true as const, proposal: fresh };
+      const applied = await service.applyConfirmedWorkingWeight(command);
+      expect(applied.status).toBe("applied");
+      expect((await service.applyConfirmedWorkingWeight(command)).status).toBe("already_applied");
+      const active = await training.findProgram(created.id);
+      expect(active.activeVersion!.workouts[0]!.prescriptions[0]!.targetWeightKg).toBe(52.5);
+      const audit = await database.pool.query(
+        "select evidence_session_one_id, evidence_session_two_id from training_program_weight_changes where person_id=$1", [personId]);
+      expect(audit.rows).toEqual([{ evidence_session_one_id: fresh.evidenceSessionId, evidence_session_two_id: null }]);
+      await expect(database.pool.query(
+        "update training_program_weight_changes set evidence_session_two_id=evidence_session_one_id where person_id=$1", [personId]))
+        .rejects.toMatchObject({ code: "23514" });
+    } finally { await scopedApp.close(); }
+  });
+
+  it("refuses a single-session high-reserve offer after Recovery changes", async () => {
+    const personId = "00000000-0000-4000-8000-000000000163";
+    await database.pool.query("insert into persons (id, kind, status, timezone) values ($1, 'real', 'active', 'UTC')", [personId]);
+    const scopedApp = await buildApp({ config: { ...testConfig, SYNTHETIC_PERSON_ID: personId }, database });
+    try {
+      const service = scopedApp.get(DailyAssessmentService);
+      const training = scopedApp.get(TrainingService);
+      const recovery = new RecoveryRepository(database);
+      const exercise = await training.createExercise({
+        visibility: "private", name: "TASK-0162 recovery recovery press", category: "strength",
+        movementPattern: null, equipment: null, instructions: null, note: null
+      });
+      const created = await training.createProgram({
+        name: "TASK-0162 recovery recovery program", note: null,
+        cadence: { kind: "rolling_weekly", strengthSessionsPerWeek: 1,
+          workoutSequence: [1], lightCardio: null },
+        workouts: [{ name: "A", prescriptions: [{
+          exerciseVersionId: exercise.currentVersion.id, loadBasis: "external_weight",
+          targetWeightKg: 50, targetSets: 1, targetRepsMin: 6, targetRepsMax: 8,
+          targetRir: 2, progressionIncrementKg: 2.5, note: null
+        }] }]
+      });
+      await training.activateProgramVersion(created.id, created.currentVersion.id, { expectedLockVersion: 0 });
+      for (const [index, daysAgo] of [8].entries()) {
+        const occurredAt = new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+        await training.createWorkoutSession({
+          occurredAt, timezone: "UTC", programVersionId: created.currentVersion.id,
+          programWorkoutPosition: 1, externalActivityId: null, venueLabel: null,
+          workoutName: "A", feeling: null, note: null,
+          exercises: [{ exerciseVersionId: exercise.currentVersion.id,
+            loadBasis: "external_weight", feeling: null, note: null,
+            sets: [{ weightKg: 50, reps: 8, rir: 4 }] }],
+          sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt },
+          dedupeKey: `task-0162-recovery-recovery-session-${index}`, confidence: 1
+        });
+      }
+      const localDate = new Date().toISOString().slice(0, 10);
+      for (const [metric, value, unit] of [
+        ["hrv_rmssd", 60, "ms"], ["resting_heart_rate", 60, "bpm"]
+      ] as const) {
+        await recovery.createObservation(personId, {
+          kind: "metric", observedFrom: null, observedUntil: null,
+          temporalPrecision: "local_date", localDate, timezone: "UTC", quality: "reliable",
+          connectionId: null, consentId: null, dedupeKey: `task-0162-recovery-${metric}`,
+          sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null },
+          detail: { type: "metric", metric, value, unit }
+        });
+      }
+      const offered = await service.readWorkingWeightProposals();
+      expect(offered).toMatchObject({ state: "available", items: [{ suggestedTargetWeightKg: 52.5 }] });
+      await recovery.createObservation(personId, {
+        kind: "subjective", observedFrom: null, observedUntil: null,
+        temporalPrecision: "local_date", localDate, timezone: "UTC", quality: "reliable",
+        connectionId: null, consentId: null, dedupeKey: "task-0162-recovery-injury-concern",
+        sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null },
+        detail: { type: "subjective", signal: "injury_concern" }
+      });
+      await expect(service.applyConfirmedWorkingWeight({
+        requestId: "00000000-0000-4000-8000-000000000164",
+        confirmed: true, proposal: offered.items[0]!
+      })).rejects.toThrow("changed");
+      expect((await training.findProgram(created.id)).activeVersionId).toBe(created.currentVersion.id);
+      const audit = await database.pool.query(
+        "select count(*)::int as count from training_program_weight_changes where person_id = $1", [personId]
+      );
+      expect(audit.rows[0].count).toBe(0);
+    } finally {
+      await scopedApp.close();
+    }
+  });
+
   it("atomically activates one confirmed weight and audits an idempotent exact retry", async () => {
     const personId = "00000000-0000-4000-8000-000000000145";
     await database.pool.query("insert into persons (id, kind, status, timezone) values ($1, 'real', 'active', 'UTC')", [personId]);
@@ -261,6 +432,13 @@ describe("Training PostgreSQL vertical", () => {
     expect(Number(audit.rows[0].new_weight_kg)).toBe(52.5);
     expect(audit.rows[0].base_version_id).toBe(created.currentVersion.id);
     expect(audit.rows[0].new_version_id).toBe(applied.appliedVersionId);
+    const auditBefore = await database.pool.query("select * from training_program_weight_changes where person_id=$1", [personId]);
+    expect(auditBefore.rows[0].evidence_session_one_id).toBe(restored.session.id);
+    expect(auditBefore.rows[0].evidence_session_two_id).toBe(sessions[0]!.id);
+    await database.pool.query(await readFile(new URL("../drizzle/20261007211330_single_session_weight_audit.sql", import.meta.url), "utf8"));
+    const auditAfter = await database.pool.query("select * from training_program_weight_changes where person_id=$1", [personId]);
+    expect(auditAfter.rows).toEqual(auditBefore.rows);
+
     const changedRevision = await new DailyAssessmentRepository(database).getEvidenceRevision(
       personId, shiftLocalDate(localDate, -90), localDate
     );

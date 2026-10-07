@@ -78,4 +78,51 @@ describe("session-backed training progression", () => {
         .toMatchObject({ action: "insufficient_evidence", reason: "unsupported_load_basis" });
     }
   });
+  it("uses only the latest high-reserve session, even when the previous session failed", () => {
+    const high = session(latest.id, 1, [8, 8, 8], 100, 4);
+    const failed = session(previous.id, 1, [6, 6, 6]);
+    for (const evidence of [[high], [high, failed]]) {
+      expect(evaluateTrainingProgression(versionId, 1, prescription, evidence, "2026-09-25"))
+        .toMatchObject({ action: "add_weight", reason: "single_session_high_reserve",
+          suggestedTargetWeightKg: 102.5, evidenceSessionIds: [latest.id] });
+    }
+  });
+
+  it.each([[0, 3], [1, 3], [2, 4], [4, 6]])("bounds reserve for target %s at %s", (targetRir, threshold) => {
+    const target = { ...prescription, targetRir };
+    expect(evaluateTrainingProgression(versionId, 1, target,
+      [session(latest.id, 1, [8, 8, 8], 100, threshold)], "2026-09-25").reason)
+      .toBe("single_session_high_reserve");
+    const uneven = session(latest.id, 1, [8, 8, 8], 100, threshold);
+    uneven.exercises[0]!.sets[1]!.rir = threshold - 0.5;
+    expect(evaluateTrainingProgression(versionId, 1, target, [uneven], "2026-09-25").action).toBe("hold");
+  });
+
+  it("requires an explicit target and complete prescribed measurements, without substituting extra sets", () => {
+    const high = session(latest.id, 1, [8, 8, 8], 100, 4);
+    expect(evaluateTrainingProgression(versionId, 1, { ...prescription, targetRir: null },
+      [high], "2026-09-25").reason).toBe("second_session_needed");
+    const bad = session(latest.id, 1, [8, 8, 8, 8], 100, 4);
+    bad.exercises[0]!.sets[0]!.rir = 3;
+    expect(evaluateTrainingProgression(versionId, 1, prescription, [bad], "2026-09-25").reason)
+      .toBe("second_session_needed");
+    for (const value of [session(latest.id, 1, [8, 7, 8], 100, 4),
+      session(latest.id, 1, [8, 8, 8], 99, 4), session(latest.id, 1, [8, 8], 100, 4),
+      session(latest.id, 1, [8, 8, 8], 100, null)]) {
+      expect(evaluateTrainingProgression(versionId, 1, prescription, [value], "2026-09-25").action)
+        .not.toBe("add_weight");
+    }
+  });
+
+  it("retains increment caps on the single-session path", () => {
+    const high = session(latest.id, 1, [8, 8, 8], 100, 4);
+    for (const increment of [null, 0, 5.001, 11]) {
+      expect(evaluateTrainingProgression(versionId, 1, { ...prescription, progressionIncrementKg: increment },
+        [high], "2026-09-25").action).toBe("hold");
+    }
+    expect(evaluateTrainingProgression(versionId, 1, { ...prescription, targetWeightKg: 20,
+      progressionIncrementKg: 2.001 }, [session(latest.id, 1, [8, 8, 8], 20, 4)], "2026-09-25").reason)
+      .toBe("increment_too_large");
+  });
+
 });

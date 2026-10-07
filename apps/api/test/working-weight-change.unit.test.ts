@@ -43,7 +43,7 @@ function setup() {
   vi.spyOn(service, "readTrainingProgression").mockResolvedValue({
     state: "available", reason: "ready", localDate, programVersionId: versionId,
     workoutPosition: 1, workoutName: "A", items: [{
-      prescriptionPosition: 1, action: "add_weight", suggestedTargetWeightKg: 52.5,
+      prescriptionPosition: 1, action: "add_weight", reason: "two_sessions_qualified", suggestedTargetWeightKg: 52.5,
       evidenceSessionIds: [firstSession, secondSession]
     }]
   } as never);
@@ -101,4 +101,22 @@ describe("confirmed working-weight safety composition", () => {
     })).rejects.toThrow("changed");
     expect(training.applyConfirmedWorkingWeight).not.toHaveBeenCalled();
   });
+  it("offers and rechecks one exact high-reserve session without weakening Recovery", async () => {
+    const { service, training, localDate } = setup();
+    vi.spyOn(service, "readTrainingProgression").mockResolvedValue({
+      state: "available", reason: "ready", localDate, programVersionId: versionId,
+      workoutPosition: 1, workoutName: "A", items: [{ prescriptionPosition: 1,
+        action: "add_weight", reason: "single_session_high_reserve", suggestedTargetWeightKg: 52.5,
+        evidenceSessionIds: [firstSession] }]
+    } as never);
+    const offered = await service.readWorkingWeightProposals();
+    expect(offered.items[0]?.evidenceSessionIds).toEqual([firstSession]);
+    await expect(service.applyConfirmedWorkingWeight({ requestId: versionId, confirmed: true,
+      proposal: offered.items[0]! })).resolves.toMatchObject({ status: "applied" });
+    vi.spyOn(service, "read").mockResolvedValueOnce({ state: "available", status: "caution", localDate } as never);
+    await expect(service.applyConfirmedWorkingWeight({ requestId: firstSession, confirmed: true,
+      proposal: offered.items[0]! })).rejects.toThrow("changed");
+    expect(training.applyConfirmedWorkingWeight).toHaveBeenCalledOnce();
+  });
+
 });

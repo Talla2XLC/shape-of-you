@@ -242,7 +242,8 @@ export class DailyAssessmentService {
         item.prescriptionPosition === candidate.prescriptionPosition &&
         item.action === "add_weight" &&
         item.suggestedTargetWeightKg === candidate.suggestedTargetWeightKg &&
-        item.evidenceSessionIds.length === 2 &&
+        ((item.reason === "single_session_high_reserve" && item.evidenceSessionIds.length === 1) ||
+          (item.reason === "two_sessions_qualified" && item.evidenceSessionIds.length === 2)) &&
         item.evidenceSessionIds[0] === candidate.evidenceSessionId
       );
       return decision ? [{

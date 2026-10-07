@@ -555,6 +555,7 @@ describe("MCP HTTP adapter", () => {
     expect(progressionTool?.description).toContain("not Recovery permission");
     expect(progressionTool?.description).toContain("Garmin activity and A/B classification never supply performed sets");
     expect(progressionTool?.description).toContain("For a future workout, check again on that day");
+    expect(progressionTool?.description).toContain("single_session_high_reserve");
     const offerTool = tools.find((tool) => tool.name === "get_working_weight_proposals");
     const applyTool = tools.find((tool) => tool.name === "apply_confirmed_working_weight");
     expect(offerTool?.description).toContain("one understandable confirmation");
@@ -2597,6 +2598,11 @@ describe("MCP HTTP adapter", () => {
         requestId: "00000000-0000-4000-8000-000000000153",
         confirmed: true, proposal: workingWeightProposal
       }, "applied"],
+      ["apply_confirmed_working_weight", {
+        requestId: "00000000-0000-4000-8000-000000000162",
+        confirmed: true, proposal: { ...workingWeightProposal,
+          evidenceSessionIds: [workingWeightProposal.evidenceSessionIds[0]] }
+      }, "applied"],
       ["record_daily_recommendation_feedback", {
         snapshotId: "00000000-0000-4000-8000-000000000501",
         status: "completed",
@@ -2718,10 +2724,7 @@ describe("MCP HTTP adapter", () => {
           expect(toolResult.structuredContent, name).toMatchObject({ status: marker,
             appliedVersionId: "00000000-0000-4000-8000-000000000152" });
           expect(toolResult.content[0].text, name).toContain("Immediately read get_training_context and get_daily_decision_context");
-          expect(applyConfirmedWorkingWeight).toHaveBeenCalledWith({
-            requestId: "00000000-0000-4000-8000-000000000153",
-            confirmed: true, proposal: workingWeightProposal
-          });
+          expect(applyConfirmedWorkingWeight).toHaveBeenLastCalledWith(args);
         } else if (name === "list_workout_sessions") {
           expect(toolResult.structuredContent).toEqual({ items: [] });
         } else {
@@ -2739,7 +2742,7 @@ describe("MCP HTTP adapter", () => {
         } }
       });
       expect(unconfirmedWrite.json().result.isError).toBe(true);
-      expect(applyConfirmedWorkingWeight).toHaveBeenCalledTimes(1);
+      expect(applyConfirmedWorkingWeight).toHaveBeenCalledTimes(2);
 
       for (const name of [
         "record_weight_measurement",

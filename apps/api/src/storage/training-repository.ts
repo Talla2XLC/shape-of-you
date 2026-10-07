@@ -3574,7 +3574,7 @@ export class TrainingRepository implements TrainingStore {
       );
       if (!candidate) throw new ConflictError("Working-weight proposal is no longer valid");
       const replacement = alias(workoutSessions, "weight_change_replacement");
-      const evidence = await transaction.select({ id: workoutSessions.id }).from(workoutSessions)
+      const evidence = await transaction.select().from(workoutSessions)
         .where(and(
           eq(workoutSessions.personId, personId),
           eq(workoutSessions.completionState, "completed"),
@@ -3587,10 +3587,6 @@ export class TrainingRepository implements TrainingStore {
         ))
         .orderBy(desc(workoutSessions.localDate), desc(workoutSessions.occurredAt), desc(workoutSessions.id))
         .limit(2);
-      if (evidence.length !== 2 || evidence[0]!.id !== proposal.evidenceSessionIds[0] ||
-          evidence[1]!.id !== proposal.evidenceSessionIds[1]) {
-        throw new ConflictError("Progression sessions changed after proposal");
-      }
       const active = current.activeVersion;
       if (!active) throw new ConflictError("Active TrainingProgramVersion is unavailable");
       const prescribed = active.workouts.find((workout) => workout.position === proposal.workoutPosition)
@@ -3598,6 +3594,17 @@ export class TrainingRepository implements TrainingStore {
       if (!prescribed || prescribed.exerciseVersionId !== proposal.exerciseVersionId ||
           prescribed.targetWeightKg !== proposal.currentTargetWeightKg) {
         throw new ConflictError("Program prescription changed after proposal");
+      }
+      const currentSessions = await Promise.all(evidence.map((row) => this.serializeSession(transaction, row)));
+      const decision = evaluateTrainingProgression(proposal.programVersionId, proposal.workoutPosition,
+        prescribed, currentSessions, proposal.localDate,
+        active.workouts.find((workout) => workout.position === proposal.workoutPosition)!.prescriptions
+          .filter((item) => item.exerciseVersionId === prescribed.exerciseVersionId &&
+            item.loadBasis === prescribed.loadBasis).length !== 1);
+      if (decision.action !== "add_weight" || decision.suggestedTargetWeightKg !== proposal.suggestedTargetWeightKg ||
+          decision.evidenceSessionIds.length !== proposal.evidenceSessionIds.length ||
+          decision.evidenceSessionIds.some((id, index) => id !== proposal.evidenceSessionIds[index])) {
+        throw new ConflictError("Progression sessions changed after proposal");
       }
       const versionInput: CreateTrainingProgramVersion = {
         expectedLockVersion: current.lockVersion,
@@ -3646,7 +3653,7 @@ export class TrainingRepository implements TrainingStore {
         oldWeightKg: proposal.currentTargetWeightKg.toFixed(3),
         newWeightKg: proposal.suggestedTargetWeightKg.toFixed(3),
         evidenceSessionOneId: proposal.evidenceSessionIds[0]!,
-        evidenceSessionTwoId: proposal.evidenceSessionIds[1]!,
+        evidenceSessionTwoId: proposal.evidenceSessionIds[1] ?? null,
         localDate: proposal.localDate,
         assessmentChecksum: proposal.assessmentEvidenceChecksum,
         evidenceRevision: proposal.evidenceRevision,

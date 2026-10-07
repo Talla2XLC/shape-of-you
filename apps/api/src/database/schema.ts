@@ -2543,7 +2543,7 @@ export const trainingProgramWeightChanges = pgTable(
     oldWeightKg: numeric("old_weight_kg", { precision: 9, scale: 3 }).notNull(),
     newWeightKg: numeric("new_weight_kg", { precision: 9, scale: 3 }).notNull(),
     evidenceSessionOneId: uuid("evidence_session_one_id").notNull(),
-    evidenceSessionTwoId: uuid("evidence_session_two_id").notNull(),
+    evidenceSessionTwoId: uuid("evidence_session_two_id"),
     localDate: date("local_date", { mode: "string" }).notNull(),
     assessmentChecksum: varchar("assessment_checksum", { length: 64 }).notNull(),
     evidenceRevision: varchar("evidence_revision", { length: 64 }).notNull(),

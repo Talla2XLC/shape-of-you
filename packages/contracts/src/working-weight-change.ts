@@ -11,7 +11,7 @@ export const WorkingWeightProposalSchema = {
   properties: {
     ...ProgressionCandidateSchema.properties,
     localDate: { type: "string", format: "date" },
-    evidenceSessionIds: { type: "array", items: uuid, minItems: 2, maxItems: 2, uniqueItems: true },
+    evidenceSessionIds: { type: "array", items: uuid, minItems: 1, maxItems: 2, uniqueItems: true },
     assessmentEvidenceChecksum: { type: "string", minLength: 64, maxLength: 64 },
     evidenceRevision: { type: "string", minLength: 64, maxLength: 64 }
   }
