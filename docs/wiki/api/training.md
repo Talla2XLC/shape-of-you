@@ -228,6 +228,20 @@ Exercise-specific analytics additionally require resolved identity and enough
 measured evidence. V1 personal records reject day-only results rather than
 inventing time; V2 returns the recorded local date and temporal precision.
 
+The MCP V2 create/correction input publication exposes common workout fields
+and all set measurements as object properties. The API still validates the
+original temporal and measured-set conditions after normalization. For an
+explicit immediate start report, MCP create accepts `startReportedNow=true`
+with `in_progress`; empty exercises are valid. It captures approximate server
+receipt time in the supplied Person timezone and records manual command
+provenance (`mcp_start_report:v1`, original create dedupe key). This is neither
+the original chat message timestamp nor provider-measured time. Retries retain
+the first canonical start. Coach copies the current start, temporal precision,
+timezone and full source reference into completion or set corrections; the
+server retains the existing full-replacement contract. A finish-only report
+with unknown start remains day-only. Existing association rules are unchanged.
+See the [reported-start capture ADR](../../adr/20261007-capture-reported-workout-start-time.md).
+
 A Smith report records Smith as performed. The Coach may ask whether it is a
 one-off substitution or should change the program. A clear targeted request or
 acceptance authorizes the existing atomic program write; untouched assignments

@@ -119,6 +119,8 @@ import {
 
 import type { RequestPersonContext } from "../application/person-context.js";
 import { publishMcpInputSchema } from "./published-input-schema.js";
+import { connectorWorkoutV2Schema } from "./workout-input-schema.js";
+import { deriveLocalDate } from "../domain/weight-measurement.js";
 import type { BodyMeasurementSessionService } from "../body-measurement-sessions/body-measurement-session.service.js";
 import type { NutritionService } from "../nutrition/nutrition.service.js";
 import type { RecoveryService } from "../recovery/recovery.service.js";
@@ -192,6 +194,8 @@ export interface McpRouteOptions {
   readonly authorizer: McpAuthorizationBoundary;
   readonly personContext: RequestPersonContext;
   readonly services: McpServices;
+  /** Server receipt clock for immediate start reports; defaults to the system clock. */
+  readonly now?: () => Date;
 }
 
 interface ToolDefinition {
@@ -287,7 +291,9 @@ const mealReadResultContent = coachResultContent(
   "If a successful correction result was already returned, this optional day or totals read must not reapply that correction. Do not ask the user to repeat or confirm the correction."
 );
 
-const workoutV2RoutingPolicy = "WORKOUT V2 ROUTING: In every workflow below, prefer get_training_context_v2 and list_workout_sessions_v2 whenever available, including program, cadence, classification, linking and correction read-back. Legacy names are fallback only for clients without V2. If a legacy read cannot represent a V2 fact, do not treat that as missing data or ask the user to repeat it. ";
+const workoutTimeCapturePolicy = "For an explicit immediate start report (starting now), create V2 with startReportedNow=true, completionState=in_progress and exercises=[] until sets are known. The saved instant is approximate server receipt time, not a provider measurement. Preserve a reported exact start instead when available. Never turn a finish report into a start. On completion or added sets, copy the current occurredAt, temporalPrecision, localDate, timezone and complete sourceReference unchanged unless the Person corrects them; never replace a known start with local_date. Retain the original create dedupeKey for retries. ";
+
+const workoutV2RoutingPolicy = workoutTimeCapturePolicy + "WORKOUT V2 ROUTING: In every workflow below, prefer get_training_context_v2 and list_workout_sessions_v2 whenever available, including program, cadence, classification, linking and correction read-back. Legacy names are fallback only for clients without V2. If a legacy read cannot represent a V2 fact, do not treat that as missing data or ask the user to repeat it. ";
 
 const workoutWriteResultContent = coachResultContent(
   workoutV2RoutingPolicy +
@@ -643,7 +649,7 @@ function createServer(
       instructions: MCP_OPERATIONAL_INSTRUCTIONS
     }
   );
-  const tools = createTools(options.services);
+  const tools = createTools(options.services, options.now ?? (() => new Date()));
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
     tools: tools.map((definition) => definition.tool)
   }));
@@ -774,7 +780,7 @@ function createServer(
   return server;
 }
 
-function createTools(services: McpServices): readonly ToolDefinition[] {
+function createTools(services: McpServices, now: () => Date): readonly ToolDefinition[] {
   return [
     ...(services.personalInsights ? [defineTool(
       "get_personal_insights",
@@ -1051,14 +1057,14 @@ function createTools(services: McpServices): readonly ToolDefinition[] {
       () => workoutReadResultContent
     ),
     defineTool(
-      "record_workout_session_v2", "Immediately preserve a direct workout report without asking whether to save. Assemble only known performed work from the conversation. Use in_progress during the workout and completed only when finishing is clear. Unknown sets are [], unresolved exercises retain their actual exerciseLabel with exerciseVersionId=null, and unknown loadBasis is null. Keep Smith distinct from free-bar squats and do not add unknown bar weight. If only the day is known, use temporalPrecision=local_date and localDate; never invent start time. Keep reported effort or RIR ranges in note rather than inventing a scalar. If this same session is already recorded, use a correction instead of a second create. Read back with list_workout_sessions_v2 before claiming success. A substitution may warrant asking whether it is for today or should update the program; an explicit permanent change authorizes the existing confirmed program lifecycle, not a silent edit.",
-      CreateWorkoutSessionV2Schema, WorkoutSessionV2Schema, true, MCP_WORKOUT_WRITE_SCOPE,
-      async (input) => (await services.training.createWorkoutSession(normalizeWorkoutV2Input(input, false) as CreateWorkoutSessionV2)).session,
+      "record_workout_session_v2", "Immediately preserve a direct workout report without asking whether to save. Assemble only known performed work from the conversation. Use in_progress during the workout and completed only when finishing is clear. Unknown sets are [], unresolved exercises retain their actual exerciseLabel with exerciseVersionId=null, and unknown loadBasis is null. Keep Smith distinct from free-bar squats and do not add unknown bar weight. For an explicit immediate start use startReportedNow=true, in_progress and exercises=[]; omit occurredAt and temporalPrecision so the API captures receipt time in the supplied timezone. If only the day is known, use temporalPrecision=local_date and localDate; never invent start time. Keep reported effort or RIR ranges in note rather than inventing a scalar. If this same session is already recorded, use a correction instead of a second create. Read back with list_workout_sessions_v2 before claiming success. A substitution may warrant asking whether it is for today or should update the program; an explicit permanent change authorizes the existing confirmed program lifecycle, not a silent edit.",
+      connectorWorkoutV2Schema(CreateWorkoutSessionV2Schema, false), WorkoutSessionV2Schema, true, MCP_WORKOUT_WRITE_SCOPE,
+      async (input) => (await services.training.createWorkoutSession(normalizeWorkoutV2Input(input, false, now) as CreateWorkoutSessionV2)).session,
       () => workoutWriteResultContent
     ),
     defineTool(
-      "correct_workout_session_v2", "Read the unique current session with list_workout_sessions_v2, overlay the user's new details or completion, preserve every unchanged exercise and value, and append a full replacement against its current id. Do not require repeated permission or a complete restatement. On conflict reread current facts and never blindly overwrite another correction. Read back with list_workout_sessions_v2 before claiming success.",
-      withIdSchema("CorrectWorkoutSessionV2ToolInput", CorrectWorkoutSessionV2Schema), WorkoutSessionV2Schema, true, MCP_WORKOUT_WRITE_SCOPE,
+      "correct_workout_session_v2", "Read the unique current session with list_workout_sessions_v2, overlay the user's new details or completion, preserve every unchanged exercise and value, including occurredAt, temporalPrecision, localDate, timezone and the complete sourceReference from the canonical session when adding sets or completing it, and append a full replacement against its current id. Do not require repeated permission or a complete restatement. On conflict reread current facts and never blindly overwrite another correction. Read back with list_workout_sessions_v2 before claiming success.",
+      withIdSchema("CorrectWorkoutSessionV2ToolInput", connectorWorkoutV2Schema(CorrectWorkoutSessionV2Schema, true)), WorkoutSessionV2Schema, true, MCP_WORKOUT_WRITE_SCOPE,
       async (input) => (await services.training.correctWorkoutSession(input.id as string, normalizeWorkoutV2Input(input, true) as CorrectWorkoutSessionV2)).session,
       () => workoutWriteResultContent
     ),
@@ -1606,10 +1612,31 @@ function inferAmountKind(item: Record<string, unknown>): string {
   return "unknown";
 }
 
-function normalizeWorkoutV2Input(input: Record<string, unknown>, correction: boolean): Record<string, unknown> {
+function normalizeWorkoutV2Input(input: Record<string, unknown>, correction: boolean, now: () => Date = () => new Date()): Record<string, unknown> {
   const body = { ...input };
   delete body.id;
-  const source = isRecord(body.sourceReference) ? body.sourceReference : {};
+  let source = isRecord(body.sourceReference) ? body.sourceReference : {};
+  if (body.startReportedNow === true) {
+    if (correction || body.completionState !== "in_progress" || body.occurredAt != null ||
+      (body.temporalPrecision != null && body.temporalPrecision !== "instant") ||
+      body.externalActivityId != null || (source.channel != null && source.channel !== "manual") ||
+      source.externalSystem != null || source.externalRecordId != null || source.occurredAt != null) {
+      throw new ConnectorInputError("Immediate start contradicts reported temporal or source evidence");
+    }
+    const receivedAt = now();
+    let localDate: string;
+    try { localDate = deriveLocalDate(receivedAt, body.timezone as string); }
+    catch { throw new ConnectorInputError("Immediate start requires a valid clock and timezone"); }
+    if (body.localDate != null && body.localDate !== localDate) {
+      throw new ConnectorInputError("Immediate start contradicts the reported local date");
+    }
+    body.occurredAt = receivedAt.toISOString();
+    body.temporalPrecision = "instant";
+    body.localDate = localDate;
+    source = { channel: "manual", externalSystem: "mcp_start_report:v1",
+      externalRecordId: body.dedupeKey, occurredAt: body.occurredAt };
+  }
+  delete body.startReportedNow;
   const normalized = {
     ...body, occurredAt: body.occurredAt ?? null,
     programVersionId: body.programVersionId ?? null, programWorkoutPosition: body.programWorkoutPosition ?? null,
