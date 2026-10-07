@@ -904,7 +904,7 @@ describe("Training PostgreSQL vertical", () => {
     );
     expect(await repository.listActivityLinkProgramContextForLocalDate(personId, secondDay))
       .toContainEqual({ sessionId: a.session.id, programWorkoutName: "Ahilej A",
-        trustedExternalTitle: "Ahilej A imported" });
+        trustedExternalTitle: "Ahilej A imported", hasStrengthProgram: true });
 
     await repository.importExternalActivity(importInput("task-0134-a-1", `${secondDay}T18:00:00.000Z`, "b"));
     expect((await repository.findWorkoutSession(personId, a.session.id))?.externalActivityId).not.toBeNull();

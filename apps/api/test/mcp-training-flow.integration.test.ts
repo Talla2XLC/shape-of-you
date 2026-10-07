@@ -375,7 +375,7 @@ describe("MCP training conversation flow with PostgreSQL", () => {
       }
     } finally { await fastify.close(); }
   });
-  it("confirms a historical date-only workout/ Garmin pair from today's context and counts it once", async () => {
+  it("confirms an ambiguous historical date-only workout/ Garmin pair from today's context and counts it once", async () => {
     const { fastify, call, program, importActivity } = await fixture();
     try {
       const session = await call("record_workout_session_v2", {
@@ -388,10 +388,12 @@ describe("MCP training conversation flow with PostgreSQL", () => {
         dedupeKey: "reported-a", confidence: 1
       });
       const activity = await importActivity();
+      await importActivity("2026-10-02", "Силовая тренировка", 900);
       // A newer unrelated import must not hide the exact blocker with historyLimit=1.
       await importActivity("2026-10-03", "Прогулка", 300);
       const before = await call("get_training_context_v2", { localDate: "2026-10-04", historyLimit: 1 });
       expect(before.nextStep).toMatchObject({ state: "needs_classification", externalActivityId: activity.id });
+      // Historical context exposes the exact blocker; the second import prevents automatic guessing.
       expect(before.pendingActivityLinkQuestion).toMatchObject({ localDate: "2026-10-02", options: [{ sessionId: session.id, externalActivityId: activity.id }] });
       // Reproduce the wrong-date classification attempt without weakening its guard.
       expect(await call("classify_external_activity", {

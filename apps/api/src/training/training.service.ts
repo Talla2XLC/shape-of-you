@@ -100,6 +100,7 @@ function pendingActivityLinkQuestion(
       programWorkoutPosition: session.programWorkoutPosition,
       programWorkoutName: contextBySessionId.get(session.id)?.programWorkoutName ?? null,
       trustedExternalTitle: contextBySessionId.get(session.id)?.trustedExternalTitle ?? null,
+      hasStrengthProgram: contextBySessionId.get(session.id)?.hasStrengthProgram ?? false,
       hasStrengthSets: session.exercises.some((exercise) => exercise.sets.some((set) =>
         set.reps !== null || (set.weightKg ?? 0) > 0)),
       sourceChannel: session.sourceReference.channel,
@@ -151,7 +152,8 @@ function pendingActivityLinkQuestion(
     activity.name.normalize("NFKC").trim().replace(/\s+/gu, " ")
       .toLocaleLowerCase("und") === normalizedMode
   ).map((activity) => ({ sessionId: session.id, externalActivityId: activity.id })));
-  const questionPairs = ambiguous.length >= 2 ? ambiguous : dateOnlyPairs;
+  const unresolvedDayPairs = candidates.filter((candidate) => candidate.basis === "reported_strength_day");
+  const questionPairs = ambiguous.length >= 2 ? ambiguous : unresolvedDayPairs.length > 0 ? unresolvedDayPairs : dateOnlyPairs;
   if (questionPairs.length === 0) return null;
   const displayedPairs = questionPairs.slice(0, 20);
   return {

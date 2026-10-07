@@ -87,7 +87,7 @@ describe("automatic activity association", () => {
     const garmin = { ...activity, name: "Силовая тренировка" };
     const match = (candidateSession: ActivityLinkSessionCandidate, candidateActivity = garmin) =>
       findAutomaticActivityLinks([candidateSession], [candidateActivity], garmin.name);
-    expect(match({ ...session, occurredAt: null })).toEqual([]);
+    expect(match({ ...session, occurredAt: null })).toEqual([{ sessionId: session.id, externalActivityId: garmin.id, basis: "reported_strength_day" }]);
     expect(match({ ...session, workoutName: "Other" })).toEqual([]);
     expect(match(session, { ...garmin, durationSeconds: 300 })).toEqual([]);
     expect(match(session, { ...garmin, sourceProvider: "other" })).toEqual([]);
@@ -123,4 +123,31 @@ describe("automatic activity association", () => {
       [{ id: "activity-a" }, { id: "activity-b" }]
     )).toBe(1);
   });
+  it("links a retrospective exact strength program report without sets, preserving unknown time", () => {
+    const report = { ...session, occurredAt: null, hasStrengthSets: false, hasStrengthProgram: true };
+    const garmin = { ...activity, name: "Силовая тренировка" };
+    expect(findAutomaticActivityLinks([report], [garmin], garmin.name)).toEqual([
+      { sessionId: report.id, externalActivityId: garmin.id, basis: "reported_strength_day" }
+    ]);
+    expect(report.occurredAt).toBeNull();
+    expect(findAutomaticActivityLinks([{ ...report, hasStrengthProgram: false }], [garmin], garmin.name)).toEqual([]);
+    expect(findAutomaticActivityLinks([{ ...report, workoutName: "Other" }], [garmin], garmin.name)).toEqual([]);
+    expect(findAutomaticActivityLinks([{ ...report, sourceChannel: "device" }], [garmin], garmin.name)).toEqual([]);
+  });
+
+  it("checks all current day facts even when an occupied or incompatible second pair is not a candidate", () => {
+    const report = { ...session, occurredAt: null };
+    const garmin = { ...activity, name: "Силовая тренировка" };
+    const population = { sessions: [report], activities: [garmin] };
+    expect(findAutomaticActivityLinks([report], [garmin], garmin.name, {
+      ...population, sessions: [report, { ...session, id: "occupied-session", workoutName: "Other", programWorkoutName: "Other" }]
+    })).toEqual([]);
+    expect(findAutomaticActivityLinks([report], [garmin], garmin.name, {
+      ...population, activities: [garmin, { ...garmin, id: "occupied-activity", classification: { kind: "not_program_workout", programVersionId: "other", workoutPosition: null } }]
+    })).toEqual([]);
+    expect(findAutomaticActivityLinks([report], [garmin], garmin.name, {
+      ...population, activities: [garmin, { ...garmin, id: "other-day", localDate: "2026-09-24" }]
+    })).toHaveLength(1);
+  });
+
 });

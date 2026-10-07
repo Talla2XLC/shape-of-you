@@ -125,7 +125,14 @@ of that exact program workout with compatible type, date, close start, and a
 unique candidate pair. A confirmed Person-wide generic Garmin strength mode
 can also link a detailed strength session when the exact local date, start
 window, type, and reciprocal uniqueness agree; it does not assign A/B from
-the imported title. `venueLabel` is optional session context for a concrete
+the imported title. For a completed manual report with unknown start,
+`reported_strength_day` / `automatic-activity-link-v4` also permits a unique
+pair across the full current local-date population, including occupied records.
+The report needs performed strength evidence or an exact immutable strength
+program workout; the Garmin activity needs the confirmed mode, no distance,
+and at least 600 seconds. Known timestamp conflicts remain blocking. Provider
+time stays in the activity without upgrading manual temporal precision.
+`venueLabel` is optional session context for a concrete
 question, not matching evidence. Arbitrary matching names are insufficient.
 The MCP
 `set_trusted_external_activity_title` command confirms, replaces, or revokes
@@ -133,7 +140,7 @@ one title under `workout:write`; it does not classify an individual activity.
 `set_activity_recording_mode` confirms or revokes the generic mode under an
 optimistic lock. `get_training_context` returns a date-scoped
 `pendingActivityLinkQuestion` when multiple current pairs remain plausible or
-a date-only detailed session needs explicit confirmation. If today's next step
+a date-only report lacks sufficient automatic matching evidence. If today's next step
 is blocked by a historical activity, its exact pair is also exposed in today's
 context using the activity's date and the current policy-week bound;
 it uses the exact immutable program version even for historical sessions and
@@ -146,7 +153,7 @@ recheck automatic associations; explicit links retain priority. Deleting
 connected evidence removes its association without mutating the immutable
 session.
 See the
-[recording-context ADR](../../adr/20260925-link-garmin-strength-with-recording-context.md).
+[natural-report association ADR](../../adr/20261007-match-natural-workout-reports-with-provider-evidence.md).
 
 After the user confirms a complete program or an unambiguous targeted change, MCP
 `save_confirmed_training_program` atomically creates and activates its first
@@ -228,6 +235,13 @@ Exercise-specific analytics additionally require resolved identity and enough
 measured evidence. V1 personal records reject day-only results rather than
 inventing time; V2 returns the recorded local date and temporal precision.
 
+MCP Coach guidance treats a gym arrival or program request as planning,
+reported sets as partial performance, and an unambiguous retrospective program
+workout report as completed even when start and sets are unknown. It requires
+neither a special start phrase nor invented performed prescriptions. Empty
+exercises preserve unknown measurements; provider evidence can later link the
+completed report. This guidance does not replace live conversational evaluation.
+
 The MCP V2 create/correction input publication exposes common workout fields
 and all set measurements as object properties. The API still validates the
 original temporal and measured-set conditions after normalization. For an
@@ -239,7 +253,7 @@ the original chat message timestamp nor provider-measured time. Retries retain
 the first canonical start. Coach copies the current start, temporal precision,
 timezone and full source reference into completion or set corrections; the
 server retains the existing full-replacement contract. A finish-only report
-with unknown start remains day-only. Existing association rules are unchanged.
+with unknown start remains day-only and may use the association policy above.
 See the [reported-start capture ADR](../../adr/20261007-capture-reported-workout-start-time.md).
 
 A Smith report records Smith as performed. The Coach may ask whether it is a

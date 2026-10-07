@@ -86,14 +86,19 @@ automatically.
   for the session's exact program version/workout position. A Person-confirmed
   generic Garmin strength recording mode can also link a detailed session,
   including one outside the active program, when type, exact date, close start,
-  and reciprocal uniqueness agree. The generic title never identifies A/B.
+  and reciprocal uniqueness agree. A completed manual report without start
+  can instead link a unique full-date pair under `reported_strength_day`, using
+  performed strength evidence or an exact immutable strength program workout.
+  The confirmed mode and compatible provider evidence remain mandatory; known
+  timestamp conflicts are not bypassed. Provider time remains external.
+  The generic title never identifies A/B.
   Nearby times or venue alone do not authorize a link. Title trust and the
   recording mode are revocable Person-owned authority, never an implicit
   program edit or activity classification. Training asks about the exact pair
   when evidence is ambiguous; a direct answer creates an explicit association.
   A historical activity blocking today's next step exposes its exact pending
   pair in today's context, independently of the recent-history display limit.
-  The lookup stays within the policy week and requires explicit confirmation;
+  The lookup stays within the policy week; ambiguous pairs require explicit confirmation;
   Coach resolves the pair before classifying the same activity separately.
   Current corrections and late imports recheck automatic links. One linked
   pair counts as one training occurrence; external load remains external,
@@ -102,7 +107,7 @@ automatically.
   Provider correction retains classification through the stable lineage;
   connected-data erasure removes association and classification without
   mutating the session. See the
-  [recording-context ADR](../../adr/20260925-link-garmin-strength-with-recording-context.md).
+  [natural-report association ADR](../../adr/20261007-match-natural-workout-reports-with-provider-evidence.md).
 - `NextTrainingStep` is a deterministic read projection over active cadence
   and current Training facts. Current `training-next-step-v5` counts completed
   strength and qualifying cardio over seven inclusive Person-local dates.

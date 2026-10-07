@@ -2619,7 +2619,9 @@ export const trainingWorkoutSessionActivityLinks = pgTable(
           OR (${table.matchBasis} IN ('source_identity', 'trusted_title_and_time')
               AND ${table.matchPolicyVersion} = 'automatic-activity-link-v2')
           OR (${table.matchBasis} = 'confirmed_recording_context'
-              AND ${table.matchPolicyVersion} = 'automatic-activity-link-v3')`
+              AND ${table.matchPolicyVersion} = 'automatic-activity-link-v3')
+          OR (${table.matchBasis} = 'reported_strength_day'
+              AND ${table.matchPolicyVersion} = 'automatic-activity-link-v4')`
     )
   ]
 );

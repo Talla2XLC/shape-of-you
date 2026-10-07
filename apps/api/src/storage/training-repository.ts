@@ -200,6 +200,7 @@ interface ActivityLinkSessionRow {
   readonly program_workout_name: string | null;
   readonly trusted_external_title: string | null;
   readonly has_strength_sets: boolean;
+  readonly has_strength_program: boolean;
   readonly source_channel: string;
   readonly external_system: string | null;
   readonly external_record_id: string | null;
@@ -222,6 +223,7 @@ interface ActivityLinkExternalRow {
 
 /** Immutable program metadata used when explaining possible activity links. */
 export interface ActivityLinkProgramContext {
+  readonly hasStrengthProgram?: boolean;
   readonly sessionId: string;
   readonly programWorkoutName: string | null;
   readonly trustedExternalTitle: string | null;
@@ -854,7 +856,7 @@ export class TrainingRepository implements TrainingStore {
                select 1 from training_workout_session_activity_links link
                 where link.session_id = session.id
                   and link.person_id = ${personId}
-                  and link.match_basis = 'confirmed_recording_context'
+                  and link.match_basis in ('confirmed_recording_context', 'reported_strength_day')
              ))
            and not exists (
              select 1 from workout_sessions successor
@@ -964,6 +966,11 @@ export class TrainingRepository implements TrainingStore {
              link.external_activity_id as linked_activity_id,
              link.match_basis, link.match_policy_version,
              exists (
+               select 1 from training_program_prescriptions prescription
+               join training_exercise_versions version on version.id = prescription.exercise_version_id
+               where prescription.workout_id = program_workout.id and version.category = 'strength'
+             ) as has_strength_program,
+             exists (
                select 1 from performed_exercises exercise
                join performed_sets performed_set
                  on performed_set.performed_exercise_id = exercise.id
@@ -1044,8 +1051,7 @@ export class TrainingRepository implements TrainingStore {
         { sessionId: row.session_id, policy: row.match_policy_version }
       ]);
     }
-    const sessions: ActivityLinkSessionCandidate[] = currentSessions
-      .filter((row) => row.linked_activity_id === null || row.match_policy_version !== null)
+    const populationSessions: ActivityLinkSessionCandidate[] = currentSessions
       .map((row) => ({
         id: row.id, localDate: row.local_date,
         occurredAt: row.occurred_at === null ? null : new Date(row.occurred_at).toISOString(),
@@ -1054,19 +1060,20 @@ export class TrainingRepository implements TrainingStore {
         programWorkoutPosition: row.program_workout_position,
         programWorkoutName: row.program_workout_name,
         trustedExternalTitle: row.trusted_external_title,
-        hasStrengthSets: row.has_strength_sets,
+        hasStrengthSets: row.has_strength_sets, hasStrengthProgram: row.has_strength_program,
         sourceChannel: row.source_channel,
         sourceExternalSystem: row.external_system,
         sourceExternalRecordId: row.external_record_id
       }));
-    const activities: ActivityLinkExternalCandidate[] = [];
+    const sessions = populationSessions.filter((session) => {
+      const row = currentSessions.find((row) => row.id === session.id)!;
+      return row.linked_activity_id === null || row.match_policy_version !== null;
+    });
+    const populationActivities: ActivityLinkExternalCandidate[] = [];
     for (const row of currentActivities) {
-      if ((occupied.get(row.id) ?? []).some((link) =>
-        link.policy === null || !candidateSessionIds.has(link.sessionId)
-      )) continue;
       const lineage = await readActivityLineageClassification(transaction, personId, row.id);
       if (!lineage) throw new Error("External activity correction lineage is broken");
-      activities.push({
+      populationActivities.push({
         id: row.id, localDate: row.local_date,
         occurredAt: new Date(row.occurred_at).toISOString(),
         name: row.name, durationSeconds: row.duration_seconds,
@@ -1081,7 +1088,10 @@ export class TrainingRepository implements TrainingStore {
         }
       });
     }
-    const expected = new Map(findAutomaticActivityLinks(sessions, activities, recordingMode?.title ?? null)
+    const activities = populationActivities.filter((activity) => !(occupied.get(activity.id) ?? []).some((link) =>
+      link.policy === null || !candidateSessionIds.has(link.sessionId)));
+    const expected = new Map(findAutomaticActivityLinks(sessions, activities, recordingMode?.title ?? null,
+      { sessions: populationSessions, activities: populationActivities })
       .map((link) => [link.sessionId, link] as const));
     for (const row of currentSessions) {
       if (row.match_policy_version === null) continue;
@@ -1100,7 +1110,7 @@ export class TrainingRepository implements TrainingStore {
         sessionId: match.sessionId, personId,
         externalActivityId: match.externalActivityId,
         matchBasis: match.basis,
-        matchPolicyVersion: match.basis === "confirmed_recording_context"
+        matchPolicyVersion: match.basis === "reported_strength_day" ? "automatic-activity-link-v4" : match.basis === "confirmed_recording_context"
           ? "automatic-activity-link-v3" : "automatic-activity-link-v2"
       });
     }
@@ -1257,10 +1267,14 @@ export class TrainingRepository implements TrainingStore {
       session_id: string;
       program_workout_name: string | null;
       trusted_external_title: string | null;
+      has_strength_program: boolean;
     }>`
       select session.id as session_id,
              program_workout.name as program_workout_name,
-             trusted_title.title as trusted_external_title
+             trusted_title.title as trusted_external_title,
+             exists (select 1 from training_program_prescriptions prescription
+               join training_exercise_versions version on version.id = prescription.exercise_version_id
+               where prescription.workout_id = program_workout.id and version.category = 'strength') as has_strength_program
         from workout_sessions session
         left join training_program_workouts program_workout
           on program_workout.program_version_id = session.program_version_id
@@ -1280,10 +1294,12 @@ export class TrainingRepository implements TrainingStore {
       session_id: string;
       program_workout_name: string | null;
       trusted_external_title: string | null;
+      has_strength_program: boolean;
     }>).map((row) => ({
       sessionId: row.session_id,
       programWorkoutName: row.program_workout_name,
-      trustedExternalTitle: row.trusted_external_title
+      trustedExternalTitle: row.trusted_external_title,
+      hasStrengthProgram: row.has_strength_program
     }));
   }
 

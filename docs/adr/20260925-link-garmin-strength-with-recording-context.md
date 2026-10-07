@@ -2,10 +2,10 @@
 id: decisions-20260925-link-garmin-strength-with-recording-context
 kind: adr
 title: "Связывать силовую Garmin с подробной сессией по подтверждённому контексту записи"
-status: accepted
+status: superseded
 date: 2026-09-25
 supersedes: [decisions-20260925-link-proven-workout-sessions-to-external-activities]
-superseded_by: null
+superseded_by: decisions-20261007-match-natural-workout-reports-with-provider-evidence
 tags:
   - architecture
   - training
