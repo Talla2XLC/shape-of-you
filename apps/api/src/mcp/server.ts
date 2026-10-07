@@ -118,6 +118,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { RequestPersonContext } from "../application/person-context.js";
+import { publishMcpInputSchema } from "./published-input-schema.js";
 import type { BodyMeasurementSessionService } from "../body-measurement-sessions/body-measurement-session.service.js";
 import type { NutritionService } from "../nutrition/nutrition.service.js";
 import type { RecoveryService } from "../recovery/recovery.service.js";
@@ -1687,7 +1688,7 @@ function defineTool(
     tool: {
       name,
       description: `${toolAuthorityInstruction} ${description}`,
-      inputSchema: inputSchema as Tool["inputSchema"],
+      inputSchema: publishMcpInputSchema(inputSchema) as Tool["inputSchema"],
       ...(outputSchema
         ? { outputSchema: outputSchema as Tool["outputSchema"] }
         : {}),

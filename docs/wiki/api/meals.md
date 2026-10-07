@@ -56,6 +56,13 @@ compatibility tests reject new required fields, removal of
 previously published fields, and narrowing of published enums; a genuinely
 incompatible contract requires a new versioned tool name.
 
+Published MCP input schemas describe fractional precision in text instead of
+using fractional `multipleOf`, so client validators accept ordinary decimals
+such as confidence `0.7` and protein `5.1`. The API still validates the original
+schemas with `multipleOfPrecision: 6` and enforces domain evidence rules.
+Integer divisors, bounds and required fields remain advertised; REST and MCP
+output schemas are unchanged.
+
 For a sufficiently legible meal photo or useful text description, the MCP
 contract directs the client to make and save a best-effort estimate immediately:
 each identifiable item carries estimated quantity/unit, `text|photo` method,
@@ -98,6 +105,8 @@ detail creates an append-only full-snapshot correction.
 - TASK-0086 accepted MCP photo-estimation and read-back fixture.
 - TASK-0114 accepted current-read correction assembly, typed recovery states,
   canonical command verification, and replay prevention tests.
+- TASK-0164 Stage A accepted decimal publication and isolated PostgreSQL
+  persistence, idempotent replay, and menu nutrient tests.
 
 ## Decisions
 
@@ -109,6 +118,7 @@ detail creates an append-only full-snapshot correction.
   completeness into a user workflow or blocking direct fact capture.
 - [Unquantified Meal amount and natural Coach language](../../adr/20260830-model-unquantified-meal-amount-evidence-and-natural-coach-language.md).
 - [Backward-compatible MCP tool schemas](../../adr/20260902-evolve-mcp-tool-schemas-backward-compatibly.md).
+- [Decimal-compatible MCP input publication](../../adr/20261007-diagnose-and-recover-meal-capture-failures.md).
 - [Transactional Meal correction recovery](../../adr/20260915-make-meal-correction-recovery-transactional.md).
 
 ## Open questions
