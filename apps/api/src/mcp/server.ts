@@ -136,6 +136,7 @@ import type { CurrentRecoveryContextService } from "../coaching/current-recovery
 import type { DailyDecisionContextService } from "../coaching/daily-decision-context.service.js";
 import {
   ConflictError,
+  DailyAssessmentEvidenceChangedError,
   DomainValidationError,
   NotFoundError
 } from "../domain/errors.js";
@@ -673,6 +674,7 @@ function createServer(
     }
 
     let executionStarted = false;
+    let failureStage: "execute" | "present" = "execute";
     try {
       const authorized = await options.authorizer.authorize(
         request.headers.authorization,
@@ -683,6 +685,7 @@ function createServer(
       const result = await options.personContext.run(authorized.personId, () =>
         definition.execute((call.params.arguments ?? {}) as Record<string, unknown>)
       );
+      failureStage = "present";
       return successResult(
         definition.structured?.(result) ?? result,
         definition.present?.(result)
@@ -707,7 +710,8 @@ function createServer(
           tool: definition.tool.name,
           diagnosticId,
           failureCategory: "execution_failure",
-          ...safeDatabaseFailureCode(error)
+          failureStage,
+          ...safeContextReadFailure(error)
         }, "MCP context read failed");
         return errorResult(coachFailureResultContent(
           "The requested current facts could not be retrieved. This does not establish invalid input or missing source data. " +
@@ -1768,6 +1772,23 @@ function errorResult(
 function isRecoveryContextWriter(toolName: string): boolean {
   return ["record_recovery_observation", "correct_recovery_observation",
     "record_daily_context_note", "correct_daily_context_note"].includes(toolName);
+}
+
+/** Classifies only recognized error evidence; never serializes an exception or arbitrary cause. */
+function safeContextReadFailure(error: unknown): {
+  readonly failureReason: "evidence_changed" | "database_failure" | "unclassified";
+  readonly databaseCode?: string;
+} {
+  const database = safeDatabaseFailureCode(error);
+  let current = error;
+  // A typed consistency failure takes precedence over a recognized nested database code.
+  for (let depth = 0; depth < 4 && isRecord(current); depth += 1) {
+    if (current instanceof DailyAssessmentEvidenceChangedError) {
+      return { failureReason: "evidence_changed", ...database };
+    }
+    current = current.cause;
+  }
+  return { failureReason: database.databaseCode ? "database_failure" : "unclassified", ...database };
 }
 
 /** Selects only a bounded SQLSTATE; never serializes a database error or its cause. */

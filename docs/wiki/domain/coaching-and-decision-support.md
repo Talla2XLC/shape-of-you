@@ -321,7 +321,15 @@ Execution failures of `get_current_recovery_context` and
 `get_daily_decision_context` carry `outcome=unknown`, `reason=read_failed`, and a
 server-generated diagnostic UUID in text and structured content. One safe log
 correlates the UUID with fixed tool/category and an allowlisted SQLSTATE when
-present; it excludes arguments, personal values, source identities, SQL, parameters,
+present. `failureStage` distinguishes service execution (`execute`) from forming
+the MCP answer (`present`). `failureReason` is `evidence_changed` for an actual
+`DailyAssessmentEvidenceChangedError`, `database_failure` for a recognized
+SQLSTATE, or `unclassified`. Classification examines at most four cause nodes;
+typed evidence changes take precedence over a recognized database code, which
+may still be logged separately. Arbitrary exception names do not establish a
+typed cause, and an absent recognized SQLSTATE does not exclude a database error.
+These fields stay in the server log and do not change the public read error.
+The log excludes arguments, personal values, source identities, SQL, parameters,
 raw exception messages, stacks, and arbitrary causes. Input and authorization
 failures keep their distinct handling. The UUID belongs only in a direct
 technical diagnostic answer, never an ordinary Coach reply. Correlation helps
