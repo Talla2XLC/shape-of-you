@@ -6,8 +6,9 @@
 принята независимым Quality (`task-0169-quality-acceptance-20261009`).
 Оператор закоммитил и запушил `d6c22e6b16560bf8205d1f8008519c0aaeb893eb`,
 затем разрешил проверку и staging delivery. Публикация этого SHA завершилась
-ошибкой CI; выкладка не началась. Исправление тестов принято, его commit/push
-требуют отдельного разрешения.
+ошибкой CI; выкладка того SHA не началась. После отдельного разрешения исправление
+тестов закоммичено и запушено как `634237ff855a674f9a6b7cd28ed1b5a7ba81792a`.
+Реализация и staging delivery завершены; production/release tags не выполнялись.
 [ADR](../../../../docs/adr/20261009-bound-api-database-connection-waits.md).
 
 ## Доказательства и пределы
@@ -63,8 +64,8 @@ typecheck/lint/docs/diff. Architecture Review подтвердил отсутс�
 Canonical Wiki приведена к принятому коду:
 [Backend runtime](../../../../docs/wiki/architecture/backend-runtime.md) и
 [Coaching](../../../../docs/wiki/domain/coaching-and-decision-support.md).
-Историческая причина UUID остаётся неизвестной. Production/staging не менялись
-в рамках TASK-0169; персональные записи не создавались.
+Историческая причина UUID остаётся неизвестной. Production не менялся;
+staging delivery описана ниже. Персональные записи не создавались.
 
 ## Доставка и исправление CI
 
@@ -81,4 +82,24 @@ docs и diff; typecheck разработчика также прошёл.
 Приёмка: `task-0169-ci-test-rework-quality-20261009`.
 Canonical Wiki соответствует прежнему принятому runtime и не требует изменения.
 Пятичастный Architecture Review остаётся применимым: изменение только тестовое.
-Повторная публикация исправленного commit и Promote staging ещё не выполнены.
+
+## Результат staging delivery
+
+Публикация push commit прошла в
+[run 37915575967](https://github.com/Talla2XLC/shape-of-you/actions/runs/37915575967).
+Первый [Promote 37916650458](https://github.com/Talla2XLC/shape-of-you/actions/runs/37916650458)
+отказал до изменений из-за занятого deployment lock. Штатный повтор освободившийся
+lock прошёл, но отказал из-за expected base `d6c22e6`, который не был выложен.
+Защиты не обходились. Штатная manual full publication того же SHA включила
+Identity и создала candidate без предположения о предыдущем deployed commit.
+
+[Full Publish 37917078484](https://github.com/Talla2XLC/shape-of-you/actions/runs/37917078484)
+и [Promote 37918246971](https://github.com/Talla2XLC/shape-of-you/actions/runs/37918246971)
+успешны. Deployment pipeline на staging выполнил API migration step
+`2026-10-09T10:33:38Z` и Identity migration step `10:33:45Z`; Identity journal
+имеет result `current`, новых migrations задача не добавляла. Runtime-ready,
+smoke и exact SHA deployment подтверждены завершением `10:34:41Z`.
+Public API и Identity readiness — HTTP 200. После выкладки параллельные
+authorized MCP Recovery и Daily Decision Context reads вернули `available`
+за `2026-10-09`. Это проверяет текущую доступность, не устанавливает причину
+утраченного UUID. Write smoke отключён, личные факты не записывались.

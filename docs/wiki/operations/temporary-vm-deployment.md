@@ -394,6 +394,21 @@ This does not affect unrelated Compose/PostgreSQL.
 ## Evidence
 
 - Staging Compose, publish/deploy workflows, and deployment scripts.
+- On 2026-10-09, operator-approved [Promote staging run 37918246971](https://github.com/Talla2XLC/shape-of-you/actions/runs/37918246971)
+  applied exact release `634237ff855a674f9a6b7cd28ed1b5a7ba81792a` after successful
+  [full publication 37917078484](https://github.com/Talla2XLC/shape-of-you/actions/runs/37917078484).
+  The earlier push publication succeeded, but its promotion first met a busy
+  deployment lock and then rejected an expected base that had never been deployed.
+  Standard manual full publication removed that inheritance assumption and
+  included Identity; no deployment guard was bypassed. The pipeline completed
+  API migrations at `10:33:38Z` and Identity migrations at `10:33:45Z`;
+  Identity reported journal result `current`. TASK-0169 authored no migrations.
+  Smoke passed and exact deployment completed at `10:34:41Z`. Public API and
+  Identity readiness returned HTTP 200. A parallel authorized Recovery and
+  Daily Decision Context read pair returned `available` for `2026-10-09`.
+  Write smoke was disabled; no personal writes were used for verification.
+  This verifies delivery and current reads, not the cause of an earlier lost
+  diagnostic UUID or reliability under arbitrary load.
 - On 2026-10-09, the operator-approved [Promote staging run 37907104925](https://github.com/Talla2XLC/shape-of-you/actions/runs/37907104925)
   applied exact release `2ff996b9d4e15927347250216ac64497e02018ef` after successful
   [publication 37905952320](https://github.com/Talla2XLC/shape-of-you/actions/runs/37905952320).
