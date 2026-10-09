@@ -4,7 +4,10 @@
 
 Оператор утвердил архитектуру и этот план 2026-10-09; реализация завершена и
 принята независимым Quality (`task-0169-quality-acceptance-20261009`).
-Commit/push/deploy пока не выполнены; доставка требует отдельного разрешения.
+Оператор закоммитил и запушил `d6c22e6b16560bf8205d1f8008519c0aaeb893eb`,
+затем разрешил проверку и staging delivery. Публикация этого SHA завершилась
+ошибкой CI; выкладка не началась. Исправление тестов принято, его commit/push
+требуют отдельного разрешения.
 [ADR](../../../../docs/adr/20261009-bound-api-database-connection-waits.md).
 
 ## Доказательства и пределы
@@ -62,3 +65,20 @@ Canonical Wiki приведена к принятому коду:
 [Coaching](../../../../docs/wiki/domain/coaching-and-decision-support.md).
 Историческая причина UUID остаётся неизвестной. Production/staging не менялись
 в рамках TASK-0169; персональные записи не создавались.
+
+## Доставка и исправление CI
+
+[Publish 37912666866](https://github.com/Talla2XLC/shape-of-you/actions/runs/37912666866)
+остановился до публикации образов: две матрицы unit tests по 12 последовательных
+MCP-вызовов превысили default timeout 5000 ms на CI. Остальные 613 API tests
+прошли, включая оба новых PostgreSQL сценария. Pipeline не дошёл до миграций,
+readiness и smoke; staging не обновлялся этим запуском.
+
+Матрица разделена на независимые параметризованные случаи: 40 tests вместо
+18 в файле, те же cases/assertions и прежний timeout. Runtime не менялся.
+Разработчик и независимый Quality проверили 54 read/write error tests, lint,
+docs и diff; typecheck разработчика также прошёл.
+Приёмка: `task-0169-ci-test-rework-quality-20261009`.
+Canonical Wiki соответствует прежнему принятому runtime и не требует изменения.
+Пятичастный Architecture Review остаётся применимым: изменение только тестовое.
+Повторная публикация исправленного commit и Promote staging ещё не выполнены.

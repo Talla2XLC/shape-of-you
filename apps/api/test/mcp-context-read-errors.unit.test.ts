@@ -40,33 +40,34 @@ function fixture() {
   return { server, call, read, authorize, logs };
 }
 
+const marker = "synthetic-private-failure";
+const evidence = new DailyAssessmentEvidenceChangedError();
+Object.assign(evidence, { cause: { code: "08006", message: marker } });
+const classificationCases = [
+  { error: new DailyAssessmentEvidenceChangedError(), reason: "evidence_changed", code: undefined },
+  { error: new Error(marker, { cause: evidence }), reason: "evidence_changed", code: "08006" },
+  { error: Object.assign(new Error(marker), { name: "DailyAssessmentEvidenceChangedError" }),
+    reason: "unclassified", code: undefined },
+  { error: new Error(marker), reason: "unclassified", code: undefined },
+  { error: marker, reason: "unclassified", code: undefined },
+  { error: new Error(marker, { cause: { code: "08006", message: marker } }),
+    reason: "database_failure", code: "08006" },
+  { error: new Error("timeout exceeded when trying to connect"), reason: "pool_acquisition_timeout", code: undefined },
+  { error: new Error(marker, { cause: new Error("timeout exceeded when trying to connect") }),
+    reason: "pool_acquisition_timeout", code: undefined },
+  { error: new Error("timeout exceeded when trying to connect", { cause: new DailyAssessmentEvidenceChangedError() }),
+    reason: "evidence_changed", code: undefined },
+  { error: new Error("timeout exceeded when trying to connect", { cause: { code: "08006" } }),
+    reason: "database_failure", code: "08006" },
+  { error: { message: "timeout exceeded when trying to connect" }, reason: "unclassified", code: undefined },
+  { error: new Error("timeout exceeded when trying to connect: " + marker), reason: "unclassified", code: undefined }
+];
+
 describe("Composed Recovery MCP read failures", () => {
-  it.each(tools)("%s safely classifies typed, nested, forged and unknown errors", async (tool) => {
-    const { server, call, read, logs } = fixture();
-    const marker = "synthetic-private-failure";
-    const evidence = new DailyAssessmentEvidenceChangedError();
-    Object.assign(evidence, { cause: { code: "08006", message: marker } });
-    const cases = [
-      { error: new DailyAssessmentEvidenceChangedError(), reason: "evidence_changed", code: undefined },
-      { error: new Error(marker, { cause: evidence }), reason: "evidence_changed", code: "08006" },
-      { error: Object.assign(new Error(marker), { name: "DailyAssessmentEvidenceChangedError" }),
-        reason: "unclassified", code: undefined },
-      { error: new Error(marker), reason: "unclassified", code: undefined },
-      { error: marker, reason: "unclassified", code: undefined },
-      { error: new Error(marker, { cause: { code: "08006", message: marker } }),
-        reason: "database_failure", code: "08006" },
-      { error: new Error("timeout exceeded when trying to connect"), reason: "pool_acquisition_timeout", code: undefined },
-      { error: new Error(marker, { cause: new Error("timeout exceeded when trying to connect") }),
-        reason: "pool_acquisition_timeout", code: undefined },
-      { error: new Error("timeout exceeded when trying to connect", { cause: new DailyAssessmentEvidenceChangedError() }),
-        reason: "evidence_changed", code: undefined },
-      { error: new Error("timeout exceeded when trying to connect", { cause: { code: "08006" } }),
-        reason: "database_failure", code: "08006" },
-      { error: { message: "timeout exceeded when trying to connect" }, reason: "unclassified", code: undefined },
-      { error: new Error("timeout exceeded when trying to connect: " + marker), reason: "unclassified", code: undefined }
-    ];
-    try {
-      for (const { error, reason, code } of cases) {
+  it.each(tools.flatMap((tool) => classificationCases.map((testCase, index) => ({ tool, index, ...testCase }))))(
+    "$tool classifies error case $index as $reason without private values", async ({ tool, error, reason, code }) => {
+      const { server, call, read, logs } = fixture();
+      try {
         read.mockRejectedValueOnce(error);
         const result = await call(tool);
         const log = JSON.parse(logs.at(-1)!);
@@ -79,9 +80,8 @@ describe("Composed Recovery MCP read failures", () => {
         expect(result.structuredContent).toEqual({ outcome: "unknown", reason: "read_failed",
           diagnosticId: expect.any(String) });
         expect(JSON.stringify(result) + JSON.stringify(log)).not.toContain(marker);
-      }
-    } finally { await server.close(); }
-  });
+      } finally { await server.close(); }
+    });
 
   it.each(tools)("%s distinguishes answer formation from service execution", async (tool) => {
     const { server, call, read, logs } = fixture();
