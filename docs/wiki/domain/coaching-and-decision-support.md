@@ -16,8 +16,9 @@ tags:
 ## Summary
 
 Implemented Coaching separates immutable recommendations, user decisions, and
-executed domain facts. Current Daily Coach decisions use a read-only
-`DailyDecisionContext` of verified facts and Training options. Legacy API-owned
+executed domain facts. Coach chooses relevant facts and user reports for current decisions; the
+read-only `DailyDecisionContext` is an optional composition of verified facts
+and Training options. Legacy API-owned
 DailyAssessment snapshots, evidence-backed completion, and typed feedback
 remain readable. None creates or mutates an owning-domain fact.
 
@@ -37,28 +38,24 @@ TrainingProgramVersion/assignment, and optional sessions. It may hold the
 assignment, propose target weight, or propose a repetition range, changing at
 most one parameter. It creates no program/session change.
 
-When discussing how to perform the next active strength workout, including
-ordinary questions about working weights, repetitions, or sets, Coach reads
-the current Daily Decision Context and Training context before the read-only
-`get_training_progression` composition. It calls progression when both reads
-identify the same exact strength next step. Routine fact capture, unrelated
-topics, absent or ambiguous steps, and completed training do not need this read.
-Training supplies an exact A/B progression suggestion from detailed sets;
-Coach weighs current Recovery facts before advising how to train.
-The result includes target and actual weights, repetitions, RIR, dates, and
-typed limitations so Coach can explain a hold or a small increase without
-inventing Garmin sets. `single_session_high_reserve` identifies one measured
-qualifying session; Coach must not present it as two-session confirmation or
-infer numeric RIR from an easy feeling. A current-day result is not a future readiness promise.
-The guidance read does not write a program. For a concrete eligible increase,
-Coach may show the exact old and new working weight and ask once whether the
-Person confirms it with sound technique and no pain. Only a clear acceptance
-of that proposal authorizes `apply_confirmed_working_weight`; doubt, an edit,
-or a different response does not. The API rechecks current Recovery, detailed
-sessions, and program version before changing one prescription and activating
-the immutable successor. Coach verifies Training and Daily Decision Context
-afterward. Candidate acceptance remains a separate inactive-draft path. See
-the [single-session audit ADR](../../adr/20261007-allow-single-session-working-weight-audit.md).
+Shape of You is the fact authority and knowledge store; Coach owns interpretation,
+recommendations and consented program changes. It chooses relevant reads, may
+paginate history, and can use direct user reports as manual evidence. There is
+no mandatory daily-context sequence or eligibility based on training counts,
+RIR, Recovery score, fixed increments, percentage caps, next A/B, or completed
+training. Program targets and completion states describe facts, not permission.
+
+Coach saves accepted changes through `save_confirmed_training_program`, preserving
+untouched prescriptions and cadence. A direct exact instruction or acceptance
+of the latest proposal suffices; no second approval or pain checklist is required.
+Performed-work reports alone do not authorize silent program changes. The complete
+canonical transaction result verifies a successful save; optional read failure
+does not negate it. See the [knowledge-store ADR](../../adr/20261009-let-coach-propose-working-weight-from-history.md).
+
+Legacy `get_training_progression`, `get_working_weight_proposals` and
+`apply_confirmed_working_weight` remain callable for compatibility with their
+historical eligibility and audit semantics, but are absent from new MCP discovery.
+Their unavailability does not block the universal confirmed save.
 
 The current `DailyDecisionContext` v1 contains Person-local daily fact
 summary, coverage, personal comparisons, current Recovery observations with
@@ -75,8 +72,9 @@ For a question about multi-week personal patterns, Coach calls the read-only
 `get_personal_insights` tool with the current Person-local date and timezone.
 The API applies the same `personal-insights-v1` evidence gates used by Web
 Progress and returns only eligible observations, sample sizes, uncertainty,
-limitations, and owner-fact provenance. Coach does not recalculate a pattern,
-infer a cause or diagnosis, or use a pattern as permission to train today.
+limitations, and owner-fact provenance. Coach preserves the exact meaning of an API insight; its own analysis must be
+identified as interpretation with its evidence and uncertainty. An insight does
+not itself establish causation, diagnosis or permission to train today.
 Missing observations are not negative findings. See the
 [personal insights ADR](../../adr/20260929-compute-evidence-gated-personal-insights-on-read.md).
 
@@ -125,9 +123,9 @@ Reported illness or injury concern stops training progression; fatigue or
 soreness makes an otherwise actionable decision cautious. An existing
 `insufficient_data` decision still requests missing evidence, with the report
 shown as a reason. Feeling well cannot lift another restriction or create
-readiness from sparse data. Coach records a clear current report through
-Recovery, reads it back, and requests a fresh `get_daily_decision_context`
-before deciding from current facts. It asks one short question only when a material detail
+readiness from sparse data. Coach records a clear current report through Recovery and chooses further
+reads when useful. These legacy policy restrictions do not govern the new Coach
+decision path. It asks one short question only when a material detail
 is unclear and does not require a check-in after every reply. Today's result
 does not promise readiness for a future workout. Earlier v5 snapshots remain
 readable and completion-capable. See the
@@ -216,16 +214,16 @@ and Person authorization. It never changes current recommendations.
 Recovery still owns physiological evidence, historical load-risk assessments,
 and erasure. Training still owns active programs, sessions, and connected
 activity facts. Coach makes the current conversational decision from verified
-facts and cannot invent a workout, exercise, set, load, schedule, diagnosis,
-or completed fact. Legacy DailyAssessment snapshots retain their historical
+facts, preserving unknown measurements and distinguishing its proposals from
+saved programs, diagnoses and performed facts. Legacy DailyAssessment snapshots retain their historical
 Recovery precedence.
 
 The Daily Coach presentation preserves the same boundary across existing MCP
 tools. `Planned` contains only typed plan artifacts, currently the active
 TrainingProgramVersion and prescriptions. `Proposed now` contains bounded,
 evidence-linked conversation advice and is not a persisted fact. `Actually
-completed` contains only current owning-domain facts verified through typed
-reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
+completed` contains only current owning-domain facts verified through owning
+transaction results or typed reads. There is no cross-domain `DailyPlan`, and an accepted recommendation or
 chat message never creates execution facts. The exact completion assessment
 may explain that an action is observed, partially observed, self-reported, or
 unknown, but remains a derived Coaching conclusion. A `completed` feedback
@@ -253,8 +251,8 @@ claims as uncertain without changing owner facts. A manual clarification is
 asked only when its answer changes the useful next step.
 
 The exact-date factual view remains the always-live `get_daily_projection`
-read. A full current Daily Coach decision starts with
-`get_daily_decision_context` or `GET /v1/daily-assessment/context`. The
+read. Coach may use `get_daily_decision_context` or
+`GET /v1/daily-assessment/context` when that composition is useful. The
 versioned read composes current owner facts without materializing a legacy
 recommendation. `get_daily_projection` stays factual-only and does not embed
 a decision. `get_daily_assessment` remains a compatible legacy snapshot read
@@ -307,15 +305,12 @@ nor read failures require a screenshot or an unsolicited next step; delivery
 details belong in answers to direct technical questions. Error results carry
 the same natural-language guidance.
 
-When `get_daily_decision_context` fails, Coach may report a separately verified
-Training sequence or frequency as facts, but cannot use them, resleep,
-individual fallback reads, or chat history to establish today's training
-suitability. It briefly states that current recovery cannot be assessed,
-does not assume normal wellbeing without a user report, and does not promise
-recovery tomorrow. A successful daily context with a missing individual metric
-still supports cautious advice from its verified facts and material uncertainty.
-A failed focused Recovery read does not invalidate a separately successful
-current daily context.
+A failed context read leaves its requested facts unknown. Coach can still use
+other available facts, saved history and direct reports for contextual advice,
+explaining material uncertainty. Resleep alone does not establish readiness;
+normal wellbeing and future recovery are not assumed. A missing metric is not
+zero. A failed focused read does not invalidate a separately successful current
+context.
 
 Execution failures of `get_current_recovery_context` and
 `get_daily_decision_context` carry `outcome=unknown`, `reason=read_failed`, and a
@@ -344,7 +339,8 @@ correction-chain, receipt, checksum, credential, and raw provider identities.
 
 A direct relevant user report authorizes one routine low-risk idempotent write
 through the owning typed tool without a duplicate confirmation question. The
-Coach performs typed read-back before declaring success. Unknown optional
+canonical owning-domain transaction result verifies success. Additional reads
+serve totals, changed context, conflicts or uncertain outcomes. Unknown optional
 values remain partial/null; later precise input appends a correction. A bounded
 `DailyContextNote` is used only when no more specific owning-domain fact can
 represent a relevant observation safely.
@@ -352,8 +348,8 @@ represent a relevant observation safely.
 Routine capture stays conversational. The Coach matches the user's language
 and tone and may simply acknowledge a verified write. An interpretation,
 recommendation, or question is added when useful or requested, rather than
-required after every report. Full Daily Coach answers still use the current
-`DailyDecisionContext` and explain important uncertainty. Unambiguous routine
+required after every report. Daily Coach answers choose useful context and explain important uncertainty;
+`DailyDecisionContext` is an optional composition of verified facts. Unambiguous routine
 writes and corrections do not require another permission question. Tool names,
 arguments, identifiers, contract fields, and transport details stay out of
 ordinary replies. Failures receive a short honest explanation without success
@@ -373,7 +369,8 @@ progression evidence. See the [fact-capture ADR](../../adr/20261002-capture-inco
 For Training, `get_active_training_program` explicitly distinguishes an active
 program from valid absence. Only its typed `absent` result proves that no
 `Planned` training artifact is available; a tool failure remains unknown and
-stops dependent coaching without chat-history or Sheets fallback.
+cannot establish that stored plan. Other evidence can support a clearly labelled
+proposal or advice; Sheets remains unavailable as an interactive fallback.
 
 `get_training_context_v2` (when available) makes the same boundary durable while
 returning bounded
@@ -385,8 +382,8 @@ An accepted uniquely targeted change to a current prescription does not require
 reconfirmation of the unchanged program.
 `save_confirmed_training_program` then performs one Person-scoped atomic
 create-or-version-and-activate command with optimistic expectations and
-duplicate no-op behavior. Coach verifies the complete active snapshot through
-a typed read before reporting success. The persisted active program is shared
+duplicate no-op behavior. The returned complete canonical program verifies the transaction; no extra
+read is required solely to acknowledge success. The persisted active program is shared
 authority across conversations; per-chat memory is not an authority source.
 
 Coach may pass an accepted exact exercise name and only characteristics already
@@ -410,12 +407,12 @@ below. Coach asks one short save-as-active
 question when the reference is ambiguous and never requires the user to repeat
 an already complete program.
 
-The proposal stays `Proposed now` until the save and same-turn composed read
-agree on the complete active snapshot. A stale read that already matches proves
-the accepted version is active. A different active version is not overwritten
-automatically; Coach keeps the accepted snapshot available and asks whether to
-replace the current program. Failed or inconsistent verification never permits
-an active, agreed, or current-plan claim.
+A proposal is not a stored active program until a successful save or matching
+current-authority read verifies it. On a version conflict Coach rereads current
+fields and preserves unrelated concurrent changes. It can retry the same exact
+accepted change under existing consent; materially different scope needs new
+consent. An uncertain write outcome is checked before retry, without duplicating
+an already committed version.
 
 A reported Smith substitution is captured as performed and may prompt one
 question about whether it is temporary or should replace the prescription.
@@ -431,9 +428,8 @@ the program, identify versions, or confirm each exercise. After verifying that
 the active name, note, workouts, exercise versions, order, loads, RIR, and
 progression still match the accepted proposal, Coach sends only the accepted
 cadence with the exact active authority. Training clones and activates the
-immutable successor atomically. Coach then rereads Training context and Daily
-Assessment in the same turn; only those results may establish the active
-cadence and today's concrete action. Ambiguous acceptance, a partial edit, a
+immutable successor atomically. The canonical transaction result verifies the cadence write. Further reads
+are chosen when useful for current advice. Ambiguous acceptance, a partial edit, a
 stale active version, or failed verification cannot be converted into a write
 or a prompt-inferred A/B decision.
 
@@ -455,26 +451,15 @@ duplicate question. Otherwise it asks exactly the one short API-returned
 classification question and never infers the answer from expected sequence,
 activity name, program note, time, or exercise similarity.
 
-Coach persists the answer through the narrow Training classification command;
-the imported summary remains distinct from `WorkoutSession` and gains no
-invented exercises or sets. After `created`, `corrected`, or `unchanged`, Coach
-reads Training context and then Daily Decision Context in the same turn. Coach
-chooses from the verified options using the user's intent and current Recovery
-evidence. A stale or
-no-longer-pending result requires fresh Training context and permits at most
-its new single question. Coach adds no program training after `complete_today`.
-Current `training-next-step-v5` supplies seven inclusive Person-local dates of
-frequency guidance; reaching a target does not remove strength/cardio options
-or create a debt. Coach chooses strength, light cardio, or rest using current
-Recovery, recent training, preferences, and the actual gap. Normally alternating
-strength and cardio is a contextual preference, not a rigid schedule. A question
-about why cardio was not chosen asks for an explanation; a changed recommendation
-requires new facts or an explicitly explained reassessment. A/B identity remains
-Training-owned and survives pauses. Explicit illness or injury concern remains
-current evidence for Coach to weigh. Legacy programs without typed cadence keep
-the schedule-unavailable limitation; historical v1-v4 snapshots preserve their
-original semantics, including `week_complete`. See the
-[rolling guidance ADR](../../adr/20261004-use-rolling-training-frequency-as-coach-guidance.md).
+Coach persists an explicit classification through the narrow Training command;
+connected summaries remain separate from detailed sessions and gain no invented
+sets. Refresh relevant facts when needed for advice rather than following a
+mandatory tool sequence. A stale identity write requires current authority;
+it does not block unrelated capture or advice. Current `training-next-step-v5`
+provides rolling frequency and sequence facts. Coach may propose other training
+or accepted program changes, including after `complete_today`; cadence and
+completion do not impose backend permission. Exact A/B identity and linked
+occurrences remain factual, and missing values remain unknown.
 
 ## Evidence
 
@@ -511,6 +496,8 @@ original semantics, including `week_complete`. See the
   Training, version, audit, and idempotency checks.
 
 ## Decisions
+
+- [Coach decisions over the knowledge store](../../adr/20261009-let-coach-propose-working-weight-from-history.md).
 
 - [Coaching ADR](../../adr/20260731-model-immutable-coaching-recommendations-and-separate-user-decisions.md).
 - [Daily Coach over existing MCP tools](../../adr/20260827-orchestrate-daily-coach-over-existing-mcp-tools.md).

@@ -2,10 +2,10 @@
 id: "decisions-20260912-persist-confirmed-training-programs-through-one-mcp-command"
 kind: adr
 title: "Сохранять подтверждённую тренировочную программу одной атомарной MCP-командой"
-status: accepted
+status: superseded
 date: 2026-09-12
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - architecture
   - training
@@ -34,6 +34,11 @@ Training domain уже поддерживает Person-owned `TrainingProgram`, 
 команды не должен создавать новые программы или версии.
 
 ## Decision
+
+Правила полномочий и orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Исторические snapshots, compatibility commands и технические гарантии хранения
+сохраняют прежний смысл; supersession не переписывает существующие данные.
 
 В существующем `apps/api` добавить новый MCP tool
 `save_confirmed_training_program`. Он использует существующий

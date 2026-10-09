@@ -26,6 +26,11 @@ TASK-0135 рассчитывает read-only прогрессию по двум 
 
 ## Decision
 
+Полномочия и обязательная orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Хранение фактов, исторические версии и legacy eligibility сохраняются
+для совместимости, но не ограничивают новый универсальный путь.
+
 1. Training выдаёт неперсистентное предложение ровно для одного назначения
    точной следующей силовой тренировки: active program/version/lock, workout и
    prescription position, `exerciseVersionId`, текущий и предложенный вес,

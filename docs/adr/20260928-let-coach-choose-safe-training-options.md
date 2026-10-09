@@ -2,10 +2,10 @@
 id: "decisions-20260928-let-coach-choose-safe-training-options"
 kind: adr
 title: "Дать Coach выбор допустимой тренировки после проверки безопасности"
-status: accepted
+status: superseded
 date: 2026-09-28
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - architecture
   - training
@@ -24,6 +24,11 @@ tags:
 переход к выбору агента из проверенных вариантов 28 сентября 2026 года.
 
 ## Decision
+
+Правила полномочий и orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Исторические snapshots, compatibility commands и технические гарантии хранения
+сохраняют прежний смысл; supersession не переписывает существующие данные.
 
 1. Training остаётся authority для active cadence, недельных квот, current
    evidence, exact A/B identity и невозможности назначать дополнительное

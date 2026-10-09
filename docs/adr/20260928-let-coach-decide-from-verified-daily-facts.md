@@ -2,10 +2,10 @@
 id: "decisions-20260928-let-coach-decide-from-verified-daily-facts"
 kind: adr
 title: "Передать решение о дневной тренировке Coach на основе проверенных фактов"
-status: accepted
+status: superseded
 date: 2026-09-28
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - architecture
   - coaching
@@ -26,6 +26,11 @@ tags:
 переосмыслить задним числом.
 
 ## Decision
+
+Правила полномочий и orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Исторические snapshots, compatibility commands и технические гарантии хранения
+сохраняют прежний смысл; supersession не переписывает существующие данные.
 
 1. Для нового Daily Coach чтения вводится versioned `DailyDecisionContext`.
    Оно содержит Person-local дату, проверенные дневные факты и coverage,

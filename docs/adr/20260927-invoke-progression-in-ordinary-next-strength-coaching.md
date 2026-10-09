@@ -2,10 +2,10 @@
 id: "decisions-20260927-invoke-progression-in-ordinary-next-strength-coaching"
 kind: adr
 title: "Вызывать прогрессию при обычном обсуждении следующей силовой тренировки"
-status: accepted
+status: superseded
 date: 2026-09-27
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - architecture
   - coaching
@@ -24,6 +24,11 @@ TASK-0135 уже предоставляет read-only `get_training_progression`
 объяснение веса и повторений.
 
 ## Decision
+
+Правила полномочий и orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Исторические snapshots, compatibility commands и технические гарантии хранения
+сохраняют прежний смысл; supersession не переписывает существующие данные.
 
 1. Расширить только инструкцию выбора MCP-инструмента. При обычном обсуждении
    выполнения следующей силовой тренировки, её рабочих весов, повторений или

@@ -47,8 +47,8 @@ describe("gradually reported WorkoutSession V2", () => {
   it("permits acknowledgement without mandatory advice and explicit permanent substitution", () => {
     expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).toContain("acknowledgement can be a complete answer");
     expect(MCP_COACH_FINAL_RESPONSE_REQUIREMENT).not.toMatch(/MUST end|mandatory|incomplete/);
-    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("explicit targeted replacement");
-    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("preserve all untouched prescriptions and cadence");
-    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("clarify significant unspecified load");
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("direct instruction");
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("preserve every untouched field and cadence");
+    expect(MCP_OPERATIONAL_INSTRUCTIONS).toContain("material unresolved identity or scope");
   });
 });

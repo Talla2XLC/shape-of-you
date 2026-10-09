@@ -19,6 +19,14 @@ automatically.
 
 ## Content
 
+Coach decides recommendations and consented changes from relevant facts and user
+reports. `save_confirmed_training_program` preserves untouched fields and activates
+an immutable version under the existing Person lock, refs and optimistic expectation.
+It has no training-count, RIR, Recovery, increment cap or next-A/B eligibility.
+Its canonical result verifies success without mandatory read-back. Legacy narrow
+progression commands retain historical rules but are not the new Coach route.
+See the [knowledge-store ADR](../../adr/20261009-let-coach-propose-working-weight-from-history.md).
+
 - `Exercise` has stable identity and immutable ExerciseVersions; aliases and
   equipment are overlays; private exercises have an owner.
 - Confirmed-program persistence resolves only exact accessible current
@@ -114,8 +122,8 @@ automatically.
   Frequency targets are guidance and do not close the exact next strength or
   programmed cardio option. Coach chooses the activity from current Recovery,
   recent load, user intent, and training gaps; alternation is a contextual
-  preference. `complete_today` and identity/version uncertainty still guard
-  exact options. A/B continues from the last compatible classified event even
+  preference. `complete_today` and identity/version uncertainty describe the stored
+  projection; they do not forbid Coach advice or consented changes. A/B continues from the last compatible classified event even
   outside the window; missed days never skip positions. Explicit repeats or
   reordering become the anchor. Local date precedes instant when ordering
   mixed date-only and timed events. Same-program earlier versions contribute
@@ -143,7 +151,7 @@ automatically.
   becomes a domain fact or identifier.
 - `PersonalRecord` is a projection over current sets: highest weight, then more
   repetitions on ties.
-- `TrainingProgressionGuidance` is a read-only projection for an exact active
+- Compatibility-only `TrainingProgressionGuidance` is a read-only projection for an exact active
   program version and workout position. It uses only the two latest current
   detailed `WorkoutSession` facts through the requested Person-local date,
   excluding future instants and superseded sessions. It compares the first
@@ -159,7 +167,7 @@ automatically.
   performed-assignment identity, and bodyweight or assisted loads fail closed.
   The projection exposes the target and actual sets for explanation; imported
   Garmin strength remains occurrence evidence only.
-- Weight progression candidates use the same shared one- or two-session predicate and exact
+- Legacy weight progression candidates use the same shared one- or two-session predicate and exact
   workout position. Acceptance rechecks the candidate and creates a new
   inactive program version; explicit activation is separate. A distinct
   confirmed working-weight command requires current ready Recovery, an exact
@@ -174,6 +182,8 @@ automatically.
 - Training schema, API, and integration tests.
 
 ## Decisions
+
+- [Coach knowledge-store boundary](../../adr/20261009-let-coach-propose-working-weight-from-history.md).
 
 - [Incomplete fact capture and contextual Coach replies](../../adr/20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md).
 
@@ -194,7 +204,7 @@ automatically.
 
 ## Open questions
 
-- Bodyweight/assisted progression policy, richer exercise substitutions, external
+- Model guidance quality for bodyweight/assisted progression, richer exercise substitutions, external
   catalog source/moderation, and live Intervals.icu activity-contract
   validation.
 

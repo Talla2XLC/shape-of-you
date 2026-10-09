@@ -32,6 +32,11 @@ tags:
 
 ## Decision
 
+Полномочия и обязательная orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Хранение фактов, исторические версии и legacy eligibility сохраняются
+для совместимости, но не ограничивают новый универсальный путь.
+
 1. Training владеет read-only `TrainingProgressionGuidance` projection для
    назначений точной active `TrainingProgramVersion` и workout position.
    Projection возвращает `hold`, `add_reps`, `add_weight` либо

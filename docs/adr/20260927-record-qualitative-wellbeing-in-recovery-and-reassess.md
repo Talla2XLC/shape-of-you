@@ -2,10 +2,10 @@
 id: "decisions-20260927-record-qualitative-wellbeing-in-recovery-and-reassess"
 kind: adr
 title: "Сохранять словесное самочувствие в Recovery и пересчитывать Daily Assessment"
-status: accepted
+status: superseded
 date: 2026-09-27
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - architecture
   - recovery
@@ -25,6 +25,11 @@ Coach получает прямые сообщения о самочувстви
 без обязательного отчёта после каждого ответа.
 
 ## Decision
+
+Полномочия и обязательная orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Хранение фактов, исторические версии и legacy eligibility сохраняются
+для совместимости, но не ограничивают новый универсальный путь.
 
 1. Recovery расширяет существующий `subjective` detail двумя непересекающимися
    формами: полный числовой check-in без изменения его контракта и короткий

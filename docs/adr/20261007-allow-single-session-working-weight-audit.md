@@ -2,10 +2,10 @@
 id: decisions-20261007-allow-single-session-working-weight-audit
 kind: adr
 title: "Разрешить audit подтверждённой прибавки по одной тренировке"
-status: accepted
+status: superseded
 date: 2026-10-07
 supersedes: [decisions-20260929-confirm-working-weight-increase-atomically]
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - training
   - progression
@@ -25,6 +25,11 @@ tags:
 Дополнение и delivery одобрены оператором 2026-10-07.
 
 ## Decision
+
+Правила полномочий и orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Исторические snapshots, compatibility commands и технические гарантии хранения
+сохраняют прежний смысл; supersession не переписывает существующие данные.
 
 Одобренный TASK-0162 дополнен следующими изменениями:
 

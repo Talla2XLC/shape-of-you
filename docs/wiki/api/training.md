@@ -44,8 +44,9 @@ The MCP `get_training_context_v2` read composes the active program with separate
 bounded lists of recent current `WorkoutSession` facts and connected
 `ExternalActivitySummary` facts. When a Person-local date is supplied it also
 returns a Training-owned `NextTrainingStep`. An active program is the only planned
-authority. When it is absent, only completed facts are evidence that
-may support a proposal but are not a plan. Connected activity summaries expose
+authority. When it is absent, history, other available evidence and direct user
+intent can support a clearly labelled proposal, including with no history; they
+do not establish a stored active plan. Connected activity summaries expose
 only safe typed occurrence, duration, distance, load, heart-rate, device, and
 normalized Garmin-attribution fields; provider identities, connection or
 consent identifiers, checksums, credentials, and raw payloads stay internal.
@@ -159,8 +160,10 @@ After the user confirms a complete program or an unambiguous targeted change, MC
 `save_confirmed_training_program` atomically creates and activates its first
 version or appends and activates a new immutable version. The command uses the
 previously read active program id and lock version, rejects stale expectations,
-and returns an idempotent no-op when the active snapshot already matches. Coach
-must read the active program back before claiming that the change is saved.
+and returns an idempotent no-op when the active snapshot already matches. The complete canonical transaction result verifies the save; an optional
+read failure does not undo success. No history, numeric RIR, Recovery gate,
+fixed increment, percentage cap or next-workout eligibility applies to this command.
+Coach chooses changes from relevant evidence and existing consent.
 The existing HTTP draft/version/activation lifecycle is unchanged.
 
 Each confirmed prescription may pin an existing `ExerciseVersion` or provide a
@@ -185,12 +188,10 @@ targeted changes to a current prescription follow the substitution rule below.
 Coach publishes a revised proposal and asks one short save-as-active question
 when the reference is ambiguous.
 
-Until the atomic write and complete `get_training_context` read-back agree, the
-program remains `Proposed now` and cannot be described as active, agreed, or the
-current plan. A stale conflict triggers a fresh read. An already matching active
-snapshot verifies success; a different active version is never overwritten
-automatically and requires a short replacement confirmation without making the
-user repeat the program.
+A successful canonical save verifies the accepted program. On a stale conflict,
+read current authority and preserve unrelated concurrent changes. Retry the same
+accepted change within existing consent; materially different scope needs fresh
+consent. Unknown write outcomes require verification before an exact retry.
 
 When an accepted complete cadence belongs to an already active legacy version
 whose other contents match, the narrow MCP cadence mutation avoids resending
@@ -201,13 +202,14 @@ exercise versions, prescriptions, loads, RIR, and progression; only the
 accepted typed cadence changes. The immutable successor becomes current and
 active atomically. The old version remains unchanged, an identical cadence is
 a semantic no-op, and a stale expectation or invalid workout reference writes
-nothing. Coach must then read both Training context and Daily Decision Context before
-claiming an active cadence or a concrete next action; prose in `note` is never
+nothing. The canonical transaction result verifies the cadence write. Further context
+reads are optional and selected for the request; prose in `note` is never
 used as schedule authority.
 
-After a classification is created, corrected, or found unchanged, Coach must
-read `get_training_context` and then `get_daily_decision_context` in the same
-turn. Coach determines the visible next action from the refreshed facts.
+Successful classification results verify that fact. Coach refreshes relevant
+context when useful; classification or linking does not block unrelated advice.
+`complete_today`, `week_complete`, next A/B and frequency are projections, not
+permission gates on Coach recommendations or accepted program changes.
 The MCP implementation exists in the repository, but publication or refresh
 of a deployed action catalog and its canary remain separate operational gates.
 
@@ -264,7 +266,7 @@ confirmation. Old sessions stay immutable and different mechanisms do not
 silently share weights or progression rules. Substitution alone does not
 change the program.
 
-Projections:
+Compatibility projections:
 
 - `GET /v1/training/personal-records`;
 - `GET /v1/training/progression-candidates`;
@@ -281,19 +283,23 @@ future session, or ambiguous duplicate prescription yields no candidate.
 Acceptance rechecks current evidence, creates a new inactive version, and
 blocks duplicate pending acceptance.
 
-The read-only MCP `get_training_progression` action composes the exact next
+The three legacy progression/proposal/apply tools are hidden from new MCP
+discovery but retain authorized direct dispatch and historical audit/replay.
+New Coach changes use the universal confirmed program save.
+
+Compatibility-only MCP `get_training_progression` action composes the exact next
 strength workout with the current API-owned Daily Assessment. It returns a
 typed `hold`, `add_reps`, `add_weight`, or `insufficient_evidence` decision per
 exercise, the target, up to two current detailed sessions' actual weights,
 repetitions and RIR, and a reason. When Recovery is not ready, the active
 program or next step changed, or the timezone is missing, it returns an
 explicit unavailable state. Guidance never saves or activates a program;
-Coach must refresh it on the actual future training day.
+Its dated result does not prove future readiness.
 
 The MCP `get_working_weight_proposals` read exposes exact current-day increases
 only when the API-owned Recovery assessment is ready and the next strength
 position, the exact one- or two-session evidence, and active program agree. After one
-clear Person confirmation, `apply_confirmed_working_weight` rechecks Recovery,
+clear Person confirmation, compatibility-only `apply_confirmed_working_weight` rechecks Recovery,
 the current local date, evidence revision, exact progression candidate, and
 active program under the Person lock. It copies one immutable program version,
 changes only the selected prescription's external working weight, activates
@@ -302,8 +308,8 @@ evidence session is mandatory; the second is NULL for the high-reserve path.
 The command recomputes the shared predicate and exact ordered evidence IDs
 under the Person lock. Stale or
 unsafe proposals fail without a write; an identical request ID can be retried
-idempotently. Coach reads Training and Daily Decision Context back before
-claiming the new version is active. The existing candidate acceptance path
+idempotently. The canonical successful result verifies this legacy transaction; further reads
+are selected when useful. The existing candidate acceptance path
 still creates an inactive draft. See the
 [single-session audit ADR](../../adr/20261007-allow-single-session-working-weight-audit.md).
 
@@ -332,6 +338,8 @@ reply remain unverified. See the
   migration, lineage, erasure, deduplication, and concurrency tests.
 
 ## Decisions
+
+- [Coach knowledge-store boundary](../../adr/20261009-let-coach-propose-working-weight-from-history.md).
 
 - [Incomplete fact capture and contextual Coach replies](../../adr/20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md).
 

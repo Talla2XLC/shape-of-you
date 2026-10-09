@@ -140,11 +140,11 @@ describe("Composed Recovery MCP read failures", () => {
       expect(failed.structuredContent).not.toHaveProperty("failureStage");
       const text = failed.content[0].text;
       expect(text).toContain("does not establish invalid input or missing source data");
-      expect(text).toContain("do not recommend today's strength workout");
+      expect(text).not.toContain("do not recommend today's strength workout");
       expect(text).toContain("Resleep alone does not establish readiness");
-      expect(text).toContain("never assume normal wellbeing unless the user reported it");
+      expect(text).toContain("never assume normal wellbeing unless reported");
       expect(text).toContain("never promise recovery or training suitability tomorrow");
-      expect(text).toContain("A successful daily context with a missing individual metric is different");
+      expect(text).toContain("A successful context with missing metrics also preserves uncertainty");
       expect(text).toContain("A failed focused Recovery read does not invalidate a separately successful current daily context");
       expect(text).toContain("Do not include diagnosticId in an ordinary Coach reply");
       const success = await call(tool);

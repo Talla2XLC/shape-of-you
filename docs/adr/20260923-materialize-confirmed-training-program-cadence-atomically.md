@@ -2,10 +2,10 @@
 id: "decisions-20260923-materialize-confirmed-training-program-cadence-atomically"
 kind: adr
 title: "Атомарно материализовать подтверждённый cadence без повторной передачи TrainingProgram"
-status: accepted
+status: superseded
 date: 2026-09-23
 supersedes: []
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - architecture
   - training
@@ -35,6 +35,11 @@ Live-проверка выявила разрыв между решениями.
 изменения полей, которые пользователь не редактировал.
 
 ## Decision
+
+Полномочия и обязательная orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Хранение фактов, исторические версии и legacy eligibility сохраняются
+для совместимости, но не ограничивают новый универсальный путь.
 
 1. Training предоставляет узкую Person-owned команду материализации cadence.
    Её вход содержит ожидаемую authority активной программы и полное typed

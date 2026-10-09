@@ -2,10 +2,10 @@
 id: "decisions-20261006-allow-single-session-high-reserve-progression"
 kind: adr
 title: "Разрешить предложение прибавки после одной тренировки с большим запасом"
-status: accepted
+status: superseded
 date: 2026-10-06
 supersedes: [decisions-20260925-explain-session-backed-training-progression]
-superseded_by: null
+superseded_by: decisions-20261009-let-coach-propose-working-weight-from-history
 tags:
   - training
   - progression
@@ -22,6 +22,11 @@ tags:
 weight, reps и RIR всех назначенных подходов.
 
 ## Decision
+
+Правила полномочий и orchestration нового Coach заменены
+[ADR базы знаний](20261009-let-coach-propose-working-weight-from-history.md).
+Исторические snapshots, compatibility commands и технические гарантии хранения
+сохраняют прежний смысл; supersession не переписывает существующие данные.
 
 Оператор одобрил дополнение пункта 5 принятого ADR прогрессии узким
 альтернативным предикатом 2026-10-07 вместе с implementation plan.

@@ -1,3 +1,4 @@
+import type { TrainingProgram, SaveConfirmedTrainingProgram } from "@shape-of-you/contracts";
 import { randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import Fastify from "fastify";
@@ -140,6 +141,84 @@ async function fixture(lostAcknowledgementTool?: string) {
   return { fastify, call, rawCall, program, importActivity, repository, personId, connectionId, consentId, recoveryConnectionId, integrations };
 }
 
+describe("Coach knowledge-store confirmed program saves with PostgreSQL", () => {
+  it("saves consented multiple fields without history, RIR, Recovery or increment gates and preserves untouched authority", async () => {
+    const { fastify, call, rawCall, program: initial, personId } = await fixture();
+    try {
+      const program = initial as TrainingProgram;
+      const version = program.activeVersion!;
+      const command: SaveConfirmedTrainingProgram = {
+        expectedActiveProgramId: program.id, expectedLockVersion: program.lockVersion,
+        name: version.name, note: version.note, cadence: version.cadence!,
+        workouts: version.workouts.map((workout) => ({ name: workout.name,
+          prescriptions: workout.prescriptions.map((p) => ({
+            exerciseVersionId: p.exerciseVersionId, loadBasis: p.loadBasis, targetWeightKg: p.targetWeightKg,
+            targetSets: p.targetSets, targetRepsMin: p.targetRepsMin, targetRepsMax: p.targetRepsMax,
+            targetRir: p.targetRir, progressionIncrementKg: p.progressionIncrementKg, note: p.note
+          })) }))
+      };
+      command.workouts[0]!.prescriptions[0] = { ...command.workouts[0]!.prescriptions[0]!,
+        targetWeightKg: 30, targetSets: 4, targetRepsMin: 10, targetRepsMax: 15,
+        targetRir: null, progressionIncrementKg: null };
+      const history = await call("list_workout_sessions_v2");
+      expect(history.items).toEqual([]);
+      const result = await rawCall("save_confirmed_training_program", command);
+      expect(result.isError).not.toBe(true);
+      expect(result.structuredContent.outcome).toBe("updated");
+      const updated = result.structuredContent.program as TrainingProgram;
+      expect(updated.activeVersion!.workouts[0]!.prescriptions[0]).toMatchObject({
+        targetWeightKg: 30, targetSets: 4, targetRepsMin: 10, targetRepsMax: 15,
+        targetRir: null, progressionIncrementKg: null });
+      expect(updated.activeVersion!.workouts[1]).toEqual(version.workouts[1]);
+      expect(updated.activeVersion!.cadence).toEqual(version.cadence);
+      expect(updated.activeVersion!.note).toEqual(version.note);
+      expect(result.content[0].text).toContain("It is sufficient verification");
+      expect(result.content[0].text).not.toContain("MUST immediately call");
+      const replay = await call("save_confirmed_training_program", command);
+      expect(replay.outcome).toBe("unchanged");
+      expect(replay.program.activeVersion.id).toBe(updated.activeVersion!.id);
+      const stale = await rawCall("save_confirmed_training_program", {
+        ...command, name: "Concurrent stale replacement" });
+      expect(stale).toMatchObject({ isError: true,
+        structuredContent: { reason: "stale_active_program" } });
+      const otherPerson = await fixture();
+      const otherProgram = otherPerson.program as TrainingProgram;
+      await otherPerson.fastify.close();
+      const foreign = await rawCall("save_confirmed_training_program", {
+        ...command, expectedActiveProgramId: updated.id, expectedLockVersion: updated.lockVersion,
+        workouts: [{ name: "Foreign exercise", prescriptions: [{
+          ...command.workouts[0]!.prescriptions[0]!, exerciseVersionId: otherProgram.activeVersion!.workouts[0]!.prescriptions[0]!.exerciseVersionId
+        }] }, command.workouts[1]] });
+      expect(foreign.isError).toBe(true);
+      const current = await call("get_active_training_program");
+      expect(current.program.activeVersion.id).toBe(updated.activeVersion!.id);
+      const counts = await database.pool.query("select count(*)::int as count from workout_sessions where person_id=$1", [personId]);
+      expect(counts.rows[0].count).toBe(0);
+      await call("record_workout_session_v2", {
+        occurredAt: null, temporalPrecision: "local_date", localDate: "2026-10-06", timezone: "Europe/Belgrade",
+        programVersionId: updated.activeVersionId, programWorkoutPosition: 1, externalActivityId: null,
+        completionState: "completed", workoutName: "Synthetic completed A", venueLabel: null,
+        feeling: null, note: "Qualitative effort only", exercises: [], dedupeKey: "knowledge-store-completed-a",
+        sourceReference: { channel: "manual", externalSystem: "chatgpt", externalRecordId: "synthetic-completed-a", occurredAt: null },
+        confidence: 1
+      });
+      // Completed A and the resulting next B do not forbid changing A's prescription.
+      for (const loadBasis of ["body_weight", "assisted"] as const) {
+        const next = await call("save_confirmed_training_program", {
+          ...command, expectedActiveProgramId: current.program.id,
+          expectedLockVersion: current.program.lockVersion,
+          workouts: command.workouts.map((workout, index) => index !== 0 ? workout : ({ ...workout,
+            prescriptions: [{ ...workout.prescriptions[0], loadBasis,
+              targetWeightKg: loadBasis === "body_weight" ? null : 17.5 }] }))
+        });
+        expect(next.outcome).toBe("updated");
+        expect(next.program.activeVersion.workouts[0].prescriptions[0].loadBasis).toBe(loadBasis);
+        current.program = next.program;
+      }
+    } finally { await fastify.close(); }
+  });
+});
+
 describe("Current Recovery MCP composition with PostgreSQL", () => {
   it("keeps night sleep and resleep distinct, diagnoses an owner read failure and then reads successfully", async () => {
     const { fastify, call, rawCall, integrations, personId } = await fixture();
@@ -171,8 +250,8 @@ describe("Current Recovery MCP composition with PostgreSQL", () => {
       expect(facts.items).toHaveLength(2);
       const training = await rawCall("get_training_context_v2", { localDate: "2026-10-06" });
       expect(training.isError).not.toBe(true);
-      expect(training.content[0].text).toContain("do not recommend today's strength workout");
-      expect(training.content[0].text).toContain("A successful daily context with a missing individual metric is different");
+      expect(training.content[0].text).not.toContain("do not recommend today's strength workout");
+      expect(training.content[0].text).toContain("A successful context with missing metrics also preserves uncertainty");
     } finally { vi.restoreAllMocks(); await fastify.close(); }
   });
 });
