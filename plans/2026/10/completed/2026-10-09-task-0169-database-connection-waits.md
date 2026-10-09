@@ -1,0 +1,64 @@
+# TASK-0169 — Ожидание соединений при чтении контекста Coach
+
+## Статус
+
+Оператор утвердил архитектуру и этот план 2026-10-09; реализация завершена и
+принята независимым Quality (`task-0169-quality-acceptance-20261009`).
+Commit/push/deploy пока не выполнены; доставка требует отдельного разрешения.
+[ADR](../../../../docs/adr/20261009-bound-api-database-connection-waits.md).
+
+## Доказательства и пределы
+
+Сохранённый failed daily-read имеет UUID и execution failure body; args {} валидны.
+Original exception log утрачен после разрешённой замены контейнера. Его причина
+не установлена. Отдельно подтверждён pool wait timeout: production max 10,
+1000 ms budget, 1002 ms до Error без SQLSTATE при занятых соединениях.
+Параллельная live пара после выкладки прошла. Не считать гипотезу о старом
+отказе установленным диагнозом.
+
+## Объём после утверждения
+
+1. Existing API pool acquisition timeout 1000→5000 ms; max 10/4 сохранить.
+2. Safe fixed `pool_acquisition_timeout` classification в bounded cause chain.
+   Не раскрывать сообщения/SQL/values; technical authorization guards сохранить.
+3. Real MCP→PG pin: временная очередь дольше старого budget успешно читается;
+   длительная очередь возвращает bounded unknown failure с UUID и safe reason.
+4. Проверить старые typed consistency/database классификации, auth/input distinction,
+   Person scope и privacy. Не менять product eligibility или Training facts.
+5. Relevant tests/typecheck/build/lint, independent Quality, five-point Architecture
+   Review, canonical Wiki после приёмки; переместить план в completed.
+6. Только отдельно разрешённая доставка exact commit с CI, migration step,
+   readiness/smoke и live read. Персональные записи не создавать.
+
+## Критерии приёмки
+
+- Temporary contention между 1 и 5 секундами не вызывает старый секундный отказ.
+- Pool maximum не увеличен. Длительное ожидание ограничено и диагностируется.
+- Safe logs/public errors не содержат raw exceptions и чувствительные данные.
+- Existing successful reads, scope, versions и consistency semantics сохранены.
+- Исторический UUID не объявлен исправленным без доказательства его причины.
+
+## Результат
+
+API использует 5000 ms вместо 1000 ms при прежнем max 10/4. Классификация
+ограничена четырьмя cause nodes: typed consistency → recognized SQLSTATE →
+точная pg-pool Error → unclassified. Public error и Person scope сохранены.
+
+Проверки разработчика: все 407 API unit tests; 11 DailyAssessment PostgreSQL
+tests; 2 новых MCP→real services→isolated PostgreSQL сценария; typecheck, build,
+lint, docs validator и diff check. Временная занятость pool на 1500 ms позволила
+чтение после освобождения; exhaustion завершился примерно через 5 секунд с
+безопасной диагностикой, повторное чтение после освобождения прошло.
+Первый запуск нового теста выявил отсутствующую синтетическую Person в фикстуре;
+фикстура исправлена, оба сценария прошли повторно.
+
+Quality независимо проверил 32 unit tests и оба PostgreSQL сценария, а также
+typecheck/lint/docs/diff. Architecture Review подтвердил отсутствие новых
+сущностей/сервисов, сохранение DDD ownership, отсутствие дублирующей Wiki и
+сохранение ограничения ресурсов. Новых migrations и SQL identifiers нет.
+
+Canonical Wiki приведена к принятому коду:
+[Backend runtime](../../../../docs/wiki/architecture/backend-runtime.md) и
+[Coaching](../../../../docs/wiki/domain/coaching-and-decision-support.md).
+Историческая причина UUID остаётся неизвестной. Production/staging не менялись
+в рамках TASK-0169; персональные записи не создавались.

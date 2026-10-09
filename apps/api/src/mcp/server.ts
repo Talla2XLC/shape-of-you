@@ -1747,19 +1747,24 @@ function isRecoveryContextWriter(toolName: string): boolean {
 
 /** Classifies only recognized error evidence; never serializes an exception or arbitrary cause. */
 function safeContextReadFailure(error: unknown): {
-  readonly failureReason: "evidence_changed" | "database_failure" | "unclassified";
+  readonly failureReason: "evidence_changed" | "database_failure" | "pool_acquisition_timeout" | "unclassified";
   readonly databaseCode?: string;
 } {
   const database = safeDatabaseFailureCode(error);
+  let poolTimeout = false;
   let current = error;
   // A typed consistency failure takes precedence over a recognized nested database code.
   for (let depth = 0; depth < 4 && isRecord(current); depth += 1) {
     if (current instanceof DailyAssessmentEvidenceChangedError) {
       return { failureReason: "evidence_changed", ...database };
     }
+    if (current instanceof Error && current.message === "timeout exceeded when trying to connect") {
+      poolTimeout = true;
+    }
     current = current.cause;
   }
-  return { failureReason: database.databaseCode ? "database_failure" : "unclassified", ...database };
+  return { failureReason: database.databaseCode ? "database_failure" :
+    poolTimeout ? "pool_acquisition_timeout" : "unclassified", ...database };
 }
 
 /** Selects only a bounded SQLSTATE; never serializes a database error or its cause. */

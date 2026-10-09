@@ -54,7 +54,16 @@ describe("Composed Recovery MCP read failures", () => {
       { error: new Error(marker), reason: "unclassified", code: undefined },
       { error: marker, reason: "unclassified", code: undefined },
       { error: new Error(marker, { cause: { code: "08006", message: marker } }),
-        reason: "database_failure", code: "08006" }
+        reason: "database_failure", code: "08006" },
+      { error: new Error("timeout exceeded when trying to connect"), reason: "pool_acquisition_timeout", code: undefined },
+      { error: new Error(marker, { cause: new Error("timeout exceeded when trying to connect") }),
+        reason: "pool_acquisition_timeout", code: undefined },
+      { error: new Error("timeout exceeded when trying to connect", { cause: new DailyAssessmentEvidenceChangedError() }),
+        reason: "evidence_changed", code: undefined },
+      { error: new Error("timeout exceeded when trying to connect", { cause: { code: "08006" } }),
+        reason: "database_failure", code: "08006" },
+      { error: { message: "timeout exceeded when trying to connect" }, reason: "unclassified", code: undefined },
+      { error: new Error("timeout exceeded when trying to connect: " + marker), reason: "unclassified", code: undefined }
     ];
     try {
       for (const { error, reason, code } of cases) {
@@ -98,11 +107,13 @@ describe("Composed Recovery MCP read failures", () => {
     const { server, call, read, logs } = fixture();
     const wrap = (cause: unknown) => new Error("synthetic-private-nested", { cause });
     try {
-      for (const leaf of [new DailyAssessmentEvidenceChangedError(), { code: "08006" }]) {
+      for (const leaf of [new DailyAssessmentEvidenceChangedError(), { code: "08006" },
+        new Error("timeout exceeded when trying to connect")]) {
         read.mockRejectedValueOnce(wrap(wrap(wrap(leaf))));
         await call("get_daily_decision_context");
         expect(JSON.parse(logs.at(-1)!).failureReason).toBe(
-          leaf instanceof DailyAssessmentEvidenceChangedError ? "evidence_changed" : "database_failure");
+          leaf instanceof DailyAssessmentEvidenceChangedError ? "evidence_changed" :
+            leaf instanceof Error ? "pool_acquisition_timeout" : "database_failure");
         read.mockRejectedValueOnce(wrap(wrap(wrap(wrap(leaf)))));
         await call("get_daily_decision_context");
         expect(JSON.parse(logs.at(-1)!).failureReason).toBe("unclassified");

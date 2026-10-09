@@ -319,9 +319,11 @@ correlates the UUID with fixed tool/category and an allowlisted SQLSTATE when
 present. `failureStage` distinguishes service execution (`execute`) from forming
 the MCP answer (`present`). `failureReason` is `evidence_changed` for an actual
 `DailyAssessmentEvidenceChangedError`, `database_failure` for a recognized
-SQLSTATE, or `unclassified`. Classification examines at most four cause nodes;
-typed evidence changes take precedence over a recognized database code, which
-may still be logged separately. Arbitrary exception names do not establish a
+SQLSTATE, `pool_acquisition_timeout` for the exact pg-pool acquisition Error,
+or `unclassified`. Classification examines at most four cause nodes;
+typed evidence changes take precedence over recognized SQLSTATE, which takes
+precedence over pool timeout. The database code may still be logged separately.
+Arbitrary exception names or plain message objects do not establish a
 typed cause, and an absent recognized SQLSTATE does not exclude a database error.
 These fields stay in the server log and do not change the public read error.
 The log excludes arguments, personal values, source identities, SQL, parameters,
@@ -330,6 +332,7 @@ failures keep their distinct handling. The UUID belongs only in a direct
 technical diagnostic answer, never an ordinary Coach reply. Correlation helps
 investigate a future failure; it does not recover a previously suppressed
 exception or prove its cause.
+See the [bounded-wait ADR](../../adr/20261009-bound-api-database-connection-waits.md).
 
 The read
 is local and does not depend on provider

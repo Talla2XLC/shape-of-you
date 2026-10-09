@@ -15,6 +15,8 @@ export interface DatabaseContext {
 
 /**
  * Creates the API database context from validated runtime configuration.
+ * Connection establishment and pool acquisition each have a bounded five-second
+ * wait; pool capacity remains independent of that waiting budget.
  *
  * @param config - Validated application configuration.
  * @returns A Drizzle client and its underlying PostgreSQL pool.
@@ -22,7 +24,7 @@ export interface DatabaseContext {
 export function createDatabase(config: AppConfig): DatabaseContext {
   const pool = new Pool({
     connectionString: config.DATABASE_URL,
-    connectionTimeoutMillis: 1_000,
+    connectionTimeoutMillis: 5_000,
     max: config.NODE_ENV === "test" ? 4 : 10
   });
 

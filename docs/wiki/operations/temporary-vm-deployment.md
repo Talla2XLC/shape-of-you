@@ -394,13 +394,18 @@ This does not affect unrelated Compose/PostgreSQL.
 ## Evidence
 
 - Staging Compose, publish/deploy workflows, and deployment scripts.
-- On 2026-09-28, the operator-approved `Promote staging` run
-  [36397674322](https://github.com/Talla2XLC/shape-of-you/actions/runs/36397674322)
-  promoted exact release `a3a5f7458d7cc1866702081cbb1938507438861f`
-  after restore-checking fresh API and Identity backups. The API migration
-  journal advanced from 52 to 54; Identity reported its migration journal
-  current at 8. The API, Identity, and edge containers were healthy and the
-  pipeline smoke checks passed. Write smoke was disabled for this promotion.
+- On 2026-10-09, the operator-approved [Promote staging run 37907104925](https://github.com/Talla2XLC/shape-of-you/actions/runs/37907104925)
+  applied exact release `2ff996b9d4e15927347250216ac64497e02018ef` after successful
+  [publication 37905952320](https://github.com/Talla2XLC/shape-of-you/actions/runs/37905952320).
+  The deployment pipeline completed its API migration step at
+  `2026-10-09T08:48:11Z`; TASK-0168 authored no new migration. Identity source
+  was unchanged and its deployed image was reused, so this promotion did not
+  execute Identity migrations. Pipeline smoke passed at `08:49:02Z`, followed
+  by exact-release deployment completion. Public API and Identity readiness
+  returned HTTP 200, and authorized Recovery and Daily Decision Context reads
+  succeeded after deployment with the new MCP guidance. Write smoke was disabled.
+  These successful reads do not establish the cause or resolution of an earlier
+  intermittent read failure.
 
 ## Decisions
 

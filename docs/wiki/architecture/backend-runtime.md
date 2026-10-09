@@ -25,6 +25,12 @@ DI, and lifecycle; Fastify provides HTTP and Pino logging. A global exception
 filter preserves one public error contract. Shutdown uses
 `NestFastifyApplication.close()`.
 
+The API PostgreSQL pool allows 10 connections outside tests and 4 in tests.
+Connection acquisition and connection establishment use a bounded 5000 ms
+driver timeout. Brief contention can wait for an available connection; sustained
+exhaustion still fails. This budget does not bound SQL execution or a complete
+composed read. See the [bounded-wait ADR](../../adr/20261009-bound-api-database-connection-waits.md).
+
 System endpoints:
 
 - `GET /health` checks the HTTP process without PostgreSQL;
