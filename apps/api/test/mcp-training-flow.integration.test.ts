@@ -25,16 +25,23 @@ import { MCP_RECOVERY_RETRY_POLICY, registerMcpRoutes, type McpRouteOptions } fr
 import { TrainingRepository } from "../src/storage/training-repository.js";
 import { TrainingService } from "../src/training/training.service.js";
 
-let container: StartedPostgreSqlContainer;
+let container: StartedPostgreSqlContainer | undefined;
 let database: DatabaseContext;
 
 beforeAll(async () => {
-  container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  const isolatedUrl = process.env.SOY_ISOLATED_TEST_DATABASE_URL;
+  if (isolatedUrl) {
+    const url = new URL(isolatedUrl);
+    if (url.hostname !== "127.0.0.1" || url.pathname !== "/shape_of_you_task0176_test" || url.port === "5432") {
+      throw new Error("Isolated test override requires the dedicated loopback test database on a non-default port");
+    }
+  } else container = await new PostgreSqlContainer("postgres:17-alpine").start();
+  const connectionUri = isolatedUrl ?? container!.getConnectionUri();
   process.env.PERSON_CONTEXT_MODE = "synthetic";
   process.env.SYNTHETIC_PERSON_ID = "00000000-0000-4000-8000-000000000001";
-  await runMigrations(container.getConnectionUri());
+  await runMigrations(connectionUri);
   database = createDatabase({ NODE_ENV: "test", HOST: "127.0.0.1", PORT: 3000,
-    DATABASE_URL: container.getConnectionUri(), LOG_LEVEL: "silent", PERSON_CONTEXT_MODE: "synthetic",
+    DATABASE_URL: connectionUri, LOG_LEVEL: "silent", PERSON_CONTEXT_MODE: "synthetic",
     SYNTHETIC_PERSON_ID: process.env.SYNTHETIC_PERSON_ID, SHUTDOWN_TIMEOUT_MS: 1000 });
 });
 
@@ -215,6 +222,111 @@ describe("Coach knowledge-store confirmed program saves with PostgreSQL", () => 
         expect(next.program.activeVersion.workouts[0].prescriptions[0].loadBasis).toBe(loadBasis);
         current.program = next.program;
       }
+    } finally { await fastify.close(); }
+  });
+});
+
+describe("Coach program completion and replacement", () => {
+  it("preserves historical sessions, separates program identity and safely replays after later completion", async () => {
+    const { fastify, call, rawCall, program: initial, personId, repository } = await fixture();
+    const program = initial as TrainingProgram;
+    const version = program.activeVersion!;
+    const newProgramId = randomUUID();
+    const command = {
+      newProgramId, expectedActiveProgramId: program.id,
+      expectedActiveVersionId: version.id, expectedLockVersion: program.lockVersion,
+      name: "Synthetic new venue", note: null,
+      workouts: version.workouts.map((w) => ({ name: w.name, prescriptions: w.prescriptions.map((p) => ({
+        exerciseVersionId: p.exerciseVersionId, loadBasis: p.loadBasis, targetWeightKg: p.targetWeightKg,
+        targetSets: p.targetSets, targetRepsMin: p.targetRepsMin, targetRepsMax: p.targetRepsMax,
+        targetRir: p.targetRir, progressionIncrementKg: p.progressionIncrementKg, note: p.note
+      })) }))
+    };
+    try {
+      await call("record_workout_session_v2", {
+        occurredAt: null, temporalPrecision: "local_date", localDate: "2026-10-06", timezone: "Europe/Belgrade",
+        programVersionId: version.id, programWorkoutPosition: 1, externalActivityId: null,
+        completionState: "completed", workoutName: "Historical Ahilej", venueLabel: null,
+        feeling: null, note: "Synthetic history", exercises: [], dedupeKey: randomUUID(),
+        sourceReference: { channel: "manual", externalSystem: "chatgpt", externalRecordId: randomUUID(), occurredAt: null }, confidence: 1
+      });
+      const bad = await rawCall("save_confirmed_training_program", { ...command, expectedActiveVersionId: randomUUID() });
+      expect(bad.isError).toBe(true);
+      expect((await call("get_active_training_program")).program.id).toBe(program.id);
+      const foreign = await fixture();
+      try {
+        expect((await foreign.rawCall("complete_training_program", {
+          expectedActiveProgramId: program.id, expectedActiveVersionId: version.id,
+          expectedLockVersion: program.lockVersion
+        })).isError).toBe(true);
+        expect((await foreign.rawCall("get_training_program_version", { programId: program.id, versionId: version.id })).isError).toBe(true);
+      } finally { await foreign.fastify.close(); }
+      const replacements = await Promise.all([
+        call("save_confirmed_training_program", command), call("save_confirmed_training_program", command)
+      ]);
+      expect(replacements.map((r) => r.outcome).sort()).toEqual(["created", "unchanged"]);
+      const successor = replacements[0]!.program as TrainingProgram;
+      expect(successor.id).toBe(newProgramId);
+      expect(successor.currentVersion.version).toBe(1);
+      const history = await call("get_training_program_version", { programId: program.id, versionId: version.id });
+      expect(history).toEqual(version);
+      const session = await database.pool.query("select program_version_id from workout_sessions where person_id=$1", [personId]);
+      expect(session.rows[0].program_version_id).toBe(version.id);
+      const page = await call("list_training_programs", { limit: 1 });
+      expect(page.items).toHaveLength(1);
+      const next = await call("list_training_programs", { limit: 1, afterId: page.nextAfterId });
+      expect(new Set([page.items[0].id, next.items[0].id])).toEqual(new Set([program.id, successor.id]));
+      expect(next.nextAfterId).toBeNull();
+      // An inactive draft may be current while an earlier immutable version is active.
+      const draftInput = { ...command, expectedLockVersion: successor.lockVersion, name: "Unactivated draft" };
+      await repository.appendProgramVersion(personId, successor.id, draftInput);
+      const withDraft = (await call("get_active_training_program")).program;
+      const completion = { expectedActiveProgramId: successor.id,
+        expectedActiveVersionId: successor.activeVersionId, expectedLockVersion: withDraft.lockVersion };
+      expect((await call("complete_training_program", completion)).activeVersionId).toBeNull();
+      expect((await call("complete_training_program", completion)).activeVersionId).toBeNull();
+      expect(await call("get_active_training_program")).toMatchObject({ status: "absent" });
+      const replay = await call("save_confirmed_training_program", command);
+      expect(replay.program.id).toBe(newProgramId);
+      expect(replay.program.activeVersionId).toBeNull();
+      expect(await call("get_active_training_program")).toMatchObject({ status: "absent" });
+      expect((await rawCall("save_confirmed_training_program", { ...command, name: "Different request" })).isError).toBe(true);
+      const absentCommand = { ...command, newProgramId: randomUUID(), expectedActiveProgramId: null,
+        expectedActiveVersionId: null, expectedLockVersion: null };
+      const distinct = await call("save_confirmed_training_program", absentCommand);
+      expect(distinct.program.id).toBe(absentCommand.newProgramId);
+      expect((await rawCall("save_confirmed_training_program", { ...command, newProgramId: randomUUID() })).isError).toBe(true);
+      expect((await call("get_active_training_program")).program.id).toBe(distinct.program.id);
+      // A later explicit reactivation invalidates a stale completion retry.
+      const oldState = await repository.findProgram(personId, successor.id);
+      await repository.activateProgramVersion(personId, successor.id, successor.activeVersionId!, {
+        expectedLockVersion: oldState!.lockVersion
+      });
+      expect((await rawCall("complete_training_program", completion)).isError).toBe(true);
+      expect((await call("get_active_training_program")).program.id).toBe(successor.id);
+      const ownedPage = await call("list_training_programs", {});
+      expect(ownedPage.items.every((p: TrainingProgram) => p.personId === personId)).toBe(true);
+      const beforeRollback = await database.pool.query("select count(*)::int as count from training_exercises where owner_person_id=$1", [personId]);
+      const activeAgain = (await call("get_active_training_program")).program as TrainingProgram;
+      const broken = await rawCall("save_confirmed_training_program", {
+        ...command, newProgramId: randomUUID(), expectedActiveProgramId: activeAgain.id,
+        expectedActiveVersionId: activeAgain.activeVersionId, expectedLockVersion: activeAgain.lockVersion,
+        workouts: [{ name: "Rollback", prescriptions: [
+          { ...command.workouts[0]!.prescriptions[0], exerciseVersionId: undefined,
+            exercise: { name: randomUUID(), category: null, movementPattern: null, equipment: null, instructions: null, note: null } },
+          { ...command.workouts[0]!.prescriptions[0], exerciseVersionId: randomUUID() }
+        ] }]
+      });
+      expect(broken.isError).toBe(true);
+      const afterRollback = await database.pool.query("select count(*)::int as count from training_exercises where owner_person_id=$1", [personId]);
+      expect(afterRollback.rows).toEqual(beforeRollback.rows);
+      expect((await call("get_active_training_program")).program.id).toBe(activeAgain.id);
+      const races = await Promise.all([1, 2].map(() => rawCall("save_confirmed_training_program", {
+        ...command, newProgramId: randomUUID(), expectedActiveProgramId: activeAgain.id,
+        expectedActiveVersionId: activeAgain.activeVersionId, expectedLockVersion: activeAgain.lockVersion
+      })));
+      expect(races.filter((r) => r.isError === true)).toHaveLength(1);
+      expect(races.filter((r) => r.structuredContent?.outcome === "created")).toHaveLength(1);
     } finally { await fastify.close(); }
   });
 });

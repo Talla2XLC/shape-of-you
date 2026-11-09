@@ -29,7 +29,7 @@ function fixture(error?: unknown) {
       nutrition: { listMeals: unavailable, createMeal: unavailable, correctMeal: unavailable },
       training: { listWorkoutSessions: unavailable, createWorkoutSession: unavailable,
         correctWorkoutSession: unavailable, findActiveProgram: unavailable,
-        getTrainingContext: unavailable, saveConfirmedProgram: unavailable, materializeProgramCadence: unavailable,
+        getTrainingContext: unavailable, saveConfirmedProgram: unavailable, completeProgram: unavailable, listPrograms: unavailable, findProgramVersion: unavailable, materializeProgramCadence: unavailable,
         classifyExternalActivity: unavailable, setTrustedExternalActivityTitle: unavailable,
         setActivityRecordingMode: unavailable, confirmWorkoutActivityLink: unavailable, getExternalActivityDetails: unavailable },
       recovery: { listObservations: unavailable, createObservation: write, correctObservation: write },

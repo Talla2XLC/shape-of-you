@@ -15,7 +15,7 @@ export function mcpMealServer(nutrition: McpRouteOptions["services"]["nutrition"
       weights: { list: unavailable, create: unavailable, correct: unavailable },
       bodyMeasurements: { list: unavailable, create: unavailable, correct: unavailable },
       training: { listWorkoutSessions: unavailable, createWorkoutSession: unavailable, correctWorkoutSession: unavailable,
-        findActiveProgram: unavailable, getTrainingContext: unavailable, saveConfirmedProgram: unavailable,
+        findActiveProgram: unavailable, getTrainingContext: unavailable, saveConfirmedProgram: unavailable, completeProgram: unavailable, listPrograms: unavailable, findProgramVersion: unavailable,
         materializeProgramCadence: unavailable, classifyExternalActivity: unavailable, setTrustedExternalActivityTitle: unavailable,
         setActivityRecordingMode: unavailable, confirmWorkoutActivityLink: unavailable, getExternalActivityDetails: unavailable },
       recovery: { listObservations: unavailable, createObservation: unavailable, correctObservation: unavailable },

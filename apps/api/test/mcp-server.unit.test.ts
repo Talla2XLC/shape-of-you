@@ -202,7 +202,10 @@ const unavailableServices = {
     createWorkoutSession: unreachable,
     correctWorkoutSession: unreachable,
     findActiveProgram: unreachable,
-    saveConfirmedProgram: unreachable,
+    completeProgram: unreachable,
+  listPrograms: unreachable,
+  findProgramVersion: unreachable,
+  saveConfirmedProgram: unreachable,
     materializeProgramCadence: unreachable,
     classifyExternalActivity: unreachable,
     setTrustedExternalActivityTitle: unreachable,
@@ -373,7 +376,7 @@ describe("MCP HTTP adapter", () => {
 
     expect(response.statusCode).toBe(200);
     const body = response.json();
-    expect(body.result.tools).toHaveLength(39);
+    expect(body.result.tools).toHaveLength(42);
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
@@ -403,6 +406,9 @@ describe("MCP HTTP adapter", () => {
       get_active_training_program: MCP_READ_SCOPE,
       get_training_context: MCP_READ_SCOPE,
       get_external_activity_details: MCP_READ_SCOPE,
+      complete_training_program: MCP_WORKOUT_WRITE_SCOPE,
+      list_training_programs: MCP_READ_SCOPE,
+      get_training_program_version: MCP_READ_SCOPE,
       save_confirmed_training_program: MCP_WORKOUT_WRITE_SCOPE,
       materialize_training_program_cadence: MCP_WORKOUT_WRITE_SCOPE,
       classify_external_activity: MCP_WORKOUT_WRITE_SCOPE,

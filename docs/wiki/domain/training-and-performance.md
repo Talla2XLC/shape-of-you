@@ -27,6 +27,21 @@ Its canonical result verifies success without mandatory read-back. Legacy narrow
 progression commands retain historical rules but are not the new Coach route.
 See the [knowledge-store ADR](../../adr/20261009-let-coach-propose-working-weight-from-history.md).
 
+Confirmed saves update the existing program unless `newProgramId` explicitly
+requests a distinct identity. This mode requires `expectedActiveVersionId` plus
+the existing active id/lock expectation, atomically replaces activity, and keeps
+all previous versions and sessions. The new UUID is a durable retry key compared
+against immutable version 1; retries never reactivate a later inactive program.
+`complete_training_program` removes the exact program's active pointer while
+preserving its current draft and history. Completion is reversible inactivity,
+not deletion or a terminal status. `list_training_programs` and
+`get_training_program_version` expose bounded Person-owned history and exact
+immutable snapshots independently of active state. See the
+[program lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
+Local lifecycle implementation is independently verified; connector publication
+and external Coach conversations remain unverified.
+
+
 - `Exercise` has stable identity and immutable ExerciseVersions; aliases and
   equipment are overlays; private exercises have an owner.
 - Confirmed-program persistence resolves only exact accessible current

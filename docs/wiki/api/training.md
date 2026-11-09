@@ -21,6 +21,31 @@ personal records, progression candidates, and confirmed working-weight changes.
 
 ## Content
 
+MCP program lifecycle now includes:
+
+- `complete_training_program`: expects exact active program/version/lock;
+  clears activity and preserves current draft, versions and sessions. An
+  inactive snapshot with the immediately following lock and an owned expected
+  version is a desired-state retry, not evidence of who completed it.
+- `save_confirmed_training_program`: optional `newProgramId` creates a distinct
+  program and atomically replaces activity. It requires
+  `expectedActiveVersionId` in this mode (null only for confirmed absence),
+  alongside active program id/lock. Reuse the UUID only for the exact original
+  snapshot; a retry compares immutable version 1 and returns current state
+  without reactivation. A replay result may be inactive or subsequently revised.
+- `list_training_programs`: `limit` defaults to 20, maximum 100; pass
+  `nextAfterId` as `afterId` for the next UUID-ordered page, including inactive
+  programs. This order is not a chronological recommendation.
+- `get_training_program_version`: reads the exact Person-owned `programId` /
+  `versionId` pair without activation, including versions referenced by sessions.
+
+Existing save calls retain same-program version semantics. There are no new
+lifecycle tables or migrations. Local MCP/PostgreSQL tests and independent
+Quality verify history, ownership, retries, rollback and concurrent replacement;
+publication of these actions to the connected Coach remains unverified. See the
+[lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
+
+
 Exercise catalog:
 
 - `POST /v1/training/catalog/exercises` and `/:id/versions`;

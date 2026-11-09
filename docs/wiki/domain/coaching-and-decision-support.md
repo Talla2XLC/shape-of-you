@@ -57,6 +57,23 @@ Legacy `get_training_progression`, `get_working_weight_proposals` and
 historical eligibility and audit semantics, but are absent from new MCP discovery.
 Their unavailability does not block the universal confirmed save.
 
+Current MCP policy asks Coach to weigh the goal, actual completed intensity,
+recovery freshness, reported wellbeing, time and confirmed equipment when choosing
+strength, cardio or rest. Sequence and frequency remain guidance. A venue change
+neither implies a home/gym hybrid nor transfers weights between different
+mechanisms. Finishing the old program and accepting a new complete proposal are
+separate intents; lifecycle commands preserve that distinction and history.
+
+The connected catalog observed during TASK-0176 still advertised old mandatory
+reads and legacy progression tools, while source initialize/tools discovery had
+already changed. The publication cause is unknown. After separately authorized
+delivery, compare initialize instructions and tools/list through the same client
+used by Coach, then run conversational scenarios with synthetic data before
+claiming corrected live behavior. Local tests validate contracts and persistence,
+not the external model's training judgment. See the
+[lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
+
+
 The current `DailyDecisionContext` v1 contains Person-local daily fact
 summary, coverage, personal comparisons, current Recovery observations with
 time and quality, delivery state, and the exact next Training step. It has no

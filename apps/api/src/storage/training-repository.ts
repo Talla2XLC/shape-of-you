@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  gt,
   gte,
   inArray,
   isNull,
@@ -16,6 +17,9 @@ import { alias } from "drizzle-orm/pg-core";
 import { createHash } from "node:crypto";
 
 import type {
+  CompleteTrainingProgram,
+  ListTrainingProgramsQuery,
+  TrainingProgramList,
   ActivityDetailsPayload,
   ActivityDetailsIssue,
   AcceptProgressionCandidate,
@@ -334,6 +338,9 @@ export interface TrainingStore {
     personId: string,
     input: MaterializeTrainingProgramCadence
   ): Promise<MaterializeTrainingProgramCadenceResult>;
+  completeProgram(personId: string, input: CompleteTrainingProgram): Promise<TrainingProgram>;
+  listPrograms(personId: string, query: ListTrainingProgramsQuery): Promise<TrainingProgramList>;
+  findProgramVersion(personId: string, programId: string, versionId: string): Promise<TrainingProgramVersion | null>;
   findProgram(personId: string, id: string): Promise<TrainingProgram | null>;
   findActiveProgram(personId: string): Promise<TrainingProgram | null>;
   createWorkoutSession(
@@ -2504,6 +2511,43 @@ export class TrainingRepository implements TrainingStore {
       }
       const snapshot = resolution.snapshot;
 
+      if (input.newProgramId !== undefined) {
+        if (input.expectedActiveVersionId === undefined) {
+          throw new ConflictError("New program requires an exact active version expectation");
+        }
+        const existing = await this.readProgram(transaction, personId, input.newProgramId);
+        if (existing) {
+          const [first] = await transaction.select().from(trainingProgramVersions).where(and(
+            eq(trainingProgramVersions.programId, existing.id), eq(trainingProgramVersions.personId, personId),
+            eq(trainingProgramVersions.version, 1)
+          ));
+          const original = first ? await this.readProgramVersion(transaction, personId, first.id) : null;
+          if (!original || !trainingProgramSnapshotMatches(original, snapshot)) {
+            throw new ConflictError("New program identity was already used for different contents");
+          }
+          return { outcome: "unchanged", program: existing };
+        }
+        if ((active?.id ?? null) !== input.expectedActiveProgramId ||
+            (active?.lockVersion ?? null) !== input.expectedLockVersion ||
+            (active?.activeVersionId ?? null) !== input.expectedActiveVersionId) {
+          throw new ConflictError("Active TrainingProgram changed concurrently");
+        }
+        // Identity is the durable retry key; it is never reused for another program.
+        const [created] = await transaction.insert(trainingPrograms)
+          .values({ id: input.newProgramId, personId }).onConflictDoNothing().returning();
+        if (!created) throw new ConflictError("New program identity is unavailable");
+        const version = await this.insertProgramVersionContents(transaction, personId, created.id, 1, snapshot);
+        if (active) await transaction.update(trainingPrograms).set({ activeVersionId: null,
+          lockVersion: active.lockVersion + 1 }).where(and(eq(trainingPrograms.id, active.id), eq(trainingPrograms.personId, personId)));
+        const [activated] = await transaction.update(trainingPrograms).set({ currentVersionId: version.id,
+          activeVersionId: version.id, lockVersion: 1 }).where(and(eq(trainingPrograms.id, created.id), eq(trainingPrograms.personId, personId))).returning();
+        if (!activated) throw new Error("TrainingProgram activation failed");
+        return { outcome: "created", program: await this.serializeProgram(transaction, activated) };
+      }
+      if (input.expectedActiveVersionId !== undefined &&
+          (active?.activeVersionId ?? null) !== input.expectedActiveVersionId) {
+        throw new ConflictError("Active TrainingProgram version changed concurrently");
+      }
       if (
         active?.activeVersion &&
         trainingProgramSnapshotMatches(active.activeVersion, snapshot)
@@ -2681,6 +2725,55 @@ export class TrainingRepository implements TrainingStore {
         outcome: "updated",
         program: await this.serializeProgram(transaction, updated)
       };
+    });
+  }
+
+  /** Completes an exact active snapshot, retaining versions and sessions; exact retries are harmless. */
+  public async completeProgram(personId: string, input: CompleteTrainingProgram): Promise<TrainingProgram> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, personId);
+      const current = await this.readProgram(transaction, personId, input.expectedActiveProgramId);
+      if (!current) throw new NotFoundError("TrainingProgram was not found");
+      if (current.activeVersionId === null && current.lockVersion === input.expectedLockVersion + 1) {
+        const [ownedVersion] = await transaction.select({ id: trainingProgramVersions.id }).from(trainingProgramVersions).where(and(
+          eq(trainingProgramVersions.id, input.expectedActiveVersionId), eq(trainingProgramVersions.programId, current.id),
+          eq(trainingProgramVersions.personId, personId)
+        ));
+        // Desired-state replay proves inactivity, not the origin of a historical completion.
+        if (ownedVersion) return current;
+      }
+      if (current.lockVersion !== input.expectedLockVersion || current.activeVersionId !== input.expectedActiveVersionId) {
+        throw new ConflictError("Active TrainingProgram changed concurrently");
+      }
+      const [updated] = await transaction.update(trainingPrograms).set({ activeVersionId: null,
+        lockVersion: current.lockVersion + 1 }).where(and(eq(trainingPrograms.id, current.id), eq(trainingPrograms.personId, personId))).returning();
+      if (!updated) throw new ConflictError("TrainingProgram changed concurrently");
+      return this.serializeProgram(transaction, updated);
+    });
+  }
+
+  /** Lists Person-owned programs using an exclusive immutable UUID cursor, including inactive history. */
+  public async listPrograms(personId: string, query: ListTrainingProgramsQuery): Promise<TrainingProgramList> {
+    return this.database.db.transaction(async (transaction) => {
+    const limit = query.limit ?? 20;
+    const rows = await transaction.select().from(trainingPrograms).where(and(
+      eq(trainingPrograms.personId, personId), query.afterId ? gt(trainingPrograms.id, query.afterId) : undefined
+    )).orderBy(asc(trainingPrograms.id)).limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const items: TrainingProgram[] = [];
+    for (const row of page) items.push(await this.serializeProgram(transaction, row));
+    return { items, nextAfterId: rows.length > limit ? page.at(-1)!.id : null };
+    });
+  }
+
+  /** Reads one immutable version only when both program and version belong to this Person. */
+  public async findProgramVersion(personId: string, programId: string, versionId: string): Promise<TrainingProgramVersion | null> {
+    return this.database.db.transaction(async (transaction) => {
+    const [row] = await transaction.select().from(trainingProgramVersions).where(and(
+      eq(trainingProgramVersions.personId, personId), eq(trainingProgramVersions.programId, programId),
+      eq(trainingProgramVersions.id, versionId)
+    ));
+    return row ? this.readProgramVersion(transaction, personId, row.id) : null;
     });
   }
 

@@ -4,6 +4,13 @@ import addFormats from "ajv-formats";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 import {
+  CompleteTrainingProgramSchema,
+  ListTrainingProgramsQuerySchema,
+  TrainingProgramListSchema,
+  TrainingProgramVersionSchema,
+  ReadTrainingProgramVersionSchema,
+  type CompleteTrainingProgram,
+  type ListTrainingProgramsQuery,
   GetExternalActivityDetailsSchema,
   ExternalActivityDetailsResultSchema,
   type GetExternalActivityDetails,
@@ -165,6 +172,9 @@ interface McpServices {
     | "createWorkoutSession"
     | "correctWorkoutSession"
     | "findActiveProgram"
+    | "completeProgram"
+    | "listPrograms"
+    | "findProgramVersion"
     | "saveConfirmedProgram"
     | "materializeProgramCadence"
     | "classifyExternalActivity"
@@ -445,7 +455,7 @@ function confirmedTrainingProgramWriteResultContent(result: unknown): string {
   }
   return coachResultContent(
     workoutV2RoutingPolicy + trainingProgramConfirmationPolicy +
-    "The accepted program was saved atomically; the returned complete program is the canonical transaction result. It is sufficient verification of this write. Do not retract success if a later optional read fails. Read again for new advice or changed context only when useful."
+    "Inspect the returned activeVersionId: replay can return a now-inactive or subsequently revised program and must never be described as newly activated. The accepted program was saved atomically; the returned complete program is the canonical transaction result. It is sufficient verification of this write. Do not retract success if a later optional read fails. Read again for new advice or changed context only when useful."
   );
 }
 
@@ -494,6 +504,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   MCP_COACH_REPLY_POLICY + " " + routineCoachReplyShape + " " + dailyCoachReplyShape + " " + MCP_COACH_FINAL_RESPONSE_REQUIREMENT + " " +
   "Use authorized Person-scoped typed tools; authorization and ownership failures must never be bypassed. Google Sheets is a frozen non-authoritative legacy source, never an interactive writer or fallback. " +
   "There are no training-count, mandatory RIR, Recovery-score, fixed-increment, percentage, next-A/B or completed-day/week eligibility rules for Coach decisions and the universal confirmed program save. Progression increments and cadence are program facts you can discuss and change with consent. Legacy progression tools are compatibility-only, not today's permission. " +
+  "For training choices consider the user goal, actual completed work and intensity, recovery freshness, reported wellbeing, available time and confirmed equipment. Choose strength, cardio or rest; A/B sequence and frequency are guidance, not mandatory alternation. Explain material changes in advice. Do not assume gym equipment, impose a home/gym hybrid without the user preference or consent or treat a discussed program as accepted. Keep a stable exercise structure for progression; distinguish measured sets from program targets and qualitative effort. Venue changes do not transfer working weights across different mechanisms. " +
   trainingProgramConfirmationPolicy + workoutV2RoutingPolicy + MCP_RECOVERY_RETRY_POLICY +
   "A direct routine fact report or correction authorizes recording without another question. Preserve qualitative effort in notes without inventing numeric RIR; gym arrival is planning, not performed sets. Unknown optional measurements remain null or partial. For corrections, read the current record when needed to preserve untouched fields and append its replacement. A successful owning-domain result verifies the write; read again for requested totals, changed context, uncertainty or conflict, not as a compulsory ritual. An uncertain write outcome must be checked before retry to avoid duplicates. " +
   "Recovery observations retain exact metric meaning, time, units and manual versus account provenance. A 0..100 sleep_score is not 1..5 sleepQuality. Labelled nightly HRV differs from a seven-day average; retain unsupported labels or resleep with unknown duration as general notes. Save independent reported facts even when another fails. Do not invent a check-in, medical diagnosis or unknown duration. " +
@@ -943,8 +954,29 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       )
     ),
     defineTool(
+      "complete_training_program",
+      "Complete only the exact current program the user unambiguously asked to finish. This removes activity and preserves every historical version and session; it creates no replacement. Read its exact active id, version and lock. A venue discussion is not consent. The canonical result verifies completion; retries never reactivate anything.",
+      CompleteTrainingProgramSchema, TrainingProgramSchema, true, MCP_WORKOUT_WRITE_SCOPE,
+      (input) => services.training.completeProgram(input as CompleteTrainingProgram),
+      () => coachResultContent("The program is inactive and its history is preserved. No replacement was created. Use the current result; do not imply deletion or permanent retirement.")
+    ),
+    defineTool(
+      "list_training_programs",
+      "Read a bounded page of Person-owned programs, including inactive history. Follow nextAfterId as afterId. Inactive programs are historical context, not current prescriptions.",
+      ListTrainingProgramsQuerySchema, TrainingProgramListSchema, false, MCP_READ_SCOPE,
+      (input) => services.training.listPrograms(input as ListTrainingProgramsQuery),
+      () => trainingContextResultContent
+    ),
+    defineTool(
+      "get_training_program_version",
+      "Read an exact immutable historical program snapshot from programId and versionId, including versions referenced by recorded sessions. Does not activate or alter the program.",
+      ReadTrainingProgramVersionSchema, TrainingProgramVersionSchema, false, MCP_READ_SCOPE,
+      (input) => services.training.findProgramVersion(input.programId as string, input.versionId as string),
+      () => trainingContextResultContent
+    ),
+    defineTool(
       "save_confirmed_training_program",
-      "Save the complete program snapshot or exact changes already accepted by the user, atomically as the active immutable version. A direct instruction such as put 25 kg already authorizes that change without another confirmation or pain checklist. Read the current program when needed, preserve untouched workouts, prescriptions and cadence, overlay accepted changes and bind expectedActiveProgramId/expectedLockVersion. No training history, RIR, Recovery readiness, fixed increment, percentage or next-workout eligibility is required. Use explicit exercise versions or the supplied known descriptor; ask only if identity is materially ambiguous. Its typed result verifies the transaction. On conflict refresh current state and retry only within the same consented scope.",
+      "For a separately accepted new program, supply a fresh stable newProgramId UUID and expectedActiveVersionId (null only for confirmed absence); reuse that UUID on exact retries. This creates a distinct program and atomically replaces activity, preserving old history. Without newProgramId this updates the same program. A replay may return an inactive or subsequently revised program; never claim activation from outcome alone. Save the complete program snapshot or exact changes already accepted by the user, atomically as the active immutable version. A direct instruction such as put 25 kg already authorizes that change without another confirmation or pain checklist. Read the current program when needed, preserve untouched workouts, prescriptions and cadence, overlay accepted changes and bind expectedActiveProgramId/expectedLockVersion. No training history, RIR, Recovery readiness, fixed increment, percentage or next-workout eligibility is required. Use explicit exercise versions or the supplied known descriptor; ask only if identity is materially ambiguous. Its typed result verifies the transaction. On conflict refresh current state and retry only within the same consented scope.",
       SaveConfirmedTrainingProgramSchema,
       SaveConfirmedTrainingProgramResultSchema,
       true,

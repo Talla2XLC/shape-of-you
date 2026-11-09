@@ -646,6 +646,8 @@ export type ActivateTrainingProgramVersion = FromSchema<
 >;
 
 const confirmedProgramExpectationProperties = {
+  newProgramId: uuidSchema,
+  expectedActiveVersionId: nullableUuidSchema,
   expectedActiveProgramId: nullableUuidSchema,
   expectedLockVersion: {
     anyOf: [
@@ -658,6 +660,7 @@ const confirmedProgramExpectationProperties = {
 export const SaveConfirmedTrainingProgramSchema = {
   $id: "SaveConfirmedTrainingProgram",
   type: "object",
+  dependencies: { newProgramId: ["expectedActiveVersionId"] },
   oneOf: [
     {
       type: "object",
@@ -1914,3 +1917,34 @@ export const TrainingVersionParamsSchema = {
 export type TrainingVersionParams = FromSchema<
   typeof TrainingVersionParamsSchema
 >;
+
+/** Exact active snapshot to complete; no training eligibility is evaluated. */
+export const CompleteTrainingProgramSchema = {
+  type: "object", additionalProperties: false,
+  required: ["expectedActiveProgramId", "expectedActiveVersionId", "expectedLockVersion"],
+  properties: {
+    expectedActiveProgramId: uuidSchema, expectedActiveVersionId: uuidSchema,
+    expectedLockVersion: { type: "integer", minimum: 0 }
+  }
+} as const;
+/** Command removing activity while retaining all program history. */
+export type CompleteTrainingProgram = FromSchema<typeof CompleteTrainingProgramSchema>;
+/** Bounded program history ordered by immutable identity. */
+export const ListTrainingProgramsQuerySchema = {
+  type: "object", additionalProperties: false,
+  properties: { afterId: uuidSchema, limit: { type: "integer", minimum: 1, maximum: 100 } }
+} as const;
+/** Keyset page request; omitted limit defaults to twenty. */
+export type ListTrainingProgramsQuery = FromSchema<typeof ListTrainingProgramsQuerySchema>;
+/** Current program snapshots with a continuation identity. */
+export const TrainingProgramListSchema = {
+  type: "object", additionalProperties: false, required: ["items", "nextAfterId"],
+  properties: { items: { type: "array", items: TrainingProgramSchema }, nextAfterId: nullableUuidSchema }
+} as const;
+/** Person-owned program page, including inactive programs. */
+export type TrainingProgramList = FromSchema<typeof TrainingProgramListSchema>;
+/** Exact immutable version request, independent of active state. */
+export const ReadTrainingProgramVersionSchema = {
+  type: "object", additionalProperties: false, required: ["programId", "versionId"],
+  properties: { programId: uuidSchema, versionId: uuidSchema }
+} as const;

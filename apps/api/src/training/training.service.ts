@@ -1,6 +1,10 @@
 import { Inject, Injectable } from "@nestjs/common";
 
 import type {
+  CompleteTrainingProgram,
+  ListTrainingProgramsQuery,
+  TrainingProgramList,
+  TrainingProgramVersion,
   GetExternalActivityDetails,
   ExternalActivityDetailsResult,
   AcceptProgressionCandidate,
@@ -292,6 +296,23 @@ export class TrainingService {
       throw new NotFoundError("Active TrainingProgram was not found");
     }
     return program;
+  }
+
+  /** Removes activity from an exact Person-owned program without deleting history. */
+  public completeProgram(input: CompleteTrainingProgram): Promise<TrainingProgram> {
+    return this.store.completeProgram(this.personContext.getPersonId(), input);
+  }
+
+  /** Lists bounded current snapshots, including inactive programs. */
+  public listPrograms(query: ListTrainingProgramsQuery): Promise<TrainingProgramList> {
+    return this.store.listPrograms(this.personContext.getPersonId(), query);
+  }
+
+  /** Reads an exact historical snapshot; throws NotFoundError for inaccessible versions. */
+  public async findProgramVersion(programId: string, versionId: string): Promise<TrainingProgramVersion> {
+    const version = await this.store.findProgramVersion(this.personContext.getPersonId(), programId, versionId);
+    if (!version) throw new NotFoundError("TrainingProgramVersion was not found");
+    return version;
   }
 
   /** Atomically persists one explicitly confirmed active program snapshot. */

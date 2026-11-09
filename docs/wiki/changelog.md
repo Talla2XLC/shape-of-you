@@ -20,6 +20,19 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-11-09 — Coach program lifecycle prepared for delivery
+
+- Added explicit program completion, separate new-program identity with atomic
+  replacement, bounded program history and exact immutable-version reads.
+- Preserved Person ownership, immutable sessions and versions, optimistic
+  expectations, rollback and identity-backed replay without schema changes.
+- Clarified goal/intensity/wellbeing/time/equipment guidance in source MCP policy.
+- Local Quality, Architecture Review, PostgreSQL lifecycle checks and affected
+  documentation are accepted. Connected-catalog publication and natural Coach
+  conversations remain unverified; no delivery is claimed by this entry.
+- See the [lifecycle ADR](../adr/20261108-complete-and-replace-training-programs-through-coach.md).
+
+
 ### 2026-09-22 — Manual low-footprint staging promotion
 
 - Stopped successful `main` publication from contacting the shared staging VM;
