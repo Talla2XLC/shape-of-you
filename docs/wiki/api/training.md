@@ -42,8 +42,9 @@ MCP program lifecycle now includes:
 Existing save calls retain same-program version semantics. There are no new
 lifecycle tables or migrations. Local MCP/PostgreSQL tests and independent
 Quality verify history, ownership, retries, rollback and concurrent replacement;
-staging publication is verified by Promote 42581498688. Refresh of the connected
-client catalog and live Coach conversations remain unverified. See the
+staging publication is verified by Promote 42581498688. The ChatGPT web connection was refreshed and a new conversation recognized all
+three lifecycle actions. Prompted synthetic conversational smoke is accepted;
+no live user facts were read or written. See the
 [lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
 
 

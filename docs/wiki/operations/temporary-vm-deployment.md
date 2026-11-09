@@ -434,9 +434,11 @@ This does not affect unrelated Compose/PostgreSQL.
   write smoke was disabled. API and Identity public readiness returned HTTP 200.
   Public MCP discovery now lists 43 tools, including all three new program
   lifecycle actions and no legacy progression actions. Initialize policy SHA256
-  matches the local implementation. Current-client metadata refresh and live
-  Coach conversation remain unverified: browser ChatGPT timed out and native
-  app control was unavailable. No personal facts were written for verification.
+  matches the local implementation. The initially unavailable browser later became reachable. The ChatGPT web
+  Shape of You connection was refreshed; a new test conversation recognized
+  all three lifecycle tools and passed prompted fictional scenarios without
+  domain reads or writes. Existing sessions may retain old definitions.
+  This does not claim blind or longitudinal Coach validation.
 
 ## Decisions
 

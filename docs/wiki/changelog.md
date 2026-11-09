@@ -31,8 +31,9 @@ parsing, rollback operations, and production deployment remain separate stages.
   documentation are accepted. Full publication 42580368493 and Promote
   42581498688 delivered exact release ef52e4890c45b9cf0cf82d3bcc71e5c820e7007a
   through migrations, readiness and smoke. Public MCP discovery/policy are
-  verified; connected-client refresh and natural Coach conversations remain
-  unverified. No personal facts were written for verification.
+  verified. The ChatGPT web connection was refreshed and prompted fictional
+  Coach scenarios passed bounded Quality review. No personal facts were read
+  or written; this does not establish longitudinal recommendation quality.
 - See the [lifecycle ADR](../adr/20261108-complete-and-replace-training-programs-through-coach.md).
 
 

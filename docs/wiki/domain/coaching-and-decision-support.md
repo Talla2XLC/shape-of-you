@@ -68,9 +68,13 @@ The connected catalog observed during TASK-0176 still advertised old mandatory
 reads and legacy progression tools, while source initialize/tools discovery had
 already changed. The cause of that client/server mismatch is unknown. After staging delivery
 42581498688, public MCP discovery exposes the new lifecycle actions and initialize
-policy matches local source. Refresh of the same client used by Coach and
-conversational scenarios with synthetic data remain outstanding before claiming
-corrected live behavior. Local tests validate contracts and persistence,
+policy matches local source. The ChatGPT web connection was subsequently refreshed. A new dialogue recognized
+the lifecycle actions and passed prompted fictional strength/cardio/rest,
+unknown-recovery, venue-change and natural-consent scenarios without domain
+reads or writes. Independent Quality reviewed parent-observed excerpts; this
+is bounded conversational smoke, not a blind or longitudinal evaluation.
+Existing conversations may retain old definitions; the successful observation
+applies to the new test conversation. Local tests validate contracts and persistence,
 not the external model's training judgment. See the
 [lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
 

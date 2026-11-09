@@ -109,4 +109,4 @@ Coach сможет завершить старую программу до го�
 
 - [Принятая граница Coach](20261009-let-coach-propose-working-weight-from-history.md).
 - [Training](../wiki/domain/training-and-performance.md).
-- [План TASK-0176](../../plans/2026/11/2026-11-08-task-0176-training-coach-process.md).
+- [План TASK-0176](../../plans/2026/11/completed/2026-11-08-task-0176-training-coach-process.md).

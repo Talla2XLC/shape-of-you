@@ -39,8 +39,9 @@ not deletion or a terminal status. `list_training_programs` and
 immutable snapshots independently of active state. See the
 [program lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
 Local lifecycle implementation is independently verified and delivered to staging
-by Promote 42581498688. Connected-client catalog refresh and external Coach
-conversations remain unverified.
+by Promote 42581498688. The ChatGPT web catalog was refreshed and prompted synthetic Coach scenarios
+were accepted. These scenarios do not replace transaction tests or guarantee
+longitudinal recommendation quality.
 
 
 - `Exercise` has stable identity and immutable ExerciseVersions; aliases and
