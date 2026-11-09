@@ -210,3 +210,32 @@ API migration step сохраняется. При несовпадении ож�
 634237ff855a674f9a6b7cd28ed1b5a7ba81792a: это историческое свидетельство workflow,
 не сегодняшняя проверка runtime. После доставки — сравнение MCP initialize /
 tools/list и разговорный canary без реальных записей пользователя.
+
+
+## Доставка 2026-11-09 — проверенные факты
+
+Оператор отдельно подтвердил commit и push по точному плану. Коммит
+`ef52e4890c45b9cf0cf82d3bcc71e5c820e7007a` создан из 16 файлов и отправлен
+в `origin/main`; восемь прежних DreamTeam изменений исключены.
+Publish 42579036400 прошёл CI и опубликовал API/edge/Certbot. Promote
+42580241342 остановился до миграций: actual staging base не совпал с
+ожидаемым `bbf5a51e455b9f8761517f728ec279f99dc124e4`. Предусмотренный
+runbook путь полной публикации того же SHA (42580368493 с Identity) прошёл.
+Повторный Promote 42581498688 успешно доставил точный SHA. Pipeline staging
+завершил API migration step в 07:48:41Z, Identity migration step в 07:48:45Z
+(журнал current); smoke и exact-release completion — 07:49:41Z. Новых миграций
+TASK-0176 нет. Публичные API/Identity readiness после доставки: HTTP 200.
+Серверный MCP tools/list: 43 инструмента, все три новых lifecycle, без legacy
+progression. SHA256 инструкции совпал с локальным исходником:
+`06af88f48629db4deef7d306d474db1c15ac1c7fd2f9ead31f54744b6adf917b`.
+Выкладка staging завершена; обновление текущего клиентского каталога и живой
+диалог Coach остаются непроверенными. Реальные записи не менялись.
+
+Прямой public MCP initialize прежнего staging не содержит mandatory daily read
+и передаёт решения Coach; tools/list возвращал 40 инструментов без новых
+lifecycle и без legacy progression. Подключённые метаданные клиента при этом
+сохраняли старые описания. Это доказывает расхождение server/client metadata,
+но не его внутреннюю причину. Browser ChatGPT plugins недоступен
+(ERR_TIMED_OUT), а native UI текущего приложения запрещён computer-use
+средству. Права не менялись; reconnect и разговорный canary пока не выполнены.
+Проверки прежних API/Identity readiness после отказа Promote: HTTP 200.

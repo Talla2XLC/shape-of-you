@@ -20,7 +20,7 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
-### 2026-11-09 — Coach program lifecycle prepared for delivery
+### 2026-11-09 — Coach program lifecycle delivered to staging
 
 - Added explicit program completion, separate new-program identity with atomic
   replacement, bounded program history and exact immutable-version reads.
@@ -28,8 +28,11 @@ parsing, rollback operations, and production deployment remain separate stages.
   expectations, rollback and identity-backed replay without schema changes.
 - Clarified goal/intensity/wellbeing/time/equipment guidance in source MCP policy.
 - Local Quality, Architecture Review, PostgreSQL lifecycle checks and affected
-  documentation are accepted. Connected-catalog publication and natural Coach
-  conversations remain unverified; no delivery is claimed by this entry.
+  documentation are accepted. Full publication 42580368493 and Promote
+  42581498688 delivered exact release ef52e4890c45b9cf0cf82d3bcc71e5c820e7007a
+  through migrations, readiness and smoke. Public MCP discovery/policy are
+  verified; connected-client refresh and natural Coach conversations remain
+  unverified. No personal facts were written for verification.
 - See the [lifecycle ADR](../adr/20261108-complete-and-replace-training-programs-through-coach.md).
 
 

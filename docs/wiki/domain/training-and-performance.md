@@ -38,8 +38,9 @@ not deletion or a terminal status. `list_training_programs` and
 `get_training_program_version` expose bounded Person-owned history and exact
 immutable snapshots independently of active state. See the
 [program lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
-Local lifecycle implementation is independently verified; connector publication
-and external Coach conversations remain unverified.
+Local lifecycle implementation is independently verified and delivered to staging
+by Promote 42581498688. Connected-client catalog refresh and external Coach
+conversations remain unverified.
 
 
 - `Exercise` has stable identity and immutable ExerciseVersions; aliases and

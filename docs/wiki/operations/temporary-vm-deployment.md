@@ -422,6 +422,22 @@ This does not affect unrelated Compose/PostgreSQL.
   These successful reads do not establish the cause or resolution of an earlier
   intermittent read failure.
 
+- On 2026-11-09, operator-approved [full publication 42580368493](https://github.com/Talla2XLC/shape-of-you/actions/runs/42580368493)
+  and [Promote staging 42581498688](https://github.com/Talla2XLC/shape-of-you/actions/runs/42581498688)
+  delivered TASK-0176 release `ef52e4890c45b9cf0cf82d3bcc71e5c820e7007a`.
+  The initial push publication succeeded; its promotion 42580241342 rejected
+  the expected staging base before migrations. The standard full-publication
+  route included Identity and removed the inheritance assumption without
+  bypassing guards. The staging pipeline completed API migration at
+  `07:48:41Z`, Identity migration at `07:48:45Z` (journal `current`), and smoke
+  plus exact-release deployment at `07:49:41Z`. TASK-0176 authored no migrations;
+  write smoke was disabled. API and Identity public readiness returned HTTP 200.
+  Public MCP discovery now lists 43 tools, including all three new program
+  lifecycle actions and no legacy progression actions. Initialize policy SHA256
+  matches the local implementation. Current-client metadata refresh and live
+  Coach conversation remain unverified: browser ChatGPT timed out and native
+  app control was unavailable. No personal facts were written for verification.
+
 ## Decisions
 
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)

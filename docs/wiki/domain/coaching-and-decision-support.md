@@ -66,10 +66,11 @@ separate intents; lifecycle commands preserve that distinction and history.
 
 The connected catalog observed during TASK-0176 still advertised old mandatory
 reads and legacy progression tools, while source initialize/tools discovery had
-already changed. The publication cause is unknown. After separately authorized
-delivery, compare initialize instructions and tools/list through the same client
-used by Coach, then run conversational scenarios with synthetic data before
-claiming corrected live behavior. Local tests validate contracts and persistence,
+already changed. The cause of that client/server mismatch is unknown. After staging delivery
+42581498688, public MCP discovery exposes the new lifecycle actions and initialize
+policy matches local source. Refresh of the same client used by Coach and
+conversational scenarios with synthetic data remain outstanding before claiming
+corrected live behavior. Local tests validate contracts and persistence,
 not the external model's training judgment. See the
 [lifecycle ADR](../../adr/20261108-complete-and-replace-training-programs-through-coach.md).
 
