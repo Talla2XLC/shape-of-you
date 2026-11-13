@@ -20,6 +20,17 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-11-13 — Meal correction result verification accepted
+
+- Treat uncertain correction outcomes as unknown and verify current facts before
+  retrying; matching replacements confirm persistence without another write.
+- Validate successful corrections against the existing Meal schema and return
+  matching canonical structured and JSON text results for client compatibility.
+- Preserve unchanged items, ownership, idempotency and concurrent corrections.
+- Independent Quality accepted the local implementation and documentation;
+  429 API unit tests and three isolated PostgreSQL scenarios passed. Original
+  client-visible empty-result cause remains unproven. Staging delivery is pending.
+
 ### 2026-11-09 — Coach program lifecycle delivered to staging
 
 - Added explicit program completion, separate new-program identity with atomic

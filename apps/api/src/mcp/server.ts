@@ -55,6 +55,7 @@ import {
   ListWeightMeasurementsQuerySchema,
   ListWorkoutSessionsQuerySchema,
   MealListSchema,
+  MealSchema,
   MaterializeTrainingProgramCadenceResultSchema,
   MaterializeTrainingProgramCadenceSchema,
   PersonPreferencesSchema,
@@ -302,7 +303,8 @@ const mealCorrectionWriteResultContent = coachResultContent(
 const mealReadResultContent = coachResultContent(
   "Use these meal facts silently. Acknowledge what was eaten; give approximate nutrition when useful and advice only when useful or requested. " +
   "Use stored estimates as approximate values rather than hiding them because exact grams were not measured. " +
-  "Only when the user's unambiguous Meal correction is still pending and no successful correction result has been returned for it, select the current matching Meal from this result, preserve its complete canonical fields and items, overlay only the user's clarification, and immediately perform the correction with that current id. " +
+  "When a Meal correction has an unknown outcome, compare the current matching Meal with the complete intended replacement first. A matching current replacement verifies persistence: acknowledge it without another correction. Only an unchanged original target permits an exact retry with the same target id and idempotency key. Preserve unrelated concurrent changes; reread and apply only the still-authorized clarification if needed. A failed read leaves the outcome unknown, never not_saved. " +
+  "Only when the user's unambiguous Meal correction is still pending and the current facts do not already contain it, select the current matching Meal from this result, preserve its complete canonical fields and items, overlay only the user's clarification, and perform the correction with that current id. " +
   "If a successful correction result was already returned, this optional day or totals read must not reapply that correction. Do not ask the user to repeat or confirm the correction."
 );
 
@@ -508,6 +510,7 @@ export const MCP_OPERATIONAL_INSTRUCTIONS =
   trainingProgramConfirmationPolicy + workoutV2RoutingPolicy + MCP_RECOVERY_RETRY_POLICY +
   "A direct routine fact report or correction authorizes recording without another question. Preserve qualitative effort in notes without inventing numeric RIR; gym arrival is planning, not performed sets. Unknown optional measurements remain null or partial. For corrections, read the current record when needed to preserve untouched fields and append its replacement. A successful owning-domain result verifies the write; read again for requested totals, changed context, uncertainty or conflict, not as a compulsory ritual. An uncertain write outcome must be checked before retry to avoid duplicates. " +
   "Recovery observations retain exact metric meaning, time, units and manual versus account provenance. A 0..100 sleep_score is not 1..5 sleepQuality. Labelled nightly HRV differs from a seven-day average; retain unsupported labels or resleep with unknown duration as general notes. Save independent reported facts even when another fails. Do not invent a check-in, medical diagnosis or unknown duration. " +
+  "Preserve whether reported food weights are raw or cooked; do not silently choose a cooking basis. State a necessary assumption or clarify when the difference materially changes a useful correction. " +
   "Meal descriptions and photo estimates are approximate, not measured precision. Preserve restaurant-supplied nutrition as the baseline; overlay only the reported portion correction. Use unknown fields when evidence is insufficient, not sentinel amounts. Method and confidence describe an estimate; they do not decide a diet recommendation. Answer in natural language without technical mechanics. " +
   "Imported activity summaries do not contain exercise sets. Classifications and links preserve actual identities and prevent double counting; resolve them when relevant, not as a prerequisite to unrelated advice. Program targets and completion labels are factual projections, not mandatory instructions or bans. " +
   "Historical recommendation snapshots and statistical insights retain their recorded provenance and uncertainty; they are inputs, not binding current decisions. Never claim a saved fact, active program, provider value or autonomous follow-up without evidence. Material new program changes require consent, but a direct instruction or consent already given is sufficient. " +
@@ -552,6 +555,7 @@ const validateCreateWeightMeasurement = compile(CreateWeightMeasurementSchema);
 const validateCorrectWeightMeasurement = compile(CorrectWeightMeasurementSchema);
 const validateCreateMeal = compile(CreateMealSchema);
 const validateCorrectMeal = compile(CorrectMealSchema);
+const validateMealResult = compile(MealSchema);
 const validateCreateRecoveryObservation = compile(CreateRecoveryObservationSchema);
 const validateCorrectRecoveryObservation = compile(CorrectRecoveryObservationSchema);
 const validateCreateWorkoutSession = compile(CreateWorkoutSessionSchema);
@@ -670,7 +674,8 @@ function createServer(
       failureStage = "present";
       return successResult(
         definition.structured?.(result) ?? result,
-        definition.present?.(result)
+        definition.present?.(result),
+        definition.tool.name === "correct_meal"
       );
     } catch (error) {
       if (error instanceof McpAuthorizationError) {
@@ -880,13 +885,17 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "correct_meal",
       "Immediately append one idempotent full-replacement correction to a uniquely identified current Meal without duplicate confirmation. Preserve every unchanged item and its estimate. Recalculate only the corrected food or amount using reasonable average values; do not replace a useful estimate with unknown values merely because exact grams are absent. Preserve genuine unknowns when estimation has no reasonable basis. The returned canonical Meal is sufficient typed verification; use a later date-scoped read only when the user also requested the updated day or totals, and never reapply an already successful correction. Reply in natural coach language without exposing contract fields or tool mechanics.",
       withIdSchema("CorrectMealToolInput", correctMealToolInputSchema),
-      undefined,
+      MealSchema,
       true,
       MCP_MEAL_WRITE_SCOPE,
-      async (input) => (await services.nutrition.correctMeal(
-        input.id as string,
-        normalizeMealInput(input, validateCorrectMeal) as unknown as CorrectMeal
-      )).meal,
+      async (input) => {
+        const meal = (await services.nutrition.correctMeal(
+          input.id as string,
+          normalizeMealInput(input, validateCorrectMeal) as unknown as CorrectMeal
+        )).meal;
+        if (!validateMealResult(meal)) throw new Error("Meal correction result does not match its output schema");
+        return meal;
+      },
       () => mealCorrectionWriteResultContent
     ),
     defineTool(
@@ -1753,10 +1762,14 @@ function compile(schema: Readonly<Record<string, unknown>>): ValidateFunction {
   return ajv.compile(schema);
 }
 
-function successResult(value: unknown, content?: string): CallToolResult {
+function successResult(value: unknown, content?: string, includeJson = false): CallToolResult {
   const structured = isRecord(value) ? value : { result: value };
   return {
-    content: [{ type: "text", text: content ?? JSON.stringify(value) }],
+    content: [
+      { type: "text", text: content ?? JSON.stringify(value) },
+      ...(includeJson && content !== undefined
+        ? [{ type: "text" as const, text: JSON.stringify(structured) }] : [])
+    ],
     structuredContent: structured
   };
 }
@@ -1958,17 +1971,17 @@ function mealCorrectionErrorResult(
   reason: MealCorrectionFailureReason
 ): CallToolResult {
   const recovery = reason === "retryable_failure"
-    ? "retry_same_correction_once"
+    ? "read_current_meal_verify_before_retry"
     : "read_current_meal_rebuild_and_retry";
   const instruction = reason === "retryable_failure"
-    ? "MEAL CORRECTION NOT SAVED: Retry the exact same correction once with the same idempotency key. If it still fails, say naturally that saving is temporarily unavailable."
+    ? "MEAL CORRECTION OUTCOME UNKNOWN: The operation may have committed before its acknowledgement failed. Call list_meals for the correction's exact local date before retrying. Compare the complete intended replacement with the current matching Meal. A matching replacement verifies persistence: acknowledge success without another correction. If the original target is unchanged, retry the exact same correction once with the same target id and idempotency key. If concurrent changes exist, preserve them and apply only the still-authorized clarification; never overwrite unrelated items. If the read also fails or the match is ambiguous, keep the outcome unknown and do not retry blindly or claim failure or success."
     : "MEAL CORRECTION NOT SAVED: Call list_meals for the local date already present in the correction, select the current matching Meal, preserve every canonical field and item, overlay only the user's clarification, and retry correct_meal once with the current id and a correction-specific idempotency key.";
   return errorResult(
     coachFailureResultContent(
-      `${instruction} Keep the user's unambiguous clarification as pending correction intent and do not ask them to repeat or reconfirm it. Until a typed success is returned, never claim it was saved or promise to use the unpersisted value in later totals, assessments, or recommendations. Keep this recovery flow and all tool names, ids, fields, and error categories out of the user-facing reply.`
+      `${instruction} Keep the user's unambiguous clarification as pending correction intent and do not ask them to repeat or reconfirm it. Until a typed success or matching current read-back verifies persistence, never claim it was saved or promise to use the unpersisted value in later totals, assessments, or recommendations. Keep this recovery flow and all tool names, ids, fields, and error categories out of the user-facing reply.`
     ),
     {
-      state: "not_saved",
+      state: reason === "retryable_failure" ? "unknown" : "not_saved",
       reason,
       recovery
     }

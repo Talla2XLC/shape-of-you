@@ -78,15 +78,33 @@ Natural Meal corrections use a current-read transaction protocol. Before
 assembling the full replacement, the Coach reads the exact local date, selects
 the current matching Meal, preserves its canonical fields and items, and
 overlays only the user's clarification. A successful `correct_meal` response
-contains the canonical Meal serialized from the committed transaction and is
-sufficient write verification; another list is used only when the user also
+declares the existing Meal output schema and validates the service result
+before reporting success. It contains the canonical Meal serialized from the
+committed transaction in both `structuredContent` and an additional JSON
+TextContent block alongside guidance. Both representations match, allowing
+clients without structured-content support to read the saved fact. An empty or
+invalid service result returns unknown rather than fabricated success. A valid
+canonical response is sufficient write verification; another list is used only when the user also
 requested the updated day or totals, and it must not replay the correction.
 Invalid replacements return a machine-readable re-read/rebuild/retry state;
 stale or missing targets require the same rebase onto the current Meal; other
-execution failures permit one retry with the same idempotency key. Until typed
-success, the clarification remains pending intent and cannot be presented or
-used as a persisted fact. These recovery details remain model-facing and are
-not exposed in the natural user reply.
+execution failures return `state: unknown` with
+`recovery: read_current_meal_verify_before_retry`. A write may have committed
+before its acknowledgement failed. Read the exact local date and compare the
+complete intended replacement against the current matching Meal first. Matching
+content verifies persistence without another correction. An unchanged original
+target permits an exact retry with the same target id and idempotency key;
+unrelated concurrent changes must be preserved. Failed verification reads leave
+the outcome unknown and do not authorize blind retries. Typed success or matching
+current read-back verifies persistence; until then the clarification remains
+pending intent. These recovery details remain model-facing and are not exposed
+in ordinary replies.
+
+Food weights retain the reported raw or cooked basis. Coach states a necessary
+assumption or clarifies a material ambiguity instead of silently choosing one.
+TASK-0177 verifies the recovery contract using synthetic PostgreSQL scenarios;
+this local change is not yet delivered and does not establish the cause of an
+individual lost acknowledgement.
 
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and
@@ -105,6 +123,9 @@ detail creates an append-only full-snapshot correction.
 - TASK-0086 accepted MCP photo-estimation and read-back fixture.
 - TASK-0114 accepted current-read correction assembly, typed recovery states,
   canonical command verification, and replay prevention tests.
+- TASK-0177 accepted unknown-outcome recovery, post-commit acknowledgement loss,
+  exact replay, failed read, concurrent correction, ownership, output-schema
+  validation and canonical JSON compatibility tests.
 - TASK-0164 Stage A accepted decimal publication and isolated PostgreSQL
   persistence, idempotent replay, and menu nutrient tests.
 

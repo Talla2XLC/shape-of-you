@@ -47,6 +47,27 @@ import {
   registerMcpRoutes
 } from "../src/mcp/server.js";
 
+function completeSyntheticMeal(snapshot: {
+  id: string; description?: string; supersedesId?: string; items: Array<Record<string, unknown>>;
+}) {
+  const occurredAt = "2026-09-02T07:00:00.000Z";
+  const totals = { caloriesKcal: 0, proteinG: 0, fatG: 0, carbsG: 0 };
+  for (const item of snapshot.items) {
+    for (const key of Object.keys(totals) as Array<keyof typeof totals>) {
+      totals[key] += (item.nutrients as Record<string, number>)[key]!;
+    }
+  }
+  return { personId: "00000000-0000-4000-8000-000000000001", occurredAt,
+    temporalPrecision: "instant", localDate: "2026-09-02", timezone: "Europe/Moscow", kind: "breakfast",
+    description: null, note: null, photoMediaId: null, totals, nutritionCompleteness: "complete",
+    sourceReference: { id: "00000000-0000-4000-8000-000000000999", channel: "manual",
+      externalSystem: null, externalRecordId: null, occurredAt, ingestedAt: occurredAt },
+    dedupeKey: "synthetic-correction", confidence: null, supersedesId: null,
+    correctionReason: null, createdAt: occurredAt, ...snapshot,
+    items: snapshot.items.map((item, i) => ({ position: i + 1, foodVersionId: null,
+      amountDescription: null, estimateMethod: null, amountConfidence: null, ...item })) };
+}
+
 const legacyMealToolCompatibilityContracts = {
   record_meal: {
     required: ["occurredAt", "timezone", "kind", "items", "dedupeKey"],
@@ -657,6 +678,7 @@ describe("MCP HTTP adapter", () => {
     const correctMealTool = body.result.tools.find((tool: { name: string }) =>
       tool.name === "correct_meal"
     );
+    expect(correctMealTool?.outputSchema).toMatchObject({ type: "object", required: expect.arrayContaining(["id", "items", "totals"]) });
     expect(correctMealTool?.description).toContain(
       "returned canonical Meal is sufficient typed verification"
     );
@@ -1918,7 +1940,11 @@ describe("MCP HTTP adapter", () => {
       created("measurement", "record_weight_measurement")
     );
     const correctMeal = vi.fn().mockResolvedValue(
-      created("meal", "correct_meal")
+      { created: true, meal: completeSyntheticMeal({
+        id: "00000000-0000-4000-8000-000000000204",
+        items: [{ label: "Synthetic food", amountKind: "quantified", quantity: 1, unit: "piece",
+          nutrients: { caloriesKcal: 100, proteinG: 5, fatG: 4, carbsG: 11 } }]
+      }) }
     );
     const readDailyAssessment = vi.fn<() => Promise<DailyAssessmentResult>>().mockResolvedValue({
       state: "timezone_required" as const,
@@ -2443,6 +2469,11 @@ describe("MCP HTTP adapter", () => {
           expect(applyConfirmedWorkingWeight).toHaveBeenLastCalledWith(args);
         } else if (name === "list_workout_sessions") {
           expect(toolResult.structuredContent).toEqual({ items: [] });
+        } else if (name === "correct_meal") {
+          expect(toolResult.structuredContent).toMatchObject({
+            id: "00000000-0000-4000-8000-000000000204"
+          });
+          expect(JSON.parse(toolResult.content[1].text)).toEqual(toolResult.structuredContent);
         } else {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });
         }
@@ -2553,7 +2584,7 @@ describe("MCP HTTP adapter", () => {
         "select the current matching Meal from this result"
       );
       expect(successfulContent.get("list_meals")).toContain(
-        "no successful correction result has been returned for it"
+        "the current facts do not already contain it"
       );
       expect(successfulContent.get("list_meals")).toContain(
         "must not reapply that correction"
@@ -2650,17 +2681,15 @@ describe("MCP HTTP adapter", () => {
       expect(retryableCorrection).toMatchObject({
         isError: true,
         structuredContent: {
-          state: "not_saved",
+          state: "unknown",
           reason: "retryable_failure",
-          recovery: "retry_same_correction_once"
+          recovery: "read_current_meal_verify_before_retry"
         }
       });
-      expect(retryableCorrection.content[0].text).toContain(
-        "Retry the exact same correction once with the same idempotency key"
-      );
-      expect(retryableCorrection.content[0].text).toContain(
-        "never claim it was saved or promise to use the unpersisted value"
-      );
+      expect(retryableCorrection.content[0].text).toContain("before retrying");
+      expect(retryableCorrection.content[0].text).toContain("matching current read-back");
+      expect(retryableCorrection.content[0].text).toContain("If the read also fails");
+      expect(retryableCorrection.content[0].text).not.toContain("MEAL CORRECTION NOT SAVED");
 
       readDailyAssessment.mockResolvedValueOnce(availableDailyAssessment);
       const directDailyAssessment = await authorizedFastify.inject({
@@ -3011,7 +3040,7 @@ describe("MCP HTTP adapter", () => {
         }
       ]
     };
-    const correctedMeal = {
+    const correctedMeal = completeSyntheticMeal({
       ...originalMeal,
       id: "00000000-0000-4000-8000-000000000204",
       supersedesId: originalMeal.id,
@@ -3025,7 +3054,7 @@ describe("MCP HTTP adapter", () => {
         amountConfidence: null,
         nutrients: { caloriesKcal: 414, proteinG: 44, fatG: 25.5, carbsG: 0 }
       }]
-    };
+    });
     const photoMeal = {
       id: "00000000-0000-4000-8000-000000000205",
       description: "Ужин по фото",
