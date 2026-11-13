@@ -440,6 +440,27 @@ This does not affect unrelated Compose/PostgreSQL.
   domain reads or writes. Existing sessions may retain old definitions.
   This does not claim blind or longitudinal Coach validation.
 
+- On 2026-11-13, operator-approved [full publication 43417236571](https://github.com/Talla2XLC/shape-of-you/actions/runs/43417236571)
+  and [Promote staging 43418547067, attempt 3](https://github.com/Talla2XLC/shape-of-you/actions/runs/43418547067/attempts/3)
+  delivered TASK-0177 release `3cd1930bb9eca13d91fbc688e5ca6a8a7030d97f`.
+  The pipeline completed API migrations at `12:11:28Z`, Identity migrations at
+  `12:11:33Z` (journal `current`), and smoke at `12:12:30Z`. TASK-0177 authored
+  no migrations; write smoke was disabled. The current release pointer matches
+  the exact SHA; API, Identity and edge are healthy, and public readiness is 200.
+  Public MCP discovery advertises the Meal output schema and initialize policy
+  exactly matches accepted source. No personal reads or writes were used.
+  Attempt 1 stopped on the deployment/renewal lock before migrations. Attempt 2
+  completed API migrations but timed out on Identity and could not verify Docker
+  cleanup. During the incident, console evidence confirmed host OOM killed a
+  `talking-to-ai` process; direct and `german-vpn`-routed SSH/HTTP/TLS stalled.
+  This does not identify the initiating allocation or prove the migration caused
+  OOM. Access recovered without an operator restart; before attempt 3, Docker was
+  responsive, migration containers were absent and the previous release healthy.
+  The VM had 1.9 GiB RAM, 486 MiB swap and approximately 650 MiB available RAM;
+  disk/inode exhaustion was absent. Runtime memory limits exist, but migration
+  services have no `mem_limit`. Shared-host resource budgeting remains separate
+  work; successful retry does not establish that the OOM risk is resolved.
+
 ## Decisions
 
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)

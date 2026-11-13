@@ -103,8 +103,11 @@ in ordinary replies.
 Food weights retain the reported raw or cooked basis. Coach states a necessary
 assumption or clarifies a material ambiguity instead of silently choosing one.
 TASK-0177 verifies the recovery contract using synthetic PostgreSQL scenarios;
-this local change is not yet delivered and does not establish the cause of an
-individual lost acknowledgement.
+release `3cd1930` delivered this contract to staging on 2026-11-13 through
+publication 43417236571 and Promote 43418547067 attempt 3. Public discovery
+confirms the output schema and accepted operational policy. This does not
+establish the cause of an individual lost acknowledgement or verify a refreshed
+client conversation; no personal writes were used for delivery verification.
 
 Controlled historical import may return item nutrient components and exact
 totals as `null`, with `nutritionCompleteness = partial`. Null means unknown and

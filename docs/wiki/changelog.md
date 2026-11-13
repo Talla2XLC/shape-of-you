@@ -20,7 +20,7 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
-### 2026-11-13 — Meal correction result verification accepted
+### 2026-11-13 — Meal correction result verification delivered to staging
 
 - Treat uncertain correction outcomes as unknown and verify current facts before
   retrying; matching replacements confirm persistence without another write.
@@ -29,7 +29,13 @@ parsing, rollback operations, and production deployment remain separate stages.
 - Preserve unchanged items, ownership, idempotency and concurrent corrections.
 - Independent Quality accepted the local implementation and documentation;
   429 API unit tests and three isolated PostgreSQL scenarios passed. Original
-  client-visible empty-result cause remains unproven. Staging delivery is pending.
+  client-visible empty-result cause remains unproven. Full publication
+  43417236571 and Promote 43418547067 attempt 3 delivered exact release
+  `3cd1930bb9eca13d91fbc688e5ca6a8a7030d97f` through API/Identity migration
+  steps, readiness and smoke. Public MCP discovery/policy match accepted source.
+  Earlier attempts met a deployment lock and then an Identity timeout during a
+  host OOM incident; host access recovered without an operator restart. The
+  initiating allocation and resource-capacity remediation remain unverified.
 
 ### 2026-11-09 — Coach program lifecycle delivered to staging
 
