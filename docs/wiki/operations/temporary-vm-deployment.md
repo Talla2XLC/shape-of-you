@@ -440,6 +440,25 @@ This does not affect unrelated Compose/PostgreSQL.
   domain reads or writes. Existing sessions may retain old definitions.
   This does not claim blind or longitudinal Coach validation.
 
+- On 2026-11-16, operator-approved [full publication 43832206133](https://github.com/Talla2XLC/shape-of-you/actions/runs/43832206133)
+  and [Promote staging 43833391693](https://github.com/Talla2XLC/shape-of-you/actions/runs/43833391693)
+  delivered TASK-0178 release `c12916da35117c1e6e7be20c5d553fed9f8941c0`.
+  Full publication avoids relying on unverified Identity inheritance from the
+  preceding documentation-only `main` commit. The pipeline actor in staging
+  completed the API migration step at `08:43:43Z`, Identity at `08:43:48Z`
+  (`journal_current` at `08:43:47Z`), smoke at `08:44:46Z`, and exact-release
+  completion immediately afterward. TASK-0178 authored no migrations; write
+  smoke was disabled. Public API and Identity readiness returned HTTP 200.
+  Public discovery returns 43 tools; all 23 visible writers declare result
+  schemas. The 41 tools shared with the local comparison fixture exactly match
+  accepted input/output schemas, descriptions and annotations. One standard
+  MCP SDK validator compiles every deployed output schema. No personal facts
+  were read or written, no manual SSH was used, and the original client
+  conversation was not verified. This establishes implementation and staging
+  delivery completion, not the original acknowledgement-loss cause or
+  longitudinal Coach behavior. Production, tags and GitHub Release remain
+  separate gates.
+
 - On 2026-11-13, operator-approved [full publication 43417236571](https://github.com/Talla2XLC/shape-of-you/actions/runs/43417236571)
   and [Promote staging 43418547067, attempt 3](https://github.com/Talla2XLC/shape-of-you/actions/runs/43418547067/attempts/3)
   delivered TASK-0177 release `3cd1930bb9eca13d91fbc688e5ca6a8a7030d97f`.

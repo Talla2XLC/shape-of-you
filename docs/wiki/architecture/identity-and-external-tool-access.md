@@ -379,9 +379,12 @@ use `limit`/`cursor`, not a `localDate` argument; date selection uses returned
 facts. A valid canonical result with a successful domain outcome is sufficient
 verification without a compulsory second read.
 
-TASK-0178's shared result handling is locally Quality-accepted; server delivery
-and verification in the original client conversation remain pending. No new
-domain entities, services or migrations were introduced.
+TASK-0178's shared result handling is Quality-accepted and delivered to staging
+as `c12916d` on 2026-11-16. Public discovery matches the accepted source and the
+standard MCP SDK compiles the deployed output catalog. Verification in the
+original client conversation remains pending. See the
+[deployment evidence](../operations/temporary-vm-deployment.md). No new domain
+entities, services or migrations were introduced.
 
 Relevant routine MCP results carry the current server-owned Coach reply policy
 in model-facing content. Validation, execution, and OAuth failures carry a separate

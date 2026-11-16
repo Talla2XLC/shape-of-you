@@ -49,8 +49,8 @@ results expose identical canonical data as structured content and JSON text.
 An invalid or missing creation result leaves the outcome unknown; an uncertain
 creation requires comparing the exact current Meal and report identity before
 an exact retry with the original key. Similar food or totals alone do not verify
-that report. Shared handling is locally accepted in TASK-0178; its delivery and
-original-client verification remain pending.
+that report. TASK-0178's shared handling is delivered to staging; verification
+in the original client conversation remains pending.
 Routine capture may end with a natural acknowledgement; advice
 or a question is added when useful or requested. Ordinary replies keep internal
 transport and completeness vocabulary out of the conversation.
