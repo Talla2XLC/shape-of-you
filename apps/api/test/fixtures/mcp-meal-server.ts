@@ -4,8 +4,9 @@ import { registerMcpRoutes, type McpRouteOptions } from "../../src/mcp/server.js
 
 async function unavailable(): Promise<never> { throw new Error("Unrelated service called"); }
 
-/** Creates an isolated MCP endpoint using the supplied Nutrition boundary. */
-export function mcpMealServer(nutrition: McpRouteOptions["services"]["nutrition"], personId: string) {
+/** Creates an isolated MCP endpoint with Nutrition and optional additional synthetic boundaries. */
+export function mcpMealServer(nutrition: McpRouteOptions["services"]["nutrition"], personId: string,
+  overrides: Partial<McpRouteOptions["services"]> = {}) {
   const server = Fastify({ logger: false });
   const context = new RequestPersonContext(personId);
   registerMcpRoutes({ fastify: server, issuer: "https://identity.example.test", resource: "https://api.example.test/mcp",
@@ -20,7 +21,7 @@ export function mcpMealServer(nutrition: McpRouteOptions["services"]["nutrition"
         setActivityRecordingMode: unavailable, confirmWorkoutActivityLink: unavailable, getExternalActivityDetails: unavailable },
       recovery: { listObservations: unavailable, createObservation: unavailable, correctObservation: unavailable },
       dailyContextNotes: { list: unavailable, create: unavailable, correct: unavailable },
-      currentRecoveryContext: { read: unavailable }, dailyProjection: { projection: unavailable }
+      currentRecoveryContext: { read: unavailable }, dailyProjection: { projection: unavailable }, ...overrides
     }
   });
   let requestId = 0;

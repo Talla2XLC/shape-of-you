@@ -6,6 +6,8 @@ import { createDatabase, type DatabaseContext } from "../src/database/context.js
 import { runMigrations } from "../src/database/migrate.js";
 import { NutritionRepository } from "../src/storage/nutrition-repository.js";
 import { NutritionService } from "../src/nutrition/nutrition.service.js";
+import { WeightMeasurementRepository } from "../src/storage/weight-measurement-repository.js";
+import { WeightMeasurementService } from "../src/weight-measurements/weight-measurement.service.js";
 import { mcpMealServer, decimalMenuMeal } from "./fixtures/mcp-meal-server.js";
 
 let container: StartedPostgreSqlContainer | undefined;
@@ -38,8 +40,12 @@ async function fixture() {
     listMeals: (query) => service.listMeals(query),
     createMeal: (input) => service.createMeal(input),
     correctMeal: (id, input) => service.correctMeal(id, input)
-  }, personId);
+  }, personId, { weights: {
+    list: (query) => weights.list(query), create: (input) => weights.create(input),
+    correct: (id, input) => weights.correct(id, input)
+  } });
   const service = new NutritionService(repository, endpoint.context);
+  const weights = new WeightMeasurementService(new WeightMeasurementRepository(database), endpoint.context);
   const original = decimalMenuMeal(randomUUID());
   original.items.push({ ...original.items[0]!, label: "Unchanged synthetic side" });
   const meal = (await endpoint.call("record_meal", original)).structuredContent;
@@ -47,10 +53,59 @@ async function fixture() {
     items: original.items.map((item, index) => index === 0 ? { ...item, quantity: 2,
       nutrients: { caloriesKcal: 1270, proteinG: 10.2, fatG: 22, carbsG: 138 } } : item) };
   const count = async () => (await database.pool.query("select count(*)::int as count from meals where person_id=$1", [personId])).rows[0].count;
-  return { ...endpoint, service, personId, meal, correction, count };
+  return { ...endpoint, service, weights, personId, meal, correction, count };
 }
 
-describe("Meal correction unknown outcomes through MCP and PostgreSQL", () => {
+describe("Meal and Weight unknown outcomes through MCP and PostgreSQL", () => {
+  it.each([false, true])("verifies Meal creation before exact retry; committed=%s", async (committed) => {
+    const f = await fixture();
+    try {
+      const input = decimalMenuMeal(randomUUID());
+      const real = f.service.createMeal.bind(f.service);
+      vi.spyOn(f.service, "createMeal").mockImplementationOnce(async (command) => {
+        if (committed) await real(command);
+        throw new Error("Synthetic Meal acknowledgement failure");
+      });
+      const uncertain = await f.call("record_meal", input);
+      expect(uncertain).toMatchObject({ isError: true, structuredContent: { state: "unknown" } });
+      expect(uncertain.content[0].text).toContain("list_meals");
+      const current = await f.call("list_meals", { localDate: "2026-10-07" });
+      expect(JSON.parse(current.content[1].text)).toEqual(current.structuredContent);
+      expect(current.structuredContent.items.filter((meal: Meal) => meal.dedupeKey === input.dedupeKey)).toHaveLength(committed ? 1 : 0);
+      if (!committed) {
+        const saved = await f.call("record_meal", input);
+        expect(saved.isError).not.toBe(true);
+        expect(JSON.parse(saved.content[1].text)).toEqual(saved.structuredContent);
+      }
+      expect(await f.count()).toBe(2);
+      const replay = await f.call("record_meal", input);
+      expect(replay.isError).not.toBe(true);
+      expect(await f.count()).toBe(2);
+    } finally { await f.server.close(); }
+  });
+
+  it.each([false, true])("verifies Weight creation before exact retry; committed=%s", async (committed) => {
+    const f = await fixture();
+    try {
+      const input = { measuredAt: "2026-11-15T07:00:00.000Z", timezone: "Europe/Belgrade", weightKg: 76.4,
+        sourceReference: { channel: "manual", externalSystem: null, externalRecordId: null, occurredAt: null }, dedupeKey: randomUUID() };
+      const real = f.weights.create.bind(f.weights);
+      vi.spyOn(f.weights, "create").mockImplementationOnce(async (command) => {
+        if (committed) await real(command);
+        throw new Error("Synthetic Weight acknowledgement failure");
+      });
+      expect(await f.call("record_weight_measurement", input)).toMatchObject({ isError: true, structuredContent: { state: "unknown" } });
+      const current = await f.call("list_weight_measurements", {});
+      expect(JSON.parse(current.content[1].text)).toEqual(current.structuredContent);
+      expect(current.structuredContent.items).toHaveLength(committed ? 1 : 0);
+      if (!committed) expect((await f.call("record_weight_measurement", input)).isError).not.toBe(true);
+      const replay = await f.call("record_weight_measurement", input);
+      expect(replay.isError).not.toBe(true);
+      expect(JSON.parse(replay.content[1].text)).toEqual(replay.structuredContent);
+      expect((await f.call("list_weight_measurements", {})).structuredContent.items).toHaveLength(1);
+    } finally { await f.server.close(); }
+  });
+
   it("verifies committed replacement after acknowledgement loss and keeps exact replay idempotent", async () => {
     const f = await fixture();
     try {
@@ -81,7 +136,8 @@ describe("Meal correction unknown outcomes through MCP and PostgreSQL", () => {
       const tools = await f.list();
       const schema = tools.tools.find((tool: { name: string }) => tool.name === "correct_meal").outputSchema;
       expect(schema.required).toEqual(expect.arrayContaining(["id", "items", "totals"]));
-      expect(lost.content).toHaveLength(1);
+      expect(lost.content).toHaveLength(2);
+      expect(JSON.parse(lost.content[1].text)).toEqual(lost.structuredContent);
       expect(lost.content[0].text).not.toContain('"supersedesId"');
     } finally { await f.server.close(); }
   });
@@ -92,7 +148,8 @@ describe("Meal correction unknown outcomes through MCP and PostgreSQL", () => {
       vi.spyOn(f.service, "correctMeal").mockResolvedValueOnce({ created: true, meal: {} as Meal });
       const result = await f.call("correct_meal", f.correction);
       expect(result).toMatchObject({ isError: true, structuredContent: { state: "unknown" } });
-      expect(result.content).toHaveLength(1);
+      expect(result.content).toHaveLength(2);
+      expect(JSON.parse(result.content[1].text)).toEqual(result.structuredContent);
       expect(result.content[0].text).not.toContain("The Meal correction has been committed");
       expect(await f.count()).toBe(1);
     } finally { await f.server.close(); }

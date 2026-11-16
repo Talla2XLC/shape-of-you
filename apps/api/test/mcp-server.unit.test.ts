@@ -68,6 +68,36 @@ function completeSyntheticMeal(snapshot: {
       amountDescription: null, estimateMethod: null, amountConfidence: null, ...item })) };
 }
 
+function completeSyntheticFact(kind: "weight" | "body" | "workout" | "note" | "recovery", snapshot: Record<string, unknown> = {}) {
+  const instant = "2026-09-02T07:00:00.000Z";
+  const base = { id: "00000000-0000-4000-8000-000000000201",
+    personId: "00000000-0000-4000-8000-000000000001", localDate: "2026-09-02", timezone: "Europe/Moscow",
+    sourceReference: { id: "00000000-0000-4000-8000-000000000999", channel: "manual",
+      externalSystem: null, externalRecordId: null, occurredAt: instant, ingestedAt: instant },
+    dedupeKey: "synthetic-fact", supersedesId: null, correctionReason: null, createdAt: instant };
+  const fields = {
+    weight: { measuredAt: instant, temporalPrecision: "instant", weightKg: 77.1, confidence: null },
+    body: { measuredAt: instant, temporalPrecision: "instant", values: [{ metric: "waist", value: 82, unit: "cm" }],
+      confidence: null, photoMediaId: null, note: null },
+    workout: { occurredAt: instant, temporalPrecision: "instant", programVersionId: null, programWorkoutPosition: null,
+      externalActivityId: null, venueLabel: null, workoutName: "Synthetic workout", feeling: null, note: null,
+      exercises: [], confidence: null, completionState: "completed" },
+    note: { text: "Synthetic context", contextKind: "general", baselineEligibility: "include", confidence: null },
+    recovery: { kind: "metric", observedFrom: null, observedUntil: null, temporalPrecision: "local_date",
+      quality: "reliable", connectionId: null, consentId: null,
+      detail: { type: "metric", metric: "hrv_rmssd", value: 48, unit: "ms" } }
+  };
+  return { ...base, ...fields[kind], ...snapshot };
+}
+
+function completeSyntheticProgram(snapshot: Record<string, unknown>) {
+  const version = { id: "00000000-0000-4000-8000-000000000403", version: 1,
+    name: "Synthetic program", note: null, cadence: null, workouts: [], createdAt: "2026-09-02T07:00:00.000Z" };
+  return { id: "00000000-0000-4000-8000-000000000401", personId: "00000000-0000-4000-8000-000000000001",
+    lockVersion: 1, activeVersionId: version.id, activeVersion: version, currentVersion: version,
+    createdAt: version.createdAt, ...snapshot };
+}
+
 const legacyMealToolCompatibilityContracts = {
   record_meal: {
     required: ["occurredAt", "timezone", "kind", "items", "dedupeKey"],
@@ -808,7 +838,6 @@ describe("MCP HTTP adapter", () => {
       expect(branch.properties.recentExternalActivities).toMatchObject({
         type: "array",
         items: {
-          $id: "ExternalActivitySummary",
           additionalProperties: false,
           required: expect.arrayContaining([
             "id",
@@ -935,7 +964,7 @@ describe("MCP HTTP adapter", () => {
     expect(response.statusCode).toBe(200);
     expect(response.json().result).toMatchObject({
       isError: true,
-      content: [{ text: expect.stringContaining("Do not claim that an unverified read or failed change succeeded") }],
+      content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("Do not claim that an unverified read or failed change succeeded") }]),
       _meta: {
         "mcp/www_authenticate": [
           'Bearer resource_metadata="https://api.example.test/api/.well-known/oauth-protected-resource", scope="person:read", error="invalid_token", error_description="A bearer access token is required"'
@@ -985,7 +1014,7 @@ describe("MCP HTTP adapter", () => {
       })
       .mockResolvedValueOnce({
         status: "active",
-        program: { id: programId, lockVersion: 1 },
+        program: completeSyntheticProgram({ id: programId, lockVersion: 1 }),
         recentSessions: { items: [] },
         recentExternalActivities: []
       })
@@ -1000,7 +1029,7 @@ describe("MCP HTTP adapter", () => {
       .fn()
       .mockResolvedValueOnce({
         outcome: "created",
-        program: { id: programId, lockVersion: 1 }
+        program: completeSyntheticProgram({ id: programId, lockVersion: 1 })
       })
       .mockResolvedValueOnce({
         outcome: "needs_clarification",
@@ -1033,19 +1062,13 @@ describe("MCP HTTP adapter", () => {
       .fn()
       .mockResolvedValueOnce({
         outcome: "updated",
-        program: {
-          id: programId,
-          activeVersionId: "00000000-0000-4000-8000-000000000404",
-          lockVersion: 2
-        }
+        program: completeSyntheticProgram({
+          id: programId, activeVersionId: "00000000-0000-4000-8000-000000000404", lockVersion: 2
+        })
       })
       .mockResolvedValueOnce({
         outcome: "unchanged",
-        program: {
-          id: programId,
-          activeVersionId,
-          lockVersion: 2
-        }
+        program: completeSyntheticProgram({ id: programId, activeVersionId, lockVersion: 2 })
       })
       .mockRejectedValueOnce(new DomainValidationError(
         "cadence workoutSequence must reference an existing workout position"
@@ -1268,7 +1291,7 @@ describe("MCP HTTP adapter", () => {
       expect(saved).toMatchObject({
         structuredContent: {
           outcome: "created",
-          program: { id: programId, lockVersion: 1 }
+          program: completeSyntheticProgram({ id: programId, lockVersion: 1 })
         }
       });
       expect(saved.content[0].text).toContain(
@@ -1307,7 +1330,7 @@ describe("MCP HTTP adapter", () => {
       expect(active).toMatchObject({
         structuredContent: {
           status: "active",
-          program: { id: programId, lockVersion: 1 }
+          program: completeSyntheticProgram({ id: programId, lockVersion: 1 })
         }
       });
       expect(getTrainingContext).toHaveBeenNthCalledWith(1, {
@@ -1368,7 +1391,7 @@ describe("MCP HTTP adapter", () => {
       expect(retryable).toMatchObject({
         isError: true,
         structuredContent: {
-          state: "not_saved",
+          state: "unknown",
           reason: "retryable_failure",
           recovery: "read_context_verify_or_retry_once"
         }
@@ -1465,7 +1488,7 @@ describe("MCP HTTP adapter", () => {
       expect(retryableCadence).toMatchObject({
         isError: true,
         structuredContent: {
-          state: "not_saved",
+          state: "unknown",
           reason: "retryable_failure"
         }
       });
@@ -1536,11 +1559,11 @@ describe("MCP HTTP adapter", () => {
       .sign(pair.privateKey);
     const createWorkoutSession = vi.fn().mockResolvedValue({
       created: true,
-      session: { id: "00000000-0000-4000-8000-000000000301", exercises: [] }
+      session: completeSyntheticFact("workout", { id: "00000000-0000-4000-8000-000000000301" })
     });
     const correctWorkoutSession = vi.fn().mockResolvedValue({
       created: true,
-      session: { id: "00000000-0000-4000-8000-000000000303", exercises: [] }
+      session: completeSyntheticFact("workout", { id: "00000000-0000-4000-8000-000000000303" })
     });
     let currentV2: Record<string, unknown>;
     registerMcpRoutes({
@@ -1613,7 +1636,7 @@ describe("MCP HTTP adapter", () => {
       });
 
       expect(response.json().result).toMatchObject({
-        content: [{ text: expect.stringContaining("sound like a real coach") }],
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("sound like a real coach") }]),
         structuredContent: { id: "00000000-0000-4000-8000-000000000301" }
       });
       expect(createWorkoutSession).toHaveBeenCalledWith({
@@ -1648,9 +1671,9 @@ describe("MCP HTTP adapter", () => {
       });
       expect(invalidSchemaResponse.json().result).toMatchObject({
         isError: true,
-        content: [{
-          text: expect.stringContaining("do not ask the user whether to save known work again")
-        }]
+        content: expect.arrayContaining([{
+          type: "text", text: expect.stringContaining("do not ask the user whether to save known work again")
+        }])
       });
       expect(createWorkoutSession).toHaveBeenCalledOnce();
       const invalidResponse = await authorizedFastify.inject({
@@ -1676,7 +1699,7 @@ describe("MCP HTTP adapter", () => {
       });
       expect(invalidResponse.json().result).toMatchObject({
         isError: true,
-        content: [{ text: expect.stringContaining("The requested fact was not saved") }]
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("Retry this Workout once") }])
       });
       expect(createWorkoutSession).toHaveBeenCalledOnce();
       const correction = {
@@ -1704,7 +1727,7 @@ describe("MCP HTTP adapter", () => {
         }
       });
       expect(correctionResponse.json().result).toMatchObject({
-        content: [{ text: expect.stringContaining("sound like a real coach") }],
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("sound like a real coach") }]),
         structuredContent: { id: "00000000-0000-4000-8000-000000000303" }
       });
       expect(correctWorkoutSession).toHaveBeenCalledWith(
@@ -1748,7 +1771,7 @@ describe("MCP HTTP adapter", () => {
       });
       expect(invalidCorrectionResponse.json().result).toMatchObject({
         isError: true,
-        content: [{ text: expect.stringContaining("The requested fact was not saved") }]
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("Retry this Workout once") }])
       });
       expect(correctWorkoutSession).toHaveBeenCalledOnce();
       const v2 = {
@@ -1759,7 +1782,14 @@ describe("MCP HTTP adapter", () => {
           { exerciseLabel: "Разведения", sets: [] }
         ]
       };
-      currentV2 = { ...v2, id: "00000000-0000-4000-8000-000000000301", exercises: v2.exercises.map((exercise) => ({ ...exercise, exerciseId: null, exerciseVersionId: null, loadBasis: exercise.loadBasis ?? null })) };
+      currentV2 = completeSyntheticFact("workout", { ...v2, occurredAt: null,
+        id: "00000000-0000-4000-8000-000000000301",
+        sourceReference: { ...completeSyntheticFact("workout").sourceReference, ...v2.sourceReference },
+        exercises: v2.exercises.map((exercise, index) => ({ feeling: null, note: null, ...exercise,
+          id: `00000000-0000-4000-8000-${String(500 + index).padStart(12, "0")}`, position: index + 1,
+          exerciseId: null, exerciseVersionId: null, loadBasis: exercise.loadBasis ?? null,
+          sets: exercise.sets.map((set, setIndex) => ({ durationSeconds: null, distanceMeters: null, rir: null,
+            id: `00000000-0000-4000-8000-${String(600 + setIndex).padStart(12, "0")}`, position: setIndex + 1, ...set })) })) });
       createWorkoutSession.mockResolvedValueOnce({ created: true, session: currentV2 });
       const v2call = async (name: string, args: unknown) => (await authorizedFastify.inject({ method: "POST", url: "/mcp",
         headers: { accept: "application/json, text/event-stream", authorization: `Bearer ${token}` },
@@ -1876,7 +1906,7 @@ describe("MCP HTTP adapter", () => {
 
       expect(response.statusCode).toBe(200);
       expect(response.json().result).toMatchObject({
-        content: [{ text: expect.stringContaining("A brief acknowledgement can be a complete answer") }],
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("A brief acknowledgement can be a complete answer") }]),
         structuredContent: { items: [], nextCursor: null }
       });
       expect(list).toHaveBeenCalledOnce();
@@ -1897,9 +1927,9 @@ describe("MCP HTTP adapter", () => {
       });
       expect(invalidInputResponse.json().result).toMatchObject({
         isError: true,
-        content: [{
-          text: expect.stringContaining("Retry once silently using the unambiguous facts already present")
-        }]
+        content: expect.arrayContaining([{
+          type: "text", text: expect.stringContaining("Retry once silently using the unambiguous facts already present")
+        }])
       });
     } finally {
       await authorizedFastify.close();
@@ -1931,7 +1961,17 @@ describe("MCP HTTP adapter", () => {
       .setIssuedAt()
       .setExpirationTime("10m")
       .sign(pair.privateKey);
-    const result = (marker: string) => ({ marker });
+    const result = (marker: string) => {
+      if (/^(record|correct)_/u.test(marker)) {
+        if (marker.includes("meal")) return completeSyntheticMeal({ id: "00000000-0000-4000-8000-000000000204",
+          items: [{ label: "Synthetic food", amountKind: "quantified", quantity: 1, unit: "piece",
+            nutrients: { caloriesKcal: 100, proteinG: 5, fatG: 4, carbsG: 11 } }] });
+        const kind = marker.includes("weight") ? "weight" : marker.includes("body") ? "body"
+          : marker.includes("workout") ? "workout" : marker.includes("recovery") ? "recovery" : "note";
+        return completeSyntheticFact(kind, { dedupeKey: marker });
+      }
+      return { marker };
+    };
     const created = (key: string, marker: string) => ({
       created: true,
       [key]: result(marker)
@@ -1964,6 +2004,7 @@ describe("MCP HTTP adapter", () => {
         status: "completed",
         comment: "Сделано без проблем",
         idempotencyKey: "coach-feedback-completed",
+        supersedesFeedbackId: null,
         reportedAt: "2026-09-02T10:00:00.000Z"
       }
     });
@@ -2173,8 +2214,8 @@ describe("MCP HTTP adapter", () => {
         training: {
           findActiveProgram: async () => result("get_active_training_program"),
           listWorkoutSessions: async () => ({ items: [] }),
-          createWorkoutSession: async () => ({ session: { ...result("record_workout_session"), exercises: [] } }),
-          correctWorkoutSession: async () => ({ session: { ...result("correct_workout_session"), exercises: [] } })
+          createWorkoutSession: async () => ({ session: result("record_workout_session") }),
+          correctWorkoutSession: async () => ({ session: result("correct_workout_session") })
         },
         recovery: {
           listObservations: async () => result("list_recovery_observations"),
@@ -2474,9 +2515,13 @@ describe("MCP HTTP adapter", () => {
             id: "00000000-0000-4000-8000-000000000204"
           });
           expect(JSON.parse(toolResult.content[1].text)).toEqual(toolResult.structuredContent);
+        } else if (/^(record|correct)_/u.test(name)) {
+          expect(toolResult.structuredContent, name).toMatchObject(name === "record_meal"
+            ? { id: "00000000-0000-4000-8000-000000000204" } : { dedupeKey: marker });
         } else {
           expect(toolResult.structuredContent, name).toMatchObject({ marker });
         }
+        expect(JSON.parse(toolResult.content[1].text), name).toEqual(toolResult.structuredContent);
       }
 
       const unconfirmedWrite = await authorizedFastify.inject({
@@ -2860,7 +2905,7 @@ describe("MCP HTTP adapter", () => {
       });
       expect(compatibleDailyProjection.json().result).toMatchObject({
         structuredContent: { marker: "get_daily_projection" },
-        content: [{ text: expect.stringContaining("FACTUAL-ONLY DAILY PROJECTION") }]
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("FACTUAL-ONLY DAILY PROJECTION") }])
       });
       expect(compatibleDailyProjection.json().result.content[0].text).not.toContain(availableDailyAssessment.snapshotId);
 
@@ -2916,7 +2961,7 @@ describe("MCP HTTP adapter", () => {
       });
       expect(projectionWithoutAssessment.json().result).toMatchObject({
         structuredContent: { marker: "get_daily_projection" },
-        content: [{ text: expect.stringContaining("FACTUAL-ONLY DAILY PROJECTION") }]
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("FACTUAL-ONLY DAILY PROJECTION") }])
       });
       expect(projectionWithoutAssessment.json().result.isError).not.toBe(true);
       expect(projectionWithoutAssessment.json().result.content[0].text).toContain(
@@ -2946,7 +2991,7 @@ describe("MCP HTTP adapter", () => {
       });
       expect(failedDailyAssessment.json().result).toMatchObject({
         isError: true,
-        content: [{ text: expect.stringContaining("could not be retrieved") }]
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("could not be retrieved") }])
       });
       expect(failedDailyAssessment.json().result.structuredContent).toBeUndefined();
       for (const weightKg of ["77.1", 77.1234, 0.499, 700.001]) {
@@ -3001,11 +3046,11 @@ describe("MCP HTTP adapter", () => {
       .mockRejectedValueOnce(new Error("Training repository unavailable"));
     const create = vi.fn().mockResolvedValue({
       created: true,
-      note: { id: "00000000-0000-4000-8000-000000000201" }
+      note: completeSyntheticFact("note", { id: "00000000-0000-4000-8000-000000000201" })
     });
     const correct = vi.fn().mockResolvedValue({
       created: true,
-      note: { id: "00000000-0000-4000-8000-000000000202" }
+      note: completeSyntheticFact("note", { id: "00000000-0000-4000-8000-000000000202" })
     });
     const listNotes = vi.fn().mockResolvedValue({ items: [] });
     const projection = vi.fn().mockResolvedValue({
@@ -3081,10 +3126,10 @@ describe("MCP HTTP adapter", () => {
       }))
     };
     const createMeal = vi.fn()
-      .mockResolvedValueOnce({ created: true, meal: originalMeal })
-      .mockResolvedValueOnce({ created: true, meal: originalMeal })
-      .mockResolvedValueOnce({ created: true, meal: photoMeal })
-      .mockResolvedValueOnce({ created: true, meal: originalMeal });
+      .mockResolvedValueOnce({ created: true, meal: completeSyntheticMeal(originalMeal) })
+      .mockResolvedValueOnce({ created: true, meal: completeSyntheticMeal(originalMeal) })
+      .mockResolvedValueOnce({ created: true, meal: completeSyntheticMeal(photoMeal) })
+      .mockResolvedValueOnce({ created: true, meal: completeSyntheticMeal(originalMeal) });
     const correctMeal = vi.fn().mockResolvedValue({ created: true, meal: correctedMeal });
     const listMeals = vi.fn()
       .mockResolvedValueOnce({ items: [originalMeal], nextCursor: null })
@@ -3100,7 +3145,8 @@ describe("MCP HTTP adapter", () => {
         supersedesId: null,
         correctionReason: null,
         createdAt: "2026-08-31T09:00:00.000Z",
-        ...input
+        ...input,
+        sourceReference: { ...completeSyntheticFact("recovery").sourceReference, ...input.sourceReference }
       } as RecoveryObservation;
       recoveryObservations.push(observation);
       return { created: true, observation };
@@ -3275,7 +3321,7 @@ describe("MCP HTTP adapter", () => {
       expect((await call(7, "get_active_training_program", {})).json().result)
         .toMatchObject({
           isError: true,
-          content: [{ text: expect.stringContaining("The requested current facts could not be retrieved") }]
+          content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("The requested current facts could not be retrieved") }])
         });
       const noteWriteResult = (await call(
         8,
@@ -3333,7 +3379,7 @@ describe("MCP HTTP adapter", () => {
         dedupeKey: "chatgpt:meal:dinner:2026-08-30:invalid"
       })).json().result).toMatchObject({
         isError: true,
-        content: [{ text: expect.stringContaining("Preserve genuinely unknown amounts or nutrients only when there is no reasonable estimation basis") }]
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("Preserve genuinely unknown amounts or nutrients only when there is no reasonable estimation basis") }])
       });
       expect(createMeal).not.toHaveBeenCalled();
       const honestFallbackMealResult = (await call(101, "record_meal", {
@@ -3348,20 +3394,20 @@ describe("MCP HTTP adapter", () => {
       createMeal.mockClear();
       const recordMealResult = (await call(11, "record_meal", dinner)).json().result;
       expect(recordMealResult).toMatchObject({ structuredContent: originalMeal });
-      expect(recordMealResult.content).toEqual([{
+      expect(recordMealResult.content).toEqual(expect.arrayContaining([{
         type: "text",
         text: expect.stringContaining("sound like a real coach")
-      }]);
+      }]));
       expect(recordMealResult.content[0].text.trim().startsWith("{")).toBe(false);
       const firstMealReadResult = (await call(12, "list_meals", {
         localDate: "2026-08-30"
       })).json().result;
       expect(firstMealReadResult)
         .toMatchObject({ structuredContent: { items: [originalMeal] } });
-      expect(firstMealReadResult.content).toEqual([{
+      expect(firstMealReadResult.content).toEqual(expect.arrayContaining([{
         type: "text",
         text: expect.stringContaining("A brief acknowledgement can be a complete answer")
-      }]);
+      }]));
       const forbiddenMealPresentationTerms = [
         "partial",
         "null",
@@ -3477,7 +3523,7 @@ describe("MCP HTTP adapter", () => {
       })).json().result;
       expect(invalidSleepScoreResult).toMatchObject({
         isError: true,
-        content: [{ text: expect.stringContaining("Continue saving the other independent facts") }]
+        content: expect.arrayContaining([{ type: "text", text: expect.stringContaining("Continue saving the other independent facts") }])
       });
       expect(createObservation).not.toHaveBeenCalled();
       const unsupportedGarminResult = (await call(150, "record_recovery_observation", {

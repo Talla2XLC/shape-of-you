@@ -15,12 +15,32 @@ const schemaValues = new Set([
 export function publishMcpInputSchema(
   schema: Readonly<Record<string, unknown>>
 ): Readonly<Record<string, unknown>> {
+  return publishMcpSchema(schema, false);
+}
+
+/**
+ * Copies an inline result schema for standard MCP client validators.
+ *
+ * @param schema - The unchanged strict server result contract, with no $ref links.
+ * @returns A client schema without fractional multipleOf or nested resource IDs;
+ * the root identity, shape, ranges and integer divisors remain intact.
+ */
+export function publishMcpOutputSchema(
+  schema: Readonly<Record<string, unknown>>
+): Readonly<Record<string, unknown>> {
+  return publishMcpSchema(schema, true);
+}
+
+function publishMcpSchema(schema: Readonly<Record<string, unknown>>, output: boolean): Readonly<Record<string, unknown>> {
   const published = structuredClone(schema);
   const visited = new WeakSet<object>();
-  function visit(value: unknown): void {
+  function visit(value: unknown, root = false): void {
     if (value === null || typeof value !== "object" || Array.isArray(value) || visited.has(value)) return;
     visited.add(value);
     const node = value as Record<string, unknown>;
+    // These contracts inline reusable definitions. Nested IDs otherwise collide
+    // within one result or with another tool in the client's shared validator.
+    if (output && !root) delete node.$id;
     if (typeof node.multipleOf === "number" && !Number.isInteger(node.multipleOf)) {
       const precision = `The API requires multiples of ${node.multipleOf}.`;
       node.description = typeof node.description === "string" ? `${node.description} ${precision}` : precision;
@@ -28,14 +48,14 @@ export function publishMcpInputSchema(
     }
     for (const [key, child] of Object.entries(node)) {
       if (schemaMaps.has(key) && child !== null && typeof child === "object" && !Array.isArray(child)) {
-        Object.values(child).forEach(visit);
+        Object.values(child).forEach((entry) => visit(entry));
       } else if ((schemaLists.has(key) || key === "items") && Array.isArray(child)) {
-        child.forEach(visit);
+        child.forEach((entry) => visit(entry));
       } else if (schemaValues.has(key) || key === "items") {
         visit(child);
       }
     }
   }
-  visit(published);
+  visit(published, true);
   return published;
 }

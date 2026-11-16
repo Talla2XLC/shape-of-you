@@ -357,9 +357,34 @@ new versioned tool name and an explicit transition period. Client metadata
 refresh remains a release verification step, not a prerequisite imposed on an
 already open user conversation.
 
+Every successful MCP result exposes the same canonical data in `structuredContent`
+and a separate JSON TextContent block, alongside its model-facing guidance. Clients
+without structured-content support can therefore read both facts and write
+confirmations. Errors with a structured state also expose that state as JSON text.
+Every writer, including compatibility commands, declares an output schema and
+validates its returned fact before presenting success. Empty or invalid write
+results leave persistence unknown. A schema-valid `stale` outcome is an unapplied
+command, never a successful save. Published result schemas omit fractional
+`multipleOf` constraints and nested inline `$id` annotations for standard MCP
+client validators; the API retains its strict domain/result validation, integer
+divisors and numeric ranges. Root schema identities remain stable.
+
+Unknown execution or response-preparation failures do not establish `not_saved`:
+the transaction may already have committed. Coach verifies the exact current
+fact and report identity before retrying, retaining the original key, target,
+parameters and version expectations and preserving unrelated concurrent changes.
+Equal values alone do not identify a report. If a read fails or cannot expose
+the affected fact, the outcome stays unknown. Weight and Body measurement lists
+use `limit`/`cursor`, not a `localDate` argument; date selection uses returned
+facts. A valid canonical result with a successful domain outcome is sufficient
+verification without a compulsory second read.
+
+TASK-0178's shared result handling is locally Quality-accepted; server delivery
+and verification in the original client conversation remain pending. No new
+domain entities, services or migrations were introduced.
+
 Relevant routine MCP results carry the current server-owned Coach reply policy
-in model-facing content. Successful results retain typed facts in
-`structuredContent`; validation, execution, and OAuth failures carry a separate
+in model-facing content. Validation, execution, and OAuth failures carry a separate
 fail-closed presentation that forbids success claims, advice based on unverified
 facts, and user-facing implementation details while preserving the OAuth
 challenge. This reaches already open conversations after their next actual tool

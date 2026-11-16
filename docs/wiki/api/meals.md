@@ -42,8 +42,16 @@ The API-owned adapter fills omitted nullable fields, defaults interactive
 provenance to `manual`, and validates the unchanged strict Meal domain command
 before calling Nutrition. Honest unknown amounts and nutrients are accepted;
 contradictory evidence and invalid numeric values still fail before dispatch.
-Successful tools retain typed `structuredContent` and a concise model-facing
-presentation. Routine capture may end with a natural acknowledgement; advice
+Both `record_meal` and `correct_meal` use the
+[shared MCP result contract](../architecture/identity-and-external-tool-access.md):
+the returned Meal is checked against the strict result schema, and successful
+results expose identical canonical data as structured content and JSON text.
+An invalid or missing creation result leaves the outcome unknown; an uncertain
+creation requires comparing the exact current Meal and report identity before
+an exact retry with the original key. Similar food or totals alone do not verify
+that report. Shared handling is locally accepted in TASK-0178; its delivery and
+original-client verification remain pending.
+Routine capture may end with a natural acknowledgement; advice
 or a question is added when useful or requested. Ordinary replies keep internal
 transport and completeness vocabulary out of the conversation.
 

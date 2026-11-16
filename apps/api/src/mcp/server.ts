@@ -14,6 +14,7 @@ import {
   GetExternalActivityDetailsSchema,
   ExternalActivityDetailsResultSchema,
   type GetExternalActivityDetails,
+  BodyMeasurementSessionSchema,
   BodyMeasurementSessionListSchema,
   ClassifyExternalActivityResultSchema,
   ClassifyExternalActivitySchema,
@@ -40,6 +41,7 @@ import {
   CreateWeightMeasurementSchema,
   CreateWorkoutSessionSchema,
   CurrentRecoveryContextResultSchema,
+  DailyContextNoteSchema,
   DailyContextNoteListSchema,
   DailyAssessmentResultSchema,
   DailyDecisionContextResultSchema,
@@ -63,6 +65,7 @@ import {
   PersonFactTimelineSchema,
   PersonalInsightsQuerySchema,
   PersonalInsightsResultSchema,
+  RecoveryObservationSchema,
   RecoveryObservationListSchema,
   SaveConfirmedTrainingProgramResultSchema,
   SaveConfirmedTrainingProgramSchema,
@@ -78,7 +81,9 @@ import {
   AppliedWorkingWeightSchema,
   TrainingProgramSchema,
   UpdatePersonPreferencesSchema,
+  WeightMeasurementSchema,
   WeightMeasurementListSchema,
+  WorkoutSessionSchema,
   WorkoutSessionListSchema,
   type CorrectBodyMeasurementSession,
   type CorrectDailyContextNote,
@@ -126,7 +131,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 
 import type { RequestPersonContext } from "../application/person-context.js";
-import { publishMcpInputSchema } from "./published-input-schema.js";
+import { publishMcpInputSchema, publishMcpOutputSchema } from "./published-input-schema.js";
 import { connectorWorkoutV2Schema } from "./workout-input-schema.js";
 import { deriveLocalDate } from "../domain/weight-measurement.js";
 import type { BodyMeasurementSessionService } from "../body-measurement-sessions/body-measurement-session.service.js";
@@ -213,6 +218,7 @@ export interface McpRouteOptions {
 interface ToolDefinition {
   readonly tool: OAuthProtectedTool;
   readonly validate: ValidateFunction;
+  readonly validateResult?: ValidateFunction;
   readonly scope: string;
   readonly write: boolean;
   readonly execute: (input: Record<string, unknown>) => Promise<unknown>;
@@ -672,11 +678,11 @@ function createServer(
         definition.execute((call.params.arguments ?? {}) as Record<string, unknown>)
       );
       failureStage = "present";
-      return successResult(
-        definition.structured?.(result) ?? result,
-        definition.present?.(result),
-        definition.tool.name === "correct_meal"
-      );
+      const structured = definition.structured?.(result) ?? result;
+      if (definition.validateResult && !definition.validateResult(structured)) {
+        throw new Error("MCP write result does not match its output schema");
+      }
+      return successResult(structured, definition.present?.(result));
     } catch (error) {
       if (error instanceof McpAuthorizationError) {
         return authorizationErrorResult(
@@ -685,6 +691,9 @@ function createServer(
           metadataUrl,
           definition.scope
         );
+      }
+      if (definition.write && failureStage === "present") {
+        return uncertainWriteResult(definition.tool.name);
       }
       if (error instanceof ConnectorInputError) {
         return inputErrorResult(definition.tool.name);
@@ -761,10 +770,13 @@ function createServer(
       if (definition.tool.name === "materialize_training_program_cadence") {
         return trainingProgramCadenceErrorResult("retryable_failure");
       }
+      if (definition.write) {
+        return error instanceof DomainValidationError || error instanceof ConflictError || error instanceof NotFoundError
+          ? rejectedWriteResult(definition.tool.name)
+          : uncertainWriteResult(definition.tool.name);
+      }
       return errorResult(coachFailureResultContent(
-        definition.write
-          ? "The requested fact was not saved. Say this briefly and naturally without blaming the user."
-          : "The requested current facts could not be retrieved. Say this briefly and naturally without blaming the user."
+        "The requested current facts could not be retrieved. Say this briefly and naturally without blaming the user."
       ));
     }
   });
@@ -805,7 +817,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "record_weight_measurement",
       "Record one idempotent weight measurement from a direct user report; The typed result verifies the write; read again for uncertainty, conflict or requested totals.",
       createWeightMeasurementToolInputSchema,
-      undefined,
+      WeightMeasurementSchema,
       true,
       MCP_WEIGHT_WRITE_SCOPE,
       async (input) => (await services.weights.create(
@@ -819,7 +831,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
         "CorrectWeightMeasurementToolInput",
         correctWeightMeasurementToolInputSchema
       ),
-      undefined,
+      WeightMeasurementSchema,
       true,
       MCP_WEIGHT_WRITE_SCOPE,
       async (input) => (await services.weights.correct(
@@ -844,7 +856,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "record_body_measurements",
       "Record one idempotent body measurement session from a direct user report; The typed result verifies the write; read again for uncertainty, conflict or requested totals.",
       CreateBodyMeasurementSessionSchema,
-      undefined,
+      BodyMeasurementSessionSchema,
       true,
       MCP_BODY_MEASUREMENT_WRITE_SCOPE,
       async (input) =>
@@ -854,7 +866,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "correct_body_measurements",
       "Append one idempotent correction to a uniquely identified body measurement session; The typed result verifies the write; read again for uncertainty, conflict or requested totals.",
       withIdSchema("CorrectBodyMeasurementsToolInput", CorrectBodyMeasurementSessionSchema),
-      undefined,
+      BodyMeasurementSessionSchema,
       true,
       MCP_BODY_MEASUREMENT_WRITE_SCOPE,
       async (input) => (await services.bodyMeasurements.correct(input.id as string, input as unknown as CorrectBodyMeasurementSession)).session
@@ -873,7 +885,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "record_meal",
       "Immediately record one idempotent Meal from a direct user report without a pre-read or duplicate confirmation. Estimate ordinary photo/text reports using reasonable portions and average food nutrients, even without exact grams; clearly say approximately. Preserve unknown amounts or nutrients only without a reasonable estimation basis. For a sufficiently legible photo or useful text description, estimate realistic quantities using method and bounded confidence; exact grams are not required. If material food or scale is genuinely unidentifiable, preserve known foods and clarify only if the ambiguity changes a useful action, and never invent a sentinel serving. The returned canonical Meal verifies the write; read list_meals with localDate when totals or uncertainty require it, and reply in natural coach language with approximate nutrition and useful guidance without exposing contract fields or tool mechanics.",
       createMealToolInputSchema,
-      undefined,
+      MealSchema,
       true,
       MCP_MEAL_WRITE_SCOPE,
       async (input) => (await services.nutrition.createMeal(
@@ -1098,7 +1110,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "record_workout_session",
       "Immediately record one idempotent workout session when the user directly reports performed exercises or sets, or clearly says the workout is finished. Assemble the session from the current message and accumulated conversation context; preserve the user's reported exact start time and venueLabel when known, never invent them, and never ask whether to save it or require the user to restate known work. Use get_active_training_program when exact exercise version references are needed, preserve genuinely unknown optional set values, use list_workout_sessions with localDate when current totals or uncertainty require it, and reply in natural coach language without exposing tool mechanics.",
       createWorkoutSessionToolInputSchema,
-      undefined,
+      WorkoutSessionSchema,
       true,
       MCP_WORKOUT_WRITE_SCOPE,
       async (input) =>
@@ -1115,7 +1127,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
         "CorrectWorkoutSessionToolInput",
         correctWorkoutSessionToolInputSchema
       ),
-      undefined,
+      WorkoutSessionSchema,
       true,
       MCP_WORKOUT_WRITE_SCOPE,
       async (input) => legacyWorkoutSession((await services.training.correctWorkoutSession(
@@ -1148,7 +1160,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "record_recovery_observation",
       MCP_RECOVERY_RETRY_POLICY + "Immediately record one independent recovery fact from a direct text or screenshot report. The report is manual provenance even when the text or image displays Garmin or another wearable; never classify it as a direct device connection. Use hrv_rmssd only for an explicitly labelled last-night HRV, never a seven-day average. Store seven-day HRV, baseline and status as labelled general context notes. A report of resleep without a known full duration does not authorize inventing or correcting sleep minutes. Never reroute a safety-blocked write through another tool. Use sleep_score for a wearable 0..100 score. A clear current physical wellbeing report may use a qualitative subjective signal without any invented 1..5 fields or absent false values; do not ask for a routine check-in. Continue other independent facts after an isolated failure. Choose relevant available facts for advice without compulsory full-context reads.",
       createRecoveryObservationToolInputSchema,
-      undefined,
+      RecoveryObservationSchema,
       true,
       MCP_RECOVERY_WRITE_SCOPE,
       async (input) =>
@@ -1162,7 +1174,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "correct_recovery_observation",
       MCP_RECOVERY_RETRY_POLICY + "Append one idempotent correction to a uniquely identified recovery observation. Text and screenshot reports are manual provenance even when they display wearable data; the canonical result verifies this correction; refresh facts when useful without exposing internal mechanics.",
       withIdSchema("CorrectRecoveryObservationToolInput", correctRecoveryObservationToolInputSchema),
-      undefined,
+      RecoveryObservationSchema,
       true,
       MCP_RECOVERY_WRITE_SCOPE,
       async (input) => (await services.recovery.correctObservation(
@@ -1185,7 +1197,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       "record_daily_context_note",
       MCP_RECOVERY_RETRY_POLICY + "Record one idempotent relevant context note when no more specific typed fact can represent the report safely. Use general notes for labelled seven-day HRV, baseline range, Garmin status and resleep with unknown full duration; preserve their meaning and manual provenance. Omit baselineEligibility to use the kind's default: general requires include, travel requires exclude. Never classify resleep or HRV alone as travel. Do not duplicate saved facts or use this tool to bypass a safety-blocked write. The canonical result verifies this note; choose further relevant reads when useful.",
       CreateDailyContextNoteSchema,
-      undefined,
+      DailyContextNoteSchema,
       true,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       async (input) => (await services.dailyContextNotes.create(input as CreateDailyContextNote)).note,
@@ -1196,7 +1208,7 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       MCP_RECOVERY_RETRY_POLICY + "Append one idempotent correction to a uniquely identified context note; The typed result verifies the write; read again for uncertainty, conflict or requested totals.",
       { ...withIdSchema("CorrectDailyContextNoteToolInput", CorrectDailyContextNoteSchema),
         allOf: CorrectDailyContextNoteSchema.allOf },
-      undefined,
+      DailyContextNoteSchema,
       true,
       MCP_DAILY_CONTEXT_NOTE_WRITE_SCOPE,
       async (input) => (await services.dailyContextNotes.correct(input.id as string, input as unknown as CorrectDailyContextNote)).note,
@@ -1695,7 +1707,7 @@ function normalizeWorkoutInput(
     )
   };
   if (!validate(normalized)) {
-    throw new Error("Normalized WorkoutSession input does not match the domain contract");
+    throw new ConnectorInputError("Normalized WorkoutSession input does not match the domain contract");
   }
   return normalized;
 }
@@ -1727,13 +1739,14 @@ function defineTool(
   present?: (value: unknown) => string,
   structured?: (value: unknown) => unknown
 ): ToolDefinition {
+  if (write && !outputSchema) throw new Error(`Missing output schema for MCP writer ${name}`);
   return {
     tool: {
       name,
       description: `${toolAuthorityInstruction} ${description}`,
       inputSchema: publishMcpInputSchema(inputSchema) as Tool["inputSchema"],
       ...(outputSchema
-        ? { outputSchema: outputSchema as Tool["outputSchema"] }
+        ? { outputSchema: publishMcpOutputSchema(outputSchema) as Tool["outputSchema"] }
         : {}),
       annotations: {
         readOnlyHint: !write,
@@ -1747,12 +1760,27 @@ function defineTool(
       }
     },
     validate: compile(inputSchema),
+    ...(write && outputSchema ? { validateResult: compileWriteResult(outputSchema) } : {}),
     scope,
     write,
     execute,
-    present: present ?? (() => write ? routineWriteResultContent : routineReadResultContent),
+    present: present ?? ((value) => write ? routineWritePresentation(name, value) : routineReadResultContent),
     ...(structured ? { structured } : {})
   };
+}
+
+const writeResultValidators = new WeakMap<object, ValidateFunction>();
+
+function compileWriteResult(schema: Readonly<Record<string, unknown>>): ValidateFunction {
+  let validate = writeResultValidators.get(schema);
+  if (!validate) {
+    // Contracts inline their schemas without $ref; repeated nested $id annotations
+    // are identities for documentation, not separate validation resources.
+    const inline = JSON.parse(JSON.stringify(schema, (key, value: unknown) => key === "$id" ? undefined : value)) as Record<string, unknown>;
+    validate = compile(inline);
+    writeResultValidators.set(schema, validate);
+  }
+  return validate;
 }
 
 function compile(schema: Readonly<Record<string, unknown>>): ValidateFunction {
@@ -1762,12 +1790,12 @@ function compile(schema: Readonly<Record<string, unknown>>): ValidateFunction {
   return ajv.compile(schema);
 }
 
-function successResult(value: unknown, content?: string, includeJson = false): CallToolResult {
+function successResult(value: unknown, content?: string): CallToolResult {
   const structured = isRecord(value) ? value : { result: value };
   return {
     content: [
       { type: "text", text: content ?? JSON.stringify(value) },
-      ...(includeJson && content !== undefined
+      ...(content !== undefined
         ? [{ type: "text" as const, text: JSON.stringify(structured) }] : [])
     ],
     structuredContent: structured
@@ -1780,9 +1808,69 @@ function errorResult(
 ): CallToolResult {
   return {
     isError: true,
-    content: [{ type: "text", text: message }],
+    content: [
+      { type: "text", text: message },
+      ...(structuredContent ? [{ type: "text" as const, text: JSON.stringify(structuredContent) }] : [])
+    ],
     ...(structuredContent ? { structuredContent } : {})
   };
+}
+
+function writeVerificationGuidance(toolName: string): string {
+  if (toolName.includes("weight_measurement")) {
+    return "Read list_weight_measurements using limit/cursor pagination as needed (localDate is not an accepted argument). Select the reported local date from returned facts and compare the complete intended measurement and report identity, not just equal weight values.";
+  }
+  if (toolName.includes("body_measurements")) {
+    return "Read list_body_measurements using limit/cursor pagination as needed (localDate is not an accepted argument). Select the reported local date from returned facts and compare the complete intended session and report identity, not just equal measurements.";
+  }
+  if (toolName === "record_meal") {
+    return "Read list_meals for the exact reported localDate and compare the complete intended Meal, items and report identity, not just similar food or totals.";
+  }
+  if (toolName.includes("workout_session")) {
+    return "Read list_workout_sessions_v2 for the exact localDate (legacy list_workout_sessions only if V2 is unavailable). Compare the exact session identity and complete reported work, including completion, temporal precision and source reference.";
+  }
+  if (toolName === "complete_training_program") {
+    return "Read list_training_programs and get_training_program_version for the exact program/version; verify that this program is inactive and preserve history. Do not infer this program's completion from another active program or create a replacement.";
+  }
+  if (toolName === "record_daily_recommendation_feedback") {
+    return "Read get_daily_recommendation_completion for the exact snapshot only if it can expose the exact submitted feedback identity and contents. A derived completion or matching status alone does not verify this feedback; otherwise leave the outcome unknown.";
+  }
+  if (toolName === "set_current_timezone") {
+    return "Read get_daily_decision_context and compare the current Person timezone with the explicitly accepted timezone. Its availability or failure is not evidence that the timezone was or was not saved.";
+  }
+  return "Read get_training_context_v2 (legacy get_training_context only if V2 is unavailable) and compare the exact accepted change against its program, version, activity or session identity and current locks. If that read does not expose the affected fact, leave the outcome unknown.";
+}
+
+function routineWritePresentation(toolName: string, value: unknown): string {
+  if (isRecord(value) && value.outcome === "stale") {
+    return coachResultContent(
+      "The command was not applied because its expected authority is stale. Do not claim that the requested change was saved. " +
+      writeVerificationGuidance(toolName) + " Preserve unrelated concurrent changes and retry only the still-authorized change against current authority. Ask again only if the accepted change materially differs."
+    );
+  }
+  return routineWriteResultContent;
+}
+
+function uncertainWriteResult(toolName: string): CallToolResult {
+  if (toolName === "correct_meal") return mealCorrectionErrorResult("retryable_failure");
+  if (toolName === "save_confirmed_training_program") return trainingProgramSaveErrorResult("retryable_failure");
+  if (toolName === "materialize_training_program_cadence") return trainingProgramCadenceErrorResult("retryable_failure");
+  if (isRecoveryContextWriter(toolName)) return recoveryContextWriteErrorResult(toolName, "write_failed");
+  return errorResult(coachFailureResultContent(
+    "WRITE OUTCOME UNKNOWN: The operation may have committed before its result could be verified or delivered. " +
+    writeVerificationGuidance(toolName) + " A matching current fact verifies persistence without another write. " +
+    "If verification fails or report identity is ambiguous, keep the outcome unknown; do not claim success or failure. " +
+    "Only after current state shows the intended change is absent and the original target/authority is unchanged, retry the exact command once with its original idempotency key, target, versions and parameters. " +
+    "Never invent a new key, use attempt suffixes, overwrite concurrent changes or repeat a successful change. Distinct reports with equal values are not duplicates. " +
+    "Preserve the user's pending intent without asking them to repeat or reconfirm it. Keep recovery mechanics out of ordinary replies."
+  ), { state: "unknown", reason: "write_outcome_unverified", recovery: "read_current_state_verify_before_retry" });
+}
+
+function rejectedWriteResult(toolName: string): CallToolResult {
+  return errorResult(coachFailureResultContent(
+    "The command was rejected by domain validation or because its target is missing or conflicting; this attempt did not save the change. " +
+    writeVerificationGuidance(toolName) + " Preserve unrelated concurrent changes and retry only within the user's existing intent when the current target and required facts are unambiguous. Never bypass a domain rejection or claim success."
+  ), { state: "not_saved", reason: "rejected_command", recovery: "read_current_state_before_rebuild" });
 }
 
 function isRecoveryContextWriter(toolName: string): boolean {
@@ -1930,7 +2018,7 @@ function trainingProgramSaveErrorResult(
       `${instruction} Until a matching active read-back succeeds, do not claim this uncertain or rejected write succeeded. Keep all tool names, ids, fields, error categories, and recovery mechanics out of the user-facing reply.`
     ),
     {
-      state: "not_saved",
+      state: reason === "retryable_failure" ? "unknown" : "not_saved",
       reason,
       recovery
     }
@@ -1955,7 +2043,7 @@ function trainingProgramCadenceErrorResult(
       `${instruction} An uncertain cadence write must be verified against its active version, not against daily-context availability. Keep all tool names, ids, fields, error categories, and recovery mechanics out of the user-facing reply.`
     ),
     {
-      state: "not_saved",
+      state: reason === "retryable_failure" ? "unknown" : "not_saved",
       reason,
       recovery: "read_current_training_authority_then_continue_safely"
     }
