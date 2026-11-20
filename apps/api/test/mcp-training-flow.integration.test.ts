@@ -1,4 +1,4 @@
-import type { TrainingProgram, SaveConfirmedTrainingProgram } from "@shape-of-you/contracts";
+import { ConnectedRecoveryMetricKeySchema, type TrainingProgram, type SaveConfirmedTrainingProgram } from "@shape-of-you/contracts";
 import { randomUUID } from "node:crypto";
 import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
 import Fastify from "fastify";
@@ -355,7 +355,8 @@ describe("Current Recovery MCP composition with PostgreSQL", () => {
       expect(context.observations.items.map((item: { detail: { totalSleepMinutes: number } }) =>
         item.detail.totalSleepMinutes).sort((a: number, b: number) => a - b)).toEqual([50, 360]);
       expect(context.observations.items).toHaveLength(2);
-      expect(context.metricDelivery).toHaveLength(10);
+      expect(context.metricDelivery).toHaveLength(ConnectedRecoveryMetricKeySchema.enum.length);
+      expect(context.metricDelivery).toContainEqual({ metric: "body_battery", state: "unknown", periodState: null, asOf: null });
       expect(context.observations.items.every((item: object) => !Object.hasOwn(item, "personId"))).toBe(true);
       expect(JSON.stringify(context)).not.toContain(personId);
       const facts = await call("list_recovery_observations", { localDate: "2026-10-06" });
