@@ -1,22 +1,23 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type {
   DisconnectIntegration,
   GarminIntervalsConnection,
+  IntegrationConnection,
   IntegrationAuthorizationStart,
   StartGarminIntervalsAuthorization,
   CreateRecoveryObservation,
   RecoveryObservationDetail
 } from "@shape-of-you/contracts";
 
-import { PERSON_CONTEXT, INTEGRATION_CIPHER, INTEGRATION_PROVIDER, INTEGRATION_STORE, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
+import { INTEGRATION_IMPORT_CONTEXT, PERSON_CONTEXT, INTEGRATION_CIPHER, INTEGRATION_PROVIDER, INTEGRATION_STORE, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
 import type { PersonContext } from "../application/person-context.js";
 import type { RecoveryStore } from "../storage/recovery-repository.js";
 import type { TrainingStore } from "../storage/training-repository.js";
 import type { ConnectionCredentialCipher } from "./credential-cipher.js";
 import type { ActiveIntegrationConnection, IntegrationStore } from "./integration-store.js";
-import type { HealthDataProvider, ProviderWellnessRecord } from "./provider.js";
+import type { HealthDataProvider, HealthDataReader, ProviderWellnessRecord } from "./provider.js";
 import { ActivityDetailsReadError, IntegrationProviderError } from "./provider.js";
 import { normalizedChecksum } from "./intervals-icu/normalizer.js";
 import { parseGarminRecoverySnapshot } from "./intervals-icu/fit-recovery.js";
@@ -33,20 +34,21 @@ const fitFactKey = "garmin_post_activity_recovery_time";
 
 /** Coordinates OAuth, typed import, disconnect and sync state inside the API. */
 @Injectable()
-export class IntegrationService {
+export class IntegrationService<Status extends IntegrationConnection = GarminIntervalsConnection> {
   public constructor(
     @Inject(PERSON_CONTEXT) private readonly personContext: PersonContext,
-    @Inject(INTEGRATION_STORE) private readonly store: IntegrationStore | null,
-    @Inject(INTEGRATION_PROVIDER) private readonly provider: HealthDataProvider | null,
+    @Inject(INTEGRATION_STORE) private readonly store: IntegrationStore<Status> | null,
+    @Inject(INTEGRATION_PROVIDER) private readonly provider: HealthDataReader | null,
     @Inject(INTEGRATION_CIPHER) private readonly cipher: ConnectionCredentialCipher | null,
     @Inject(RECOVERY_STORE) private readonly recovery: RecoveryStore,
-    @Inject(TRAINING_STORE) private readonly training: TrainingStore
+    @Inject(TRAINING_STORE) private readonly training: TrainingStore,
+    @Optional() @Inject(INTEGRATION_IMPORT_CONTEXT) private readonly context: IntegrationImportContext = { providerKey: "intervals_icu", historicalWindowDays }
   ) {}
 
   /** Returns only the safe browser projection, including feature unavailability. */
-  public async status(): Promise<GarminIntervalsConnection> {
-    if (!this.store || !this.provider || !this.cipher) return unavailableStatus();
-    return await this.store.status(this.personContext.getPersonId()) ?? unavailableStatus("disconnected");
+  public async status(): Promise<Status> {
+    if (!this.store || !this.provider || !this.cipher) return this.emptyStatus();
+    return await this.store.status(this.personContext.getPersonId()) ?? this.emptyStatus("disconnected");
   }
 
   /** Creates a short-lived, Person-bound, one-use authorization transaction. */
@@ -60,7 +62,7 @@ export class IntegrationService {
       input.returnTo,
       new Date(Date.now() + transactionTtlMs)
     );
-    return { authorizationUrl: this.provider!.authorizationUrl(state) };
+    return { authorizationUrl: this.oauthProvider().authorizationUrl(state) };
   }
 
   /** Consumes OAuth state exactly once, exchanges code server-side and encrypts the Person token. */
@@ -69,12 +71,12 @@ export class IntegrationService {
     if (!state || state.length > 256 || !code || code.length > 4096) throw new IntegrationProviderError("authorization_required");
     const transaction = await this.store!.consumeAuthorization(stateHash(state), new Date());
     if (!transaction) throw new IntegrationProviderError("authorization_required");
-    const authorization = await this.provider!.exchangeAuthorizationCode(code);
+    const authorization = await this.oauthProvider().exchangeAuthorizationCode(code);
     const existingIdentity = await this.store!.authorizationIdentity(transaction.personId);
     const id = existingIdentity?.id ?? randomUUID();
     const recoveryConnectionId = existingIdentity?.recoveryConnectionId ?? randomUUID();
     const consentId = randomUUID();
-    const credential = this.cipher!.encrypt(authorization.accessToken, associatedData(transaction.personId, id));
+    const credential = this.cipher!.encrypt(authorization.accessToken, associatedData(transaction.personId, id, this.context.providerKey));
     await this.store!.activate({ id, recoveryConnectionId, consentId, personId: transaction.personId, externalUserId: authorization.externalUserId, credential, authorizationStartedAt: transaction.createdAt });
     return transaction.returnTo;
   }
@@ -88,31 +90,31 @@ export class IntegrationService {
   }
 
   /** Stops local import before attempting remote revocation; facts remain available. */
-  public async disconnect(input: DisconnectIntegration): Promise<GarminIntervalsConnection> {
+  public async disconnect(input: DisconnectIntegration): Promise<Status> {
     this.assertEnabled();
     const personId = this.personContext.getPersonId();
     const connection = await this.store!.beginDisconnect(personId, input.reason);
     if (connection) {
       try {
-        const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id));
-        await this.provider!.disconnect(token);
-        await this.store!.completeRemoteDisconnect(connection.id);
+        const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id, this.context.providerKey));
+        await this.oauthProvider().disconnect(token);
+        await this.store!.completeRemoteDisconnect(connection.id, connection.consentId);
       } catch (error) {
         const code = error instanceof IntegrationProviderError ? error.failureCode : "provider_unavailable";
-        await this.store!.failRemoteDisconnect(connection.id, code);
+        await this.store!.failRemoteDisconnect(connection.id, code, connection.consentId);
       }
     }
-    return await this.store!.status(personId) ?? unavailableStatus("disconnected");
+    return await this.store!.status(personId) ?? this.emptyStatus("disconnected");
   }
 
   /** Starts or resumes the current Person's explicitly requested historical import. */
-  public async startHistoricalImport(): Promise<GarminIntervalsConnection> {
+  public async startHistoricalImport(): Promise<Status> {
     this.assertEnabled();
     const personId = this.personContext.getPersonId();
     if (!await this.store!.startHistoricalImport(personId)) {
-      throw new ConflictError("An active Intervals.icu connection is required");
+      throw new ConflictError(this.context.providerKey === "intervals_icu" ? "An active Intervals.icu connection is required" : "An active Garmin connection is required");
     }
-    return await this.store!.status(personId) ?? unavailableStatus("disconnected");
+    return await this.store!.status(personId) ?? this.emptyStatus("disconnected");
   }
 
   /** Reconciles one Person connection; provider failures only degrade sync state. */
@@ -128,27 +130,27 @@ export class IntegrationService {
     const connection = await this.store.findForErasure(personId, recoveryConnectionId);
     if (!connection) return;
     if (!this.provider || !this.cipher) throw new IntegrationProviderError("provider_unavailable");
-    const token = this.cipher.decrypt(connection.credential, associatedData(connection.personId, connection.id));
-    await this.provider.disconnect(token);
-    await this.store.completeRemoteDisconnect(connection.id);
+    const token = this.cipher.decrypt(connection.credential, associatedData(connection.personId, connection.id, this.context.providerKey));
+    await this.oauthProvider().disconnect(token);
+    await this.store.completeRemoteDisconnect(connection.id, connection.consentId);
   }
 
   /** Retries a previously durable local disconnect without enabling import. */
   public async retryRemoteDisconnect(connection: ActiveIntegrationConnection): Promise<void> {
     try {
-      const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id));
-      await this.provider!.disconnect(token);
-      await this.store!.completeRemoteDisconnect(connection.id);
+      const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id, this.context.providerKey));
+      await this.oauthProvider().disconnect(token);
+      await this.store!.completeRemoteDisconnect(connection.id, connection.consentId);
     } catch (error) {
       const code = error instanceof IntegrationProviderError ? error.failureCode : "provider_unavailable";
-      await this.store!.failRemoteDisconnect(connection.id, code);
+      await this.store!.failRemoteDisconnect(connection.id, code, connection.consentId);
     }
   }
 
   /** Reconciles one already-claimed connection for the in-process worker. */
   public async reconcileConnection(connection: ActiveIntegrationConnection): Promise<void> {
     try {
-      const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id));
+      const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id, this.context.providerKey));
       const today = new Date();
       const from = new Date(today.valueOf() - reconciliationWindowDays * 86_400_000);
       const rollingFrom = isoDate(from);
@@ -173,7 +175,7 @@ export class IntegrationService {
       const failure = error instanceof IntegrationProviderError ? error.failureCode : "provider_unavailable";
       await this.store!.markSyncFailed(connection.id, connection.consentId, failure);
     } finally {
-      await this.store!.releaseClaim(connection.id);
+      await this.store!.releaseClaim(connection.id, connection.consentId);
     }
   }
 
@@ -198,7 +200,7 @@ export class IntegrationService {
       await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, historicalLowerBound, true);
       return;
     }
-    const candidateOldest = addDays(newest, -(historicalWindowDays - 1));
+    const candidateOldest = addDays(newest, -(this.context.historicalWindowDays - 1));
     const oldest = candidateOldest < historicalLowerBound ? historicalLowerBound : candidateOldest;
     try {
       const result = await this.reconcileRange(connection, token, oldest, newest, fitBudget);
@@ -220,7 +222,7 @@ export class IntegrationService {
     newest: string,
     fitBudget: { remaining: number }
   ): Promise<{ readonly changed: boolean; readonly complete: boolean }> {
-    const result = await this.provider!.reconcile(token, oldest, newest);
+    const result = await this.provider!.reconcile(token, oldest, newest, `${connection.id}:${connection.consentId}`);
     let changed = false;
     let timezone: string | null | undefined;
     for (const wellness of result.wellness) changed = await this.importWellness(connection, wellness) || changed;
@@ -248,7 +250,7 @@ export class IntegrationService {
         trainingLoadBasisVersion: activity.trainingLoadBasisVersion,
         averageHeartRate: activity.averageHeartRate,
         maximumHeartRate: activity.maximumHeartRate, deviceName: activity.deviceName,
-        sourceProvider: "intervals_icu", garminAttributed: activity.garminAttributed
+        sourceProvider: this.context.providerKey, garminAttributed: activity.garminAttributed
       });
       if (outcome === "stopped") continue;
       if (needsFit) {
@@ -269,7 +271,7 @@ export class IntegrationService {
     timezone: string
   ): Promise<boolean> {
     let file: Uint8Array | null;
-    try { file = await this.provider!.originalActivityFile(token, activityId); }
+    try { file = await this.provider!.originalActivityFile(token, activityId, `${connection.id}:${connection.consentId}`); }
     catch (error) {
       await this.store!.setActivityDetailsIssue(connection.id, connection.consentId, receiptId,
         error instanceof ActivityDetailsReadError ? error.issue : error instanceof IntegrationProviderError && error.failureCode === "provider_response_invalid" ? "invalid_fit" : "provider_unavailable");
@@ -307,7 +309,7 @@ export class IntegrationService {
       if (!current || current.checksum === "removed") return detailsChanged;
       const withdrawn = await this.recovery.withdrawObservation(
         connection.personId, current.observationId,
-        `intervals:${activityId}:${fitFactKey}:removed:${current.observationId}`,
+        `${this.context.providerKey}:${activityId}:${fitFactKey}:removed:${current.observationId}`,
         "provider_field_removed",
         { connectionId: connection.recoveryConnectionId, consentId: connection.consentId }
       );
@@ -323,9 +325,9 @@ export class IntegrationService {
       kind: "metric", observedFrom: snapshot.observedAt, observedUntil: snapshot.observedAt,
       temporalPrecision: "instant", localDate: null, timezone, quality: "estimated",
       connectionId: connection.recoveryConnectionId, consentId: connection.consentId,
-      dedupeKey: `intervals:${activityId}:${fitFactKey}:${checksum.slice(0, 16)}${current ? `:${current.observationId}` : ""}`,
+      dedupeKey: `${this.context.providerKey}:${activityId}:${fitFactKey}:${checksum.slice(0, 16)}${current ? `:${current.observationId}` : ""}`,
       sourceReference: {
-        channel: "account", externalSystem: "intervals_icu_activity_fit:garmin_140_9_v1",
+        channel: "account", externalSystem: `${this.context.providerKey}_activity_fit:garmin_140_9_v1`,
         externalRecordId: `${activityId}:140.9:${fileChecksum}`, occurredAt: snapshot.observedAt
       },
       detail: { type: "metric", metric: fitFactKey, value: snapshot.minutes, unit: "minute" }
@@ -349,6 +351,7 @@ export class IntegrationService {
       ...metric("hrv_rmssd", "ms", wellness.hrvRmssd),
       ...metric("oxygen_saturation", "percent", wellness.oxygenSaturation),
       ...metric("respiration_rate", "breaths_per_minute", wellness.respirationRate),
+      ...metric("body_battery", "score", wellness.bodyBatteryLatest ?? null),
       ...metric("body_battery_min", "score", wellness.bodyBatteryMinimum),
       ...metric("body_battery_max", "score", wellness.bodyBatteryMaximum),
       ...metric("steps", "count", wellness.steps ?? null)
@@ -371,10 +374,10 @@ export class IntegrationService {
         quality: "reliable",
         connectionId: connection.recoveryConnectionId,
         consentId: connection.consentId,
-        dedupeKey: `intervals:${wellness.identity}:${fact.key}:${checksum.slice(0, 16)}${current ? `:${current.observationId}` : ""}`,
+        dedupeKey: `${this.context.providerKey}:${wellness.identity}:${fact.key}:${checksum.slice(0, 16)}${current ? `:${current.observationId}` : ""}`,
         sourceReference: {
           channel: "account",
-          externalSystem: "intervals_icu_wellness",
+          externalSystem: `${this.context.providerKey}_wellness`,
           externalRecordId: `${wellness.identity}:${fact.key}:${checksum}`,
           occurredAt: fact.key === "steps" ? wellness.updatedAt ?? null : null
         },
@@ -395,6 +398,7 @@ export class IntegrationService {
       "hrv_rmssd",
       "oxygen_saturation",
       "respiration_rate",
+      "body_battery",
       "body_battery_min",
       "body_battery_max",
       "steps"
@@ -409,7 +413,7 @@ export class IntegrationService {
       const withdrawn = await this.recovery.withdrawObservation(
         connection.personId,
         current.observationId,
-        `intervals:${wellness.identity}:${factKey}:removed:${current.observationId}`,
+        `${this.context.providerKey}:${wellness.identity}:${factKey}:removed:${current.observationId}`,
         "provider_field_removed",
         { connectionId: connection.recoveryConnectionId, consentId: connection.consentId }
       );
@@ -420,19 +424,34 @@ export class IntegrationService {
     return changed;
   }
 
+  private emptyStatus(lifecycle: "unavailable" | "disconnected" = "unavailable"): Status {
+    return { ...unavailableStatus(lifecycle), provider: this.context.providerKey,
+      displayName: this.context.providerKey === "intervals_icu" ? "Garmin via Intervals.icu" : "Garmin" } as Status;
+  }
+
+  private oauthProvider(): HealthDataProvider {
+    if (!this.provider || !("authorizationUrl" in this.provider)) throw new DomainValidationError("OAuth is not available for this provider");
+    return this.provider as HealthDataProvider;
+  }
+
   private assertEnabled(): void {
     if (!this.store || !this.provider || !this.cipher) throw new DomainValidationError("Garmin via Intervals.icu is not configured");
   }
 }
 
 function metric(
-  metricName: "sleep_score" | "resting_heart_rate" | "night_heart_rate" | "hrv_rmssd" | "oxygen_saturation" | "respiration_rate" | "body_battery_min" | "body_battery_max" | "steps",
+  metricName: "sleep_score" | "resting_heart_rate" | "night_heart_rate" | "hrv_rmssd" | "oxygen_saturation" | "respiration_rate" | "body_battery" | "body_battery_min" | "body_battery_max" | "steps",
   unit: "score" | "bpm" | "ms" | "percent" | "breaths_per_minute" | "count",
   value: number | null
 ): readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] {
   return value === null ? [] : [{ key: metricName, detail: { type: "metric", metric: metricName, value, unit } }];
 }
-function associatedData(personId: string, connectionId: string): string { return `intervals_icu:${personId}:${connectionId}`; }
+/** Binds import provenance and bounded history to one explicit provider. */
+export interface IntegrationImportContext {
+  readonly providerKey: "intervals_icu" | "garmin_personal";
+  readonly historicalWindowDays: number;
+}
+function associatedData(personId: string, connectionId: string, providerKey: string): string { return `${providerKey}:${personId}:${connectionId}`; }
 function stateHash(value: string): string { return createHash("sha256").update(value).digest("hex"); }
 function isoDate(value: Date): string { return value.toISOString().slice(0, 10); }
 function addDays(value: string, days: number): string {

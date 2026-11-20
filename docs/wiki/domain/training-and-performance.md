@@ -70,10 +70,15 @@ longitudinal recommendation quality.
   projections; resolved exercise identity and measured evidence are additionally
   required for exercise-specific results.
 - `TrainingRepository` also owns immutable connection-linked activity facts
-  imported from Intervals.icu. They retain typed duration, distance, training
+  imported from Intervals.icu or direct Garmin Personal API. They retain typed duration, distance, training
   load, heart-rate summary, device name, provider identity, and normalized
   checksum rather than a raw provider payload. Garmin attribution is set only
   when device metadata identifies Garmin.
+  Direct Garmin summaries round fractional timer seconds to the integer contract,
+  leave unconfirmed load/device metadata null, and do not infer device attribution
+  from account ownership. Original ZIP files are bounded and verified before
+  the existing FIT decoders; raw archives are not retained. Provider identity
+  remains connection-scoped; cross-provider history is never auto-merged.
 - Repeated external identity plus checksum is a no-op. Changed content creates
   an immutable successor, including a later return to a previously seen value.
   Current reads expose only the latest fact.
@@ -200,6 +205,7 @@ longitudinal recommendation quality.
 
 ## Decisions
 
+- [Direct Garmin Personal API linking](../../adr/20261118-connect-garmin-personal-api.md).
 - [Coach knowledge-store boundary](../../adr/20261009-let-coach-propose-working-weight-from-history.md).
 
 - [Incomplete fact capture and contextual Coach replies](../../adr/20261002-capture-incomplete-facts-and-use-contextual-coach-replies.md).

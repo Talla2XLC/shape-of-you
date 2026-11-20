@@ -95,3 +95,44 @@ export const DisconnectIntegrationSchema = {
 
 /** Explicit local disconnect intent; imported facts are retained. */
 export type DisconnectIntegration = FromSchema<typeof DisconnectIntegrationSchema>;
+
+/** Browser-safe projection for direct Garmin Personal API access. */
+export const GarminPersonalConnectionSchema = {
+  ...GarminIntervalsConnectionSchema,
+  $id: "GarminPersonalConnection",
+  properties: {
+    ...GarminIntervalsConnectionSchema.properties,
+    provider: { const: "garmin_personal" },
+    displayName: { const: "Garmin" }
+  }
+} as const;
+
+/** Person-owned direct Garmin connection, excluding credentials and account identifiers. */
+export type GarminPersonalConnection = FromSchema<typeof GarminPersonalConnectionSchema>;
+
+/** Supported public projections; provider discriminator preserves existing Intervals clients. */
+export type IntegrationConnection = GarminIntervalsConnection | GarminPersonalConnection;
+
+/** Secret input accepted only over the authenticated, CSRF-protected API. */
+export const CheckGarminPersonalKeySchema = {
+  $id: "CheckGarminPersonalKey", type: "object", additionalProperties: false,
+  required: ["apiKey"],
+  properties: { apiKey: { type: "string", minLength: 1, maxLength: 4096, pattern: "^[^\\s\\x00-\\x1f\\x7f]+$" } }
+} as const;
+
+/** Explicit consent activates automatic read-only imports for the authenticated Person. */
+export const ConnectGarminPersonalSchema = {
+  ...CheckGarminPersonalKeySchema, $id: "ConnectGarminPersonal", required: ["apiKey", "consent"],
+  properties: { ...CheckGarminPersonalKeySchema.properties, consent: { const: true } }
+} as const;
+
+/** Successful credential check; no account metadata or import side effect. */
+export const GarminPersonalKeyCheckSchema = {
+  $id: "GarminPersonalKeyCheck", type: "object", additionalProperties: false,
+  required: ["verified"], properties: { verified: { const: true } }
+} as const;
+
+/** Transient personal key check input. */
+export type CheckGarminPersonalKey = FromSchema<typeof CheckGarminPersonalKeySchema>;
+/** Direct connection activation and key rotation input. */
+export type ConnectGarminPersonal = FromSchema<typeof ConnectGarminPersonalSchema>;

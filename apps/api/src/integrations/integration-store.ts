@@ -2,7 +2,8 @@ import type {
   ActivityDetailsIssue,
   ConnectedRecoveryMetricDeliveryState,
   ConnectedRecoveryMetricKey,
-  GarminIntervalsConnection
+  GarminIntervalsConnection,
+  IntegrationConnection
 } from "@shape-of-you/contracts";
 
 import type { EncryptedCredential } from "./credential-cipher.js";
@@ -43,6 +44,7 @@ export const CONNECTED_RECOVERY_METRIC_KEYS = [
   "hrv_rmssd",
   "oxygen_saturation",
   "respiration_rate",
+  "body_battery",
   "body_battery_min",
   "body_battery_max",
   "steps"
@@ -72,6 +74,7 @@ export interface ConnectedRecoveryDeliveryEvidence {
 
 /** Stable ids reused on reauthorization so imported fact history is preserved. */
 export interface IntegrationConnectionIdentity {
+  readonly consentId?: string;
   readonly id: string;
   readonly recoveryConnectionId: string;
 }
@@ -83,7 +86,7 @@ export interface HistoricalImportClaim {
 }
 
 /** Durable provider integration persistence boundary. */
-export interface IntegrationStore {
+export interface IntegrationStore<Status extends IntegrationConnection = GarminIntervalsConnection> {
   createAuthorization(personId: string, stateHash: string, returnTo: string, expiresAt: Date): Promise<void>;
   consumeAuthorization(stateHash: string, now: Date): Promise<ConsumedAuthorizationTransaction | null>;
   authorizationIdentity(personId: string): Promise<IntegrationConnectionIdentity | null>;
@@ -92,26 +95,27 @@ export interface IntegrationStore {
     readonly recoveryConnectionId: string;
     readonly consentId: string;
     readonly personId: string;
-    readonly externalUserId: string;
+    readonly externalUserId: string | null;
     readonly credential: EncryptedCredential;
     readonly authorizationStartedAt: Date;
+    readonly expectedConsentId?: string | null;
   }): Promise<void>;
-  status(personId: string): Promise<GarminIntervalsConnection | null>;
+  status(personId: string): Promise<Status | null>;
   connectedRecoveryDelivery(personId: string, localDate: string): Promise<ConnectedRecoveryDeliveryEvidence | null>;
   findActive(personId: string): Promise<ActiveIntegrationConnection | null>;
   personTimezone(personId: string): Promise<string | null>;
   findForErasure(personId: string, recoveryConnectionId: string): Promise<ActiveIntegrationConnection | null>;
   claimDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null>;
   claimRemoteDisconnectDue(workerId: string, leaseMs: number): Promise<ActiveIntegrationConnection | null>;
-  releaseClaim(id: string): Promise<void>;
+  releaseClaim(id: string, expectedConsentId?: string): Promise<void>;
   beginDisconnect(personId: string, reason: string): Promise<ActiveIntegrationConnection | null>;
   startHistoricalImport(personId: string): Promise<boolean>;
   claimHistoricalWindow(id: string, expectedConsentId: string, expectedCursorBefore: string | null, claimToken: string, leaseMs: number): Promise<HistoricalImportClaim | null>;
   markHistoricalWindowSucceeded(id: string, claimToken: string, processedThroughDate: string, completed: boolean): Promise<boolean>;
   deferHistoricalWindow(id: string, claimToken: string): Promise<boolean>;
   markHistoricalImportFailed(id: string, claimToken: string, failureCode: IntegrationFailureCode, retryable: boolean): Promise<boolean>;
-  completeRemoteDisconnect(id: string): Promise<void>;
-  failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode): Promise<void>;
+  completeRemoteDisconnect(id: string, expectedConsentId?: string): Promise<void>;
+  failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode, expectedConsentId?: string): Promise<void>;
   markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void>;
   markSyncPartial(id: string, consentId: string): Promise<void>;
   markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void>;

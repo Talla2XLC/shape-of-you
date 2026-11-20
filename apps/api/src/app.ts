@@ -61,6 +61,7 @@ import type { IntakeParser } from "./domain/intake.js";
 import { IntegrationRepository } from "./storage/integration-repository.js";
 import { IntervalsIcuProvider } from "./integrations/intervals-icu/provider.js";
 import { ConnectionCredentialCipher, parseIntegrationKeyRing } from "./integrations/credential-cipher.js";
+import { GarminPersonalProvider } from "./integrations/garmin-personal/provider.js";
 import { IntegrationService } from "./integrations/integration.service.js";
 import { registerIntegrationCallback } from "./integrations/integration.controller.js";
 import { WeightMeasurementService } from "./weight-measurements/weight-measurement.service.js";
@@ -125,6 +126,8 @@ export interface BuildAppOptions {
   readonly intakeParser?: IntakeParser;
   /** Optional Person resolution boundary, primarily for isolated tests. */
   readonly personContext?: PersonContext;
+  /** Optional official transport with a fake HTTP boundary for isolated tests. */
+  readonly garminPersonalProvider?: GarminPersonalProvider;
 }
 
 /**
@@ -252,7 +255,8 @@ export async function buildApp(
         redirectUri: options.config.INTERVALS_ICU_REDIRECT_URI!
       })
     : null;
-  const integrationCipher = integrationEnabled
+  const encryptionEnabled = Boolean(options.config.INTEGRATION_ENCRYPTION_KEY_RING && options.config.INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID);
+  const integrationCipher = encryptionEnabled
     ? new ConnectionCredentialCipher(
         options.config.INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID!,
         parseIntegrationKeyRing(options.config.INTEGRATION_ENCRYPTION_KEY_RING!)
@@ -318,9 +322,14 @@ export async function buildApp(
       readinessProbe,
       database,
       integrationStore,
+      garminPersonalRuntime: database && integrationCipher ? {
+        store: new IntegrationRepository(database, "garmin_personal"),
+        provider: options.garminPersonalProvider ?? new GarminPersonalProvider(),
+        cipher: integrationCipher
+      } : null,
       integrationProvider,
       integrationCipher,
-      integrationWorkerEnabled: integrationEnabled && options.config.NODE_ENV !== "test",
+      integrationWorkerEnabled: encryptionEnabled && Boolean(database) && options.config.NODE_ENV !== "test",
       ownsDatabase
     }),
     adapter,

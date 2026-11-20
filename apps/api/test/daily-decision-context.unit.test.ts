@@ -79,7 +79,7 @@ const recovery = {
   syncState: "never_checked", targetDateDelivery: "unknown", checkedAt: null,
   metricDelivery: [
     "sleep", "sleep_score", "resting_heart_rate", "night_heart_rate", "hrv_rmssd",
-    "oxygen_saturation", "respiration_rate", "body_battery_min", "body_battery_max", "steps"
+    "oxygen_saturation", "respiration_rate", "body_battery", "body_battery_min", "body_battery_max", "steps"
   ].map((metric) => ({ metric, state: "unknown", periodState: null, asOf: null })),
   observations: { items: [{
     kind: "subjective", sourceChannel: "manual", observedFrom: null, observedUntil: null,

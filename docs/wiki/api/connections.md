@@ -14,14 +14,62 @@ tags:
 
 ## Summary
 
-Provides the authenticated browser contract for the configuration-gated
-`Garmin via Intervals.icu` connection. Complete provider configuration makes
-the connection available without a separate enable flag. The product names
-both providers and does not accept a Garmin password, Garmin token, or personal
-Intervals.icu API key. Connecting starts only rolling synchronization;
-complete history is imported only after a separate user request.
+Provides authenticated browser controls for direct `Garmin` personal-key
+linking and the existing `Garmin via Intervals.icu` OAuth connection. Both
+reuse the API-owned typed import, consent, sync evidence and erasure boundaries.
+Connecting enables rolling synchronization; older history is requested separately.
+Direct linking and the observed wellness mapping are locally accepted. A bounded
+own-account read-only sample confirmed populated fields; live typed import and
+delivery remain unverified. Existing Intervals history is never automatically
+switched or merged.
 
 ## Content
+
+### Direct Garmin
+
+The user creates a Personal API key in Garmin settings, pastes it into the
+masked field, and connects with explicit import consent. Successful token
+exchange and an authenticated profile read are sufficient: an account without
+health or activity records remains connected with no data. No initial watch
+sync or external account ID is required from the user. The external identity
+is bound from documented record IDs before domain writes; a different account
+after key rotation cannot silently merge with retained facts.
+
+Endpoints under `/v1/integrations/garmin-personal` are `GET` status and `POST`
+`check`, `connect`, `disconnect`, and `historical-import`. `check` creates no
+connection or facts. `connect` accepts `{ apiKey, consent: true }`; mutation
+bodies are Person-bound and CSRF-protected. Safe responses are `no-store` and
+never contain credentials or external account IDs. Key checking is bounded to
+five attempts per Person per minute within one API process.
+
+Database plus the integration encryption key ring/active key ID enable direct
+linking independently of Intervals OAuth settings. Personal keys are encrypted
+at rest; access tokens stay in a bounded memory cache scoped to connection and
+consent generation. Rotation/disconnect invalidate old scopes. The browser
+clears its key field after success, cancellation or unmount and never persists
+it. Local disconnect stops import and discards the key; revoking the key in
+Garmin remains the account owner's separate action. Imported-data deletion
+continues through the existing fresh-passkey erasure flow.
+
+Current direct normalization covers sleep duration, explicit resting heart rate,
+sleep-average heart rate, SpO2 and respiration, separate daily Body Battery
+latest/minimum/maximum, steps with provider chronology, and activity
+summaries/original FIT details. Body Battery latest is a `local_date` snapshot,
+not an instant reading; no fetch/sync timestamp is assigned as measurement time.
+HRV and overall sleep score mappings remain unconfirmed; their delivery state
+is `unknown`. The [observed mapping ADR](../../adr/20261120-garmin-observed-wellness-mapping.md)
+defines the exact interpretation and consumer constraints.
+Garmin training load is not mapped to Intervals relative training stress.
+History uses bounded fourteen-day windows with complete activity pagination;
+ZIP files are validated and decoded in memory. Empty windows do not end the
+entire historical scan.
+
+The backend rejects competing provider activation under the same Person lock,
+including retained imported evidence after disconnect. A disconnected empty
+Garmin connection does not hide an active Intervals connection from Coach.
+The UI protects successful mutations from delayed status-poll responses.
+
+### Garmin via Intervals.icu
 
 The user first connects Garmin to Intervals.icu through Garmin's hosted flow,
 then authorizes Shape of You through Intervals.icu OAuth with activity and
@@ -111,6 +159,8 @@ not expose connection controls or imported-record counts.
 
 ## Evidence
 
+- `TASK-0179` independent local Quality and Architecture Review acceptance;
+  direct PostgreSQL/HTTP, fake-provider and browser race checks.
 - Integration contracts, API unit/PostgreSQL tests, and Web Playwright flow.
 - `TASK-0101`, `TASK-0106`, and `TASK-0110` independent Quality acceptance.
 - `TASK-0120` consent-generation, attempt-receipt, correction, and stale-worker
@@ -118,6 +168,7 @@ not expose connection controls or imported-record counts.
 
 ## Decisions
 
+- [Direct Garmin Personal API linking](../../adr/20261118-connect-garmin-personal-api.md)
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 - [Import Intervals.icu history only on user request](../../adr/20260911-import-intervals-history-only-on-user-request.md)
 - [Automatic day context and optional daily movement](../../adr/20260917-automate-day-context-and-use-optional-daily-movement.md)
@@ -128,6 +179,11 @@ not expose connection controls or imported-record counts.
 
 ## Open questions
 
+- A bounded live read confirmed populated wellness fields and original ZIP
+  availability with one declared FIT candidate. Actual FIT decoding, live typed
+  import and transition from retained Intervals history remain unverified.
+  The operator confirmed
+  Supplemental Terms agreement on 2026-11-18.
 - Intervals.icu history availability, Supporter/dormancy policy, provider rate
   limits, and live long-running backfill observation.
 - Production activation, migration application, deployment, and VM verification

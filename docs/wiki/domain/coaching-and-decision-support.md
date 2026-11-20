@@ -298,6 +298,15 @@ it was saved earlier and that current freshness is not yet confirmed. It does
 not claim that reconnect, migration, or another unverified event caused the
 state.
 
+Garmin daily `body_battery` latest remains visible in the focused typed context
+with `local_date` precision and independent consent-scoped delivery evidence.
+Coach describes it as last known for that date, never as measured at fetch/sync
+time. Legacy DailyAssessment summary and baseline samples accept only instant
+Body Battery observations, so daily latest does not replace its existing
+min/max fallback. The
+[observed mapping ADR](../../adr/20261120-garmin-observed-wellness-mapping.md)
+records this boundary and the future MCP schema-refresh delivery gate.
+
 Coach does not require Garmin Training Readiness or Recovery Time screenshots
 for ordinary recovery or daily guidance. It uses verified current facts
 and available Recovery observations. When asked for either Garmin value, Coach

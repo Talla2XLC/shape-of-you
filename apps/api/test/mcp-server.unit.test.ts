@@ -123,6 +123,7 @@ const confirmedAbsentRecoveryMetrics = [
   "hrv_rmssd",
   "oxygen_saturation",
   "respiration_rate",
+  "body_battery",
   "body_battery_min",
   "body_battery_max",
   "steps"

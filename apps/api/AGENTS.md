@@ -13,8 +13,11 @@ credentials or databases.
 - PostgreSQL is the operational authority after TASK-0067. The Google Sheets
   Fitness Tracker is a non-authoritative read-only legacy reference and is
   never an interactive writer or fallback.
-- Credentials enter only through the runtime environment. Never store secrets
-  in the repository, logs, test snapshots, or documentation.
+- Global credentials and encryption keys enter only through the runtime
+  environment. Person-owned OAuth tokens and Garmin Personal API keys enter
+  through their approved integration flows and are stored only as authenticated
+  ciphertext bound to provider, Person and connection. Never store secrets in
+  the repository, logs, test snapshots, browser storage or documentation.
 
 ## Changes
 

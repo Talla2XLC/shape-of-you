@@ -20,6 +20,28 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-11-20 — Direct Garmin linking and observed wellness accepted locally
+
+- Added Personal API key linking, empty-account activation, encrypted per-Person
+  credentials, rotation/disconnect, rolling sync and explicit history import.
+  Preserve consent fencing, provenance, corrections and erasure; refuse overlap
+  with retained Intervals imports instead of merging histories implicitly.
+- Import confirmed sleep duration, resting pulse, sleep-average pulse/SpO2/
+  respiration, daily Body Battery latest and extrema, steps and activity details.
+  Daily latest has unknown measurement time; legacy DailyAssessment keeps its
+  instant-only Body Battery and extrema fallback.
+- TASK-0179 and TASK-0180 passed independent Quality and Architecture Review.
+  Latest checks: 482 API unit and 14 isolated PostgreSQL/HTTP tests, API
+  typecheck/build, Web typecheck, scoped lint and canonical docs validation.
+  Bounded own-account read-only sampling confirmed populated fields and original
+  ZIP availability; actual live FIT decoding and typed import remain unverified.
+- Delivery is pending. The eleven-key MCP delivery output requires refreshed
+  client tool discovery/schema and smoke; it is incompatible with the cached
+  older closed ten-key output schema. HRV/overall sleep-score mapping and
+  retained Intervals cutover remain separate work. See the
+  [linking ADR](../adr/20261118-connect-garmin-personal-api.md) and
+  [observed mapping ADR](../adr/20261120-garmin-observed-wellness-mapping.md).
+
 ### 2026-11-16 — Shared MCP result verification delivered to staging
 
 - Extended canonical structured and JSON text delivery to all successful MCP

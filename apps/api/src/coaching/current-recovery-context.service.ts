@@ -1,9 +1,10 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 
 import type {
   ConnectedRecoveryMetricDelivery,
   CurrentRecoveryObservation,
   CurrentRecoveryContextResult,
+  GarminPersonalConnection,
   RecoveryObservation
 } from "@shape-of-you/contracts";
 
@@ -11,6 +12,7 @@ import type { PersonContext } from "../application/person-context.js";
 import {
   DAILY_ASSESSMENT_STORE,
   INTEGRATION_STORE,
+  GARMIN_PERSONAL_STORE,
   PERSON_CONTEXT
 } from "../application/tokens.js";
 import {
@@ -33,8 +35,20 @@ export class CurrentRecoveryContextService {
     @Inject(PERSON_CONTEXT) private readonly personContext: PersonContext,
     @Inject(DAILY_ASSESSMENT_STORE) private readonly preferences: DailyAssessmentStore,
     @Inject(INTEGRATION_STORE) private readonly integrations: IntegrationStore | null,
-    @Inject(RecoveryService) private readonly recovery: RecoveryService
+    @Inject(RecoveryService) private readonly recovery: RecoveryService,
+    @Optional() @Inject(GARMIN_PERSONAL_STORE) private readonly garmin: IntegrationStore<GarminPersonalConnection> | null = null
   ) {}
+
+  private async delivery(personId: string, localDate: string) {
+    const [direct, intervals] = await Promise.all([
+      this.garmin?.connectedRecoveryDelivery(personId, localDate),
+      this.integrations?.connectedRecoveryDelivery(personId, localDate)
+    ]);
+    if (direct?.importEnabled) return direct;
+    if (intervals?.importEnabled) return intervals;
+    if (direct?.metricDelivery.some((item) => item.state !== "unknown")) return direct;
+    return intervals ?? direct ?? null;
+  }
 
   public async read(now = new Date()): Promise<CurrentRecoveryContextResult> {
     const personId = this.personContext.getPersonId();
@@ -45,7 +59,7 @@ export class CurrentRecoveryContextService {
     const localDate = derivePersonLocalDate(timezone, now);
     const [observations, delivery] = await Promise.all([
       this.recovery.listObservations({ localDate, limit: 100 }),
-      this.integrations?.connectedRecoveryDelivery(personId, localDate) ?? Promise.resolve(null)
+      this.delivery(personId, localDate)
     ]);
     const internalMetricDelivery = delivery?.metricDelivery ?? CONNECTED_RECOVERY_METRIC_KEYS.map(
       (metric) => ({ metric, state: "unknown" as const, observationId: null })
@@ -76,7 +90,7 @@ export class CurrentRecoveryContextService {
         )
       },
       now,
-      this.integrations !== null
+      this.integrations !== null || this.garmin !== null
     );
     return {
       state: "available",

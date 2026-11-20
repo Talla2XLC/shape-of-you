@@ -92,6 +92,7 @@ function historicalActionLabel(value: GarminIntervalsStatus["historicalImport"][
 
 <template>
   <section>
+    <GarminPersonalConnection />
     <p class="eyebrow">
       Connections
     </p>

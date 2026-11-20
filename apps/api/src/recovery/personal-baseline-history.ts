@@ -6,6 +6,7 @@ export interface RecoveryBaselineDay {
   readonly sleepMinutes: number | null;
   readonly hrvRmssd: number | null;
   readonly restingHeartRate: number | null;
+  /** Median of instant observations only; date-only latest snapshots remain raw evidence. */
   readonly bodyBattery: number | null;
   readonly bodyBatteryMin: number | null;
   readonly bodyBatteryMax: number | null;
@@ -48,6 +49,8 @@ function numberOrNull(value: string | null): number | null {
  * per Person-local day. Longest sleep avoids summing naps/duplicates; metric
  * readings use a median without inspecting provider identity. Daily steps use
  * the maximum current count so overlapping sources are not summed.
+ * Body Battery samples include instant observations only; date-only snapshots
+ * retain their evidence IDs but cannot change the legacy point-value baseline.
  */
 export async function readRecoveryBaselineDays(
   client: Pool | PoolClient,
@@ -58,7 +61,7 @@ export async function readRecoveryBaselineDays(
   const result = await client.query<RecoveryBaselineRow>(
     `with current_recovery as (
        select observation.id, observation.person_id, observation.local_date,
-              observation.observed_until
+              observation.observed_until, observation.temporal_precision
        from recovery_observations observation
        join source_references source on source.id = observation.source_reference_id
        where observation.person_id = $1
@@ -224,7 +227,8 @@ export async function readRecoveryBaselineDays(
        select distinct observation.local_date, metric.metric, metric.value
        from current_recovery observation
        join recovery_metric_details metric on metric.observation_id = observation.id
-       where metric.metric in (
+       where (metric.metric <> 'body_battery' or observation.temporal_precision = 'instant')
+       and metric.metric in (
          'hrv_rmssd', 'resting_heart_rate', 'body_battery',
          'body_battery_min', 'body_battery_max', 'steps'
        )

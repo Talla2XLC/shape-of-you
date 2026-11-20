@@ -533,7 +533,7 @@ export class DailyAssessmentService {
         hrvBaselineMs: median(hrvValues.slice(1)),
         restingHeartRateBpm: latestMetric(currentRecovery, "resting_heart_rate"),
         restingHeartRateBaselineBpm: median(rhrValues.slice(1)),
-        bodyBattery: latestMetric(currentRecovery, "body_battery"),
+        bodyBattery: latestMetric(currentRecovery.filter((item) => item.temporalPrecision === "instant"), "body_battery"),
         bodyBatteryMin: latestMetric(currentRecovery, "body_battery_min"),
         bodyBatteryMax: latestMetric(currentRecovery, "body_battery_max"),
         recentWorkoutCount: recentSessions.length,

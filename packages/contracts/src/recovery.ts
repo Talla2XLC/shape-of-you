@@ -591,6 +591,7 @@ export type ConnectedRecoveryMetricKey =
   | "hrv_rmssd"
   | "oxygen_saturation"
   | "respiration_rate"
+  | "body_battery"
   | "body_battery_min"
   | "body_battery_max"
   | "steps";
@@ -627,6 +628,7 @@ export const ConnectedRecoveryMetricKeySchema = {
     "hrv_rmssd",
     "oxygen_saturation",
     "respiration_rate",
+    "body_battery",
     "body_battery_min",
     "body_battery_max",
     "steps"
@@ -805,8 +807,8 @@ export const CurrentRecoveryContextResultSchema = {
         checkedAt: { anyOf: [dateTime, { type: "null" }] },
         metricDelivery: {
           type: "array",
-          minItems: 10,
-          maxItems: 10,
+          minItems: ConnectedRecoveryMetricKeySchema.enum.length,
+          maxItems: ConnectedRecoveryMetricKeySchema.enum.length,
           items: ConnectedRecoveryMetricDeliverySchema,
           allOf: ConnectedRecoveryMetricKeySchema.enum.map((metric) => ({
             contains: {

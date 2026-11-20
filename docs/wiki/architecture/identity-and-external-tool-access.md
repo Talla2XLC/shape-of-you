@@ -313,6 +313,17 @@ absence-as-zero, timestamp comparison by the model, and promises of a later
 autonomous recheck. The tool explains availability only;
 `get_daily_assessment` remains the sole Daily Coach decision authority.
 
+The active Recovery delivery projection includes eleven metric keys, including
+independent `body_battery` latest evidence. A `local_date` Body Battery value is
+last known for its stated date, without a known measurement instant; even
+`confirmed_present` does not make it a live reading. Current and raw Recovery
+result policies preserve this distinction. The freshness algorithm remains v2.
+The eleven-key output is incompatible with a cached older closed ten-key schema:
+future delivery requires fresh tool discovery/connector schema refresh and a
+structured-output smoke check before declaring that client ready. Local tests
+of the new schema do not prove old cached-client compatibility. See the
+[mapping and compatibility ADR](../../adr/20261120-garmin-observed-wellness-mapping.md).
+
 `get_daily_recommendation_completion` remains a separate read for one exact V4
 snapshot. Coach calls it only when that result can affect a useful reply: an
 explicit progress question, a relevant verified owner fact for an already-known

@@ -126,12 +126,30 @@ import {
   PersonalInsightsResultSchema,
   DisconnectIntegrationSchema,
   GarminIntervalsConnectionSchema,
+  GarminPersonalConnectionSchema,
+  CheckGarminPersonalKeySchema,
+  ConnectGarminPersonalSchema,
+  GarminPersonalKeyCheckSchema,
   IntegrationAuthorizationStartSchema,
   StartGarminIntervalsAuthorizationSchema
 } from "@shape-of-you/contracts";
 
 function integrationPaths(): Record<string, object> {
+  const direct = Object.fromEntries([
+    ["", "get", null, GarminPersonalConnectionSchema, "Read direct Garmin connection"],
+    ["/check", "post", CheckGarminPersonalKeySchema, GarminPersonalKeyCheckSchema, "Check a personal key without importing data"],
+    ["/connect", "post", ConnectGarminPersonalSchema, GarminPersonalConnectionSchema, "Connect or renew a personal Garmin key"],
+    ["/disconnect", "post", DisconnectIntegrationSchema, GarminPersonalConnectionSchema, "Stop local Garmin imports and discard the personal key"],
+    ["/historical-import", "post", null, GarminPersonalConnectionSchema, "Request historical Garmin import"]
+  ].map(([suffix, method, input, output, summary]) => [`/v1/integrations/garmin-personal${suffix}`, {
+    [method as string]: {
+      tags: ["integrations"], summary,
+      ...(input ? { requestBody: { required: true, content: { "application/json": { schema: input } } } } : {}),
+      responses: { "200": { description: "Safe connection result", content: { "application/json": { schema: output } } } }
+    }
+  }]));
   return {
+    ...direct,
     "/v1/integrations/garmin-intervals": {
       get: {
         tags: ["integrations"],

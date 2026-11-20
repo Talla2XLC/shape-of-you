@@ -15,7 +15,7 @@ tags:
 
 Current runtime is one NestJS API in `apps/api` using `FastifyAdapter`,
 PostgreSQL, and Drizzle. It implements Physical State, Nutrition, Training,
-Recovery, Coaching, asynchronous Intake, an in-process Intervals.icu adapter,
+Recovery, Coaching, asynchronous Intake, in-process Garmin/Intervals adapters,
 and an OAuth-protected MCP adapter in one modular deployable.
 
 ## Content
@@ -52,15 +52,23 @@ versioned exercises/programs, immutable sessions/sets, records, and progression
 projections. Recovery and Coaching retain typed facts, policies, evidence, and
 ownership boundaries.
 
-The Integrations module coordinates the disabled-by-default `Garmin via
-Intervals.icu` flow. It owns one-use Person-bound OAuth transactions,
-authenticated encryption of per-connection tokens, a technical inbox, sync
-projection, and a bounded reconciliation loop inside the API process. Provider
-transport and payload validation end at the adapter; Recovery and Training
-receive provider-neutral typed commands. The worker claims due import and
-remote-disconnect retry work through PostgreSQL leases and `SKIP LOCKED`.
-Provider failures degrade only connection sync health and do not couple normal
-domain reads to Intervals.icu.
+The Integrations module coordinates direct Garmin personal-key linking and
+Garmin-via-Intervals OAuth through scoped adapters in the existing API process.
+It owns encrypted per-connection credentials, consent-bound technical inboxes,
+sync projections and typed import. Direct availability requires database and
+integration encryption settings; Intervals additionally requires its OAuth
+client settings. Provider transport and raw payloads end at the adapter.
+Recovery and Training retain their existing ownership and typed commands.
+
+PostgreSQL leases and `SKIP LOCKED` scope every claim to the selected provider.
+The shared loop alternates providers and uses a fifteen-minute connection
+lease for bounded reconciliation plus the shared twenty-FIT download budget;
+it does not claim a hard database wall-time guarantee. Direct historical
+windows are fourteen days. Disconnect, account binding, callbacks and stale
+worker completion are consent-fenced. Local Garmin key removal does not claim
+remote revocation. Coach selects the active provider's exact delivery receipts.
+Normal domain reads remain independent of provider availability. See the
+[Connections contract](../api/connections.md) for current coverage and controls.
 
 When all three OAuth trust values are configured, the API also exposes a
 stateless Streamable HTTP MCP endpoint at `/mcp` and protected-resource
@@ -83,6 +91,7 @@ operator mappings are provisioned.
 
 ## Decisions
 
+- [Direct Garmin Personal API linking](../../adr/20261118-connect-garmin-personal-api.md)
 - [NestJS and Nuxt](../../adr/20260729-use-nestjs-with-fastify-and-nuxt.md)
 - [PostgreSQL queue](../../adr/20260802-use-durable-postgresql-intake-queue-and-typed-items.md)
 - [PostgreSQL with Drizzle](../../adr/20260728-use-postgresql-with-drizzle-orm-and-kit.md)

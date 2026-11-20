@@ -154,11 +154,13 @@ const environmentSchema = z.object({
   const integrationSettings = [
     environment.INTERVALS_ICU_CLIENT_ID,
     environment.INTERVALS_ICU_CLIENT_SECRET,
-    environment.INTERVALS_ICU_REDIRECT_URI,
-    environment.INTEGRATION_ENCRYPTION_KEY_RING,
-    environment.INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID
+    environment.INTERVALS_ICU_REDIRECT_URI
   ];
-  if (integrationSettings.some(Boolean) && !integrationSettings.every(Boolean)) {
+  const encryptionSettings = [environment.INTEGRATION_ENCRYPTION_KEY_RING, environment.INTEGRATION_ENCRYPTION_ACTIVE_KEY_ID];
+  if (encryptionSettings.some(Boolean) && !encryptionSettings.every(Boolean)) {
+    context.addIssue({ code: "custom", path: ["INTEGRATION_ENCRYPTION_KEY_RING"], message: "Integration encryption key ring and active key ID must be supplied together" });
+  }
+  if (integrationSettings.some(Boolean) && (!integrationSettings.every(Boolean) || !encryptionSettings.every(Boolean))) {
     context.addIssue({
       code: "custom",
       path: ["INTERVALS_ICU_CLIENT_ID"],

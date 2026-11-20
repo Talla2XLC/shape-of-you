@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
-import { Inject, Injectable, Logger, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional, type OnApplicationShutdown, type OnModuleInit } from "@nestjs/common";
 
 import { INTEGRATION_STORE, INTEGRATION_WORKER_ENABLED } from "../application/tokens.js";
 import type { IntegrationStore } from "./integration-store.js";
+import { GarminPersonalService } from "./garmin-personal.service.js";
 import { IntegrationService } from "./integration.service.js";
 
 const idleMs = 30_000;
-const leaseMs = 60_000;
+// Covers two bounded reconciliations plus the shared twenty-download FIT budget.
+const leaseMs = 15 * 60_000;
 
 /** Bounded reconciliation loop hosted by the existing API deployable. */
 @Injectable()
@@ -16,26 +18,30 @@ export class IntegrationWorker implements OnModuleInit, OnApplicationShutdown {
   private timer: NodeJS.Timeout | undefined;
   private running: Promise<void> | undefined;
   private stopping = false;
+  private preferDirect = false;
 
   public constructor(
     @Inject(INTEGRATION_STORE) private readonly store: IntegrationStore | null,
     @Inject(INTEGRATION_WORKER_ENABLED) private readonly enabled: boolean,
-    @Inject(IntegrationService) private readonly service: IntegrationService
+    @Inject(IntegrationService) private readonly service: IntegrationService,
+    @Optional() @Inject(GarminPersonalService) private readonly garmin: GarminPersonalService | null = null
   ) {}
 
-  public onModuleInit(): void { if (this.enabled && this.store) this.schedule(0); }
+  public onModuleInit(): void { if (this.enabled && (this.store || this.garmin)) this.schedule(0); }
   public async onApplicationShutdown(): Promise<void> { this.stopping = true; if (this.timer) clearTimeout(this.timer); await this.running; }
 
   /** Claims and reconciles at most one durable connection. */
   public async processNext(): Promise<boolean> {
-    if (!this.store) return false;
+    this.preferDirect = !this.preferDirect;
+    if (this.preferDirect && await this.garmin?.processNext(this.workerId, leaseMs)) return true;
+    if (!this.store) return await this.garmin?.processNext(this.workerId, leaseMs) ?? false;
     const disconnect = await this.store.claimRemoteDisconnectDue(this.workerId, leaseMs);
     if (disconnect) {
       await this.service.retryRemoteDisconnect(disconnect);
       return true;
     }
     const connection = await this.store.claimDue(this.workerId, leaseMs);
-    if (!connection) return false;
+    if (!connection) return await this.garmin?.processNext(this.workerId, leaseMs) ?? false;
     await this.service.reconcileConnection(connection);
     return true;
   }

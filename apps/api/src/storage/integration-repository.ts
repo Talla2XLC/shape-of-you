@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
-import type { ActivityDetailsIssue, GarminIntervalsConnection } from "@shape-of-you/contracts";
+import type { ActivityDetailsIssue, GarminIntervalsConnection, IntegrationConnection } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
 import {
@@ -29,15 +29,16 @@ import type { IntegrationFailureCode } from "../integrations/provider.js";
 import { ConflictError } from "../domain/errors.js";
 import { lockPersonEvidenceMutation } from "./source-reference-repository.js";
 
-const providerKey = "intervals_icu";
+/** The two supported integration namespaces, never inferred from credential contents. */
+export type IntegrationProviderKey = "intervals_icu" | "garmin_personal";
 
 /** PostgreSQL implementation of the in-process provider integration boundary. */
-export class IntegrationRepository implements IntegrationStore {
-  public constructor(private readonly database: DatabaseContext) {}
+export class IntegrationRepository<Status extends IntegrationConnection = GarminIntervalsConnection> implements IntegrationStore<Status> {
+  public constructor(private readonly database: DatabaseContext, private readonly providerKey: IntegrationProviderKey = "intervals_icu") {}
 
   public async createAuthorization(personId: string, stateHash: string, returnTo: string, expiresAt: Date): Promise<void> {
     await this.database.db.insert(integrationAuthorizationTransactions).values({
-      personId, providerKey, stateHash, returnTo, expiresAt
+      personId, providerKey: this.providerKey, stateHash, returnTo, expiresAt
     });
   }
 
@@ -45,7 +46,7 @@ export class IntegrationRepository implements IntegrationStore {
     const rows = await this.database.db.update(integrationAuthorizationTransactions)
       .set({ consumedAt: now })
       .where(and(
-        eq(integrationAuthorizationTransactions.providerKey, providerKey),
+        eq(integrationAuthorizationTransactions.providerKey, this.providerKey),
         eq(integrationAuthorizationTransactions.stateHash, stateHash),
         isNull(integrationAuthorizationTransactions.consumedAt),
         gte(integrationAuthorizationTransactions.expiresAt, now)
@@ -58,30 +59,41 @@ export class IntegrationRepository implements IntegrationStore {
     const rows = await this.database.db.select({ integration: integrationConnections, recovery: recoveryConnections })
       .from(integrationConnections)
       .innerJoin(recoveryConnections, eq(integrationConnections.recoveryConnectionId, recoveryConnections.id))
-      .where(and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, providerKey)))
+      .where(and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, this.providerKey)))
       .limit(1);
     const row = rows[0];
     if (!row) return null;
     if (row.recovery.erasureRequestedAt) throw new Error("Connection erasure must complete before reauthorization");
-    return { id: row.integration.id, recoveryConnectionId: row.integration.recoveryConnectionId };
+    return { id: row.integration.id, recoveryConnectionId: row.integration.recoveryConnectionId, consentId: row.integration.consentId };
   }
 
   public async activate(input: {
     readonly id: string; readonly recoveryConnectionId: string; readonly consentId: string;
-    readonly personId: string; readonly externalUserId: string; readonly credential: { readonly keyId: string; readonly nonce: string; readonly ciphertext: string; readonly tag: string };
-    readonly authorizationStartedAt: Date;
+    readonly personId: string; readonly externalUserId: string | null; readonly credential: { readonly keyId: string; readonly nonce: string; readonly ciphertext: string; readonly tag: string };
+    readonly authorizationStartedAt: Date; readonly expectedConsentId?: string | null;
   }): Promise<void> {
     await this.database.db.transaction(async (transaction) => {
       await lockPersonEvidenceMutation(transaction, input.personId);
+      const overlap = await transaction.execute(sql`
+        select 1 from integration_connections other
+        where other.person_id = ${input.personId} and other.provider_key <> ${this.providerKey}
+          and (other.import_enabled = true
+            or exists (select 1 from recovery_observations o where o.connection_id = other.recovery_connection_id)
+            or exists (select 1 from integration_activity_facts a where a.connection_id = other.id))
+        limit 1
+      `);
+      if (overlap.rowCount) throw new ConflictError("Another provider connection or retained imported data prevents automatic switching");
+      if (this.providerKey === "intervals_icu" && !input.externalUserId) throw new ConflictError("Provider account identity is required");
       const providers = await transaction.insert(recoveryProviders)
-        .values({ key: providerKey, name: "Intervals.icu" })
+        .values({ key: this.providerKey, name: this.providerKey === "intervals_icu" ? "Intervals.icu" : "Garmin" })
         .onConflictDoNothing().returning();
-      const provider = providers[0] ?? await transaction.query.recoveryProviders.findFirst({ where: eq(recoveryProviders.key, providerKey) });
+      const provider = providers[0] ?? await transaction.query.recoveryProviders.findFirst({ where: eq(recoveryProviders.key, this.providerKey) });
       if (!provider) throw new Error("Intervals.icu provider could not be resolved");
 
       const previous = await transaction.query.integrationConnections.findFirst({
-        where: and(eq(integrationConnections.personId, input.personId), eq(integrationConnections.providerKey, providerKey))
+        where: and(eq(integrationConnections.personId, input.personId), eq(integrationConnections.providerKey, this.providerKey))
       });
+      if (input.expectedConsentId !== undefined && (previous?.consentId ?? null) !== input.expectedConsentId) throw new ConflictError("Concurrent authorization changed the connection generation");
       if (previous && previous.id !== input.id) throw new ConflictError("Concurrent authorization changed the connection identity");
       if (previous) {
         const recovery = await transaction.query.recoveryConnections.findFirst({ where: and(eq(recoveryConnections.id, previous.recoveryConnectionId), eq(recoveryConnections.personId, input.personId)) });
@@ -108,14 +120,14 @@ export class IntegrationRepository implements IntegrationStore {
           id: input.recoveryConnectionId,
           personId: input.personId,
           providerId: provider.id,
-          dedupeKey: `${providerKey}:${input.externalUserId}`
+          dedupeKey: `${this.providerKey}:${input.recoveryConnectionId}`
         });
       }
       await transaction.insert(recoveryConsents).values({
         id: input.consentId,
         personId: input.personId,
         connectionId: input.recoveryConnectionId,
-        purpose: "Import Recovery wellness from Intervals.icu",
+        purpose: `Import Recovery wellness from ${this.providerKey}`,
         retentionMode: "indefinite"
       });
       await transaction.insert(recoveryConsentKinds).values([
@@ -123,7 +135,7 @@ export class IntegrationRepository implements IntegrationStore {
         { consentId: input.consentId, kind: "metric" }
       ]);
       const values = {
-        consentId: input.consentId, externalUserId: input.externalUserId,
+        consentId: input.consentId, externalUserId: input.externalUserId ?? previous?.externalUserId ?? null,
         lifecycle: "active" as const, importEnabled: true,
         credentialKeyId: input.credential.keyId, credentialNonce: input.credential.nonce,
         credentialCiphertext: input.credential.ciphertext, credentialTag: input.credential.tag,
@@ -135,35 +147,56 @@ export class IntegrationRepository implements IntegrationStore {
       } else {
         await transaction.insert(integrationConnections).values({
           id: input.id, personId: input.personId, recoveryConnectionId: input.recoveryConnectionId,
-          providerKey, ...values
+          providerKey: this.providerKey, ...values
         });
       }
     });
   }
 
-  public async status(personId: string): Promise<GarminIntervalsConnection | null> {
+  /** Binds the first documented account identity before writes and fences key rotation. */
+  public async bindExternalIdentity(id: string, consentId: string, externalUserId: string): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      const owner = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey)) });
+      if (!owner) return false;
+      await lockPersonEvidenceMutation(transaction, owner.personId);
+      const rows = await transaction.execute(sql`
+        update integration_connections set external_user_id = ${externalUserId}
+        where id = ${id} and provider_key = ${this.providerKey} and consent_id = ${consentId}
+          and import_enabled = true and (external_user_id is null or external_user_id = ${externalUserId})
+        returning id
+      `);
+      if (!rows.rowCount) {
+        const current = await transaction.query.integrationConnections.findFirst({ where: eq(integrationConnections.id, id) });
+        if (current?.consentId === consentId && current.importEnabled && current.externalUserId !== externalUserId) throw new ConflictError("Garmin account changed; imported accounts cannot be merged");
+        return false;
+      }
+      return true;
+    });
+  }
+
+  public async status(personId: string): Promise<Status | null> {
     const row = await this.database.db.query.integrationConnections.findFirst({
-      where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, providerKey))
+      where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, this.providerKey))
     });
     if (!row) {
       const pending = await this.database.db.query.integrationAuthorizationTransactions.findFirst({
         where: and(
           eq(integrationAuthorizationTransactions.personId, personId),
-          eq(integrationAuthorizationTransactions.providerKey, providerKey),
+          eq(integrationAuthorizationTransactions.providerKey, this.providerKey),
           isNull(integrationAuthorizationTransactions.consumedAt),
           gte(integrationAuthorizationTransactions.expiresAt, new Date())
         )
       });
       return pending ? {
-        provider: "intervals_icu", displayName: "Garmin via Intervals.icu", recoveryConnectionId: null,
+        provider: this.providerKey, displayName: this.providerKey === "intervals_icu" ? "Garmin via Intervals.icu" : "Garmin", recoveryConnectionId: null,
         lifecycle: "connecting", failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null,
         lastDataAt: null, connectedAt: null, disconnectedAt: null,
         historicalImport: emptyHistoricalImport()
-      } : null;
+      } as Status : null;
     }
     return {
-      provider: "intervals_icu",
-      displayName: "Garmin via Intervals.icu",
+      provider: this.providerKey,
+      displayName: this.providerKey === "intervals_icu" ? "Garmin via Intervals.icu" : "Garmin",
       recoveryConnectionId: row.recoveryConnectionId,
       lifecycle: row.lifecycle,
       failureCode: row.failureCode,
@@ -180,7 +213,7 @@ export class IntegrationRepository implements IntegrationStore {
         completedAt: row.historicalCompletedAt?.toISOString() ?? null,
         failureCode: row.historicalFailureCode
       }
-    };
+    } as Status;
   }
 
   /** Reads only safe sync and target-date delivery metadata for Recovery composition. */
@@ -191,7 +224,7 @@ export class IntegrationRepository implements IntegrationStore {
     const connection = await this.database.db.query.integrationConnections.findFirst({
       where: and(
         eq(integrationConnections.personId, personId),
-        eq(integrationConnections.providerKey, providerKey)
+        eq(integrationConnections.providerKey, this.providerKey)
       )
     });
     if (!connection) return null;
@@ -215,6 +248,10 @@ export class IntegrationRepository implements IntegrationStore {
     const normalizedDeliveryIds = new Set(records.map((record) => record.id));
     const pointers = new Map(facts.map((fact) => [fact.factKey, fact]));
     const metricDelivery = CONNECTED_RECOVERY_METRIC_KEYS.map((metric) => {
+      if ((this.providerKey === "garmin_personal" && !["sleep", "resting_heart_rate", "night_heart_rate", "oxygen_saturation", "respiration_rate", "body_battery", "body_battery_min", "body_battery_max", "steps"].includes(metric)) ||
+          (this.providerKey === "intervals_icu" && metric === "body_battery")) {
+        return { metric, state: "unknown" as const, observationId: null };
+      }
       const pointer = pointers.get(metric);
       if (
         pointer?.confirmedConsentId === connection.consentId
@@ -256,7 +293,7 @@ export class IntegrationRepository implements IntegrationStore {
 
   public async findActive(personId: string): Promise<ActiveIntegrationConnection | null> {
     const row = await this.database.db.query.integrationConnections.findFirst({
-      where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.importEnabled, true))
+      where: and(eq(integrationConnections.providerKey, this.providerKey), eq(integrationConnections.personId, personId), eq(integrationConnections.importEnabled, true))
     });
     if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
     return {
@@ -275,7 +312,7 @@ export class IntegrationRepository implements IntegrationStore {
 
   public async findForErasure(personId: string, recoveryConnectionId: string): Promise<ActiveIntegrationConnection | null> {
     const row = await this.database.db.query.integrationConnections.findFirst({
-      where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.recoveryConnectionId, recoveryConnectionId))
+      where: and(eq(integrationConnections.providerKey, this.providerKey), eq(integrationConnections.personId, personId), eq(integrationConnections.recoveryConnectionId, recoveryConnectionId))
     });
     if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
     return {
@@ -292,6 +329,7 @@ export class IntegrationRepository implements IntegrationStore {
       const now = new Date();
       const candidates = await transaction.select().from(integrationConnections)
         .where(and(
+          eq(integrationConnections.providerKey, this.providerKey),
           eq(integrationConnections.importEnabled, true),
           lte(integrationConnections.nextAttemptAt, now),
           or(isNull(integrationConnections.leaseUntil), lte(integrationConnections.leaseUntil, now))
@@ -313,6 +351,7 @@ export class IntegrationRepository implements IntegrationStore {
     return this.database.db.transaction(async (transaction) => {
       const now = new Date();
       const candidates = await transaction.select().from(integrationConnections).where(and(
+        eq(integrationConnections.providerKey, this.providerKey),
         eq(integrationConnections.remoteDisconnectPending, true), lte(integrationConnections.nextAttemptAt, now),
         or(isNull(integrationConnections.leaseUntil), lte(integrationConnections.leaseUntil, now))
       )).orderBy(integrationConnections.nextAttemptAt).limit(1).for("update", { skipLocked: true });
@@ -327,15 +366,15 @@ export class IntegrationRepository implements IntegrationStore {
     });
   }
 
-  public async releaseClaim(id: string): Promise<void> {
-    await this.database.db.update(integrationConnections).set({ leaseOwner: null, leaseUntil: null }).where(eq(integrationConnections.id, id));
+  public async releaseClaim(id: string, expectedConsentId?: string): Promise<void> {
+    await this.database.db.update(integrationConnections).set({ leaseOwner: null, leaseUntil: null }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey), expectedConsentId ? eq(integrationConnections.consentId, expectedConsentId) : undefined));
   }
 
   public async beginDisconnect(personId: string, reason: string): Promise<ActiveIntegrationConnection | null> {
     return this.database.db.transaction(async (transaction) => {
       await lockPersonEvidenceMutation(transaction, personId);
       const row = await transaction.query.integrationConnections.findFirst({
-        where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, providerKey))
+        where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, this.providerKey))
       });
       if (!row) return null;
       const active = row.credentialKeyId && row.credentialNonce && row.credentialCiphertext && row.credentialTag ? {
@@ -361,7 +400,9 @@ export class IntegrationRepository implements IntegrationStore {
           };
       await transaction.update(integrationConnections).set({
         lifecycle: "disconnected", importEnabled: false, disconnectedAt: now,
-        remoteDisconnectPending: Boolean(active), ...historicalReset, updatedAt: now
+        remoteDisconnectPending: this.providerKey === "intervals_icu" && Boolean(active),
+        ...(this.providerKey === "garmin_personal" ? { credentialKeyId: null, credentialNonce: null, credentialCiphertext: null, credentialTag: null } : {}),
+        ...historicalReset, updatedAt: now
       }).where(eq(integrationConnections.id, row.id));
       await transaction.update(recoveryConnections).set({ status: "disconnected", disconnectedAt: now })
         .where(eq(recoveryConnections.id, row.recoveryConnectionId));
@@ -376,7 +417,7 @@ export class IntegrationRepository implements IntegrationStore {
     const current = await this.database.db.query.integrationConnections.findFirst({
       where: and(
         eq(integrationConnections.personId, personId),
-        eq(integrationConnections.providerKey, providerKey),
+        eq(integrationConnections.providerKey, this.providerKey),
         eq(integrationConnections.importEnabled, true)
       )
     });
@@ -496,14 +537,14 @@ export class IntegrationRepository implements IntegrationStore {
     return rows.length > 0;
   }
 
-  public async completeRemoteDisconnect(id: string): Promise<void> {
+  public async completeRemoteDisconnect(id: string, expectedConsentId?: string): Promise<void> {
     await this.database.db.update(integrationConnections).set({
       remoteDisconnectPending: false, credentialKeyId: null, credentialNonce: null,
       credentialCiphertext: null, credentialTag: null, failureCode: null, leaseOwner: null, leaseUntil: null, updatedAt: new Date()
-    }).where(eq(integrationConnections.id, id));
+    }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey), eq(integrationConnections.importEnabled, false), expectedConsentId ? eq(integrationConnections.consentId, expectedConsentId) : undefined));
   }
-  public async failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode): Promise<void> {
-    await this.database.db.update(integrationConnections).set({ failureCode, nextAttemptAt: new Date(Date.now() + 60_000), leaseOwner: null, leaseUntil: null, updatedAt: new Date() }).where(eq(integrationConnections.id, id));
+  public async failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode, expectedConsentId?: string): Promise<void> {
+    await this.database.db.update(integrationConnections).set({ failureCode, nextAttemptAt: new Date(Date.now() + 60_000), leaseOwner: null, leaseUntil: null, updatedAt: new Date() }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey), eq(integrationConnections.importEnabled, false), expectedConsentId ? eq(integrationConnections.consentId, expectedConsentId) : undefined));
   }
   public async markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void> {
     const now = new Date();

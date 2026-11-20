@@ -352,10 +352,12 @@ const recoveryWriteResultContent = coachResultContent(
 
 const recoveryReadResultContent = coachResultContent(
   MCP_RECOVERY_RETRY_POLICY +
+  "A body_battery observation with temporalPrecision local_date is the last known value for that localDate, without a known measurement time. Never call it a current live reading or assign fetch/sync time as its measurement time. Keep it separate from daily minimum and maximum. " +
   "Use these recovery facts silently. Answer the recovery question with verified facts; a next step is optional and must be useful."
 );
 
 const currentRecoveryContextResultContent = coachResultContent(
+  "For body_battery with temporalPrecision local_date, describe the last known value for the stated date. Its measurement time is unknown, even when delivery is confirmed_present; do not call it live or measured as of the fetch/sync time. Daily min/max are separate metrics. " +
   "Use typed observations as authority for their saved health values, preserving direct user reports as manual evidence. Consider their observation times, quality, and source channels when deciding what the evidence means. Use syncState, targetDateDelivery, and metricDelivery only to explain availability; delivery alone does not establish a health value. " +
   "A retained_unconfirmed value is a previously saved local value whose freshness has not yet been confirmed by the current OAuth consent generation. Never present it as current, and do not infer whether reconnect, migration, or another delivery transition caused the unconfirmed state. A confirmed_absent metric was not delivered in the normalized current-consent record; this is not zero and does not prove a cause. A confirmed_present metric is current-consent delivery evidence. " +
   "For steps with periodState partial_day, always call the value intermediate or accumulated as of the exact asOf time. Never call it a final, complete, or end-of-day total and never use a low partial value as evidence of low daily activity. " +

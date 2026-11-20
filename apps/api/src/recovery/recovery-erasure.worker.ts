@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   Inject,
   Injectable,
+  Optional,
   Logger,
   type OnApplicationShutdown,
   type OnModuleInit
@@ -13,6 +14,7 @@ import {
   RECOVERY_STORE
 } from "../application/tokens.js";
 import type { RecoveryStore } from "../storage/recovery-repository.js";
+import { GarminPersonalService } from "../integrations/garmin-personal.service.js";
 import { IntegrationService } from "../integrations/integration.service.js";
 
 const leaseMs = 30_000;
@@ -32,7 +34,8 @@ export class RecoveryErasureWorker implements OnModuleInit, OnApplicationShutdow
   public constructor(
     @Inject(RECOVERY_STORE) private readonly store: RecoveryStore,
     @Inject(RECOVERY_ERASURE_WORKER_ENABLED) private readonly enabled: boolean,
-    @Inject(IntegrationService) private readonly integrations: IntegrationService
+    @Inject(IntegrationService) private readonly integrations: IntegrationService,
+    @Optional() @Inject(GarminPersonalService) private readonly garmin: GarminPersonalService | null = null
   ) {}
 
   /** Starts fail-safe polling without creating another deployable boundary. */
@@ -54,6 +57,7 @@ export class RecoveryErasureWorker implements OnModuleInit, OnApplicationShutdow
     if (!job) return false;
     try {
       await this.integrations.prepareErasure(job.personId, job.connectionId);
+      await this.garmin?.prepareErasure(job.personId, job.connectionId);
       await this.store.completeErasure(job);
     } catch {
       this.logger.warn("Recovery erasure attempt failed");

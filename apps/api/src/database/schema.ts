@@ -3299,7 +3299,7 @@ export const integrationConnections = pgTable(
     recoveryConnectionId: uuid("recovery_connection_id").notNull(),
     consentId: uuid("consent_id").notNull(),
     providerKey: varchar("provider_key", { length: 64 }).notNull(),
-    externalUserId: varchar("external_user_id", { length: 128 }).notNull(),
+    externalUserId: varchar("external_user_id", { length: 128 }),
     lifecycle: integrationConnectionLifecycle("lifecycle").default("active").notNull(),
     importEnabled: boolean("import_enabled").default(true).notNull(),
     credentialKeyId: varchar("credential_key_id", { length: 64 }),
@@ -3338,6 +3338,7 @@ export const integrationConnections = pgTable(
       columns: [table.consentId, table.recoveryConnectionId, table.personId],
       foreignColumns: [recoveryConsents.id, recoveryConsents.connectionId, recoveryConsents.personId]
     }).onDelete("cascade"),
+    check("integration_external_identity_shape", sql`(${table.providerKey} = 'garmin_personal' AND (${table.externalUserId} IS NULL OR length(${table.externalUserId}) > 0)) OR (${table.providerKey} <> 'garmin_personal' AND ${table.externalUserId} IS NOT NULL AND length(${table.externalUserId}) > 0)`),
     unique("integration_connections_person_provider_uq").on(table.personId, table.providerKey),
     unique("integration_connections_recovery_uq").on(table.recoveryConnectionId),
     index("integration_connections_claim_idx").on(table.importEnabled, table.nextAttemptAt, table.leaseUntil),

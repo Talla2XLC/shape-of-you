@@ -57,3 +57,10 @@ export const INTEGRATION_PROVIDER = Symbol("INTEGRATION_PROVIDER");
 export const INTEGRATION_CIPHER = Symbol("INTEGRATION_CIPHER");
 /** Injection token controlling the in-process integration reconciler. */
 export const INTEGRATION_WORKER_ENABLED = Symbol("INTEGRATION_WORKER_ENABLED");
+
+/** Optional direct Garmin runtime, configured independently of Intervals OAuth. */
+export const GARMIN_PERSONAL_RUNTIME = Symbol("GARMIN_PERSONAL_RUNTIME");
+/** Scoped direct Garmin persistence for Coach delivery evidence. */
+export const GARMIN_PERSONAL_STORE = Symbol("GARMIN_PERSONAL_STORE");
+/** Optional context for explicitly constructed provider-specific import coordinators. */
+export const INTEGRATION_IMPORT_CONTEXT = Symbol("INTEGRATION_IMPORT_CONTEXT");

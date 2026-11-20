@@ -28,10 +28,10 @@ restore protection only.
 Shared provider/device-model/capability definitions use immutable versions.
 Person owns connections, device instances, consent, retention state, and
 observations. A connection may represent either a physical device or an
-authorized account. Per-connection Intervals.icu access tokens are stored only
-as authenticated ciphertext bound to provider, Person, and connection; global
-OAuth credentials and encryption keys are runtime configuration. Neither is
-returned by public projections or written to logs.
+authorized account. Per-connection Intervals access tokens and direct Garmin
+personal keys are stored only as authenticated ciphertext bound to provider,
+Person, and connection; global OAuth credentials and encryption keys are runtime
+configuration. Neither is returned by public projections or written to logs.
 
 Immutable RecoveryObservation stores UTC interval, IANA timezone/local date,
 source, quality, idempotency, correction metadata, and exactly one typed detail:
@@ -108,6 +108,27 @@ while actual model behavior requires a separate conversation check.
 
 Device observations require active matching consent; revocation stops future
 collection but is not erasure. Corrections replace full observations.
+
+Direct Garmin ingestion uses `garmin_personal_wellness` account provenance
+and the same typed observations, immutable corrections, consent fencing,
+receipts and journal-backed erasure. Current mappings cover sleep duration,
+explicit resting heart rate, sleep-average heart rate/SpO2/respiration,
+separate daily Body Battery latest and extrema, and steps with provider
+chronology. Body Battery latest uses `body_battery` with `local_date` precision;
+its measurement instant remains unknown. Corrections replace the daily snapshot,
+and missing latest withdraws only that fact. Consent-scoped delivery reports
+latest independently of extrema, with `asOf/periodState: null`. Legacy
+DailyAssessment and its personal baseline use only instant `body_battery`
+samples, preserving the existing extrema fallback; raw daily observations remain
+available to focused Coach reads. See the
+[observed mapping ADR](../../adr/20261120-garmin-observed-wellness-mapping.md).
+Unconfirmed HRV/overall sleep score remain `unknown`, rather than false confirmed
+absence. Connection activation does not require records; account identity is
+bound internally before the first typed writes. The
+[Connections contract](../api/connections.md) defines exact linking, coverage
+and the refusal to overlap retained Intervals evidence. Local implementation
+is accepted; a bounded own-account read confirmed populated fields, while live
+typed import, actual FIT decoding and rollout remain unverified.
 
 The Intervals.icu adapter imports supported wellness fields through an
 account-level source channel. Its explicit whitelist maps sleep duration, sleep
@@ -299,6 +320,7 @@ reconstruction of the observation ordering used by a historical live v1 read.
 
 ## Decisions
 
+- [Direct Garmin Personal API linking](../../adr/20261118-connect-garmin-personal-api.md).
 - [Recovery ADR](../../adr/20260731-model-typed-recovery-observations-and-versioned-readiness-assessments.md).
 - [Wearable sleep score and Recovery MCP input](../../adr/20260831-model-wearable-sleep-score-and-normalize-recovery-mcp-input.md).
 - [Recovery retention and authenticated connection erasure](../../adr/20260903-enforce-recovery-retention-and-authenticated-connection-erasure.md).

@@ -29,6 +29,8 @@ export interface ProviderWellnessRecord {
   readonly respirationRate: number | null;
   readonly bodyBatteryMinimum: number | null;
   readonly bodyBatteryMaximum: number | null;
+  /** Last known value for localDate; does not imply a known measurement timestamp. */
+  readonly bodyBatteryLatest?: number | null;
   readonly steps?: number | null;
 }
 
@@ -57,12 +59,16 @@ export interface ProviderReconciliation {
   readonly activities: readonly ProviderActivityRecord[];
 }
 
-/** Replaceable in-process transport boundary for one external provider. */
-export interface HealthDataProvider {
+/** Typed data-reading boundary shared by the two supported providers. */
+export interface HealthDataReader {
+  reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string, scope?: string): Promise<ProviderReconciliation>;
+  originalActivityFile(accessToken: string, activityId: string, scope?: string): Promise<Uint8Array | null>;
+}
+
+/** OAuth authorization/revocation belongs only to providers supporting that contract. */
+export interface HealthDataProvider extends HealthDataReader {
   authorizationUrl(state: string): string;
   exchangeAuthorizationCode(code: string): Promise<ProviderAuthorization>;
-  reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string): Promise<ProviderReconciliation>;
-  originalActivityFile(accessToken: string, activityId: string): Promise<Uint8Array | null>;
   disconnect(accessToken: string): Promise<void>;
 }
 

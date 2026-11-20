@@ -426,7 +426,7 @@ describe("Garmin via Intervals.icu integration contracts", () => {
     expect(reconcileRecentActivityLinks).toHaveBeenCalledOnce();
     expect(markHistoricalImportFailed).toHaveBeenCalledWith(connectionId, expect.any(String), "provider_timeout", true);
     expect(markSyncFailed).not.toHaveBeenCalled();
-    expect(releaseClaim).toHaveBeenCalledWith(connectionId);
+    expect(releaseClaim).toHaveBeenCalledWith(connectionId, base.consentId);
 
     reconcile.mockClear();
     reconcile.mockResolvedValue({ wellness: [], activities: [] });

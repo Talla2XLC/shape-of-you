@@ -428,6 +428,13 @@
       "when": 1791407610796,
       "tag": "20261007211330_single_session_weight_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "7",
+      "when": 1795176000000,
+      "tag": "20261120120000_garmin_personal_identity",
+      "breakpoints": true
     }
   ]
 }
