@@ -4,7 +4,9 @@
 Review приняты (`task0181-independent-quality-20261120`,
 `task0181-independent-architecture-20261120`). Оператор утвердил ADR и этап
 ответом «Да, утвердить и реализовать».
-Реальный переход, shared-environment migration и delivery не разрешены.
+Staging delivery и реальный journal upgrade позднее отдельно разрешены
+ответом «давай делай уже до конца!» и выполнены. Сам переход аккаунта
+с Intervals на Garmin этим этапом не запускался.
 
 ## Основание
 
@@ -16,8 +18,8 @@ TASK-0181 содержит analysis/review, без второго standalone о�
 «Да, реализуй v2 локально»:
 [journal v2 ADR](../../../../docs/adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md).
 Локальный этап включает prefix-preserving codec/sync/replay, durability proof
-для activation и offline upgrade tooling/tests. Реальная замена staging
-journal требует отдельного operational разрешения.
+для activation и offline upgrade tooling/tests. Реальная замена staging journal
+выполнена после отдельного operational разрешения; evidence приведён ниже.
 
 ## Объём этапа проектирования
 
@@ -102,11 +104,33 @@ Commit/push, deployment, shared-environment migration, credential access и
   на отдельном native PostgreSQL с синтетическими данными.
 - Все 82 migration-chain tests прошли на чистом isolated PostgreSQL с UTC,
   включая upgrade каждого prefix и статическую проверку identifiers ≤63 bytes.
-  Native restore drill прошёл 2/2. Миграции применял только локальный test harness.
+  Native restore drill прошёл 2/2. На локальном этапе миграции применял
+  только изолированный test harness; staging delivery описана ниже.
 - Web: unit/typecheck/lint/build, полный набор 37 Playwright cases до двух
   новых failure reasons и три дополнительных E2E после них прошли.
 - Independent reviewer повторил 18 PostgreSQL tests, 48 scoped unit и 2 manifest
   unit tests, проверил v2 codec/sync/replay/upgrade и architecture gates.
   Замечания закрыты; локальное acceptance принято. Affected canonical Wiki обновлена.
-- Реальный журнал, shared environment, ключ пользователя, connection и Git index
-  не менялись. Локальная проверка не означает staging delivery или реальный cutover.
+- Во время локальной проверки реальный журнал, shared environment, ключ
+  пользователя, connection и Git index не менялись. Этот прогон сам по себе
+  не означал staging delivery или реальный cutover.
+
+## Завершённая staging delivery
+
+- Оператор разрешил push и наблюдение, затем полный upgrade журнала и выкладку.
+  Implementation `79f09f3` и independently accepted edge-build fix `47ba3f3`
+  закоммичены и отправлены в `main`; восемь исходных посторонних правок исключены.
+- После private backup API/Identity выполнены full publication `44745557157`
+  и Promote `44746953985` точного release `47ba3f3`. Pipeline применил миграции
+  на staging; hashes всех трёх новых API migrations отдельно сверены в PostgreSQL.
+- Live journal v1 → v2 заменён под writer barrier с сохранением legacy prefix,
+  forensic v1 и checkpoints. Full sync создал verified sealed checkpoint;
+  после снятия barrier регулярный timer отработал успешно.
+- Independent operational acceptance принято
+  (`task0181-independent-staging-acceptance-20261120`): runtime/readiness/smoke,
+  v2 seal/права файлов, MCP discovery и новые OpenAPI paths проверены.
+- Точные timestamps и текущий статус находятся в
+  [deployment evidence](../../../../docs/wiki/operations/temporary-vm-deployment.md)
+  и [journal runbook](../../../../docs/wiki/operations/postgresql-backup-and-restore.md).
+  Реальный Person cutover, отдельный import consent/coverage acknowledgement
+  и дата перехода остаются самостоятельным действием владельца.

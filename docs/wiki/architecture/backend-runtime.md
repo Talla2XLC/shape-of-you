@@ -78,7 +78,8 @@ enforce admission under their existing Person lock. Restore replay disables
 import instead of recreating credentials or consent. The
 [transition ADR](../../adr/20261120-switch-intervals-to-garmin-with-date-boundary.md)
 and [journal ADR](../../adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md)
-define the authority; this local implementation is not yet delivered.
+define the authority. Staging release `47ba3f3` includes the implementation and
+verified journal-v2 synchronization; actual account transitions remain explicit.
 
 When all three OAuth trust values are configured, the API also exposes a
 stateless Streamable HTTP MCP endpoint at `/mcp` and protected-resource

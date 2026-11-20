@@ -109,8 +109,17 @@ legacy record/hash prefix. It also records bounded provider ownership policies.
 Sync captures policies and erasure requests at the same repeatable-read cutoff;
 only a durable verified sealed checkpoint permits PostgreSQL policy proof
 acknowledgement. Transition activation refuses a missing or stale proof.
-The implementation is locally accepted; the staging operator journal has not
-been upgraded by TASK-0181.
+The staging operator journal was upgraded by TASK-0181 on 2026-11-20 after
+successful deployment of compatible API release `47ba3f3`. A shared staging
+lock excluded the registered timer and manual Docker writers; read-only host
+descriptor inventory confirmed that the live SQLite inode had no open handles.
+The upgrade preserved the exact journal ID, legacy head and completeness cutoff,
+retained the private v1 forensic copy and all old checkpoints, then atomically
+replaced and flushed the live file. A full sync produced a verified v2 seal
+through `2026-11-20T13:54:00.634Z` (sequence 2). The writer barrier was released
+only after seal verification; subsequent regular timer invocations succeeded.
+Live, forensic and sealed files remain owner-only mode `0600` under the
+operator's mode-`0700` directory. No account transition was created.
 
 Legacy `recovery-erasure:manifest` v1 contains only erasure markers. Export
 refuses any cutover policy, including cancelled policies, in the same snapshot.

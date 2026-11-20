@@ -500,6 +500,28 @@ This does not affect unrelated Compose/PostgreSQL.
   failed on the obsolete ten-key integration fixture; accepted follow-ups fixed
   it and the SDK root-object output metadata before final promotion.
 
+- 2026-11-20: TASK-0181 deployed as exact release
+  `47ba3f3dfaa7d44997cb06169b5aefed42e41398` through
+  [full publication 44745557157](https://github.com/Talla2XLC/shape-of-you/actions/runs/44745557157)
+  and [Promote staging 44746953985](https://github.com/Talla2XLC/shape-of-you/actions/runs/44746953985).
+  The operator authorized completing the journal upgrade and staging delivery.
+  Private API and Identity custom-format backups were flushed and archive-checked
+  before migration. GitHub Actions completed API migration at `13:45:58Z`,
+  Identity migration at `13:46:04Z`, and smoke at `13:47:13Z`; all three exact
+  new API migration hashes were also confirmed in staging PostgreSQL.
+  Compatible runtime deployment preceded the live journal-v2 upgrade. The new
+  seal was verified through `13:54:00.634Z`; the writer barrier was released
+  and subsequent scheduled synchronization succeeded. See the
+  [journal recovery runbook](postgresql-backup-and-restore.md).
+  Independent operational acceptance confirmed healthy exact-release API,
+  active sync timer, owner-only journal/seal/forensic files, three public
+  readiness responses at 200, all five cutover OpenAPI paths, and standard MCP
+  discovery with 43 tools, 43 compilable output schemas and an eleven-key
+  synthetic Recovery result. No personal Garmin call or account cutover ran.
+  The first push publication failed because the isolated edge builder lacked
+  contracts source; the accepted build-input fix resolved it. A full publication
+  was required because the push candidate's expected base was not deployed.
+
 ## Decisions
 
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
