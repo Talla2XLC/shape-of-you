@@ -1,3 +1,4 @@
+import { integrationParentRecordAllowed, integrationRecordAllowed, readIntegrationImportPolicy } from "./integration-cutover-policy.js";
 import {
   and,
   asc,
@@ -638,7 +639,7 @@ export class TrainingRepository implements TrainingStore {
         eq(integrationConnections.consentId, input.consentId), eq(integrationConnections.importEnabled, true), inArray(integrationConnections.lifecycle, ["active", "degraded"]),
         sql`exists (select 1 from recovery_consents consent join recovery_connections recovery on recovery.id = consent.connection_id where consent.id = ${input.consentId} and consent.person_id = ${input.personId} and consent.status = 'active' and recovery.status = 'active' and recovery.erasure_requested_at is null)`
       ) });
-      if (!connection) return false;
+      if (!connection || !await integrationParentRecordAllowed(transaction, input.connectionId, input.consentId, input.providerIdentity)) return false;
       const activitySuccessor = alias(integrationActivityFacts, "details_activity_successor");
       const [activity] = await transaction.select({ id: integrationActivityFacts.id }).from(integrationActivityFacts).where(and(
         eq(integrationActivityFacts.connectionId, input.connectionId), eq(integrationActivityFacts.personId, input.personId),
@@ -1154,6 +1155,8 @@ export class TrainingRepository implements TrainingStore {
         )
       });
       if (!enabled) return "stopped";
+      const policy = await readIntegrationImportPolicy(transaction, input.connectionId, input.consentId);
+      if (!integrationRecordAllowed(policy, "activity", { localDate: input.localDate, occurredAt: input.occurredAt })) return "stopped";
       const currentRows = await transaction.execute(sql<{ id: string; normalized_checksum: string; local_date: string }>`select id, normalized_checksum, local_date::text from integration_activity_facts current where current.connection_id = ${input.connectionId} and current.provider_identity = ${input.providerIdentity} and not exists (select 1 from integration_activity_facts successor where successor.supersedes_id = current.id) limit 1`);
       const current = currentRows.rows[0] as { readonly id: string; readonly normalized_checksum: string; readonly local_date: string } | undefined;
       if (current?.normalized_checksum === input.normalizedChecksum) return "unchanged";

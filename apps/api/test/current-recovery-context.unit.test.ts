@@ -1,15 +1,33 @@
 import { describe, expect, it, vi } from "vitest";
+import type { GarminPersonalConnection } from "@shape-of-you/contracts";
 
 import { CurrentRecoveryContextService } from "../src/coaching/current-recovery-context.service.js";
 import type { PersonContext } from "../src/application/person-context.js";
 import type { IntegrationStore } from "../src/integrations/integration-store.js";
 import type { RecoveryService } from "../src/recovery/recovery.service.js";
 import type { DailyAssessmentStore } from "../src/storage/daily-assessment-repository.js";
+import type { GarminCutoverRuntime } from "../src/integrations/garmin-cutover.service.js";
 
 const personId = "00000000-0000-4000-8000-000000000018";
 const personContext = { getPersonId: () => personId } as PersonContext;
 
 describe("CurrentRecoveryContextService", () => {
+  it.each(["scheduled", "draining", "active"])("selects delivery by the cutover date while %s even when both providers are enabled", async (state) => {
+    const delivery = (metric: string) => ({ recoveryConnectionId: "synthetic", lifecycle: "active", importEnabled: true,
+      failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, targetDateRecordReceived: false,
+      targetDateSupportedFactsPresent: false, metricDelivery: [{ metric, state: "unknown", observationId: null }] });
+    const service = new CurrentRecoveryContextService(personContext,
+      { getPreferences: async () => ({ timezone: "Europe/Moscow" }) } as unknown as DailyAssessmentStore,
+      { connectedRecoveryDelivery: async () => delivery("sleep") } as unknown as IntegrationStore,
+      { listObservations: async () => ({ items: [] }) } as unknown as RecoveryService,
+      { connectedRecoveryDelivery: async () => delivery("body_battery") } as unknown as IntegrationStore<GarminPersonalConnection>,
+      { store: { find: async () => ({ state, startsOn: "2026-11-21" }) } } as unknown as GarminCutoverRuntime);
+    await expect(service.read(new Date("2026-11-20T20:59:59Z"))).resolves.toMatchObject({ localDate: "2026-11-20",
+      metricDelivery: [{ metric: "sleep" }] });
+    await expect(service.read(new Date("2026-11-20T21:00:00Z"))).resolves.toMatchObject({ localDate: "2026-11-21",
+      metricDelivery: [{ metric: "body_battery" }] });
+  });
+
   it("fails closed before reading evidence when Person timezone is unset", async () => {
     const connectedRecoveryDelivery = vi.fn();
     const listObservations = vi.fn();

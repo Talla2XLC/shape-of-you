@@ -25,6 +25,7 @@ export interface ActiveIntegrationConnection {
   readonly credential: EncryptedCredential;
   readonly historicalImportStatus: "not_requested" | "running" | "completed" | "failed";
   readonly historicalCursorBefore: string | null;
+  readonly historicalScopeFromDate?: string;
   readonly historicalNextAttemptAt: Date | null;
 }
 
@@ -85,8 +86,26 @@ export interface HistoricalImportClaim {
   readonly cursorBefore: string | null;
 }
 
+/** Snapshot of persisted forward-only import authority; every write rechecks the live policy. */
+export interface IntegrationImportPolicy {
+  readonly role: "source" | "target";
+  readonly state: "scheduled" | "draining" | "active" | "failed" | "cancelled";
+  readonly startsOn: string;
+  readonly timezone: string;
+  readonly startsAt: Date;
+  readonly sourceDrainsUntil: Date;
+  readonly version: number;
+  readonly requestAllowed: boolean;
+  readonly historyScopeFromDate: string;
+}
+
+/** Provider labels needed for write admission, never inferred from opaque activity IDs. */
+export interface IntegrationRecordAdmission { readonly localDate: string; readonly occurredAt?: string; }
+
 /** Durable provider integration persistence boundary. */
 export interface IntegrationStore<Status extends IntegrationConnection = GarminIntervalsConnection> {
+  importPolicy?(id: string, consentId: string): Promise<IntegrationImportPolicy | null>;
+  assertReadAllowed?(id: string, consentId: string): Promise<boolean>;
   createAuthorization(personId: string, stateHash: string, returnTo: string, expiresAt: Date): Promise<void>;
   consumeAuthorization(stateHash: string, now: Date): Promise<ConsumedAuthorizationTransaction | null>;
   authorizationIdentity(personId: string): Promise<IntegrationConnectionIdentity | null>;
@@ -119,7 +138,7 @@ export interface IntegrationStore<Status extends IntegrationConnection = GarminI
   markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void>;
   markSyncPartial(id: string, consentId: string): Promise<void>;
   markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void>;
-  recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<IntegrationInboxOutcome>;
+  recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string, admission?: IntegrationRecordAdmission): Promise<IntegrationInboxOutcome>;
   completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean>;
   /** Records a closed detail outcome on an existing activity receipt under the current enabled consent. */
   setActivityDetailsIssue(id: string, consentId: string, receiptId: string, issue: ActivityDetailsIssue | null): Promise<boolean>;

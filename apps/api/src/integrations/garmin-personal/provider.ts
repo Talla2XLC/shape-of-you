@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import type { ProviderActivityRecord, ProviderReconciliation, ProviderWellnessRecord } from "../provider.js";
+import type { ProviderActivityRecord, ProviderReadOptions, ProviderReconciliation, ProviderWellnessRecord } from "../provider.js";
 import { ActivityDetailsReadError, IntegrationProviderError } from "../provider.js";
 import { extractOriginalFit } from "./zip.js";
 
@@ -13,6 +13,13 @@ interface CachedToken { readonly promise: Promise<{ token: string; expiresAt: nu
 
 /** Injected HTTP boundary for deterministic contract checks; callers cannot choose the remote host. */
 export interface GarminPersonalProviderOptions { readonly fetch?: typeof fetch; }
+
+/** Read-only candidate evidence kept in memory; file bytes never enter the public cutover response. */
+export interface GarminCutoverCandidate {
+  readonly externalUserId: string | null;
+  readonly activityPresent: boolean;
+  readonly originalFit: Uint8Array | null;
+}
 
 /** Official personal-key transport. Credentials and raw responses never escape into errors or logs. */
 export class GarminPersonalProvider {
@@ -27,6 +34,42 @@ export class GarminPersonalProvider {
   public async verifyKey(apiKey: string): Promise<void> {
     const { token } = await this.authenticate(apiKey);
     asRecord(await this.json("/userprofile-service/userprofile/settings", token));
+  }
+
+  /** Samples a bounded recent window and one original file without storing a key, token, or health fact. */
+  public async inspectCutoverCandidate(apiKey: string): Promise<GarminCutoverCandidate> {
+    const { token } = await this.authenticate(apiKey);
+    const deadline = Date.now() + 40_000;
+    const profile = asRecord(await this.json("/userprofile-service/userprofile/settings", token, deadline));
+    const timezone = profile.timeZone == null ? "UTC" : validTimezone(profile.timeZone);
+    const end = dateInTimezone(new Date().toISOString(), timezone);
+    const start = new Date(Date.parse(`${end}T12:00:00Z`) - 13 * dayMs).toISOString().slice(0, 10);
+    const summary = asRecord(await this.json(`/usersummary-service/v2/dailysummaries?startDate=${start}&endDate=${end}`, token, deadline));
+    if (!Array.isArray(summary.data) || summary.data.length > 14) invalid();
+    const owners = new Set<string>();
+    const days = new Set<string>();
+    for (const value of summary.data) {
+      const row = asRecord(value);
+      const date = requiredString(row.calendarDate, 10);
+      if (!dateRange(start, end).includes(date) || days.has(date)) invalid();
+      days.add(date);
+      owners.add(profileId(row.userProfilePk));
+    }
+    const activities = await this.json(`/activitylist-service/activities/search/activities?start=0&limit=2&startDate=${start}&endDate=${end}&excludeChildren=true&sortOrder=desc`, token, deadline);
+    if (!Array.isArray(activities) || activities.length > 2) invalid();
+    let activityId: string | null = null;
+    for (const value of activities) {
+      const row = asRecord(value);
+      const id = profileId(row.activityId);
+      owners.add(profileId(row.ownerId));
+      activityId ??= id;
+    }
+    if (owners.size > 1) invalid();
+    const body = activityId === null ? null : await this.read(`/download-service/files/activity/${activityId}`, {
+      headers: { authorization: `Bearer ${token}`, accept: "application/zip, application/x-zip-compressed, application/octet-stream" }
+    }, true, deadline);
+    return { externalUserId: owners.values().next().value ?? null,
+      activityPresent: activityId !== null, originalFit: body === null ? null : extractOriginalFit(body) };
   }
 
   /** Invalidates only this key's memory cache, including an in-flight refresh that must not be reused. */
@@ -46,21 +89,26 @@ export class GarminPersonalProvider {
   }
 
   /** Reads at most 31 inclusive days; complete pagination or failure prevents a silently partial import. */
-  public async reconcile(apiKey: string, fromDate: string, toDate: string, scope = "unbound"): Promise<ProviderReconciliation & { readonly externalUserId: string | null }> {
-    try { return await this.reconcileWindow(apiKey, fromDate, toDate, scope); }
+  public async reconcile(apiKey: string, fromDate: string, toDate: string, scope = "unbound", options?: ProviderReadOptions): Promise<ProviderReconciliation & { readonly externalUserId: string | null }> {
+    try { return await this.reconcileWindow(apiKey, fromDate, toDate, scope, options); }
     catch (error) {
       if (error instanceof IntegrationProviderError && error.failureCode === "authorization_required") this.tokens.delete(this.cacheKey(apiKey, scope));
       throw error;
     }
   }
 
-  private async reconcileWindow(apiKey: string, fromDate: string, toDate: string, scope: string): Promise<ProviderReconciliation & { readonly externalUserId: string | null }> {
+  private async reconcileWindow(apiKey: string, fromDate: string, toDate: string, scope: string, options?: ProviderReadOptions): Promise<ProviderReconciliation & { readonly externalUserId: string | null }> {
     const dates = dateRange(fromDate, toDate);
+    const activityFromDate = options?.activityFromDate ?? fromDate;
+    const activityToDate = options?.activityToDate ?? toDate;
+    const activityDates = dateRange(activityFromDate, activityToDate);
     const deadline = Date.now() + 45_000;
+    await options?.beforeRequest?.();
     const token = await this.token(apiKey, scope);
     const get = async (path: string): Promise<unknown> => {
       this.assertScope(scope);
       if (Date.now() >= deadline) throw new IntegrationProviderError("provider_timeout");
+      await options?.beforeRequest?.();
       const value = await this.json(path, token, deadline);
       this.assertScope(scope);
       return value;
@@ -119,7 +167,7 @@ export class GarminPersonalProvider {
     const pageSize = 99;
     let complete = false;
     for (let page = 0; page < 21; page++) {
-      const pageData = await get(`/activitylist-service/activities/search/activities?start=${page * pageSize}&limit=${pageSize}&startDate=${fromDate}&endDate=${toDate}&excludeChildren=true&sortOrder=asc`);
+      const pageData = await get(`/activitylist-service/activities/search/activities?start=${page * pageSize}&limit=${pageSize}&startDate=${activityFromDate}&endDate=${activityToDate}&excludeChildren=true&sortOrder=asc`);
       if (!Array.isArray(pageData) || pageData.length > pageSize) invalid();
       if (activities.length + pageData.length > 2_000) invalid();
       for (const value of pageData) {
@@ -135,7 +183,7 @@ export class GarminPersonalProvider {
         const activityTimezone = validTimezone(asRecord(detail.timeZoneUnitDTO).timeZone);
         const occurredAt = gmtTimestamp(data.startTimeGMT);
         const localDate = requiredString(data.startTimeLocal, 64).slice(0, 10);
-        if (!dates.includes(localDate) || dateInTimezone(occurredAt, activityTimezone) !== localDate) invalid();
+        if (!activityDates.includes(localDate) || dateInTimezone(occurredAt, activityTimezone) !== localDate) invalid();
         const durationSeconds = numberOrNull(data.duration, 0, 604_800);
         if (durationSeconds === null) invalid();
         activities.push({
@@ -155,10 +203,12 @@ export class GarminPersonalProvider {
   }
 
   /** Downloads and validates the original ZIP; returns null only for an absent file or a valid ZIP without FIT. */
-  public async originalActivityFile(apiKey: string, activityId: string, scope = "unbound"): Promise<Uint8Array | null> {
+  public async originalActivityFile(apiKey: string, activityId: string, scope = "unbound", options?: ProviderReadOptions): Promise<Uint8Array | null> {
     if (!/^[1-9]\d{0,19}$/.test(activityId)) invalid();
+    await options?.beforeRequest?.();
     const token = await this.token(apiKey, scope);
     try {
+      await options?.beforeRequest?.();
       const body = await this.read(`/download-service/files/activity/${activityId}`, {
         headers: { authorization: `Bearer ${token}`, accept: "application/zip, application/x-zip-compressed, application/octet-stream" }
       }, true);

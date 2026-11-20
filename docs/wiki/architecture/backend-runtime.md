@@ -70,6 +70,16 @@ remote revocation. Coach selects the active provider's exact delivery receipts.
 Normal domain reads remain independent of provider availability. See the
 [Connections contract](../api/connections.md) for current coverage and controls.
 
+The same Integrations module owns scheduled provider transitions in
+`integration_cutovers`; no service or database boundary is added. Its worker
+commits date-bounded authority only after a sealed journal-v2 policy proof,
+then drains the old source within a fixed deadline. Recovery and Training
+enforce admission under their existing Person lock. Restore replay disables
+import instead of recreating credentials or consent. The
+[transition ADR](../../adr/20261120-switch-intervals-to-garmin-with-date-boundary.md)
+and [journal ADR](../../adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md)
+define the authority; this local implementation is not yet delivered.
+
 When all three OAuth trust values are configured, the API also exposes a
 stateless Streamable HTTP MCP endpoint at `/mcp` and protected-resource
 metadata. Its eight allowlisted tools reuse existing application services.

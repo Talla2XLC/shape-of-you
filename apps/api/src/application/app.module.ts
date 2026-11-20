@@ -33,6 +33,7 @@ import type { IntegrationStore } from "../integrations/integration-store.js";
 import type { HealthDataProvider } from "../integrations/provider.js";
 import type { ConnectionCredentialCipher } from "../integrations/credential-cipher.js";
 import type { GarminPersonalRuntime } from "../integrations/garmin-personal.service.js";
+import type { GarminCutoverRuntime } from "../integrations/garmin-cutover.service.js";
 import { IntegrationModule } from "../integrations/integration.module.js";
 import {
   PERSON_CONTEXT,
@@ -52,6 +53,7 @@ import {
   CHAT_ASSISTANT_CONVERSATION_BINDING_STORE,
   GARMIN_PERSONAL_RUNTIME,
   GARMIN_PERSONAL_STORE,
+  GARMIN_CUTOVER_RUNTIME,
   INTEGRATION_STORE,
   INTEGRATION_PROVIDER,
   INTEGRATION_CIPHER,
@@ -96,6 +98,8 @@ export interface AppModuleOptions {
   readonly integrationStore: IntegrationStore | null;
   /** Optional direct Garmin dependencies with separate provider scope. */
   readonly garminPersonalRuntime?: GarminPersonalRuntime | null;
+  /** API-owned pending policy and optional ordinary Garmin runtime. */
+  readonly garminCutoverRuntime?: GarminCutoverRuntime | null;
   /** Selected provider transport, null until runtime configuration enables it. */
   readonly integrationProvider: HealthDataProvider | null;
   /** Runtime-only credential encryption boundary. */
@@ -176,6 +180,7 @@ class RuntimeDependenciesModule {
         { provide: INTEGRATION_STORE, useValue: options.integrationStore },
         { provide: GARMIN_PERSONAL_RUNTIME, useValue: options.garminPersonalRuntime ?? null },
         { provide: GARMIN_PERSONAL_STORE, useValue: options.garminPersonalRuntime?.store ?? null },
+        { provide: GARMIN_CUTOVER_RUNTIME, useValue: options.garminCutoverRuntime ?? null },
         { provide: INTEGRATION_PROVIDER, useValue: options.integrationProvider },
         { provide: INTEGRATION_CIPHER, useValue: options.integrationCipher },
         { provide: INTEGRATION_WORKER_ENABLED, useValue: options.integrationWorkerEnabled },
@@ -205,6 +210,7 @@ class RuntimeDependenciesModule {
         READINESS_PROBE,
         GARMIN_PERSONAL_RUNTIME,
         GARMIN_PERSONAL_STORE,
+        GARMIN_CUTOVER_RUNTIME,
         INTEGRATION_STORE,
         INTEGRATION_PROVIDER,
         INTEGRATION_CIPHER,

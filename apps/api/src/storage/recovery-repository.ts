@@ -1,3 +1,5 @@
+import { parseIntegrationCutoverRestorePolicy, immutableCutoverPolicyHash, type IntegrationCutoverRestorePolicy } from "../recovery/integration-cutover-restore-policy.js";
+import { integrationRecoveryRecordAllowed, quarantineCutoverForErasure } from "./integration-cutover-policy.js";
 import { createHash } from "node:crypto";
 
 import {
@@ -50,6 +52,7 @@ import {
 } from "../recovery/personal-baseline-history.js";
 import type { DataCoverageEvidence, RecoveryDataCoverageEvidence } from "../domain/data-coverage.js";
 import {
+  persons,
   performedExercises,
   performedSets,
   recoveryAssessmentObservationEvidence,
@@ -66,6 +69,7 @@ import {
   recoveryDevices,
   recoveryErasureRequests,
   integrationConnections,
+  integrationCutovers,
   recoveryMetricDetails,
   recoveryObservations,
   recoveryProviders,
@@ -429,6 +433,9 @@ export class RecoveryRepository implements RecoveryStore {
     if (!rows[0]) {
       throw new ConflictError("Connected observation is not permitted by active consent and retention");
     }
+    if (input.sourceReference.channel === "account" && !await integrationRecoveryRecordAllowed(transaction, personId, input.connectionId!, input.consentId!, {
+      localDate: input.localDate ?? null, externalRecordId: input.sourceReference.externalRecordId ?? null, externalSystem: input.sourceReference.externalSystem ?? null
+    })) throw new ConflictError("Observation falls outside provider cutover authority");
   }
 
   public createObservation(personId: string, input: CreateRecoveryObservation): Promise<CreatedRecoveryObservation> {
@@ -1163,6 +1170,7 @@ export class RecoveryRepository implements RecoveryStore {
         eq(integrationConnections.recoveryConnectionId, connectionId),
         eq(integrationConnections.personId, personId)
       ));
+      await quarantineCutoverForErasure(transaction, personId, connectionId);
       return this.toErasureRequest(request);
     });
   }
@@ -1323,6 +1331,66 @@ export class RecoveryRepository implements RecoveryStore {
       ));
   }
 
+  /** Replays only deny authority: never recreates consent, credentials, or enabled import from a backup. */
+  public replayCutoverPolicy(input: IntegrationCutoverRestorePolicy): Promise<void> {
+    const policy = parseIntegrationCutoverRestorePolicy(input);
+    return this.database.db.transaction(async (transaction) => {
+      await lockPerson(transaction, policy.personId);
+      const person = await transaction.query.persons.findFirst({ where: eq(persons.id, policy.personId) });
+      if (!person) return;
+      const existing = await transaction.query.integrationCutovers.findFirst({ where: eq(integrationCutovers.id, policy.id) });
+      const identity = { id: policy.id, personId: policy.personId, sourceProvider: policy.sourceProvider, targetProvider: policy.targetProvider,
+        startsOn: policy.startsOn, timezone: policy.timezone, startsAt: new Date(policy.startsAt), sourceDrainsUntil: new Date(policy.sourceDrainsUntil),
+        capabilityVersion: policy.capabilityVersion, acceptedCoverageGaps: [...policy.acceptedCoverageGaps] };
+      const incomingHash = immutableCutoverPolicyHash(identity);
+      if (existing) {
+        const same = existing.personId === policy.personId && immutableCutoverPolicyHash(existing) === incomingHash;
+        if (!same && (existing.activatedAt !== null || existing.restoreSuppressed || policy.version <= existing.version)) throw new ConflictError("Restored cutover authority conflicts with the independent journal");
+        if (existing.restoreSuppressed && same) return;
+      }
+      const localReferences: { sourceConnectionId: string | null; targetConnectionId: string | null; sourceRecoveryConnectionId: string | null; targetRecoveryConnectionId: string | null; sourceConsentId: string | null; targetConsentId: string | null } = {
+        sourceConnectionId: null, targetConnectionId: null, sourceRecoveryConnectionId: null, targetRecoveryConnectionId: null, sourceConsentId: null, targetConsentId: null
+      };
+      for (const role of ["source", "target"] as const) {
+        const connectionId = policy[`${role}ConnectionId`];
+        const recoveryId = policy[`${role}RecoveryConnectionId`];
+        const consentId = policy[`${role}ConsentId`];
+        if (connectionId) {
+          const row = await transaction.query.integrationConnections.findFirst({ where: eq(integrationConnections.id, connectionId) });
+          if (row && (row.personId !== policy.personId || row.providerKey !== policy[`${role}Provider`] || (recoveryId !== null && row.recoveryConnectionId !== recoveryId))) throw new ConflictError("Restored cutover connection ownership conflicts");
+          if (row) localReferences[`${role}ConnectionId`] = row.id;
+        }
+        if (recoveryId) {
+          const row = await transaction.query.recoveryConnections.findFirst({ where: eq(recoveryConnections.id, recoveryId) });
+          if (row && row.personId !== policy.personId) throw new ConflictError("Restored cutover Recovery ownership conflicts");
+          if (row) localReferences[`${role}RecoveryConnectionId`] = row.id;
+        }
+        if (consentId) {
+          const row = await transaction.query.recoveryConsents.findFirst({ where: eq(recoveryConsents.id, consentId) });
+          if (row && (row.personId !== policy.personId || row.connectionId !== recoveryId)) throw new ConflictError("Restored cutover consent ownership conflicts");
+          if (row) localReferences[`${role}ConsentId`] = row.id;
+        }
+      }
+      await transaction.execute(sql`update integration_connections set import_enabled=false,lifecycle='disconnected',disconnected_at=clock_timestamp(),
+        credential_key_id=null,credential_nonce=null,credential_ciphertext=null,credential_tag=null,remote_disconnect_pending=false,lease_owner=null,lease_until=null,
+        historical_import_status=case when historical_import_status='running' then 'failed'::integration_historical_import_status else historical_import_status end,
+        historical_failure_code=case when historical_import_status='running' then 'authorization_required'::integration_sync_failure else historical_failure_code end,
+        historical_next_attempt_at=case when historical_import_status='running' then null else historical_next_attempt_at end,
+        historical_claim_token=null,historical_claim_until=null,updated_at=clock_timestamp()
+        where person_id=${policy.personId} and provider_key in ('intervals_icu','garmin_personal')`);
+      await transaction.execute(sql`update recovery_consents set status='revoked',revoked_at=clock_timestamp(),revocation_reason='Independent journal cutover restore suppression'
+        where person_id=${policy.personId} and connection_id in(select recovery_connection_id from integration_connections where person_id=${policy.personId} and provider_key in ('intervals_icu','garmin_personal')) and status='active'`);
+      await transaction.execute(sql`update recovery_connections set status='disconnected',disconnected_at=clock_timestamp()
+        where person_id=${policy.personId} and id in(select recovery_connection_id from integration_connections where person_id=${policy.personId} and provider_key in ('intervals_icu','garmin_personal'))`);
+      const values = { ...identity, ...localReferences, state: policy.state, version: Math.max(policy.version, existing?.version ?? 0) + 1,
+        restoreSuppressed: true, activatedAt: policy.activatedAt ? new Date(policy.activatedAt) : null,
+        policyJournalHash: null, policyJournalAt: null, actorPersonId: null, failureCode: "restore_suppressed",
+        createdAt: new Date(policy.createdAt), updatedAt: sql`clock_timestamp()`, dedupeKey: existing?.dedupeKey ?? `journal-restore:${policy.id}` };
+      if (existing) await transaction.update(integrationCutovers).set(values).where(eq(integrationCutovers.id, policy.id));
+      else await transaction.insert(integrationCutovers).values(values);
+    });
+  }
+
   public replayErasureMarker(marker: RecoveryErasureMarker): Promise<void> {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, marker.personId);
@@ -1360,6 +1428,7 @@ export class RecoveryRepository implements RecoveryStore {
     personId: string,
     connectionId: string
   ): Promise<void> {
+    await quarantineCutoverForErasure(transaction, personId, connectionId);
     const sourceRows = await transaction
       .select({ id: recoveryObservations.sourceReferenceId })
       .from(recoveryObservations)

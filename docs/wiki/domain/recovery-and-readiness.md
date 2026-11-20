@@ -310,6 +310,14 @@ Corrections, withdrawals, supersession, late imports, and erasure change the
 next replay. Daily consolidation is a current projection and is not an exact
 reconstruction of the observation ordering used by a historical live v1 read.
 
+Scheduled provider transitions preserve existing observations and provenance.
+Wellness admission follows the configured calendar-date boundary; FIT-derived
+Recovery inherits its activity parent's UTC ownership. Coach delivery follows
+the effective provider for the requested day. Independent journal-v2 replay
+retains deny bounds and disables restored import rights. See the
+[Connections contract](../api/connections.md) and
+[journal ADR](../../adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md).
+
 ## Evidence
 
 - Recovery schema/contracts/integration tests.

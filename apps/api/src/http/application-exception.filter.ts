@@ -11,6 +11,7 @@ import type { FastifyReply } from "fastify";
 import type { ErrorResponse } from "@shape-of-you/contracts";
 
 import { ApplicationError } from "../domain/errors.js";
+import { CutoverCoverageChangedError } from "../integrations/garmin-cutover.service.js";
 
 function errorResponse(
   statusCode: number,
@@ -33,6 +34,12 @@ export class ApplicationExceptionFilter implements ExceptionFilter {
    */
   public catch(exception: unknown, host: ArgumentsHost): void {
     const reply = host.switchToHttp().getResponse<FastifyReply>();
+
+    if (exception instanceof CutoverCoverageChangedError) {
+      void reply.code(409).send({ statusCode: 409, error: "coverage_changed",
+        message: "Coverage confirmation changed", details: { preview: exception.preview } });
+      return;
+    }
 
     if (exception instanceof ApplicationError) {
       void reply

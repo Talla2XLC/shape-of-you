@@ -2,6 +2,9 @@ import type { Pool } from "pg";
 
 import type { RecoveryErasureReason } from "@shape-of-you/contracts";
 
+import { integrationCutoverRestorePolicy, immutableCutoverPolicyHash, type IntegrationCutoverRestorePolicy } from "./integration-cutover-restore-policy.js";
+import type { CutoverRecord } from "../storage/integration-cutover-repository.js";
+
 import type { RecoveryRepository } from "../storage/recovery-repository.js";
 import {
   RecoveryErasureJournal,
@@ -54,6 +57,7 @@ export async function synchronizeRecoveryErasureJournal(
   let journal: RecoveryErasureJournal | undefined;
   let cutoff: Date;
   let rows: readonly SourceErasureRow[];
+  let policies: Array<{ row: CutoverRecord; snapshot: IntegrationCutoverRestorePolicy; hash: string }> = [];
   try {
     const lockResult = await client.query<{ acquired: boolean }>(
       "select pg_try_advisory_lock($1, $2) as acquired",
@@ -83,6 +87,11 @@ export async function synchronizeRecoveryErasureJournal(
         [cutoff]
       );
       rows = result.rows;
+      const cutoverRows = await client.query<Record<string, unknown>>("select *, starts_on::text as starts_on from integration_cutovers order by created_at, id");
+      policies = cutoverRows.rows.map((raw) => {
+        const row = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key.replace(/_([a-z])/g, (_, letter: string) => letter.toUpperCase()), value])) as CutoverRecord;
+        return { row, snapshot: integrationCutoverRestorePolicy(row), hash: immutableCutoverPolicyHash(row) };
+      });
       await client.query("commit");
     } catch (error) {
       await client.query("rollback").catch(() => undefined);
@@ -96,7 +105,9 @@ export async function synchronizeRecoveryErasureJournal(
       .filter((row) => row.completed_at !== null && row.journal_completed_at === null)
       .map((row) => row.id);
     const completeThrough = cutoff.toISOString();
-    if (options.onlyIfPending && acceptedIds.length === 0 && completedIds.length === 0) {
+    if (policies.length && journal.formatVersion !== 2) throw new Error("Cutover policy requires an explicitly prepared version-2 erasure journal");
+    const policyAcknowledgements = policies.filter(({ row, hash }) => row.policyJournalHash !== hash || row.policyJournalAt === null);
+    if (options.onlyIfPending && acceptedIds.length === 0 && completedIds.length === 0 && policyAcknowledgements.length === 0) {
       return {
         completeThrough,
         acceptedCount: 0,
@@ -105,6 +116,7 @@ export async function synchronizeRecoveryErasureJournal(
       };
     }
 
+    for (const policy of policies) journal.appendCutover(policy.snapshot);
     for (const row of rows) {
       journal.appendAccepted({
         id: row.id,
@@ -123,7 +135,7 @@ export async function synchronizeRecoveryErasureJournal(
     journal.appendCheckpoint(completeThrough);
     await journal.createSealedCheckpoint(checkpointPath, options.checkpointDurability);
 
-    if (acceptedIds.length === 0 && completedIds.length === 0) {
+    if (acceptedIds.length === 0 && completedIds.length === 0 && policyAcknowledgements.length === 0) {
       return {
         completeThrough,
         acceptedCount: 0,
@@ -134,6 +146,13 @@ export async function synchronizeRecoveryErasureJournal(
 
     try {
       await client.query("begin");
+      for (const { row, hash } of policyAcknowledgements) {
+        await client.query(`update integration_cutovers set policy_journal_hash=$1, policy_journal_at=clock_timestamp()
+          where id=$2 and person_id=$3 and source_provider=$4 and target_provider=$5 and starts_on=$6 and timezone=$7
+            and starts_at=$8 and source_drains_until=$9 and capability_version=$10
+            and ARRAY(select unnest(accepted_coverage_gaps) order by 1)=$11::text[]`,
+          [hash,row.id,row.personId,row.sourceProvider,row.targetProvider,row.startsOn,row.timezone,row.startsAt,row.sourceDrainsUntil,row.capabilityVersion,[...row.acceptedCoverageGaps].sort()]);
+      }
       if (acceptedIds.length) {
         await client.query(
           `update recovery_erasure_requests
@@ -197,6 +216,7 @@ export async function applyRecoveryErasureJournal(
   requiredThrough: string
 ): Promise<VerifiedRecoveryErasureJournal> {
   const verified = await inspectRecoveryErasureJournal(journalPath, requiredThrough);
+  for (const policy of verified.cutovers ?? []) await repository.replayCutoverPolicy(policy);
   for (const marker of verified.accepted) {
     await repository.replayErasureMarker(marker);
   }

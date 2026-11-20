@@ -102,6 +102,55 @@ be retained indefinitely. Do not delete or rotate them until the cluster owner
 first defines a finite backup lifetime and separately approves a journal safety
 margin.
 
+### Journal v2 and provider transition recovery
+
+TASK-0181 adds a compatible format-2 journal with the same journal ID and exact
+legacy record/hash prefix. It also records bounded provider ownership policies.
+Sync captures policies and erasure requests at the same repeatable-read cutoff;
+only a durable verified sealed checkpoint permits PostgreSQL policy proof
+acknowledgement. Transition activation refuses a missing or stale proof.
+The implementation is locally accepted; the staging operator journal has not
+been upgraded by TASK-0181.
+
+Legacy `recovery-erasure:manifest` v1 contains only erasure markers. Export
+refuses any cutover policy, including cancelled policies, in the same snapshot.
+A v1 manifest is never sufficient for a restore involving provider transitions.
+A backup predating a transition cannot reveal later policies: replay the
+independent sealed v2 journal before enabling workers. Replay retains ownership
+bounds, clears restored credentials, revokes import consent and exposes
+`restore_suppressed`; it never resumes a pending schedule or grants access.
+Recovery of import requires a separately approved operational procedure.
+
+An existing operator v1 file is never altered automatically. With explicit
+approval, first inspect its verified head:
+
+```sh
+pnpm --filter @shape-of-you/api recovery-erasure:journal \
+  --action preview-upgrade --journal <private-live-v1-path>
+```
+
+Stop all journal writers and timer invocations, close their SQLite handles,
+then prepare distinct private files using the exact verified preview values:
+
+```sh
+pnpm --filter @shape-of-you/api recovery-erasure:journal \
+  --action prepare-v2 --journal <private-live-v1-path> \
+  --output <new-private-v2-path> --checkpoint <new-private-v2-checkpoint> \
+  --writers-quiesced --expected-journal-id <verified-id> \
+  --expected-sequence <verified-sequence> --expected-head-hash <verified-hash> \
+  --required-through <verified-complete-through>
+```
+
+Preparation does not connect to PostgreSQL or replace the source. It preserves
+the proven completeness cutoff; wall-clock time does not advance it. Before
+a separately approved atomic replacement, keep every writer stopped, revalidate
+the source head and verify both files, permissions and storage durability.
+An old open SQLite handle must not append to the renamed v1 inode. Preserve v1
+as forensic evidence; after the first v2 append it is not a safe runtime rollback.
+The old reader rejects format 2. Deploy a compatible API/sync image and verify
+sealed synchronization before allowing transition scheduling in the environment.
+See the [journal-v2 ADR](../../adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md).
+
 Synchronize the live journal to a new sealed checkpoint in the temporary
 owner-approved same-host journal directory, outside PostgreSQL, release, and
 manual-backup directories. Both paths are explicit; the checkpoint path must

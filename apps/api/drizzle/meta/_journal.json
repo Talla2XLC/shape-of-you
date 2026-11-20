@@ -435,6 +435,27 @@
       "when": 1795176000000,
       "tag": "20261120120000_garmin_personal_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1795183200000,
+      "tag": "20261120140000_intervals_garmin_cutover",
+      "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "7",
+      "when": 1795186800000,
+      "tag": "20261120150000_cutover_policy_journal_proof",
+      "breakpoints": true
+    },
+    {
+      "idx": 64,
+      "version": "7",
+      "when": 1795187400000,
+      "tag": "20261120151000_cutover_restore_suppression",
+      "breakpoints": true
     }
   ]
 }

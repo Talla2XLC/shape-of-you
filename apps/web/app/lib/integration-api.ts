@@ -1,4 +1,21 @@
 import { readCookie } from "./browser-security";
+import type {
+  CancelGarminCutover,
+  GarminCutoverCapability,
+  GarminCutoverPreview,
+  GarminCutoverStatus,
+  PreviewGarminCutover,
+  RetryGarminCutover,
+  ScheduleGarminCutover
+} from "../../../../packages/contracts/src/integration-cutover";
+
+export type {
+  GarminCutover,
+  GarminCutoverCapability,
+  GarminCutoverGap,
+  GarminCutoverPreview,
+  GarminCutoverStatus
+} from "../../../../packages/contracts/src/integration-cutover";
 
 const csrfCookieName = "__Host-shape_of_you_api_csrf";
 
@@ -8,7 +25,7 @@ export interface GarminIntervalsStatus {
   readonly displayName: "Garmin via Intervals.icu";
   readonly recoveryConnectionId: string | null;
   readonly lifecycle: "unavailable" | "connecting" | "active" | "degraded" | "disconnected";
-  readonly failureCode: "authorization_required" | "provider_rate_limited" | "provider_timeout" | "provider_unavailable" | "provider_response_invalid" | null;
+  readonly failureCode: "authorization_required" | "provider_rate_limited" | "provider_timeout" | "provider_unavailable" | "provider_response_invalid" | "cutover_source_stopped" | null;
   readonly lastAttemptAt: string | null;
   readonly lastSuccessfulSyncAt: string | null;
   readonly lastDataAt: string | null;
@@ -21,6 +38,7 @@ export interface GarminIntervalsStatus {
     readonly lastAttemptAt: string | null;
     readonly completedAt: string | null;
     readonly failureCode: GarminIntervalsStatus["failureCode"];
+    readonly scopeFromDate?: string;
   };
 }
 
@@ -31,7 +49,7 @@ export type GarminPersonalStatus = Omit<GarminIntervalsStatus, "provider" | "dis
 };
 
 export class IntegrationApiError extends Error {
-  public constructor(public readonly status: number) {
+  public constructor(public readonly status: number, public readonly cutoverPreview?: GarminCutoverPreview) {
     super("Integration request was not accepted");
     this.name = "IntegrationApiError";
   }
@@ -45,7 +63,8 @@ export function integrationFailureReason(code: GarminIntervalsStatus["failureCod
     provider_rate_limited: "Intervals.icu asked us to retry later.",
     provider_timeout: "Intervals.icu did not respond in time.",
     provider_unavailable: "Intervals.icu is temporarily unavailable.",
-    provider_response_invalid: "Intervals.icu returned data we could not safely import."
+    provider_response_invalid: "Intervals.icu returned data we could not safely import.",
+    cutover_source_stopped: "Intervals history import stopped at the end of the transition period. Unchecked older dates have not been marked complete."
   }[code];
 }
 
@@ -57,7 +76,8 @@ export function garminPersonalFailureReason(code: GarminPersonalStatus["failureC
     provider_rate_limited: "Garmin asked us to retry later.",
     provider_timeout: "Garmin did not respond in time. Please try again.",
     provider_unavailable: "Garmin is temporarily unavailable. Please try again.",
-    provider_response_invalid: "Some Garmin data could not be safely imported."
+    provider_response_invalid: "Some Garmin data could not be safely imported.",
+    cutover_source_stopped: "The old import period has ended. Already imported data remains available."
   }[code];
 }
 
@@ -81,7 +101,7 @@ export function integrationAuthorizationResultMessage(
     : null;
 }
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function request<T>(path: string, init: RequestInit = {}, allowCutoverPreview = false): Promise<T> {
   const csrf = init.method && init.method !== "GET" ? readCookie(document.cookie, csrfCookieName) : null;
   const response = await fetch(path, {
     ...init,
@@ -94,7 +114,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       ...init.headers
     }
   });
-  if (!response.ok) throw new IntegrationApiError(response.status);
+  if (!response.ok) throw new IntegrationApiError(response.status, allowCutoverPreview && response.status === 409 ? await readCutoverErrorPreview(response) : undefined);
   return await response.json() as T;
 }
 
@@ -145,3 +165,107 @@ export const garminPersonalApi = {
     return request<GarminPersonalStatus>("/api/v1/integrations/garmin-personal/historical-import", { method: "POST" });
   }
 };
+
+/** Same-origin cutover operations; a failed preview never persists a key. */
+export const garminCutoverApi = {
+  status() { return request<GarminCutoverStatus>("/api/v1/integrations/garmin-personal/cutover"); },
+  preview(input: PreviewGarminCutover = {}) {
+    return request<GarminCutoverPreview>("/api/v1/integrations/garmin-personal/cutover/preview", {
+      method: "POST", body: JSON.stringify(input)
+    });
+  },
+  schedule(input: ScheduleGarminCutover) {
+    return request<GarminCutoverStatus>("/api/v1/integrations/garmin-personal/cutover/schedule", {
+      method: "POST", body: JSON.stringify(input)
+    }, true);
+  },
+  retry(input: RetryGarminCutover) {
+    return request<GarminCutoverStatus>("/api/v1/integrations/garmin-personal/cutover/retry", {
+      method: "POST", body: JSON.stringify(input)
+    }, true);
+  },
+  cancel(input: CancelGarminCutover) {
+    return request<GarminCutoverStatus>("/api/v1/integrations/garmin-personal/cutover/cancel", {
+      method: "POST", body: JSON.stringify(input)
+    });
+  }
+};
+
+/** Fixed labels prevent arbitrary provider error text from reaching the interface. */
+export function cutoverCapabilityLabel(capability: GarminCutoverCapability): string {
+  return {
+    "recovery.hrv_rmssd": "Overnight HRV (RMSSD)",
+    "recovery.sleep_score": "Overall sleep score",
+    "training.normalized_load": "Comparable training load",
+    "training.device_attribution": "Confirmed Garmin device attribution",
+    "training.original_fit": "Original training details (FIT)"
+  }[capability];
+}
+
+/** Explains safe transition failures without showing exception or provider text. */
+export function garminCutoverRequestMessage(error: unknown): string {
+  if (error instanceof IntegrationApiError) {
+    if (error.cutoverPreview) return "The coverage check changed. Review and confirm the updated limitations before continuing. Your key has not been saved.";
+    if (error.status === 409) return "The transition changed or this action is no longer available. Refresh its status and review a new preview before trying again.";
+    if (error.status === 400 || error.status === 422) return "Check the selected start date and your confirmations, then try again.";
+    if (error.status === 401 || error.status === 403) return "Your sign-in or Garmin access could not be verified.";
+    if (error.status === 429) return "Please wait a moment before trying again.";
+    if (error.status === 503) return "The transition is temporarily unavailable. Refresh its status before trying again.";
+  }
+  return "The result could not be confirmed. Refresh the transition status before sending another request.";
+}
+
+async function readCutoverErrorPreview(response: Response): Promise<GarminCutoverPreview | undefined> {
+  const limit = 16_384;
+  if (Number(response.headers.get("content-length")) > limit || !response.body) return undefined;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let length = 0;
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      length += chunk.value.byteLength;
+      if (length > limit) { await reader.cancel(); return undefined; }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
+    const envelope: unknown = JSON.parse(text);
+    if (!isRecord(envelope) || envelope.error !== "coverage_changed" || !isRecord(envelope.details)) return undefined;
+    return safeCutoverPreview(envelope.details.preview);
+  } catch {
+    return undefined;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function safeCutoverPreview(value: unknown): GarminCutoverPreview | undefined {
+  if (!isRecord(value)) return undefined;
+  const date = (item: unknown): item is string => typeof item === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item) && !Number.isNaN(Date.parse(`${item}T00:00:00Z`)) && new Date(`${item}T00:00:00Z`).toISOString().slice(0, 10) === item;
+  const instant = (item: unknown): item is string => typeof item === "string" && item.length <= 40 && /^\d{4}-\d{2}-\d{2}T/.test(item) && !Number.isNaN(Date.parse(item));
+  const bounded = (item: unknown, max: number): item is string => typeof item === "string" && item.length > 0 && item.length <= max;
+  if (!bounded(value.expectedRevision, 512) || !date(value.startsOn) || !bounded(value.timezone, 100) ||
+      !instant(value.startsAt) || !instant(value.sourceDrainsUntil) || !date(value.sourceTailFromDate) ||
+      !bounded(value.capabilityVersion, 128) || !Array.isArray(value.gaps) || value.gaps.length > 5) return undefined;
+  try { new Intl.DateTimeFormat("en", { timeZone: value.timezone }); } catch { return undefined; }
+  const capabilities = ["recovery.hrv_rmssd", "recovery.sleep_score", "training.normalized_load", "training.device_attribution", "training.original_fit"] as const;
+  const gaps: GarminCutoverPreview["gaps"] = [];
+  for (const item of value.gaps) {
+    if (!isRecord(item) || !capabilities.includes(item.capability as GarminCutoverCapability) ||
+        (item.status !== "unsupported" && item.status !== "unverified")) return undefined;
+    const capability = item.capability as GarminCutoverCapability;
+    if (gaps.some((gap) => gap.capability === capability)) return undefined;
+    gaps.push({ capability, status: item.status, description: cutoverCapabilityLabel(capability) });
+  }
+  return {
+    expectedRevision: value.expectedRevision, startsOn: value.startsOn, timezone: value.timezone,
+    startsAt: value.startsAt, sourceDrainsUntil: value.sourceDrainsUntil,
+    sourceTailFromDate: value.sourceTailFromDate, capabilityVersion: value.capabilityVersion, gaps
+  };
+}

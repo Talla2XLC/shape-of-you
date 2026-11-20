@@ -162,6 +162,9 @@ function formatted(value: string | null): string {
           Connected. Your Garmin data syncs automatically.
         </template>
       </p>
+      <p v-else-if="status.lifecycle === 'connecting'">
+        Garmin access is prepared. Review the transition status for its start date.
+      </p>
       <p v-else>
         Garmin is not connected.
       </p>
@@ -177,7 +180,7 @@ function formatted(value: string | null): string {
         </p>
       </template>
       <form
-        v-if="!connected || editing"
+        v-if="(!connected && status.lifecycle !== 'connecting') || editing"
         autocomplete="off"
         @submit.prevent="connect"
       >
@@ -263,6 +266,12 @@ function formatted(value: string | null): string {
         aria-live="polite"
       >
         <h3>Garmin history</h3>
+        <p
+          v-if="status.historicalImport.scopeFromDate && status.historicalImport.scopeFromDate !== '2000-01-01'"
+          class="item-meta"
+        >
+          Garmin history begins on {{ status.historicalImport.scopeFromDate }}. Earlier history keeps its existing source.
+        </p>
         <p
           v-if="status.historicalImport.status === 'running'"
           class="item-meta"

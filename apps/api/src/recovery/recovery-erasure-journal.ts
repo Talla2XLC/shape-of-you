@@ -5,9 +5,12 @@ import { dirname } from "node:path";
 
 import type { RecoveryErasureReason } from "@shape-of-you/contracts";
 
+import { parseIntegrationCutoverRestorePolicy, type IntegrationCutoverRestorePolicy } from "./integration-cutover-restore-policy.js";
+
 import type { RecoveryErasureMarker } from "../storage/recovery-repository.js";
 
-const schemaVersion = 1;
+const legacyHashVersion = 1;
+const currentFormatVersion = 2;
 const zeroHash = "0".repeat(64);
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const hashPattern = /^[0-9a-f]{64}$/;
@@ -19,7 +22,7 @@ interface JournalMetadataRow {
 
 interface JournalRecordRow {
   readonly sequence: number;
-  readonly record_kind: "accepted" | "completed" | "checkpoint";
+  readonly record_kind: "accepted" | "completed" | "checkpoint" | "cutover";
   readonly request_id: string | null;
   readonly person_id: string | null;
   readonly connection_id: string | null;
@@ -29,6 +32,7 @@ interface JournalRecordRow {
   readonly recorded_at: string;
   readonly previous_hash: string;
   readonly record_hash: string;
+  readonly cutover_policy?: string | null;
 }
 
 /** Typed completion evidence appended after one Recovery connection graph is erased. */
@@ -43,6 +47,16 @@ export interface VerifiedRecoveryErasureJournal {
   readonly completeThrough: string;
   readonly accepted: readonly RecoveryErasureMarker[];
   readonly completedRequestIds: readonly string[];
+  readonly cutovers?: readonly IntegrationCutoverRestorePolicy[];
+}
+
+/** Exact immutable source prefix that an offline preparation command must revalidate under a writer barrier. */
+export interface RecoveryErasureJournalHead {
+  readonly journalId: string;
+  readonly formatVersion: 1 | 2;
+  readonly sequence: number;
+  readonly headHash: string;
+  readonly completeThrough: string;
 }
 
 function exactUuid(value: string, name: string): string {
@@ -65,7 +79,7 @@ function canonicalField(value: string | number | null): string {
 
 function recordHash(record: Omit<JournalRecordRow, "record_hash">): string {
   const canonical = [
-    schemaVersion,
+    record.record_kind === "cutover" ? currentFormatVersion : legacyHashVersion,
     record.sequence,
     record.record_kind,
     record.request_id,
@@ -75,6 +89,7 @@ function recordHash(record: Omit<JournalRecordRow, "record_hash">): string {
     record.occurred_at,
     record.complete_through,
     record.recorded_at,
+    ...(record.record_kind === "cutover" ? [record.cutover_policy ?? null] : []),
     record.previous_hash
   ].map(canonicalField).join("|");
   return createHash("sha256").update(canonical).digest("hex");
@@ -119,26 +134,27 @@ const checkpointDurability: RecoveryErasureCheckpointDurability = {
   syncDirectory: syncPath
 };
 
-function initialize(database: DatabaseSync, journalId: string, createdAt: string): void {
+function initialize(database: DatabaseSync, journalId: string, createdAt: string, formatVersion: 1 | 2): void {
   database.exec(`
     pragma foreign_keys = on;
     pragma journal_mode = delete;
     pragma synchronous = full;
     create table recovery_erasure_journal_metadata (
       singleton integer primary key check (singleton = 1),
-      schema_version integer not null check (schema_version = 1),
+      schema_version integer not null check (schema_version = ${formatVersion}),
       journal_id text not null check (length(journal_id) = 36),
       created_at text not null
     ) strict;
     create table recovery_erasure_journal_records (
       sequence integer primary key,
-      record_kind text not null check (record_kind in ('accepted', 'completed', 'checkpoint')),
+      record_kind text not null check (record_kind in ('accepted', 'completed', 'checkpoint'${formatVersion >= 2 ? ", 'cutover'" : ""})),
       request_id text,
       person_id text,
       connection_id text,
       reason text check (reason is null or reason in ('user_request', 'retention_expired')),
       occurred_at text,
       complete_through text,
+      ${formatVersion >= 2 ? "cutover_policy text," : ""}
       recorded_at text not null,
       previous_hash text not null check (length(previous_hash) = 64),
       record_hash text not null unique check (length(record_hash) = 64),
@@ -152,6 +168,9 @@ function initialize(database: DatabaseSync, journalId: string, createdAt: string
         or (record_kind = 'checkpoint' and request_id is null and person_id is null
           and connection_id is null and reason is null and occurred_at is null
           and complete_through is not null)
+        ${formatVersion >= 2 ? `or (record_kind = 'cutover' and request_id is null and person_id is not null
+          and connection_id is null and reason is null and occurred_at is null
+          and complete_through is null and cutover_policy is not null)` : ""}
       )
     ) strict;
     create unique index recovery_erasure_journal_request_kind_uq
@@ -181,7 +200,7 @@ function initialize(database: DatabaseSync, journalId: string, createdAt: string
     `insert into recovery_erasure_journal_metadata
        (singleton, schema_version, journal_id, created_at)
      values (1, ?, ?, ?)`
-  ).run(schemaVersion, journalId, createdAt);
+  ).run(formatVersion, journalId, createdAt);
 }
 
 /** Append-only typed journal for Recovery erasure intent and completion evidence. */
@@ -190,22 +209,24 @@ export class RecoveryErasureJournal implements Disposable {
     private readonly database: DatabaseSync,
     public readonly path: string,
     public readonly journalId: string,
-    private readonly clock: () => Date
+    private readonly clock: () => Date,
+    public readonly formatVersion: 1 | 2 = currentFormatVersion
   ) {}
 
   /** Creates a new private journal and refuses to replace an existing path. */
   public static async create(
     path: string,
-    clock: () => Date = () => new Date()
+    clock: () => Date = () => new Date(),
+    formatVersion: 1 | 2 = currentFormatVersion
   ): Promise<RecoveryErasureJournal> {
     const handle = await open(path, "wx", 0o600);
     await handle.close();
     const database = new DatabaseSync(path, { timeout: 5_000 });
     const journalId = randomUUID();
     try {
-      initialize(database, journalId, clock().toISOString());
+      initialize(database, journalId, clock().toISOString(), formatVersion);
       await chmod(path, 0o600);
-      return new RecoveryErasureJournal(database, path, journalId, clock);
+      return new RecoveryErasureJournal(database, path, journalId, clock, formatVersion);
     } catch (error) {
       database.close();
       await rm(path, { force: true });
@@ -229,7 +250,7 @@ export class RecoveryErasureJournal implements Disposable {
            from recovery_erasure_journal_metadata
           where singleton = 1`
       ).get() as JournalMetadataRow | undefined;
-      if (!metadata || metadata.schema_version !== schemaVersion) {
+      if (!metadata || ![1, currentFormatVersion].includes(metadata.schema_version)) {
         throw new Error("Unsupported Recovery erasure journal schema version");
       }
       exactUuid(metadata.journal_id, "journalId");
@@ -237,7 +258,8 @@ export class RecoveryErasureJournal implements Disposable {
         database,
         path,
         metadata.journal_id,
-        options.clock ?? (() => new Date())
+        options.clock ?? (() => new Date()),
+        metadata.schema_version as 1 | 2
       );
       journal.verifyChain();
       return journal;
@@ -262,6 +284,18 @@ export class RecoveryErasureJournal implements Disposable {
       occurredAt: marker.requestedAt,
       completeThrough: null
     });
+  }
+
+  /** Appends bounded import authority; format-1 files require explicit offline preparation first. */
+  public appendCutover(policy: IntegrationCutoverRestorePolicy): void {
+    if (this.formatVersion < 2) throw new Error("Cutover restore authority requires an explicitly upgraded version-2 erasure journal");
+    const parsed = parseIntegrationCutoverRestorePolicy(policy);
+    const previous = this.verifyChain().filter((row) => row.record_kind === "cutover")
+      .map((row) => parseIntegrationCutoverRestorePolicy(JSON.parse(row.cutover_policy!)))
+      .filter((row) => row.id === parsed.id).at(-1);
+    assertPolicyProgress(previous, parsed);
+    this.append({ recordKind: "cutover", requestId: null, personId: parsed.personId,
+      connectionId: null, reason: null, occurredAt: null, completeThrough: null, cutoverPolicy: JSON.stringify(parsed) });
   }
 
   /** Appends completion evidence idempotently after physical graph deletion. */
@@ -344,6 +378,12 @@ export class RecoveryErasureJournal implements Disposable {
         throw new Error("Recovery erasure journal is incomplete for the required restore boundary");
       }
     }
+    const cutovers = new Map<string, IntegrationCutoverRestorePolicy>();
+    for (const record of records.filter((item) => item.record_kind === "cutover")) {
+      const policy = parseIntegrationCutoverRestorePolicy(JSON.parse(record.cutover_policy!));
+      assertPolicyProgress(cutovers.get(policy.id), policy);
+      cutovers.set(policy.id, policy);
+    }
     return {
       journalId: this.journalId,
       completeThrough: lastCheckpoint.complete_through,
@@ -356,10 +396,19 @@ export class RecoveryErasureJournal implements Disposable {
           reason: record.reason!,
           requestedAt: record.occurred_at!
         })),
+      ...(cutovers.size ? { cutovers: [...cutovers.values()] } : {}),
       completedRequestIds: records
         .filter((record) => record.record_kind === "completed")
         .map((record) => record.request_id!)
     };
+  }
+
+  /** Returns a verified source head without changing the journal or advancing completeness by wall clock. */
+  public head(): RecoveryErasureJournalHead {
+    const records = this.verifyChain();
+    return { journalId: this.journalId, formatVersion: this.formatVersion,
+      sequence: records.at(-1)?.sequence ?? 0, headHash: records.at(-1)?.record_hash ?? zeroHash,
+      completeThrough: this.verify().completeThrough };
   }
 
   /** Closes the SQLite handle owned by this journal. */
@@ -379,6 +428,7 @@ export class RecoveryErasureJournal implements Disposable {
     readonly reason: RecoveryErasureReason | null;
     readonly occurredAt: string | null;
     readonly completeThrough: string | null;
+    readonly cutoverPolicy?: string;
   }): void {
     this.database.exec("begin immediate");
     try {
@@ -387,16 +437,19 @@ export class RecoveryErasureJournal implements Disposable {
             `select * from recovery_erasure_journal_records
               where request_id = ? and record_kind = ?`
           ).get(input.requestId, input.recordKind) as JournalRecordRow | undefined
-        : this.database.prepare(
-            `select * from recovery_erasure_journal_records
-              where complete_through = ? and record_kind = 'checkpoint'`
-          ).get(input.completeThrough) as JournalRecordRow | undefined;
+        : input.recordKind === "cutover"
+          ? this.database.prepare(`select * from recovery_erasure_journal_records where record_kind = 'cutover' and cutover_policy = ?`).get(input.cutoverPolicy!) as JournalRecordRow | undefined
+          : this.database.prepare(
+              `select * from recovery_erasure_journal_records
+                where complete_through = ? and record_kind = 'checkpoint'`
+            ).get(input.completeThrough) as JournalRecordRow | undefined;
       if (duplicate) {
         const same = duplicate.person_id === input.personId
           && duplicate.connection_id === input.connectionId
           && duplicate.reason === input.reason
           && duplicate.occurred_at === input.occurredAt
-          && duplicate.complete_through === input.completeThrough;
+          && duplicate.complete_through === input.completeThrough
+          && (duplicate.cutover_policy ?? null) === (input.cutoverPolicy ?? null);
         if (!same) throw new Error("Recovery erasure journal event conflicts with prior evidence");
         this.database.exec("commit");
         return;
@@ -414,6 +467,7 @@ export class RecoveryErasureJournal implements Disposable {
         reason: input.reason,
         occurred_at: input.occurredAt,
         complete_through: input.completeThrough,
+        ...(this.formatVersion >= 2 ? { cutover_policy: input.cutoverPolicy ?? null } : {}),
         recorded_at: this.clock().toISOString(),
         previous_hash: previous?.record_hash ?? zeroHash
       };
@@ -421,8 +475,8 @@ export class RecoveryErasureJournal implements Disposable {
       this.database.prepare(
         `insert into recovery_erasure_journal_records
           (sequence, record_kind, request_id, person_id, connection_id, reason,
-           occurred_at, complete_through, recorded_at, previous_hash, record_hash)
-         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           occurred_at, complete_through, recorded_at, previous_hash, record_hash${this.formatVersion >= 2 ? ", cutover_policy" : ""})
+         values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?${this.formatVersion >= 2 ? ", ?" : ""})`
       ).run(
         recordWithoutHash.sequence,
         recordWithoutHash.record_kind,
@@ -434,7 +488,8 @@ export class RecoveryErasureJournal implements Disposable {
         recordWithoutHash.complete_through,
         recordWithoutHash.recorded_at,
         recordWithoutHash.previous_hash,
-        hash
+        hash,
+        ...(this.formatVersion >= 2 ? [recordWithoutHash.cutover_policy ?? null] : [])
       );
       this.database.exec("commit");
     } catch (error) {
@@ -461,8 +516,88 @@ export class RecoveryErasureJournal implements Disposable {
       if (row.connection_id) exactUuid(row.connection_id, `record[${row.sequence}].connectionId`);
       if (row.occurred_at) exactDate(row.occurred_at, `record[${row.sequence}].occurredAt`);
       if (row.complete_through) exactDate(row.complete_through, `record[${row.sequence}].completeThrough`);
+      if (row.record_kind === "cutover") {
+        if (this.formatVersion < 2 || !row.cutover_policy) throw new Error("Cutover journal record is invalid");
+        const policy = parseIntegrationCutoverRestorePolicy(JSON.parse(row.cutover_policy));
+        if (row.person_id !== policy.personId) throw new Error("Cutover journal Person mismatch");
+      } else if (row.cutover_policy != null) throw new Error("Unexpected cutover journal payload");
       expectedPrevious = row.record_hash;
     }
     return rows;
   }
+}
+
+/** Verifies an existing private journal as input to explicit offline preparation. */
+export async function inspectRecoveryErasureJournalHead(path: string): Promise<RecoveryErasureJournalHead> {
+  const journal = await RecoveryErasureJournal.open(path, { readOnly: true });
+  try { return journal.head(); } finally { journal.close(); }
+}
+
+/**
+ * Prepares a separate v2 file and seal while preserving every v1 record and the journal identity.
+ * The source is never altered or replaced. Actual replacement requires quiescing every old writer/handle
+ * and revalidating the returned source head; this function performs no operational replacement.
+ */
+export async function prepareRecoveryErasureJournalV2(
+  sourcePath: string,
+  outputPath: string,
+  checkpointPath: string,
+  expected: RecoveryErasureJournalHead,
+  durability: RecoveryErasureCheckpointDurability = checkpointDurability
+): Promise<RecoveryErasureJournalHead> {
+  if (sourcePath === outputPath || sourcePath === checkpointPath || outputPath === checkpointPath || expected.formatVersion !== 1) throw new Error("Offline upgrade requires distinct paths and a format-1 source");
+  await assertPrivateRegularFile(sourcePath);
+  await assertPrivateRecoveryErasureJournalDirectory(dirname(outputPath));
+  const source = new DatabaseSync(sourcePath, { timeout: 5_000 });
+  let created = false;
+  let sealed = false;
+  let target: DatabaseSync | undefined;
+  try {
+    source.exec("begin immediate");
+    const sourceJournal = await RecoveryErasureJournal.open(sourcePath, { readOnly: true });
+    let current: RecoveryErasureJournalHead;
+    try { current = sourceJournal.head(); } finally { sourceJournal.close(); }
+    if (current.journalId !== expected.journalId || current.formatVersion !== expected.formatVersion || current.sequence !== expected.sequence || current.headHash !== expected.headHash || current.completeThrough !== expected.completeThrough) throw new Error("Offline upgrade source head changed; prepare again from a fresh preview");
+    const rows = source.prepare("select * from recovery_erasure_journal_records order by sequence").all() as unknown as JournalRecordRow[];
+    const metadata = source.prepare("select created_at from recovery_erasure_journal_metadata where singleton=1").get() as { created_at: string };
+    const handle = await open(outputPath, "wx", 0o600);
+    await handle.close();
+    created = true;
+    target = new DatabaseSync(outputPath, { timeout: 5_000 });
+    initialize(target, current.journalId, metadata.created_at, 2);
+    target.exec("begin immediate");
+    const insert = target.prepare(`insert into recovery_erasure_journal_records
+      (sequence,record_kind,request_id,person_id,connection_id,reason,occurred_at,complete_through,recorded_at,previous_hash,record_hash,cutover_policy)
+      values(?,?,?,?,?,?,?,?,?,?,?,null)`);
+    for (const row of rows) insert.run(row.sequence,row.record_kind,row.request_id,row.person_id,row.connection_id,row.reason,row.occurred_at,row.complete_through,row.recorded_at,row.previous_hash,row.record_hash);
+    target.exec("commit");
+    target.close();
+    target = undefined;
+    const prepared = await RecoveryErasureJournal.open(outputPath);
+    try {
+      const transferred = prepared.head();
+      if (transferred.journalId !== current.journalId || transferred.sequence !== current.sequence || transferred.headHash !== current.headHash || transferred.completeThrough !== current.completeThrough) throw new Error("Offline upgrade changed the legacy prefix");
+      await durability.syncFile(outputPath);
+      await durability.syncDirectory(dirname(outputPath));
+      await prepared.createSealedCheckpoint(checkpointPath, durability);
+      sealed = true;
+    } finally { prepared.close(); }
+    const finalHead = source.prepare("select sequence,record_hash from recovery_erasure_journal_records order by sequence desc limit 1").get() as { sequence: number; record_hash: string } | undefined;
+    if ((finalHead?.sequence ?? 0) !== current.sequence || (finalHead?.record_hash ?? zeroHash) !== current.headHash) throw new Error("Offline upgrade source head changed while preparing");
+    source.exec("commit");
+    return current;
+  } catch (error) {
+    try { source.exec("rollback"); } catch { /* The source may not have entered its transaction. */ }
+    target?.close();
+    if (sealed) await rm(checkpointPath, { force: true });
+    if (created) await rm(outputPath, { force: true });
+    throw error;
+  } finally { source.close(); }
+}
+
+function assertPolicyProgress(previous: IntegrationCutoverRestorePolicy | undefined, current: IntegrationCutoverRestorePolicy): void {
+  if (!previous) return;
+  if (current.personId !== previous.personId || current.version < previous.version || (current.version === previous.version && JSON.stringify(current) !== JSON.stringify(previous))) throw new Error("Cutover restore policy conflicts with prior journal authority");
+  const immutable = (value: IntegrationCutoverRestorePolicy) => JSON.stringify([value.id,value.personId,value.sourceProvider,value.targetProvider,value.startsOn,value.timezone,value.startsAt,value.sourceDrainsUntil,value.capabilityVersion,[...value.acceptedCoverageGaps].sort()]);
+  if (previous.activatedAt !== null && (current.activatedAt === null || immutable(previous) !== immutable(current))) throw new Error("Activated cutover journal authority cannot regress");
 }

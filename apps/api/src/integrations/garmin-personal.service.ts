@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { HttpException, Inject, Injectable, Optional } from "@nestjs/common";
 import type { ConnectGarminPersonal, GarminPersonalConnection } from "@shape-of-you/contracts";
 
-import { GARMIN_PERSONAL_RUNTIME, PERSON_CONTEXT, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
+import { GARMIN_CUTOVER_RUNTIME, GARMIN_PERSONAL_RUNTIME, PERSON_CONTEXT, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
 import type { PersonContext } from "../application/person-context.js";
 import type { RecoveryStore } from "../storage/recovery-repository.js";
 import type { TrainingStore } from "../storage/training-repository.js";
@@ -12,6 +12,7 @@ import type { GarminPersonalProvider } from "./garmin-personal/provider.js";
 import { DomainValidationError } from "../domain/errors.js";
 import { IntegrationProviderError, type HealthDataReader } from "./provider.js";
 import { IntegrationService } from "./integration.service.js";
+import type { GarminCutoverRuntime } from "./garmin-cutover.service.js";
 
 /** Direct Garmin dependencies; availability never depends on Intervals OAuth configuration. */
 export interface GarminPersonalRuntime {
@@ -30,11 +31,12 @@ export class GarminPersonalService {
     @Inject(PERSON_CONTEXT) private readonly person: PersonContext,
     @Inject(RECOVERY_STORE) recovery: RecoveryStore,
     @Inject(TRAINING_STORE) training: TrainingStore,
-    @Optional() @Inject(GARMIN_PERSONAL_RUNTIME) private readonly runtime: GarminPersonalRuntime | null = null
+    @Optional() @Inject(GARMIN_PERSONAL_RUNTIME) private readonly runtime: GarminPersonalRuntime | null = null,
+    @Optional() @Inject(GARMIN_CUTOVER_RUNTIME) private readonly cutover: GarminCutoverRuntime | null = null
   ) {
     const reader: HealthDataReader | null = runtime ? {
-      reconcile: async (key, from, to, scope) => {
-        const result = await runtime.provider.reconcile(key, from, to, scope);
+      reconcile: async (key, from, to, scope, options) => {
+        const result = await runtime.provider.reconcile(key, from, to, scope, options);
         if (result.wellness.length === 0 && result.activities.length === 0) return result;
         if (!result.externalUserId || !scope) throw new IntegrationProviderError("provider_response_invalid");
         const [id, consent] = scope.split(":");
@@ -46,14 +48,19 @@ export class GarminPersonalService {
         }
         return result;
       },
-      originalActivityFile: (key, id, scope) => runtime.provider.originalActivityFile(key, id, scope)
+      originalActivityFile: (key, id, scope, options) => runtime.provider.originalActivityFile(key, id, scope, options)
     } : null;
     this.importer = new IntegrationService(person, runtime?.store ?? null, reader, runtime?.cipher ?? null,
       recovery, training, { providerKey: "garmin_personal", historicalWindowDays: 14 });
   }
 
   /** Returns only safe connection status; a connected empty account is successful. */
-  public status(): Promise<GarminPersonalConnection> { return this.importer.status(); }
+  public async status(): Promise<GarminPersonalConnection> {
+    const status = await this.importer.status();
+    const policy = await this.cutover?.store.find(this.person.getPersonId());
+    return policy && ["scheduled", "failed"].includes(policy.state) && policy.targetRecoveryConnectionId !== null &&
+      policy.targetRecoveryConnectionId === status.recoveryConnectionId ? { ...status, lifecycle: "connecting" } : status;
+  }
 
   /** Checks access without persistence, consent activation or domain writes. */
   public async check(apiKey: string): Promise<{ verified: true }> {
@@ -127,7 +134,8 @@ export class GarminPersonalService {
         provider_unavailable: [503, "Garmin is temporarily unavailable"],
         provider_response_invalid: [502, "Garmin returned an unsupported response"]
       } as const;
-      const [status, message] = failures[error.failureCode];
+      const [status, message] = error.failureCode === "cutover_source_stopped"
+        ? [503, "Import permission has ended"] as const : failures[error.failureCode];
       throw new HttpException(message, status);
     }
   }

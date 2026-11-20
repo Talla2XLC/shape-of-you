@@ -59,9 +59,11 @@ import {
 } from "./storage/daily-context-note-repository.js";
 import type { IntakeParser } from "./domain/intake.js";
 import { IntegrationRepository } from "./storage/integration-repository.js";
+import { IntegrationCutoverRepository } from "./storage/integration-cutover-repository.js";
 import { IntervalsIcuProvider } from "./integrations/intervals-icu/provider.js";
 import { ConnectionCredentialCipher, parseIntegrationKeyRing } from "./integrations/credential-cipher.js";
 import { GarminPersonalProvider } from "./integrations/garmin-personal/provider.js";
+import type { GarminPersonalRuntime } from "./integrations/garmin-personal.service.js";
 import { IntegrationService } from "./integrations/integration.service.js";
 import { registerIntegrationCallback } from "./integrations/integration.controller.js";
 import { WeightMeasurementService } from "./weight-measurements/weight-measurement.service.js";
@@ -262,6 +264,11 @@ export async function buildApp(
         parseIntegrationKeyRing(options.config.INTEGRATION_ENCRYPTION_KEY_RING!)
       )
     : null;
+  const garminPersonalRuntime: GarminPersonalRuntime | null = database && integrationCipher ? {
+    store: new IntegrationRepository(database, "garmin_personal"),
+    provider: options.garminPersonalProvider ?? new GarminPersonalProvider(),
+    cipher: integrationCipher
+  } : null;
   const deniedIdentityKids = parseIdentityOAuthDeniedKids(
     options.config.IDENTITY_OAUTH_DENIED_KIDS
   );
@@ -322,14 +329,11 @@ export async function buildApp(
       readinessProbe,
       database,
       integrationStore,
-      garminPersonalRuntime: database && integrationCipher ? {
-        store: new IntegrationRepository(database, "garmin_personal"),
-        provider: options.garminPersonalProvider ?? new GarminPersonalProvider(),
-        cipher: integrationCipher
-      } : null,
+      garminPersonalRuntime,
+      garminCutoverRuntime: database ? { store: new IntegrationCutoverRepository(database), garmin: garminPersonalRuntime } : null,
       integrationProvider,
       integrationCipher,
-      integrationWorkerEnabled: encryptionEnabled && Boolean(database) && options.config.NODE_ENV !== "test",
+      integrationWorkerEnabled: Boolean(database) && options.config.NODE_ENV !== "test",
       ownsDatabase
     }),
     adapter,

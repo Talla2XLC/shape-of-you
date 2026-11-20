@@ -6,7 +6,8 @@ export type IntegrationFailureCode =
   | "provider_rate_limited"
   | "provider_timeout"
   | "provider_unavailable"
-  | "provider_response_invalid";
+  | "provider_response_invalid"
+  | "cutover_source_stopped";
 
 /** Provider-neutral token result kept behind the encrypted credential boundary. */
 export interface ProviderAuthorization {
@@ -59,10 +60,19 @@ export interface ProviderReconciliation {
   readonly activities: readonly ProviderActivityRecord[];
 }
 
+/** Per-read transport bounds and current authorization guard; never grants write authority. */
+export interface ProviderReadOptions {
+  /** Wider transport dates for activity starts; final write ownership is checked separately. */
+  readonly activityFromDate?: string;
+  readonly activityToDate?: string;
+  /** Revalidates current consent/import policy before each external request. */
+  readonly beforeRequest?: () => Promise<void>;
+}
+
 /** Typed data-reading boundary shared by the two supported providers. */
 export interface HealthDataReader {
-  reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string, scope?: string): Promise<ProviderReconciliation>;
-  originalActivityFile(accessToken: string, activityId: string, scope?: string): Promise<Uint8Array | null>;
+  reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string, scope?: string, options?: ProviderReadOptions): Promise<ProviderReconciliation>;
+  originalActivityFile(accessToken: string, activityId: string, scope?: string, options?: ProviderReadOptions): Promise<Uint8Array | null>;
 }
 
 /** OAuth authorization/revocation belongs only to providers supporting that contract. */

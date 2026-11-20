@@ -16,7 +16,7 @@ import type { PersonContext } from "../application/person-context.js";
 import type { RecoveryStore } from "../storage/recovery-repository.js";
 import type { TrainingStore } from "../storage/training-repository.js";
 import type { ConnectionCredentialCipher } from "./credential-cipher.js";
-import type { ActiveIntegrationConnection, IntegrationStore } from "./integration-store.js";
+import type { ActiveIntegrationConnection, IntegrationImportPolicy, IntegrationStore } from "./integration-store.js";
 import type { HealthDataProvider, HealthDataReader, ProviderWellnessRecord } from "./provider.js";
 import { ActivityDetailsReadError, IntegrationProviderError } from "./provider.js";
 import { normalizedChecksum } from "./intervals-icu/normalizer.js";
@@ -44,6 +44,9 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
     @Inject(TRAINING_STORE) private readonly training: TrainingStore,
     @Optional() @Inject(INTEGRATION_IMPORT_CONTEXT) private readonly context: IntegrationImportContext = { providerKey: "intervals_icu", historicalWindowDays }
   ) {}
+
+  /** Indicates whether this coordinator can issue provider requests; policy cleanup needs no credentials. */
+  public isConfigured(): boolean { return Boolean(this.store && this.provider && this.cipher); }
 
   /** Returns only the safe browser projection, including feature unavailability. */
   public async status(): Promise<Status> {
@@ -150,13 +153,24 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
   /** Reconciles one already-claimed connection for the in-process worker. */
   public async reconcileConnection(connection: ActiveIntegrationConnection): Promise<void> {
     try {
-      const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id, this.context.providerKey));
       const today = new Date();
-      const from = new Date(today.valueOf() - reconciliationWindowDays * 86_400_000);
-      const rollingFrom = isoDate(from);
+      const policy = await this.store!.importPolicy?.(connection.id, connection.consentId) ?? null;
+      if (policy && !policy.requestAllowed) throw new IntegrationProviderError("cutover_source_stopped");
+      const token = this.cipher!.decrypt(connection.credential, associatedData(connection.personId, connection.id, this.context.providerKey));
+      const todayLabel = policy ? new Intl.DateTimeFormat("en-CA", { timeZone: policy.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(today) : isoDate(today);
+      let rollingFrom = addDays(todayLabel, -reconciliationWindowDays);
+      let rollingUntil = todayLabel;
+      if (policy && ["scheduled", "draining", "active"].includes(policy.state)) {
+        if (policy.role === "target") rollingFrom = rollingFrom < policy.startsOn ? policy.startsOn : rollingFrom;
+        else {
+          rollingUntil = rollingUntil >= policy.startsOn ? addDays(policy.startsOn, -1) : rollingUntil;
+          if (today >= policy.startsAt) rollingFrom = addDays(policy.startsOn, -14);
+        }
+      }
       const fitBudget = { remaining: maxFitDownloadsPerPass };
-      const rolling = await this.reconcileRange(connection, token, rollingFrom, isoDate(today), fitBudget);
-      await this.training.reconcileRecentActivityLinks(connection.personId, rollingFrom, isoDate(today));
+      const rolling = rollingFrom > rollingUntil ? { changed: false, complete: true } : await this.reconcileRange(connection, token, rollingFrom, rollingUntil, fitBudget);
+      if (rollingFrom <= rollingUntil) await this.training.reconcileRecentActivityLinks(connection.personId,
+        policy ? addDays(rollingFrom, -2) : rollingFrom, policy ? addDays(rollingUntil, 2) : rollingUntil);
       if (rolling.complete) {
         await this.store!.markSyncSucceeded(connection.id, connection.consentId, rolling.changed);
       } else {
@@ -194,18 +208,21 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
       historicalClaimLeaseMs
     );
     if (!claim) return;
+    const lowerBound = connection.historicalScopeFromDate ?? historicalLowerBound;
+    const policy = await this.store!.importPolicy?.(connection.id, connection.consentId) ?? null;
     const cursorBefore = claim.cursorBefore ?? rollingFrom;
-    const newest = addDays(cursorBefore, -1);
-    if (newest < historicalLowerBound) {
-      await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, historicalLowerBound, true);
+    const candidateNewest = addDays(cursorBefore, -1);
+    const newest = policy?.role === "source" && candidateNewest >= policy.startsOn ? addDays(policy.startsOn, -1) : candidateNewest;
+    if (newest < lowerBound) {
+      await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, lowerBound, true);
       return;
     }
     const candidateOldest = addDays(newest, -(this.context.historicalWindowDays - 1));
-    const oldest = candidateOldest < historicalLowerBound ? historicalLowerBound : candidateOldest;
+    const oldest = candidateOldest < lowerBound ? lowerBound : candidateOldest;
     try {
       const result = await this.reconcileRange(connection, token, oldest, newest, fitBudget);
       if (result.complete) {
-        await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, oldest, oldest === historicalLowerBound);
+        await this.store!.markHistoricalWindowSucceeded(connection.id, claimToken, oldest, oldest === lowerBound);
       } else {
         await this.store!.deferHistoricalWindow(connection.id, claimToken);
       }
@@ -222,11 +239,21 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
     newest: string,
     fitBudget: { remaining: number }
   ): Promise<{ readonly changed: boolean; readonly complete: boolean }> {
-    const result = await this.provider!.reconcile(token, oldest, newest, `${connection.id}:${connection.consentId}`);
+    const policy = await this.store!.importPolicy?.(connection.id, connection.consentId) ?? null;
+    const beforeRequest = this.store!.assertReadAllowed ? async () => {
+      if (!await this.store!.assertReadAllowed!(connection.id, connection.consentId)) throw new IntegrationProviderError("cutover_source_stopped");
+    } : undefined;
+    const options = policy || beforeRequest ? { ...(beforeRequest ? { beforeRequest } : {}),
+      ...(policy ? { activityFromDate: addDays(oldest, -2), activityToDate: addDays(newest, 2) } : {}) } : undefined;
+    const result = await this.provider!.reconcile(token, oldest, newest, `${connection.id}:${connection.consentId}`, options);
     let changed = false;
     let timezone: string | null | undefined;
-    for (const wellness of result.wellness) changed = await this.importWellness(connection, wellness) || changed;
+    for (const wellness of result.wellness) {
+      if (!admitted(policy, wellness.localDate)) continue;
+      changed = await this.importWellness(connection, wellness) || changed;
+    }
     for (const activity of result.activities) {
+      if (!admitted(policy, activity.localDate, activity.occurredAt)) continue;
       const activityChecksum = normalizedChecksum(Object.fromEntries(
         Object.entries(activity).filter(([key]) => key !== "fileType")
       ));
@@ -234,7 +261,8 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
       const inboxChecksum = activity.fileType === "fit"
         ? normalizedChecksum({ activityChecksum, fitImportVersion: 2, fitReviewDate: isoDate(new Date()) })
         : activityChecksum;
-      const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "activity", activity.identity, inboxChecksum);
+      const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "activity", activity.identity, inboxChecksum,
+        { localDate: activity.localDate, occurredAt: activity.occurredAt });
       if (inbox.state !== "process") continue;
       const needsFit = activity.fileType === "fit";
       if (needsFit && timezone === undefined) timezone = await this.store!.personTimezone(connection.personId);
@@ -271,7 +299,13 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
     timezone: string
   ): Promise<boolean> {
     let file: Uint8Array | null;
-    try { file = await this.provider!.originalActivityFile(token, activityId, `${connection.id}:${connection.consentId}`); }
+    try { file = await this.provider!.originalActivityFile(token, activityId, `${connection.id}:${connection.consentId}`, {
+      beforeRequest: async () => {
+        if (this.store!.assertReadAllowed && !await this.store!.assertReadAllowed(connection.id, connection.consentId)) {
+          throw new IntegrationProviderError("cutover_source_stopped");
+        }
+      }
+    }); }
     catch (error) {
       await this.store!.setActivityDetailsIssue(connection.id, connection.consentId, receiptId,
         error instanceof ActivityDetailsReadError ? error.issue : error instanceof IntegrationProviderError && error.failureCode === "provider_response_invalid" ? "invalid_fit" : "provider_unavailable");
@@ -341,7 +375,8 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
 
   private async importWellness(connection: ActiveIntegrationConnection, wellness: ProviderWellnessRecord): Promise<boolean> {
     const recordChecksum = normalizedChecksum(wellness);
-    const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "wellness", wellness.identity, recordChecksum);
+    const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "wellness", wellness.identity, recordChecksum,
+      { localDate: wellness.localDate });
     if (inbox.state !== "process") return false;
     const facts: readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] = [
       ...(wellness.totalSleepMinutes === null ? [] : [{ key: "sleep", detail: { type: "sleep" as const, totalSleepMinutes: wellness.totalSleepMinutes, sleepQuality: null } }]),
@@ -445,6 +480,16 @@ function metric(
   value: number | null
 ): readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] {
   return value === null ? [] : [{ key: metricName, detail: { type: "metric", metric: metricName, value, unit } }];
+}
+
+function admitted(policy: IntegrationImportPolicy | null, localDate: string, occurredAt?: string): boolean {
+  if (!policy || !["scheduled", "draining", "active"].includes(policy.state)) return true;
+  if (!policy.requestAllowed) return false;
+  if (occurredAt !== undefined) {
+    const start = Date.parse(occurredAt);
+    return Number.isFinite(start) && (policy.role === "source" ? start < policy.startsAt.valueOf() : start >= policy.startsAt.valueOf());
+  }
+  return policy.role === "source" ? localDate < policy.startsOn : localDate >= policy.startsOn;
 }
 /** Binds import provenance and bounded history to one explicit provider. */
 export interface IntegrationImportContext {

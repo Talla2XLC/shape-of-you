@@ -27,6 +27,43 @@ function fake(overrides: (url: URL, init: RequestInit | undefined) => Response |
 }
 
 describe("Garmin Personal API transport", () => {
+  it("inspects an empty cutover candidate without inventing an account ID or retaining its token", async () => {
+    const request = fake();
+    const provider = new GarminPersonalProvider({ fetch: request });
+    await expect(provider.inspectCutoverCandidate(key)).resolves.toEqual({ externalUserId: null, activityPresent: false, originalFit: null });
+    await provider.inspectCutoverCandidate(key);
+    expect(request.mock.calls.filter(([url]) => String(url).endsWith("/token"))).toHaveLength(2);
+  });
+
+  it("rejects conflicting candidate owners before downloading a FIT", async () => {
+    const request = fake(url => url.pathname.endsWith("/search/activities") ?
+      json([{ activityId: 101, ownerId: 41 }, { activityId: 102, ownerId: 42 }]) : undefined);
+    await expect(new GarminPersonalProvider({ fetch: request }).inspectCutoverCandidate(key))
+      .rejects.toMatchObject({ failureCode: "provider_response_invalid" });
+    expect(request.mock.calls.some(([url]) => String(url).includes("/download-service/"))).toBe(false);
+  });
+
+  it("stops before the next external read when cutover authority expires", async () => {
+    const request = fake();
+    let checks = 0;
+    const stopped = new Error("Synthetic policy expired");
+    const beforeRequest = async () => { if (++checks === 3) throw stopped; };
+    await expect(new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01", "scope", { beforeRequest }))
+      .rejects.toBe(stopped);
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("pads only activity transport dates while preserving the exact wellness date window", async () => {
+    const request = fake();
+    await new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01", "scope", {
+      activityFromDate: "2026-10-30", activityToDate: "2026-11-03"
+    });
+    const urls = request.mock.calls.map(([url]) => new URL(String(url)));
+    expect(urls.find(url => url.pathname.endsWith("/dailysummaries"))?.searchParams.get("startDate")).toBe("2026-11-01");
+    expect(urls.find(url => url.pathname.endsWith("/search/activities"))?.searchParams.get("startDate")).toBe("2026-10-30");
+    expect(urls.find(url => url.pathname.endsWith("/search/activities"))?.searchParams.get("endDate")).toBe("2026-11-03");
+  });
+
   it("verifies a key without any activity, health records, identity, or retained token", async () => {
     const request = fake((url) => url.pathname.endsWith("/settings") ? json({}) : undefined);
     const provider = new GarminPersonalProvider({ fetch: request });
@@ -171,18 +208,21 @@ describe("Garmin Personal API transport", () => {
 
   it("does not repopulate a forgotten generation after an in-flight token request resolves", async () => {
     let resolve: (value: Response) => void = () => {};
+    let started: () => void = () => {};
+    const tokenStarted = new Promise<void>((done) => { started = done; });
     let first = true;
     const request = fake();
     const normal = request.getMockImplementation()!;
     request.mockImplementation((url, options) => {
       if (String(url).endsWith("/token") && first) {
         first = false;
-        return new Promise<Response>((done) => { resolve = done; });
+        return new Promise<Response>((done) => { resolve = done; started(); });
       }
       return normal(url, options);
     });
     const provider = new GarminPersonalProvider({ fetch: request });
     const pending = provider.reconcile(key, "2026-11-01", "2026-11-01", "same");
+    await tokenStarted;
     provider.forget(key);
     resolve(new Response(token()));
     await pending;
@@ -220,14 +260,17 @@ describe("Garmin Personal API transport", () => {
 
   it("rejects an in-flight retired generation before reading data or repopulating its cache", async () => {
     let resolve: (value: Response) => void = () => {};
+    let started: () => void = () => {};
+    const tokenStarted = new Promise<void>((done) => { started = done; });
     const request = fake();
     const normal = request.getMockImplementation()!;
     request.mockImplementation((url, options) => String(url).endsWith("/token")
-      ? new Promise<Response>((done) => { resolve = done; })
+      ? new Promise<Response>((done) => { resolve = done; started(); })
       : normal(url, options));
     const provider = new GarminPersonalProvider({ fetch: request });
     const pending = provider.reconcile(key, "2026-11-01", "2026-11-01", "retired");
     const outcome = expect(pending).rejects.toMatchObject({ failureCode: "authorization_required" });
+    await tokenStarted;
     provider.invalidateScope("retired");
     resolve(new Response(token()));
     await outcome;

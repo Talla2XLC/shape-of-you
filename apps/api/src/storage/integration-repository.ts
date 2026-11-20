@@ -5,6 +5,7 @@ import type { DatabaseContext } from "../database/context.js";
 import {
   integrationAuthorizationTransactions,
   integrationConnections,
+  integrationCutovers,
   integrationInbox,
   integrationRecoveryFacts,
   persons,
@@ -22,12 +23,15 @@ import type {
   IntegrationStore,
   RecoveryFactPointer,
   ConnectedRecoveryDeliveryEvidence,
-  IntegrationInboxOutcome
+  IntegrationInboxOutcome,
+  IntegrationRecordAdmission,
+  IntegrationImportPolicy
 } from "../integrations/integration-store.js";
 import { CONNECTED_RECOVERY_METRIC_KEYS } from "../integrations/integration-store.js";
 import type { IntegrationFailureCode } from "../integrations/provider.js";
 import { ConflictError } from "../domain/errors.js";
-import { lockPersonEvidenceMutation } from "./source-reference-repository.js";
+import { lockPersonEvidenceMutation, type DatabaseTransaction } from "./source-reference-repository.js";
+import { integrationParentRecordAllowed, integrationRecordAllowed, readIntegrationImportPolicy } from "./integration-cutover-policy.js";
 
 /** The two supported integration namespaces, never inferred from credential contents. */
 export type IntegrationProviderKey = "intervals_icu" | "garmin_personal";
@@ -35,6 +39,28 @@ export type IntegrationProviderKey = "intervals_icu" | "garmin_personal";
 /** PostgreSQL implementation of the in-process provider integration boundary. */
 export class IntegrationRepository<Status extends IntegrationConnection = GarminIntervalsConnection> implements IntegrationStore<Status> {
   public constructor(private readonly database: DatabaseContext, private readonly providerKey: IntegrationProviderKey = "intervals_icu") {}
+
+  /** Current request scope is advisory; all writes also recheck it under the Person lock. */
+  public importPolicy(id: string, consentId: string): Promise<IntegrationImportPolicy | null> {
+    return this.database.db.transaction(async (transaction) => {
+      const owner = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey)) });
+      if (!owner) return null;
+      await lockPersonEvidenceMutation(transaction, owner.personId);
+      return readIntegrationImportPolicy(transaction, id, consentId);
+    });
+  }
+
+  /** Checks database wall time and current consent before each bounded provider request. */
+  public assertReadAllowed(id: string, consentId: string): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      const owner = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey)) });
+      if (!owner) return false;
+      await lockPersonEvidenceMutation(transaction, owner.personId);
+      const row = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)) });
+      if (!row) return false;
+      return this.writable(transaction, id, consentId);
+    });
+  }
 
   public async createAuthorization(personId: string, stateHash: string, returnTo: string, expiresAt: Date): Promise<void> {
     await this.database.db.insert(integrationAuthorizationTransactions).values({
@@ -74,6 +100,27 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
   }): Promise<void> {
     await this.database.db.transaction(async (transaction) => {
       await lockPersonEvidenceMutation(transaction, input.personId);
+      const cutover = await transaction.query.integrationCutovers.findFirst({ where: and(eq(integrationCutovers.personId, input.personId), sql`(${integrationCutovers.state} IN ('scheduled','draining','active') OR ${integrationCutovers.restoreSuppressed} = true)`) });
+      let cutoverRotation = false;
+      if (cutover) {
+        if (cutover.restoreSuppressed) throw new ConflictError("Restored cutover requires approved operational recovery");
+        const reference = this.providerKey === "intervals_icu" ? cutover.sourceConnectionId : cutover.targetConnectionId;
+        if (reference !== input.id) throw new ConflictError("Cutover bounds survive connection erasure; ordinary reconnect is unavailable");
+        if (this.providerKey === "garmin_personal" && cutover.state === "scheduled") throw new ConflictError("Pending cutover access must be changed through cutover retry");
+        if (this.providerKey === "intervals_icu") {
+          const clock = await transaction.execute(sql<{ now: Date }>`select clock_timestamp() as now`);
+          if (cutover.state === "active" || new Date(clock.rows[0]!.now as Date) >= cutover.sourceDrainsUntil) throw new ConflictError("Source import authority ended");
+          const source = await transaction.query.integrationConnections.findFirst({ where: eq(integrationConnections.id, input.id) });
+          if (source?.externalUserId !== input.externalUserId) throw new ConflictError("Intervals source account cannot change during cutover");
+          if (cutover.state === "scheduled") {
+            await transaction.update(integrationCutovers).set({ state: "failed", failureCode: "consent_changed", version: cutover.version + 1, updatedAt: sql`clock_timestamp()` }).where(eq(integrationCutovers.id, cutover.id));
+            if (cutover.targetConnectionId) await transaction.update(integrationConnections).set({ importEnabled: false, lifecycle: "disconnected", disconnectedAt: sql`clock_timestamp()` }).where(eq(integrationConnections.id, cutover.targetConnectionId));
+            if (cutover.targetConsentId) await transaction.update(recoveryConsents).set({ status: "revoked", revokedAt: sql`clock_timestamp()`, revocationReason: "Source generation changed before cutover" }).where(eq(recoveryConsents.id, cutover.targetConsentId));
+            if (cutover.targetRecoveryConnectionId) await transaction.update(recoveryConnections).set({ status: "disconnected", disconnectedAt: sql`clock_timestamp()` }).where(eq(recoveryConnections.id, cutover.targetRecoveryConnectionId));
+          }
+        }
+        cutoverRotation = true;
+      }
       const overlap = await transaction.execute(sql`
         select 1 from integration_connections other
         where other.person_id = ${input.personId} and other.provider_key <> ${this.providerKey}
@@ -82,7 +129,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
             or exists (select 1 from integration_activity_facts a where a.connection_id = other.id))
         limit 1
       `);
-      if (overlap.rowCount) throw new ConflictError("Another provider connection or retained imported data prevents automatic switching");
+      if (overlap.rowCount && !cutoverRotation) throw new ConflictError("Another provider connection or retained imported data prevents automatic switching");
       if (this.providerKey === "intervals_icu" && !input.externalUserId) throw new ConflictError("Provider account identity is required");
       const providers = await transaction.insert(recoveryProviders)
         .values({ key: this.providerKey, name: this.providerKey === "intervals_icu" ? "Intervals.icu" : "Garmin" })
@@ -140,10 +187,14 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
         credentialKeyId: input.credential.keyId, credentialNonce: input.credential.nonce,
         credentialCiphertext: input.credential.ciphertext, credentialTag: input.credential.tag,
         failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, lastDataAt: null,
-        disconnectedAt: null, remoteDisconnectPending: false, nextAttemptAt: new Date(), updatedAt: new Date()
+        disconnectedAt: null, remoteDisconnectPending: false, remoteDisconnectAttempts: 0, remoteRevokeUnconfirmed: false, nextAttemptAt: new Date(), updatedAt: new Date()
       };
       if (previous) {
         await transaction.update(integrationConnections).set(values).where(eq(integrationConnections.id, previous.id));
+        if (cutover && cutover.state !== "scheduled") await transaction.update(integrationCutovers).set({
+          ...(this.providerKey === "intervals_icu" ? { sourceConsentId: input.consentId } : { targetConsentId: input.consentId }),
+          version: cutover.version + 1, updatedAt: sql`clock_timestamp()`
+        }).where(eq(integrationCutovers.id, cutover.id));
       } else {
         await transaction.insert(integrationConnections).values({
           id: input.id, personId: input.personId, recoveryConnectionId: input.recoveryConnectionId,
@@ -159,6 +210,8 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       const owner = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey)) });
       if (!owner) return false;
       await lockPersonEvidenceMutation(transaction, owner.personId);
+      const policy = await readIntegrationImportPolicy(transaction, id, consentId);
+      if (policy && !policy.requestAllowed) return false;
       const rows = await transaction.execute(sql`
         update integration_connections set external_user_id = ${externalUserId}
         where id = ${id} and provider_key = ${this.providerKey} and consent_id = ${consentId}
@@ -207,6 +260,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       disconnectedAt: row.disconnectedAt?.toISOString() ?? null,
       historicalImport: {
         status: row.historicalImportStatus,
+        scopeFromDate: row.historicalScopeFromDate,
         processedThroughDate: row.historicalCursorBefore,
         requestedAt: row.historicalRequestedAt?.toISOString() ?? null,
         lastAttemptAt: row.historicalLastAttemptAt?.toISOString() ?? null,
@@ -301,6 +355,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
       historicalImportStatus: row.historicalImportStatus,
       historicalCursorBefore: row.historicalCursorBefore,
+      historicalScopeFromDate: row.historicalScopeFromDate,
       historicalNextAttemptAt: row.historicalNextAttemptAt
     };
   }
@@ -320,6 +375,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
       historicalImportStatus: row.historicalImportStatus,
       historicalCursorBefore: row.historicalCursorBefore,
+      historicalScopeFromDate: row.historicalScopeFromDate,
       historicalNextAttemptAt: row.historicalNextAttemptAt
     };
   }
@@ -331,10 +387,14 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
         .where(and(
           eq(integrationConnections.providerKey, this.providerKey),
           eq(integrationConnections.importEnabled, true),
+          importRequestPredicate(),
           lte(integrationConnections.nextAttemptAt, now),
           or(isNull(integrationConnections.leaseUntil), lte(integrationConnections.leaseUntil, now))
-        )).orderBy(integrationConnections.nextAttemptAt).limit(1).for("update", { skipLocked: true });
+        )).orderBy(integrationConnections.nextAttemptAt).limit(1);
       const row = candidates[0];
+      if (row && !await this.writable(transaction, row.id, row.consentId)) return null;
+      const freshLease = row ? await transaction.query.integrationConnections.findFirst({ columns: { leaseUntil: true }, where: eq(integrationConnections.id, row.id) }) : null;
+      if (freshLease?.leaseUntil && freshLease.leaseUntil > now) return null;
       if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
       await transaction.update(integrationConnections).set({ leaseOwner: workerId, leaseUntil: new Date(now.valueOf() + leaseMs) }).where(eq(integrationConnections.id, row.id));
       return {
@@ -342,6 +402,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
         credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
         historicalImportStatus: row.historicalImportStatus,
         historicalCursorBefore: row.historicalCursorBefore,
+      historicalScopeFromDate: row.historicalScopeFromDate,
         historicalNextAttemptAt: row.historicalNextAttemptAt
       };
     });
@@ -353,15 +414,20 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       const candidates = await transaction.select().from(integrationConnections).where(and(
         eq(integrationConnections.providerKey, this.providerKey),
         eq(integrationConnections.remoteDisconnectPending, true), lte(integrationConnections.nextAttemptAt, now),
+        sql`not exists(select 1 from integration_cutovers k where k.source_connection_id=${integrationConnections.id} and k.state in ('active','draining') and (${integrationConnections.remoteDisconnectAttempts} >= 5 or ${integrationConnections.disconnectedAt} <= clock_timestamp() - interval '1 hour'))`,
         or(isNull(integrationConnections.leaseUntil), lte(integrationConnections.leaseUntil, now))
-      )).orderBy(integrationConnections.nextAttemptAt).limit(1).for("update", { skipLocked: true });
+      )).orderBy(integrationConnections.nextAttemptAt).limit(1);
       const row = candidates[0];
+      if (row) await lockPersonEvidenceMutation(transaction, row.personId);
+      const fresh = row ? await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, row.id), eq(integrationConnections.consentId, row.consentId), eq(integrationConnections.remoteDisconnectPending, true), eq(integrationConnections.importEnabled, false), or(isNull(integrationConnections.leaseUntil), lte(integrationConnections.leaseUntil, now))) }) : null;
+      if (!fresh) return null;
       if (!row?.credentialKeyId || !row.credentialNonce || !row.credentialCiphertext || !row.credentialTag) return null;
       await transaction.update(integrationConnections).set({ leaseOwner: workerId, leaseUntil: new Date(now.valueOf() + leaseMs) }).where(eq(integrationConnections.id, row.id));
       return { id: row.id, personId: row.personId, recoveryConnectionId: row.recoveryConnectionId, consentId: row.consentId,
         credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
         historicalImportStatus: row.historicalImportStatus,
         historicalCursorBefore: row.historicalCursorBefore,
+      historicalScopeFromDate: row.historicalScopeFromDate,
         historicalNextAttemptAt: row.historicalNextAttemptAt };
     });
   }
@@ -382,6 +448,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
         credential: { keyId: row.credentialKeyId, nonce: row.credentialNonce, ciphertext: row.credentialCiphertext, tag: row.credentialTag },
         historicalImportStatus: row.historicalImportStatus,
         historicalCursorBefore: row.historicalCursorBefore,
+      historicalScopeFromDate: row.historicalScopeFromDate,
         historicalNextAttemptAt: row.historicalNextAttemptAt
       } : null;
       const now = new Date();
@@ -413,17 +480,21 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
   }
 
   public async startHistoricalImport(personId: string): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
     const now = new Date();
-    const current = await this.database.db.query.integrationConnections.findFirst({
+    const current = await transaction.query.integrationConnections.findFirst({
       where: and(
         eq(integrationConnections.personId, personId),
         eq(integrationConnections.providerKey, this.providerKey),
         eq(integrationConnections.importEnabled, true)
       )
     });
-    if (!current) return false;
+    if (!current || !await this.writable(transaction, current.id, current.consentId)) return false;
+    const policy = await readIntegrationImportPolicy(transaction, current.id, current.consentId);
+    const scopeFromDate = policy?.historyScopeFromDate ?? "2000-01-01";
     if (current.historicalImportStatus === "running") {
-      const active = await this.database.db.update(integrationConnections).set({
+      const active = await transaction.update(integrationConnections).set({
         nextAttemptAt: now,
         updatedAt: now
       }).where(and(eq(integrationConnections.id, current.id), eq(integrationConnections.importEnabled, true)))
@@ -431,8 +502,9 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       return active.length > 0;
     }
     const restartCompleted = current.historicalImportStatus === "completed";
-    const active = await this.database.db.update(integrationConnections).set({
+    const active = await transaction.update(integrationConnections).set({
       historicalImportStatus: "running",
+      historicalScopeFromDate: scopeFromDate,
       historicalCursorBefore: restartCompleted ? null : current.historicalCursorBefore,
       historicalRequestedAt: now,
       historicalLastAttemptAt: null,
@@ -446,6 +518,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
     }).where(and(eq(integrationConnections.id, current.id), eq(integrationConnections.importEnabled, true)))
       .returning({ id: integrationConnections.id });
     return active.length > 0;
+    });
   }
 
   public async claimHistoricalWindow(
@@ -455,8 +528,10 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
     claimToken: string,
     leaseMs: number
   ): Promise<HistoricalImportClaim | null> {
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id, expectedConsentId)) return null;
     const now = new Date();
-    const rows = await this.database.db.update(integrationConnections).set({
+    const rows = await transaction.update(integrationConnections).set({
       historicalClaimToken: claimToken,
       historicalClaimUntil: new Date(now.valueOf() + leaseMs),
       historicalLastAttemptAt: now,
@@ -471,6 +546,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       sql`${integrationConnections.historicalCursorBefore} IS NOT DISTINCT FROM ${expectedCursorBefore}`
     )).returning({ cursorBefore: integrationConnections.historicalCursorBefore });
     return rows[0] ? { claimToken, cursorBefore: rows[0].cursorBefore } : null;
+    });
   }
 
   public async markHistoricalWindowSucceeded(
@@ -479,8 +555,12 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
     processedThroughDate: string,
     completed: boolean
   ): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id)) return false;
+      const job = await transaction.query.integrationConnections.findFirst({ where: eq(integrationConnections.id, id) });
+      if (!job || processedThroughDate < job.historicalScopeFromDate || (completed && processedThroughDate !== job.historicalScopeFromDate)) return false;
     const now = new Date();
-    const rows = await this.database.db.update(integrationConnections).set({
+    const rows = await transaction.update(integrationConnections).set({
       historicalImportStatus: completed ? "completed" : "running",
       historicalCursorBefore: processedThroughDate,
       historicalCompletedAt: completed ? now : null,
@@ -496,11 +576,14 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       eq(integrationConnections.historicalClaimToken, claimToken)
     )).returning({ id: integrationConnections.id });
     return rows.length > 0;
+    });
   }
 
   public async deferHistoricalWindow(id: string, claimToken: string): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id)) return false;
     const now = new Date();
-    const rows = await this.database.db.update(integrationConnections).set({
+    const rows = await transaction.update(integrationConnections).set({
       historicalNextAttemptAt: new Date(now.valueOf() + 15 * 60_000),
       historicalClaimToken: null,
       historicalClaimUntil: null,
@@ -512,6 +595,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       eq(integrationConnections.historicalClaimToken, claimToken)
     )).returning({ id: integrationConnections.id });
     return rows.length > 0;
+    });
   }
 
   public async markHistoricalImportFailed(
@@ -520,8 +604,10 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
     failureCode: IntegrationFailureCode,
     retryable: boolean
   ): Promise<boolean> {
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id)) return false;
     const now = new Date();
-    const rows = await this.database.db.update(integrationConnections).set({
+    const rows = await transaction.update(integrationConnections).set({
       historicalImportStatus: retryable ? "running" : "failed",
       historicalNextAttemptAt: retryable ? new Date(now.valueOf() + 15 * 60_000) : null,
       historicalFailureCode: failureCode,
@@ -535,6 +621,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       eq(integrationConnections.historicalClaimToken, claimToken)
     )).returning({ id: integrationConnections.id });
     return rows.length > 0;
+    });
   }
 
   public async completeRemoteDisconnect(id: string, expectedConsentId?: string): Promise<void> {
@@ -544,15 +631,20 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
     }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey), eq(integrationConnections.importEnabled, false), expectedConsentId ? eq(integrationConnections.consentId, expectedConsentId) : undefined));
   }
   public async failRemoteDisconnect(id: string, failureCode: IntegrationFailureCode, expectedConsentId?: string): Promise<void> {
-    await this.database.db.update(integrationConnections).set({ failureCode, nextAttemptAt: new Date(Date.now() + 60_000), leaseOwner: null, leaseUntil: null, updatedAt: new Date() }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey), eq(integrationConnections.importEnabled, false), expectedConsentId ? eq(integrationConnections.consentId, expectedConsentId) : undefined));
+    await this.database.db.update(integrationConnections).set({ failureCode, remoteDisconnectAttempts: sql`${integrationConnections.remoteDisconnectAttempts} + 1`, nextAttemptAt: new Date(Date.now() + 60_000), leaseOwner: null, leaseUntil: null, updatedAt: new Date() }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey), eq(integrationConnections.importEnabled, false), expectedConsentId ? eq(integrationConnections.consentId, expectedConsentId) : undefined));
   }
   public async markSyncSucceeded(id: string, consentId: string, hasData: boolean): Promise<void> {
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id, consentId)) return;
     const now = new Date();
-    await this.database.db.update(integrationConnections).set({ lifecycle: "active", failureCode: null, lastAttemptAt: now, lastSuccessfulSyncAt: now, ...(hasData ? { lastDataAt: now } : {}), nextAttemptAt: new Date(now.valueOf() + 300_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
+    await transaction.update(integrationConnections).set({ lifecycle: "active", failureCode: null, lastAttemptAt: now, lastSuccessfulSyncAt: now, ...(hasData ? { lastDataAt: now } : {}), nextAttemptAt: new Date(now.valueOf() + 300_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
+    });
   }
   public async markSyncPartial(id: string, consentId: string): Promise<void> {
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id, consentId)) return;
     const now = new Date();
-    await this.database.db.update(integrationConnections).set({
+    await transaction.update(integrationConnections).set({
       lastAttemptAt: now,
       nextAttemptAt: new Date(now.valueOf() + 300_000),
       updatedAt: now
@@ -560,14 +652,23 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId),
       eq(integrationConnections.importEnabled, true)
     ));
+    });
   }
   public async markSyncFailed(id: string, consentId: string, failureCode: IntegrationFailureCode): Promise<void> {
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id, consentId)) return;
     const now = new Date();
-    await this.database.db.update(integrationConnections).set({ lifecycle: "degraded", failureCode, lastAttemptAt: now, nextAttemptAt: new Date(now.valueOf() + 60_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
+    await transaction.update(integrationConnections).set({ lifecycle: "degraded", failureCode, lastAttemptAt: now, nextAttemptAt: new Date(now.valueOf() + 60_000), updatedAt: now }).where(and(eq(integrationConnections.id, id), eq(integrationConnections.consentId, consentId), eq(integrationConnections.importEnabled, true)));
+    });
   }
 
-  public async recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string): Promise<IntegrationInboxOutcome> {
+  public async recordInbox(id: string, consentId: string, kind: "wellness" | "activity", identity: string, checksum: string, admission?: IntegrationRecordAdmission): Promise<IntegrationInboxOutcome> {
     return this.database.db.transaction(async (transaction) => {
+      const owner = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey)) });
+      if (!owner) return { state: "stale_generation" };
+      await lockPersonEvidenceMutation(transaction, owner.personId);
+      const policy = await readIntegrationImportPolicy(transaction, id, consentId);
+      if (!integrationRecordAllowed(policy, kind, admission)) return { state: "stale_generation" };
       const current = await transaction.execute(sql`
         select 1 from integration_connections
         where id = ${id} and consent_id = ${consentId} and import_enabled = true
@@ -596,16 +697,22 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
   }
   /** {@inheritDoc IntegrationStore.setActivityDetailsIssue} */
   public async setActivityDetailsIssue(id: string, consentId: string, receiptId: string, issue: ActivityDetailsIssue | null): Promise<boolean> {
-    const rows = await this.database.db.update(integrationInbox).set({ activityDetailsIssue: issue, activityDetailsAttemptedAt: sql`clock_timestamp()` }).where(and(
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id, consentId) || !await this.receiptAllowed(transaction, id, consentId, receiptId)) return false;
+    const rows = await transaction.update(integrationInbox).set({ activityDetailsIssue: issue, activityDetailsAttemptedAt: sql`clock_timestamp()` }).where(and(
       eq(integrationInbox.id, receiptId), eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId), eq(integrationInbox.kind, "activity"),
       sql`exists (select 1 from integration_connections c where c.id = ${id} and c.consent_id = ${consentId} and c.import_enabled = true)`
     )).returning({ id: integrationInbox.id });
     return rows.length > 0;
+    });
   }
 
   public async completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean> {
-    const rows = await this.database.db.update(integrationInbox).set({ status: "normalized", normalizedAt: new Date(), failureCode: null }).where(and(eq(integrationInbox.id, receiptId), eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId), sql`exists (select 1 from integration_connections c where c.id = ${id} and c.consent_id = ${consentId} and c.import_enabled = true)`)).returning({ id: integrationInbox.id });
+    return this.database.db.transaction(async (transaction) => {
+      if (!await this.writable(transaction, id, consentId) || !await this.receiptAllowed(transaction, id, consentId, receiptId)) return false;
+    const rows = await transaction.update(integrationInbox).set({ status: "normalized", normalizedAt: new Date(), failureCode: null }).where(and(eq(integrationInbox.id, receiptId), eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId), sql`exists (select 1 from integration_connections c where c.id = ${id} and c.consent_id = ${consentId} and c.import_enabled = true)`)).returning({ id: integrationInbox.id });
     return rows.length > 0;
+    });
   }
   public async recoveryFact(id: string, identity: string, factKey: string): Promise<RecoveryFactPointer | null> {
     const row = await this.database.db.query.integrationRecoveryFacts.findFirst({ where: and(eq(integrationRecoveryFacts.connectionId, id), eq(integrationRecoveryFacts.providerIdentity, identity), eq(integrationRecoveryFacts.factKey, factKey)) });
@@ -618,6 +725,10 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
   }
   public async linkRecoveryFact(id: string, consentId: string, identity: string, receiptId: string, factKey: string, checksum: string, observationId: string): Promise<boolean> {
     return this.database.db.transaction(async (transaction) => {
+      const owner = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey)) });
+      if (!owner) return false;
+      await lockPersonEvidenceMutation(transaction, owner.personId);
+      if (!await this.receiptAllowed(transaction, id, consentId, receiptId)) return false;
       const current = await transaction.execute(sql`
         select 1 from integration_connections
         where id = ${id} and consent_id = ${consentId} and import_enabled = true
@@ -639,15 +750,50 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
     });
   }
 
+  private async receiptAllowed(transaction: DatabaseTransaction, id: string, consentId: string, receiptId: string): Promise<boolean> {
+    const policy = await readIntegrationImportPolicy(transaction, id, consentId);
+    if (!policy) return true;
+    const receipt = await transaction.query.integrationInbox.findFirst({ where: and(eq(integrationInbox.id, receiptId), eq(integrationInbox.connectionId, id), eq(integrationInbox.consentId, consentId)) });
+    if (!receipt) return false;
+    return receipt.kind === "activity"
+      ? integrationParentRecordAllowed(transaction, id, consentId, receipt.providerIdentity)
+      : integrationRecordAllowed(policy, "wellness", { localDate: receipt.providerIdentity });
+  }
+
+  private async writable(transaction: DatabaseTransaction, id: string, consentId?: string): Promise<boolean> {
+    const owner = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.providerKey, this.providerKey)) });
+    if (!owner) return false;
+    await lockPersonEvidenceMutation(transaction, owner.personId);
+    const current = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.id, id), eq(integrationConnections.importEnabled, true), consentId ? eq(integrationConnections.consentId, consentId) : undefined) });
+    if (!current) return false;
+    const consent = await transaction.query.recoveryConsents.findFirst({ where: and(eq(recoveryConsents.id, current.consentId), eq(recoveryConsents.personId, current.personId), eq(recoveryConsents.connectionId, current.recoveryConnectionId), eq(recoveryConsents.status, "active")) });
+    const recovery = await transaction.query.recoveryConnections.findFirst({ where: and(eq(recoveryConnections.id, current.recoveryConnectionId), eq(recoveryConnections.personId, current.personId), eq(recoveryConnections.status, "active"), isNull(recoveryConnections.erasureRequestedAt)) });
+    if (!consent || !recovery) return false;
+    const policy = await readIntegrationImportPolicy(transaction, id, current.consentId);
+    return policy === null || policy.requestAllowed;
+  }
 }
 
 function emptyHistoricalImport(): GarminIntervalsConnection["historicalImport"] {
   return {
     status: "not_requested",
+    scopeFromDate: "2000-01-01",
     processedThroughDate: null,
     requestedAt: null,
     lastAttemptAt: null,
     completedAt: null,
     failureCode: null
   };
+}
+
+/** SQL prefilter avoids expired source jobs starving unrelated Persons; writes recheck after their lock. */
+function importRequestPredicate() {
+  return sql`not exists (select 1 from integration_cutovers cutover
+    where cutover.person_id = ${integrationConnections.personId} and (cutover.state in ('scheduled','draining','active') or cutover.restore_suppressed=true) and (cutover.restore_suppressed=true or
+      (${integrationConnections.providerKey} = cutover.source_provider and (
+        ${integrationConnections.id} is distinct from cutover.source_connection_id or ${integrationConnections.consentId} is distinct from cutover.source_consent_id
+        or cutover.state = 'active' or clock_timestamp() >= cutover.source_drains_until))
+      or (${integrationConnections.providerKey} = cutover.target_provider and (
+        ${integrationConnections.id} is distinct from cutover.target_connection_id or ${integrationConnections.consentId} is distinct from cutover.target_consent_id
+        or cutover.state = 'scheduled' or clock_timestamp() < cutover.starts_at))))`;
 }

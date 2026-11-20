@@ -20,6 +20,20 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-11-20 — Provider transition and journal v2 accepted locally
+
+- TASK-0181 adds future-day Intervals to Garmin transition controls, one key
+  entry with encrypted retry, explicit coverage waivers, bounded source drain
+  and scoped target history while retaining old facts and links.
+- Independent Quality and Architecture Review accepted the local implementation.
+  Checks include 519 API unit, 18 cutover PostgreSQL, 3 HTTP, 82 migration-chain
+  and 2 restore-drill tests, plus Web unit/build/typecheck/lint and browser flows.
+- Journal v2 preserves the old hash prefix and adds durable transition proof
+  and deny-only restore. Offline preparation leaves the operator file untouched.
+  Shared migrations, operational journal replacement, staging delivery and real
+  account transition remain separate gates. See [Connections](api/connections.md)
+  and the [restore runbook](operations/postgresql-backup-and-restore.md).
+
 ### 2026-11-20 — Direct Garmin linking and observed wellness delivered to staging
 
 - Added Personal API key linking, empty-account activation, encrypted per-Person

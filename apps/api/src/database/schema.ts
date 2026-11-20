@@ -267,7 +267,8 @@ export const integrationSyncFailure = pgEnum("integration_sync_failure", [
   "provider_rate_limited",
   "provider_timeout",
   "provider_unavailable",
-  "provider_response_invalid"
+  "provider_response_invalid",
+  "cutover_source_stopped"
 ]);
 export const integrationHistoricalImportStatus = pgEnum(
   "integration_historical_import_status",
@@ -3314,10 +3315,13 @@ export const integrationConnections = pgTable(
     leaseOwner: varchar("lease_owner", { length: 128 }),
     leaseUntil: timestamp("lease_until", { withTimezone: true, mode: "date" }),
     remoteDisconnectPending: boolean("remote_disconnect_pending").default(false).notNull(),
+    remoteDisconnectAttempts: integer("remote_disconnect_attempts").default(0).notNull(),
+    remoteRevokeUnconfirmed: boolean("remote_revoke_unconfirmed").default(false).notNull(),
     connectedAt: timestamp("connected_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
     disconnectedAt: timestamp("disconnected_at", { withTimezone: true, mode: "date" }),
     historicalImportStatus: integrationHistoricalImportStatus("historical_import_status").default("not_requested").notNull(),
     historicalCursorBefore: date("historical_cursor_before"),
+    historicalScopeFromDate: date("historical_scope_from_date").default("2000-01-01").notNull(),
     historicalRequestedAt: timestamp("historical_requested_at", { withTimezone: true, mode: "date" }),
     historicalLastAttemptAt: timestamp("historical_last_attempt_at", { withTimezone: true, mode: "date" }),
     historicalCompletedAt: timestamp("historical_completed_at", { withTimezone: true, mode: "date" }),
@@ -3371,7 +3375,7 @@ export const integrationConnections = pgTable(
           AND ${table.historicalRequestedAt} IS NOT NULL
           AND ${table.historicalCompletedAt} IS NULL)
         OR (${table.historicalImportStatus} = 'completed'
-          AND ${table.historicalCursorBefore} = '2000-01-01'
+          AND ${table.historicalCursorBefore} = ${table.historicalScopeFromDate}
           AND ${table.historicalRequestedAt} IS NOT NULL
           AND ${table.historicalCompletedAt} IS NOT NULL
           AND ${table.historicalNextAttemptAt} IS NULL
@@ -3386,6 +3390,56 @@ export const integrationConnections = pgTable(
     )
   ]
 );
+
+/** Person-owned forward-only import authority; bounds survive connection erasure. */
+export const integrationCutovers = pgTable("integration_cutovers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  personId: uuid("person_id").notNull().references(() => persons.id, { onDelete: "cascade" }),
+  sourceProvider: varchar("source_provider", { length: 64 }).default("intervals_icu").notNull(),
+  targetProvider: varchar("target_provider", { length: 64 }).default("garmin_personal").notNull(),
+  sourceConnectionId: uuid("source_connection_id"),
+  targetConnectionId: uuid("target_connection_id"),
+  sourceRecoveryConnectionId: uuid("source_recovery_connection_id"),
+  targetRecoveryConnectionId: uuid("target_recovery_connection_id"),
+  sourceConsentId: uuid("source_consent_id"),
+  targetConsentId: uuid("target_consent_id"),
+  startsOn: date("starts_on").notNull(),
+  timezone: varchar("timezone", { length: 64 }).notNull(),
+  startsAt: timestamp("starts_at", { withTimezone: true, mode: "date" }).notNull(),
+  sourceDrainsUntil: timestamp("source_drains_until", { withTimezone: true, mode: "date" }).notNull(),
+  state: varchar("state", { length: 16 }).$type<"scheduled" | "draining" | "active" | "failed" | "cancelled">().default("scheduled").notNull(),
+  version: integer("version").default(1).notNull(),
+  capabilityVersion: varchar("capability_version", { length: 128 }).notNull(),
+  acceptedCoverageGaps: text("accepted_coverage_gaps").array().default(sql`'{}'::text[]`).notNull(),
+  dedupeKey: varchar("dedupe_key", { length: 200 }).notNull(),
+  actorPersonId: uuid("actor_person_id").references(() => persons.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  activatedAt: timestamp("activated_at", { withTimezone: true, mode: "date" }),
+  cancelledAt: timestamp("cancelled_at", { withTimezone: true, mode: "date" }),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull(),
+  failureCode: varchar("failure_code", { length: 64 }),
+  lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true, mode: "date" }),
+  sourceRevocationUnconfirmed: boolean("source_revocation_unconfirmed").default(false).notNull(),
+  restoreSuppressed: boolean("restore_suppressed").default(false).notNull(),
+  policyJournalHash: varchar("policy_journal_hash", { length: 64 }),
+  policyJournalAt: timestamp("policy_journal_at", { withTimezone: true, mode: "date" })
+}, (table) => [
+  foreignKey({ name: "cutover_source_connection_fk", columns: [table.sourceConnectionId], foreignColumns: [integrationConnections.id] }).onDelete("set null"),
+  foreignKey({ name: "cutover_target_connection_fk", columns: [table.targetConnectionId], foreignColumns: [integrationConnections.id] }).onDelete("set null"),
+  foreignKey({ name: "cutover_source_recovery_fk", columns: [table.sourceRecoveryConnectionId], foreignColumns: [recoveryConnections.id] }).onDelete("set null"),
+  foreignKey({ name: "cutover_target_recovery_fk", columns: [table.targetRecoveryConnectionId], foreignColumns: [recoveryConnections.id] }).onDelete("set null"),
+  foreignKey({ name: "cutover_source_consent_fk", columns: [table.sourceConsentId], foreignColumns: [recoveryConsents.id] }).onDelete("set null"),
+  foreignKey({ name: "cutover_target_consent_fk", columns: [table.targetConsentId], foreignColumns: [recoveryConsents.id] }).onDelete("set null"),
+  uniqueIndex("integration_cutovers_pending_person_uq").on(table.personId).where(sql`${table.state} IN ('scheduled', 'draining', 'active')`),
+  unique("integration_cutovers_request_uq").on(table.personId, table.dedupeKey),
+  check("integration_cutovers_journal_proof", sql`(${table.policyJournalHash} IS NULL) = (${table.policyJournalAt} IS NULL)`),
+  check("integration_cutovers_pair", sql`${table.sourceProvider} = 'intervals_icu' AND ${table.targetProvider} = 'garmin_personal'`),
+  check("integration_cutovers_state", sql`${table.state} IN ('scheduled','draining','active','failed','cancelled') AND ${table.version} > 0`),
+  check("integration_cutovers_dates", sql`${table.sourceDrainsUntil} > ${table.startsAt}`),
+  check("integration_cutovers_activation", sql`(${table.state} IN ('draining','active')) = (${table.activatedAt} IS NOT NULL)`),
+  check("integration_cutovers_gaps", sql`${table.acceptedCoverageGaps} <@ ARRAY['recovery.hrv_rmssd','recovery.sleep_score','training.normalized_load','training.device_attribution','training.original_fit']::text[]`),
+  index("integration_cutovers_due_idx").on(table.state, table.startsAt, table.sourceDrainsUntil)
+]);
 
 /** Bounded technical inbox identity; raw provider JSON is intentionally absent. */
 export const integrationInbox = pgTable(

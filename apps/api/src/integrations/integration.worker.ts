@@ -5,6 +5,7 @@ import { INTEGRATION_STORE, INTEGRATION_WORKER_ENABLED } from "../application/to
 import type { IntegrationStore } from "./integration-store.js";
 import { GarminPersonalService } from "./garmin-personal.service.js";
 import { IntegrationService } from "./integration.service.js";
+import { GarminCutoverService } from "./garmin-cutover.service.js";
 
 const idleMs = 30_000;
 // Covers two bounded reconciliations plus the shared twenty-download FIT budget.
@@ -24,7 +25,8 @@ export class IntegrationWorker implements OnModuleInit, OnApplicationShutdown {
     @Inject(INTEGRATION_STORE) private readonly store: IntegrationStore | null,
     @Inject(INTEGRATION_WORKER_ENABLED) private readonly enabled: boolean,
     @Inject(IntegrationService) private readonly service: IntegrationService,
-    @Optional() @Inject(GarminPersonalService) private readonly garmin: GarminPersonalService | null = null
+    @Optional() @Inject(GarminPersonalService) private readonly garmin: GarminPersonalService | null = null,
+    @Optional() @Inject(GarminCutoverService) private readonly cutover: GarminCutoverService | null = null
   ) {}
 
   public onModuleInit(): void { if (this.enabled && (this.store || this.garmin)) this.schedule(0); }
@@ -32,9 +34,10 @@ export class IntegrationWorker implements OnModuleInit, OnApplicationShutdown {
 
   /** Claims and reconciles at most one durable connection. */
   public async processNext(): Promise<boolean> {
+    if (await this.cutover?.processNext()) return true;
     this.preferDirect = !this.preferDirect;
     if (this.preferDirect && await this.garmin?.processNext(this.workerId, leaseMs)) return true;
-    if (!this.store) return await this.garmin?.processNext(this.workerId, leaseMs) ?? false;
+    if (!this.store || !this.service.isConfigured()) return await this.garmin?.processNext(this.workerId, leaseMs) ?? false;
     const disconnect = await this.store.claimRemoteDisconnectDue(this.workerId, leaseMs);
     if (disconnect) {
       await this.service.retryRemoteDisconnect(disconnect);

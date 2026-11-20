@@ -70,6 +70,41 @@ including retained imported evidence after disconnect. A disconnected empty
 Garmin connection does not hide an active Intervals connection from Coach.
 The UI protects successful mutations from delayed status-poll responses.
 
+### Scheduled Intervals to Garmin transition
+
+TASK-0181 adds an explicitly consented future-day transition while preserving
+existing facts, IDs, provenance and workout links. This implementation is
+accepted locally; shared-environment migration, journal upgrade, delivery and
+an actual account transition remain separate operational gates.
+
+Under `/v1/integrations/garmin-personal/cutover`, `GET` reads safe status and
+`POST preview`, `schedule`, `retry`, and `cancel` operate on the authenticated
+Person. The preview fixes the future local date and timezone, the fourteen-day
+source drain deadline and explicit capability gaps. HRV rMSSD, overall sleep
+score, normalized training load, device attribution and original FIT are closed
+capability keys, acknowledged individually when relevant. Candidate inspection
+validates any available original FIT without storing domain facts. A refreshed
+`coverage_changed` preview clears consent and waivers; the masked key remains
+only in form memory. Failed activation can retry using the encrypted pending
+key. Expired or revoked keys use the ordinary authorization-required renewal flow.
+
+Wellness ownership follows the provider calendar date; activity ownership
+follows the parent's UTC start. FIT/details and derived Recovery inherit that
+parent. Intervals retains the old period and refreshes a fixed fourteen-day
+tail during the drain; an already requested older history job can continue
+only until its deadline. Garmin starts at the boundary and catches up only
+within its new period. `historicalImport.scopeFromDate` exposes the job's real
+lower bound. Coach selects delivery by the effective date. Consent and policy
+are rechecked before requests and under the Person lock before writes.
+
+States are `scheduled`, `draining`, `active`, `failed`, and `cancelled`.
+Cancellation is allowed before activation. Activation commits forward-only
+authority, including when no Garmin facts have arrived. It requires a durable
+sealed journal-v2 proof for the exact immutable bounds. Missing proof produces
+`journal_not_ready`, releases provisional fences and keeps the source working.
+Restored policies expose `restore_suppressed`, disable both writers and require
+approved operational recovery. See the [restore runbook](../operations/postgresql-backup-and-restore.md).
+
 ### Garmin via Intervals.icu
 
 The user first connects Garmin to Intervals.icu through Garmin's hosted flow,
@@ -169,6 +204,8 @@ not expose connection controls or imported-record counts.
 
 ## Decisions
 
+- [Future-day Intervals to Garmin transition](../../adr/20261120-switch-intervals-to-garmin-with-date-boundary.md)
+- [Compatible journal v2 restore bounds](../../adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md)
 - [Direct Garmin Personal API linking](../../adr/20261118-connect-garmin-personal-api.md)
 - [Garmin through Intervals.icu](../../adr/20260907-connect-garmin-through-intervals-icu.md)
 - [Import Intervals.icu history only on user request](../../adr/20260911-import-intervals-history-only-on-user-request.md)

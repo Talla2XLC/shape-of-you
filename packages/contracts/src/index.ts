@@ -10,6 +10,7 @@ export * from "./coaching.js";
 export * from "./body-measurement-session.js";
 export * from "./intake.js";
 export * from "./integration-connection.js";
+export * from "./integration-cutover.js";
 export * from "./person.js";
 export * from "./physical-goal.js";
 export * from "./progress-overview.js";

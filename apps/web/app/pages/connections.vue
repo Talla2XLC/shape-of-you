@@ -12,13 +12,26 @@ definePageMeta({ middleware: "api-session" });
 const status = ref<GarminIntervalsStatus | null>(null);
 const busy = ref(false);
 const message = ref("");
+const garminConnectionGeneration = ref(0);
 const route = useRoute();
 let statusRefreshTimer: ReturnType<typeof setInterval> | undefined;
+let statusGeneration = 0;
+let disposed = false;
 
 async function refreshStatus(silent = false): Promise<void> {
   if (busy.value) return;
-  try { status.value = await integrationApi.status(); }
-  catch (error) { if (!silent) message.value = userMessage(error); }
+  const generation = ++statusGeneration;
+  try {
+    const result = await integrationApi.status();
+    if (!disposed && generation === statusGeneration) status.value = result;
+  } catch (error) {
+    if (!silent && !disposed && generation === statusGeneration) message.value = userMessage(error);
+  }
+}
+
+async function refreshAfterCutover(): Promise<void> {
+  garminConnectionGeneration.value++;
+  await refreshStatus(true);
 }
 
 onMounted(async () => {
@@ -29,12 +42,18 @@ onMounted(async () => {
     window.history.replaceState(null, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
   }
   await refreshStatus();
-  statusRefreshTimer = setInterval(() => void refreshStatus(true), 30_000);
+  if (!disposed) statusRefreshTimer = setInterval(() => void refreshStatus(true), 30_000);
 });
 
-onBeforeUnmount(() => { if (statusRefreshTimer) clearInterval(statusRefreshTimer); });
+onBeforeUnmount(() => {
+  disposed = true;
+  statusGeneration++;
+  if (statusRefreshTimer) clearInterval(statusRefreshTimer);
+});
 
 async function connect(): Promise<void> {
+  if (busy.value) return;
+  statusGeneration++;
   busy.value = true;
   message.value = "";
   try {
@@ -47,6 +66,8 @@ async function connect(): Promise<void> {
 }
 
 async function disconnect(): Promise<void> {
+  if (busy.value) return;
+  statusGeneration++;
   busy.value = true;
   message.value = "";
   try { status.value = await integrationApi.disconnect(); }
@@ -55,7 +76,9 @@ async function disconnect(): Promise<void> {
 }
 
 async function importHistoricalData(): Promise<void> {
+  if (busy.value) return;
   if (!window.confirm("Import all available historical Activity and Wellness data from Intervals.icu? This may take some time.")) return;
+  statusGeneration++;
   busy.value = true;
   message.value = "";
   try { status.value = await integrationApi.startHistoricalImport(); }
@@ -64,7 +87,8 @@ async function importHistoricalData(): Promise<void> {
 }
 
 async function erase(): Promise<void> {
-  if (!status.value?.recoveryConnectionId) return;
+  if (busy.value || !status.value?.recoveryConnectionId) return;
+  statusGeneration++;
   busy.value = true;
   message.value = "";
   try {
@@ -82,7 +106,8 @@ function formatted(value: string | null): string {
   return Number.isNaN(date.valueOf()) ? "Unknown" : new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
-function historicalActionLabel(value: GarminIntervalsStatus["historicalImport"]["status"] | undefined): string {
+function historicalActionLabel(value: GarminIntervalsStatus["historicalImport"]["status"] | undefined, failureCode?: GarminIntervalsStatus["failureCode"]): string {
+  if (failureCode === "cutover_source_stopped") return "Intervals history import stopped";
   if (value === "running") return "Importing historical data…";
   if (value === "failed") return "Retry historical import…";
   if (value === "completed") return "Import historical data again…";
@@ -92,7 +117,11 @@ function historicalActionLabel(value: GarminIntervalsStatus["historicalImport"][
 
 <template>
   <section>
-    <GarminPersonalConnection />
+    <GarminCutoverConnection
+      :source-available="Boolean(status?.recoveryConnectionId || status?.lifecycle === 'active' || status?.lifecycle === 'degraded')"
+      @changed="refreshAfterCutover"
+    />
+    <GarminPersonalConnection :key="garminConnectionGeneration" />
     <p class="eyebrow">
       Connections
     </p>
@@ -146,6 +175,12 @@ function historicalActionLabel(value: GarminIntervalsStatus["historicalImport"][
           Historical data
         </h3>
         <p
+          v-if="status.historicalImport.scopeFromDate && status.historicalImport.scopeFromDate !== '2000-01-01'"
+          class="item-meta"
+        >
+          This import covers dates from {{ status.historicalImport.scopeFromDate }}.
+        </p>
+        <p
           v-if="status.historicalImport.status === 'not_requested'"
           class="item-meta"
         >
@@ -186,10 +221,10 @@ function historicalActionLabel(value: GarminIntervalsStatus["historicalImport"][
         <button
           class="button button-secondary compact-button"
           type="button"
-          :disabled="busy || status.historicalImport.status === 'running'"
+          :disabled="busy || status.historicalImport.status === 'running' || status.historicalImport.failureCode === 'cutover_source_stopped'"
           @click="importHistoricalData"
         >
-          {{ historicalActionLabel(status.historicalImport.status) }}
+          {{ historicalActionLabel(status.historicalImport.status, status.historicalImport.failureCode) }}
         </button>
       </div>
       <div class="connection-actions">

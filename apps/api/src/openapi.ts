@@ -130,6 +130,13 @@ import {
   CheckGarminPersonalKeySchema,
   ConnectGarminPersonalSchema,
   GarminPersonalKeyCheckSchema,
+  GarminCutoverPreviewSchema,
+  GarminCutoverStatusSchema,
+  GarminCutoverCoverageChangedSchema,
+  PreviewGarminCutoverSchema,
+  ScheduleGarminCutoverSchema,
+  RetryGarminCutoverSchema,
+  CancelGarminCutoverSchema,
   IntegrationAuthorizationStartSchema,
   StartGarminIntervalsAuthorizationSchema
 } from "@shape-of-you/contracts";
@@ -140,12 +147,24 @@ function integrationPaths(): Record<string, object> {
     ["/check", "post", CheckGarminPersonalKeySchema, GarminPersonalKeyCheckSchema, "Check a personal key without importing data"],
     ["/connect", "post", ConnectGarminPersonalSchema, GarminPersonalConnectionSchema, "Connect or renew a personal Garmin key"],
     ["/disconnect", "post", DisconnectIntegrationSchema, GarminPersonalConnectionSchema, "Stop local Garmin imports and discard the personal key"],
-    ["/historical-import", "post", null, GarminPersonalConnectionSchema, "Request historical Garmin import"]
+    ["/historical-import", "post", null, GarminPersonalConnectionSchema, "Request historical Garmin import"],
+    ["/cutover", "get", null, GarminCutoverStatusSchema, "Read a Person-owned future cutover"],
+    ["/cutover/preview", "post", PreviewGarminCutoverSchema, GarminCutoverPreviewSchema, "Preview a future import boundary and mapping gaps"],
+    ["/cutover/schedule", "post", ScheduleGarminCutoverSchema, GarminCutoverStatusSchema, "Verify a candidate key and schedule the acknowledged boundary"],
+    ["/cutover/retry", "post", RetryGarminCutoverSchema, GarminCutoverStatusSchema, "Retry using the encrypted pending key"],
+    ["/cutover/cancel", "post", CancelGarminCutoverSchema, GarminCutoverStatusSchema, "Cancel a cutover before activation"]
   ].map(([suffix, method, input, output, summary]) => [`/v1/integrations/garmin-personal${suffix}`, {
     [method as string]: {
       tags: ["integrations"], summary,
       ...(input ? { requestBody: { required: true, content: { "application/json": { schema: input } } } } : {}),
-      responses: { "200": { description: "Safe connection result", content: { "application/json": { schema: output } } } }
+      responses: {
+        "200": { description: "Safe connection result", content: { "application/json": { schema: output } } },
+        ...(suffix === "/cutover/schedule" || suffix === "/cutover/retry" ? {
+          "409": { description: "Stale state or newly discovered coverage requiring explicit confirmation", content: {
+            "application/json": { schema: { anyOf: [ErrorResponseSchema, GarminCutoverCoverageChangedSchema] } }
+          } }
+        } : {})
+      }
     }
   }]));
   return {

@@ -3,6 +3,7 @@ import type {
   IntegrationFailureCode,
   IntegrationProviderDiagnostic,
   ProviderAuthorization,
+  ProviderReadOptions,
   ProviderReconciliation
 } from "../provider.js";
 import { ActivityDetailsReadError, IntegrationProviderError } from "../provider.js";
@@ -98,15 +99,15 @@ export class IntervalsIcuProvider implements HealthDataProvider {
     return { accessToken: record.access_token, externalUserId };
   }
 
-  public async reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string): Promise<ProviderReconciliation> {
+  public async reconcile(accessToken: string, fromLocalDate: string, toLocalDate: string, _scope?: string, options?: ProviderReadOptions): Promise<ProviderReconciliation> {
     const headers = { authorization: `Bearer ${accessToken}`, accept: "application/json" };
     const wellnessUrl = new URL(`${apiOrigin}/api/v1/athlete/0/wellness`);
     wellnessUrl.searchParams.set("oldest", fromLocalDate);
     wellnessUrl.searchParams.set("newest", toLocalDate);
     wellnessUrl.searchParams.set("fields", wellnessFields.join(","));
     const [wellness, activities] = await Promise.all([
-      this.fetchJson(wellnessUrl.toString(), { headers }),
-      this.fetchJson(`${apiOrigin}/api/v1/athlete/0/activities?oldest=${fromLocalDate}&newest=${toLocalDate}`, { headers })
+      this.fetchJson(wellnessUrl.toString(), { headers }, false, undefined, options?.beforeRequest),
+      this.fetchJson(`${apiOrigin}/api/v1/athlete/0/activities?oldest=${options?.activityFromDate ?? fromLocalDate}&newest=${options?.activityToDate ?? toLocalDate}`, { headers }, false, undefined, options?.beforeRequest)
     ]);
     if (!Array.isArray(wellness) || !Array.isArray(activities) || wellness.length > 400 || activities.length > 2_000) invalid();
     return {
@@ -123,11 +124,12 @@ export class IntervalsIcuProvider implements HealthDataProvider {
   }
 
   /** Fetches one original provider activity file without retaining its other contents. */
-  public async originalActivityFile(accessToken: string, activityId: string): Promise<Uint8Array | null> {
+  public async originalActivityFile(accessToken: string, activityId: string, _scope?: string, options?: ProviderReadOptions): Promise<Uint8Array | null> {
     if (!activityId || activityId.length > 128) invalid();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      await options?.beforeRequest?.();
       const response = await this.request(`${apiOrigin}/api/v1/activity/${encodeURIComponent(activityId)}/file`, {
         headers: { authorization: `Bearer ${accessToken}`, accept: "application/octet-stream" },
         redirect: "error",
@@ -176,11 +178,13 @@ export class IntervalsIcuProvider implements HealthDataProvider {
     url: string,
     init: RequestInit,
     allowEmpty = false,
-    diagnosticContext?: DiagnosticContext
+    diagnosticContext?: DiagnosticContext,
+    beforeRequest?: () => Promise<void>
   ): Promise<unknown> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
+      await beforeRequest?.();
       const response = await this.request(url, { ...init, signal: controller.signal });
       if (!response.ok) {
         const failureCode = classifyHttpFailure(response.status);

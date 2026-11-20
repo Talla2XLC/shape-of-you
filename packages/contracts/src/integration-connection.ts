@@ -11,7 +11,7 @@ export const IntegrationConnectionLifecycleSchema = {
 
 export const IntegrationSyncFailureSchema = {
   type: "string",
-  enum: ["authorization_required", "provider_rate_limited", "provider_timeout", "provider_unavailable", "provider_response_invalid"]
+  enum: ["authorization_required", "provider_rate_limited", "provider_timeout", "provider_unavailable", "provider_response_invalid", "cutover_source_stopped"]
 } as const;
 
 /** Durable lifecycle of a Person-requested historical provider import. */
@@ -31,7 +31,8 @@ export const IntegrationHistoricalImportSchema = {
     requestedAt: nullableDateTime,
     lastAttemptAt: nullableDateTime,
     completedAt: nullableDateTime,
-    failureCode: { anyOf: [IntegrationSyncFailureSchema, { type: "null" }] }
+    failureCode: { anyOf: [IntegrationSyncFailureSchema, { type: "null" }] },
+    scopeFromDate: { type: "string", format: "date", description: "Earliest date covered by this history job; legacy projections imply 2000-01-01." }
   }
 } as const;
 

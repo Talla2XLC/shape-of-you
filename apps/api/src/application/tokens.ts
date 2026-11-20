@@ -64,3 +64,5 @@ export const GARMIN_PERSONAL_RUNTIME = Symbol("GARMIN_PERSONAL_RUNTIME");
 export const GARMIN_PERSONAL_STORE = Symbol("GARMIN_PERSONAL_STORE");
 /** Optional context for explicitly constructed provider-specific import coordinators. */
 export const INTEGRATION_IMPORT_CONTEXT = Symbol("INTEGRATION_IMPORT_CONTEXT");
+/** Optional durable forward-only cutover coordinator dependencies. */
+export const GARMIN_CUTOVER_RUNTIME = Symbol("GARMIN_CUTOVER_RUNTIME");

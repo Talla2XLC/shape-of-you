@@ -10,7 +10,9 @@ import {
 } from "../recovery/recovery-erasure-journal-sync.js";
 import {
   assertPrivateRecoveryErasureJournalDirectory,
-  RecoveryErasureJournal
+  RecoveryErasureJournal,
+  inspectRecoveryErasureJournalHead,
+  prepareRecoveryErasureJournalV2
 } from "../recovery/recovery-erasure-journal.js";
 import { RecoveryRepository } from "../storage/recovery-repository.js";
 
@@ -47,14 +49,36 @@ async function main(): Promise<void> {
       journal: { type: "string" },
       checkpoint: { type: "string" },
       "checkpoint-directory": { type: "string" },
-      "required-through": { type: "string" }
+      "required-through": { type: "string" },
+      output: { type: "string" },
+      "expected-journal-id": { type: "string" },
+      "expected-head-hash": { type: "string" },
+      "expected-sequence": { type: "string" },
+      "writers-quiesced": { type: "boolean", default: false }
     }
   });
   if (values.action !== "sync" && values.action !== "sync-pending"
-    && values.action !== "inspect" && values.action !== "apply") {
-    throw new Error("--action must be sync, sync-pending, inspect, or apply");
+    && values.action !== "inspect" && values.action !== "apply"
+    && values.action !== "preview-upgrade" && values.action !== "prepare-v2") {
+    throw new Error("--action must be sync, sync-pending, inspect, apply, preview-upgrade, or prepare-v2");
   }
   const journalPath = required(values.journal, "--journal");
+
+  if (values.action === "preview-upgrade") {
+    if (values.output || values.checkpoint || values["checkpoint-directory"]) throw new Error("Preview-upgrade does not accept output paths");
+    process.stdout.write(`${JSON.stringify(await inspectRecoveryErasureJournalHead(journalPath))}\n`);
+    return;
+  }
+  if (values.action === "prepare-v2") {
+    if (!values["writers-quiesced"] || values["checkpoint-directory"]) throw new Error("Prepare-v2 requires --writers-quiesced and explicit output/checkpoint paths");
+    const sequence = Number(required(values["expected-sequence"], "--expected-sequence"));
+    if (!Number.isSafeInteger(sequence) || sequence < 1) throw new Error("Expected sequence must be a positive integer from preview-upgrade");
+    const expected = { journalId: required(values["expected-journal-id"], "--expected-journal-id"), formatVersion: 1 as const,
+      sequence, headHash: required(values["expected-head-hash"], "--expected-head-hash"), completeThrough: required(values["required-through"], "--required-through") };
+    await prepareRecoveryErasureJournalV2(journalPath, required(values.output, "--output"), required(values.checkpoint, "--checkpoint"), expected);
+    process.stdout.write("Version-2 journal and checkpoint prepared; source untouched. No runtime replacement performed. Revalidate the source head with all writers stopped before a separately approved replacement. The retained version-1 file is forensic evidence, not a safe rollback after version-2 appends.\n");
+    return;
+  }
 
   if (values.action === "inspect") {
     if (values.checkpoint || values["checkpoint-directory"]) {

@@ -13,6 +13,7 @@ import {
   DAILY_ASSESSMENT_STORE,
   INTEGRATION_STORE,
   GARMIN_PERSONAL_STORE,
+  GARMIN_CUTOVER_RUNTIME,
   PERSON_CONTEXT
 } from "../application/tokens.js";
 import {
@@ -27,6 +28,7 @@ import {
 import { RecoveryService } from "../recovery/recovery.service.js";
 import type { DailyAssessmentStore } from "../storage/daily-assessment-repository.js";
 import { derivePersonLocalDate } from "./daily-assessment.service.js";
+import type { GarminCutoverRuntime } from "../integrations/garmin-cutover.service.js";
 
 /** Composes current typed Recovery facts with safe connected-data freshness. */
 @Injectable()
@@ -36,7 +38,8 @@ export class CurrentRecoveryContextService {
     @Inject(DAILY_ASSESSMENT_STORE) private readonly preferences: DailyAssessmentStore,
     @Inject(INTEGRATION_STORE) private readonly integrations: IntegrationStore | null,
     @Inject(RecoveryService) private readonly recovery: RecoveryService,
-    @Optional() @Inject(GARMIN_PERSONAL_STORE) private readonly garmin: IntegrationStore<GarminPersonalConnection> | null = null
+    @Optional() @Inject(GARMIN_PERSONAL_STORE) private readonly garmin: IntegrationStore<GarminPersonalConnection> | null = null,
+    @Optional() @Inject(GARMIN_CUTOVER_RUNTIME) private readonly cutover: GarminCutoverRuntime | null = null
   ) {}
 
   private async delivery(personId: string, localDate: string) {
@@ -44,6 +47,10 @@ export class CurrentRecoveryContextService {
       this.garmin?.connectedRecoveryDelivery(personId, localDate),
       this.integrations?.connectedRecoveryDelivery(personId, localDate)
     ]);
+    const policy = await this.cutover?.store.find(personId);
+    if (policy && ["scheduled", "draining", "active"].includes(policy.state)) {
+      return localDate >= policy.startsOn ? direct ?? null : intervals ?? null;
+    }
     if (direct?.importEnabled) return direct;
     if (intervals?.importEnabled) return intervals;
     if (direct?.metricDelivery.some((item) => item.state !== "unknown")) return direct;

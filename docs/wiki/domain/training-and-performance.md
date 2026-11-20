@@ -199,6 +199,12 @@ longitudinal recommendation quality.
   or two exact evidence session references. Stale, unsafe,
   bodyweight, and assisted proposals cannot use this command.
 
+Scheduled provider transitions retain activity IDs and existing workout links.
+Activity ownership follows the parent's UTC start at the configured boundary;
+FIT/details and derived Recovery retain that owner even when the activity ends
+in the next period. No cross-provider merge or target backfill before the
+boundary is performed. See the [Connections contract](../api/connections.md).
+
 ## Evidence
 
 - Training schema, API, and integration tests.

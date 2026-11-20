@@ -58,7 +58,7 @@ function parseMarker(value: unknown): RecoveryErasureMarker {
   };
 }
 
-/** Captures every accepted erasure marker in one read-only database snapshot. */
+/** Captures legacy erasure markers in one read-only snapshot; cutover authority requires the v2 journal. */
 export async function exportRecoveryErasureManifest(
   pool: Pool,
   clock: () => Date = () => new Date()
@@ -71,6 +71,12 @@ export async function exportRecoveryErasureManifest(
     );
     const cutoff = cutoffResult.rows[0]?.cutoff;
     if (!cutoff) throw new Error("Could not establish erasure manifest completeness boundary");
+    const cutovers = await client.query<{ present: boolean }>(
+      "select exists(select 1 from integration_cutovers) as present"
+    );
+    if (cutovers.rows[0]?.present !== false) {
+      throw new Error("Cutover policies require a sealed version-2 erasure journal; legacy manifest export is unsafe");
+    }
     const result = await client.query<{
       id: string;
       person_id: string;
