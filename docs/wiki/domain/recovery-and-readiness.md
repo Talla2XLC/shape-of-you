@@ -127,8 +127,11 @@ absence. Connection activation does not require records; account identity is
 bound internally before the first typed writes. The
 [Connections contract](../api/connections.md) defines exact linking, coverage
 and the refusal to overlap retained Intervals evidence. Local implementation
-is accepted; a bounded own-account read confirmed populated fields, while live
-typed import, actual FIT decoding and rollout remain unverified.
+is accepted and deployed to staging with pipeline migration/readiness/smoke
+and fresh MCP discovery verified. A bounded own-account read confirmed populated
+fields; live typed import, actual live FIT decoding and retained Intervals
+cutover remain unverified. Exact delivery evidence belongs to the
+[staging runbook](../operations/temporary-vm-deployment.md).
 
 The Intervals.icu adapter imports supported wellness fields through an
 account-level source channel. Its explicit whitelist maps sleep duration, sleep

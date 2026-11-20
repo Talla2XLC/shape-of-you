@@ -20,7 +20,7 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
-### 2026-11-20 — Direct Garmin linking and observed wellness accepted locally
+### 2026-11-20 — Direct Garmin linking and observed wellness delivered to staging
 
 - Added Personal API key linking, empty-account activation, encrypted per-Person
   credentials, rotation/disconnect, rolling sync and explicit history import.
@@ -35,9 +35,20 @@ parsing, rollback operations, and production deployment remain separate stages.
   typecheck/build, Web typecheck, scoped lint and canonical docs validation.
   Bounded own-account read-only sampling confirmed populated fields and original
   ZIP availability; actual live FIT decoding and typed import remain unverified.
-- Delivery is pending. The eleven-key MCP delivery output requires refreshed
-  client tool discovery/schema and smoke; it is incompatible with the cached
-  older closed ten-key output schema. HRV/overall sleep-score mapping and
+- Fixed MCP discovery metadata for object-union outputs: standard SDK tool-list
+  parsing requires root `type: object`, while strict server payload contracts
+  and alternatives stay unchanged.
+- [Full publication 44709938376](https://github.com/Talla2XLC/shape-of-you/actions/runs/44709938376)
+  and [Promote staging 44711897167](https://github.com/Talla2XLC/shape-of-you/actions/runs/44711897167)
+  delivered exact release `5a29f6f5d5516f73c79f9111600d43df7faea575`. The
+  GitHub Actions staging pipeline completed API migration at `09:36:08Z`,
+  Identity migration at `09:36:14Z`, and smoke at `09:37:12Z`. Public Web/API/
+  Identity readiness is 200. Fresh standard SDK discovery parses all 43 tools;
+  all 43 output schemas compile, including eleven-key Recovery delivery with
+  independent `body_battery`. Synthetic output validation passed without
+  personal reads or writes. Existing clients still need fresh tool discovery;
+  the cached older closed ten-key schema is incompatible. Verification in an
+  already-open client remains separate. HRV/overall sleep-score mapping and
   retained Intervals cutover remain separate work. See the
   [linking ADR](../adr/20261118-connect-garmin-personal-api.md) and
   [observed mapping ADR](../adr/20261120-garmin-observed-wellness-mapping.md).

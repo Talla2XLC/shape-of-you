@@ -18,9 +18,10 @@ Provides authenticated browser controls for direct `Garmin` personal-key
 linking and the existing `Garmin via Intervals.icu` OAuth connection. Both
 reuse the API-owned typed import, consent, sync evidence and erasure boundaries.
 Connecting enables rolling synchronization; older history is requested separately.
-Direct linking and the observed wellness mapping are locally accepted. A bounded
-own-account read-only sample confirmed populated fields; live typed import and
-delivery remain unverified. Existing Intervals history is never automatically
+Direct linking and the observed wellness mapping are accepted and deployed to
+staging with migrations, readiness and smoke verified. A bounded own-account
+read-only sample confirmed populated fields; live typed import remains
+unverified. Existing Intervals history is never automatically
 switched or merged.
 
 ## Content

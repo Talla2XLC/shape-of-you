@@ -480,6 +480,26 @@ This does not affect unrelated Compose/PostgreSQL.
   services have no `mem_limit`. Shared-host resource budgeting remains separate
   work; successful retry does not establish that the OOM risk is resolved.
 
+- 2026-11-20: TASK-0179/0180 direct Garmin integration delivered as exact release
+  `5a29f6f5d5516f73c79f9111600d43df7faea575` through
+  [full publication 44709938376](https://github.com/Talla2XLC/shape-of-you/actions/runs/44709938376)
+  and [Promote staging 44711897167](https://github.com/Talla2XLC/shape-of-you/actions/runs/44711897167).
+  The operator explicitly approved commit, push and staging deployment. The
+  GitHub Actions pipeline ran API migrations on staging, including the pending
+  `20261120120000_garmin_personal_identity.sql` (API migration completed
+  `09:36:08Z`), then Identity migrations (`09:36:14Z`), readiness and smoke
+  (`09:37:12Z`). The exact release completion marker followed at `09:37:12Z`.
+  Fresh public Web/API/Identity readiness returned 200; Garmin routes are
+  advertised in OpenAPI. A new standard MCP SDK client parsed all 43 tools,
+  compiled all 43 output schemas and validated a synthetic eleven-key Recovery
+  result including `body_battery`. No personal reads/writes, provider switch,
+  account import or direct operator SSH were used. Existing clients with cached
+  ten-key schemas require fresh discovery before their own verification.
+  Live FIT decoding and real-account typed import remain unverified; production
+  and retained Intervals cutover are separate gates. The earlier publication
+  failed on the obsolete ten-key integration fixture; accepted follow-ups fixed
+  it and the SDK root-object output metadata before final promotion.
+
 ## Decisions
 
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
