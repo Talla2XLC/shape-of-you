@@ -5,9 +5,11 @@ RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
 COPY apps/web/package.json apps/web/package.json
-RUN pnpm install --filter @shape-of-you/web... --frozen-lockfile
+COPY packages/contracts/package.json packages/contracts/package.json
+RUN pnpm install --filter @shape-of-you/web... --filter @shape-of-you/contracts... --frozen-lockfile
 
 COPY apps/web apps/web
+COPY packages/contracts/src packages/contracts/src
 ARG NUXT_PUBLIC_IDENTITY_ORIGIN=https://identity.staging.shape-of-you.ru
 ENV NUXT_PUBLIC_IDENTITY_ORIGIN=$NUXT_PUBLIC_IDENTITY_ORIGIN
 RUN pnpm --filter @shape-of-you/web build
