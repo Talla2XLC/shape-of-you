@@ -23,7 +23,8 @@ export function publishMcpInputSchema(
  *
  * @param schema - The unchanged strict server result contract, with no $ref links.
  * @returns A client schema without fractional multipleOf or nested resource IDs;
- * the root identity, shape, ranges and integer divisors remain intact.
+ * object-union results gain the root object type required by MCP discovery.
+ * Root identity, alternatives, ranges and integer divisors remain intact.
  */
 export function publishMcpOutputSchema(
   schema: Readonly<Record<string, unknown>>
@@ -32,7 +33,8 @@ export function publishMcpOutputSchema(
 }
 
 function publishMcpSchema(schema: Readonly<Record<string, unknown>>, output: boolean): Readonly<Record<string, unknown>> {
-  const published = structuredClone(schema);
+  const published: Record<string, unknown> = structuredClone(schema);
+  if (output && published.type === undefined) published.type = "object";
   const visited = new WeakSet<object>();
   function visit(value: unknown, root = false): void {
     if (value === null || typeof value !== "object" || Array.isArray(value) || visited.has(value)) return;

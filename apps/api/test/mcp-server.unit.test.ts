@@ -8,7 +8,7 @@ import {
   SignJWT
 } from "jose";
 import { afterAll, describe, expect, it, vi } from "vitest";
-import { ToolSchema } from "@modelcontextprotocol/sdk/types.js";
+import { ListToolsResultSchema, ToolSchema } from "@modelcontextprotocol/sdk/types.js";
 import type {
   CreateRecoveryObservation,
   DailyAssessmentResult,
@@ -429,6 +429,7 @@ describe("MCP HTTP adapter", () => {
     expect(response.statusCode).toBe(200);
     const body = response.json();
     expect(body.result.tools).toHaveLength(42);
+    expect(() => ListToolsResultSchema.parse(body.result)).not.toThrow();
     expect(body.result.tools).toSatisfy((tools: Array<{ description?: string }>) =>
       tools.every((tool) =>
         tool.description?.startsWith(
