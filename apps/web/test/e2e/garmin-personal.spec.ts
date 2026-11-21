@@ -1,4 +1,6 @@
 import { randomBytes, randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test, type Page, type Route } from "@playwright/test";
 
 function json(route: Route, body: unknown, status = 200): Promise<void> {
@@ -51,7 +53,7 @@ for (const lifecycle of ["active", "degraded"] as const) {
       expect(layout.cardGap).toBeGreaterThanOrEqual(24);
       expect(layout.detailsGap).toBeGreaterThanOrEqual(16);
       expect(layout.overflow).toBe(false);
-      await page.screenshot({ path: `/private/tmp/task0184-connections-${lifecycle}-${width}.png`, fullPage: true });
+      await page.screenshot({ path: join(tmpdir(), `task0184-connections-${lifecycle}-${width}.png`), fullPage: true });
     }
     await page.clock.fastForward(30_000);
     expect(legacyRequests).toEqual([]);
@@ -97,7 +99,7 @@ test("a new user connects an empty Garmin account with one submit and no browser
   await expect(field).toHaveAttribute("autocomplete", "off");
   await expect(card.getByRole("link", { name: "Create a personal API key in Garmin" })).toHaveAttribute("rel", "noreferrer noopener");
   await expect(page.locator("main")).not.toContainText(/Intervals|transition|cutover/iu);
-  await page.screenshot({ path: "/private/tmp/task0184-connections-new-user-320.png", fullPage: true });
+  await page.screenshot({ path: join(tmpdir(), "task0184-connections-new-user-320.png"), fullPage: true });
   await field.fill(apiKey);
   await card.getByRole("button", { name: "Connect Garmin", exact: true }).click();
   await expect(card.getByRole("status")).toHaveText("Connected, no data yet.");
