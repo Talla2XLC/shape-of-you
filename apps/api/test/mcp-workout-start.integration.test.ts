@@ -8,6 +8,9 @@ import { TrainingService } from "../src/training/training.service.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
 import { mcpWorkoutServer } from "./fixtures/mcp-workout-server.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 beforeAll(async () => {
@@ -19,8 +22,9 @@ beforeAll(async () => {
   database = createDatabase({ NODE_ENV: "test", HOST: "127.0.0.1", PORT: 3000, DATABASE_URL: databaseUrl,
     LOG_LEVEL: "silent", PERSON_CONTEXT_MODE: "synthetic", SYNTHETIC_PERSON_ID: process.env.SYNTHETIC_PERSON_ID,
     SHUTDOWN_TIMEOUT_MS: 1000 });
+  closePool = trackPoolShutdown(database.pool);
 });
-afterAll(async () => { await database?.pool.end(); await container?.stop(); });
+afterAll(async () => { await closePool?.(); await container?.stop(); });
 async function fixture() {
   const personId = randomUUID();
   await database.pool.query("insert into persons (id,kind,status,timezone) values ($1,'real','active','Europe/Belgrade')", [personId]);

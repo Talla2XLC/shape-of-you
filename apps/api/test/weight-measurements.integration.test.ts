@@ -17,10 +17,12 @@ import {
 } from "../src/database/context.js";
 import { runMigrations } from "../src/database/migrate.js";
 import { WeightMeasurementRepository } from "../src/storage/weight-measurement-repository.js";
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
+let closePool: (() => Promise<void>) | undefined;
 const syntheticPersonId = "00000000-0000-4000-8000-000000000001";
 
 beforeAll(async () => {
@@ -47,12 +49,13 @@ beforeAll(async () => {
   };
 
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   app = await buildApp({ config, database });
 });
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

@@ -13,6 +13,9 @@ import {
 import { NutritionImportApplyService } from "../src/import/nutrition-import-apply.js";
 import { PostgresNutritionTargetReader } from "../src/import/postgres-nutrition-target-reader.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
 const sheetIds = {
@@ -34,10 +37,11 @@ beforeAll(async () => {
     .start();
   await runMigrations(container.getConnectionUri());
   pool = new Pool({ connectionString: container.getConnectionUri() });
+  closePool = trackPoolShutdown(pool);
 }, 120_000);
 
 afterAll(async () => {
-  await pool?.end();
+  await closePool?.();
   await container?.stop();
 });
 

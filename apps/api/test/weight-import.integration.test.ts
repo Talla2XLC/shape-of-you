@@ -12,6 +12,9 @@ import { PostgresImportLifecycle } from "../src/import/postgres-import-lifecycle
 import { WeightImportApplyService } from "../src/import/weight-import-apply.js";
 import type { FitnessTrackerWeightSnapshot } from "../src/import/fitness-tracker-sheets-reader.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
 const personId = "00000000-0000-4000-8000-000000000001";
@@ -28,6 +31,7 @@ beforeAll(async () => {
     .start();
   await runMigrations(container.getConnectionUri());
   pool = new Pool({ connectionString: container.getConnectionUri() });
+  closePool = trackPoolShutdown(pool);
   const source = await pool.query<{ id: string }>(
     `insert into source_references (
        person_id, channel, external_system, external_record_id, checksum
@@ -48,7 +52,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await pool?.end();
+  await closePool?.();
   await container?.stop();
 });
 

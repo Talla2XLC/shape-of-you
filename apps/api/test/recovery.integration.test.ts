@@ -31,6 +31,9 @@ import { RecoveryService } from "../src/recovery/recovery.service.js";
 import { CurrentRecoveryContextService } from "../src/coaching/current-recovery-context.service.js";
 import type { DailyAssessmentStore } from "../src/storage/daily-assessment-repository.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
@@ -154,6 +157,7 @@ beforeAll(async () => {
   process.env.SYNTHETIC_PERSON_ID = personA;
   await runMigrations(databaseUrl);
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   await database.pool.query(
     "insert into persons (id, kind, status) values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active'), ($4, 'real', 'active'), ($5, 'real', 'active'), ($6, 'real', 'active'), ($7, 'real', 'active'), ($8, 'real', 'active'), ($9, 'real', 'active')",
     [personB, personC, personD, personE, personF, personG, personH, personI, personJ]
@@ -164,7 +168,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

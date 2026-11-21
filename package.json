@@ -28,7 +28,10 @@
     "db:generate:api": "pnpm --filter @shape-of-you/api db:generate",
     "db:migrate:api": "pnpm --filter @shape-of-you/api db:migrate",
     "db:generate:identity": "pnpm --filter @shape-of-you/identity db:generate",
-    "db:migrate:identity": "pnpm --filter @shape-of-you/identity db:migrate"
+    "db:migrate:identity": "pnpm --filter @shape-of-you/identity db:migrate",
+    "check:local": "node scripts/check-push.mjs",
+    "hooks:install": "node scripts/install-git-hooks.mjs",
+    "test:push-guard": "node --test scripts/check-push.test.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",

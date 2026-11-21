@@ -10,10 +10,12 @@ import { runMigrations } from "../src/database/migrate.js";
 import { PersonFactTimelineService } from "../src/progress-overview/person-fact-timeline.service.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
 
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
+let closePool: (() => Promise<void>) | undefined;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer("postgres:17-alpine")
@@ -30,10 +32,11 @@ beforeAll(async () => {
     PERSON_CONTEXT_MODE: "synthetic", SYNTHETIC_PERSON_ID: "00000000-0000-4000-8000-000000000001", SHUTDOWN_TIMEOUT_MS: 1_000
   };
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   app = await buildApp({ config, database });
 });
 
-afterAll(async () => { await app?.close(); await database?.pool.end(); await container?.stop(); });
+afterAll(async () => { await app?.close(); await closePool?.(); await container?.stop(); });
 
 describe("ProgressOverview PostgreSQL read model", () => {
   it("returns only current facts inside the inclusive range", async () => {

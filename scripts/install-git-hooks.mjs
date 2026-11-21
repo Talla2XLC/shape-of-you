@@ -1,0 +1,16 @@
+import { spawnSync } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const cwd = fileURLToPath(new URL('../', import.meta.url));
+const query = spawnSync('git', ['config', '--get', 'core.hooksPath'], { cwd, encoding: 'utf8' });
+const current = query.stdout.trim();
+if (query.status !== 0 && query.status !== 1) throw new Error('Cannot read Git hooks configuration');
+if (current && current !== '.githooks') throw new Error('Custom hooksPath exists; it was not overwritten.');
+const defaultHook = spawnSync('git', ['rev-parse', '--git-path', 'hooks/pre-push'], { cwd, encoding: 'utf8' });
+if (defaultHook.status !== 0) throw new Error('Cannot find default Git hook');
+if (!current && existsSync(resolve(cwd, defaultHook.stdout.trim()))) throw new Error('Existing pre-push hook was not overwritten.');
+if (!(statSync(new URL('../.githooks/pre-push', import.meta.url)).mode & 0o111)) throw new Error('Tracked hook must be executable');
+const result = spawnSync('git', ['config', '--local', 'core.hooksPath', '.githooks'], { cwd, stdio: 'inherit' });
+if (result.status !== 0) throw new Error('Cannot install local Git hooks');
+process.stdout.write('Installed local pre-push checks. No push was performed.\n');

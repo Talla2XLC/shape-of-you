@@ -17,14 +17,14 @@ coupling or premature service decomposition.
 
 ## Content
 
-One Git/4DreamTeam workspace contains the English canonical Wiki in
+One Git/DreamTeam workspace contains the English canonical Wiki in
 `docs/wiki/`, Russian canonical ADRs in `docs/adr/`, and Russian plans in
 `plans/YYYY/MM/`. Historical accepted ADRs are not translated in bulk. The pnpm
 workspace contains the API in `apps/api`, Identity in `apps/identity`, the
 static Nuxt client in `apps/web`, and shared transport/config packages in
 `packages/contracts` and `packages/config`.
 
-Canonical Wiki/ADR are ordinary Git Markdown. 4DreamTeam manages board, memory,
+Canonical Wiki/ADR are ordinary Git Markdown. DreamTeam manages board, memory,
 sources, and workflow; its managed Wiki is frozen legacy state. The repository
 validator checks canonical documents without a mirror or sync pipeline.
 

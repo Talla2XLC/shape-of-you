@@ -12,6 +12,9 @@ import { ChatAssistantConversationBindingRepository } from "../src/storage/chat-
 const personId = "00000000-0000-4000-8000-000000000001";
 const otherPersonId = "00000000-0000-4000-8000-000000000002";
 const conversationId = "00000000-0000-8000-8000-000000000068";
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let repository: ChatAssistantConversationBindingRepository;
@@ -38,6 +41,7 @@ beforeAll(async () => {
     SHUTDOWN_TIMEOUT_MS: 1_000
   };
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   repository = new ChatAssistantConversationBindingRepository(database);
   app = await buildApp({
     config,
@@ -48,7 +52,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

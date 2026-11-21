@@ -33,7 +33,7 @@ rg "DayClosure" docs
 rg --files docs/wiki docs/adr
 ```
 
-Do not register `docs/` in `4dt-sources`. Git, the IDE, and `rg` provide search
+Do not register `docs/` in `dreamteam-sources`. Git, the IDE, and `rg` provide search
 without duplicating index state.
 
 ## Language

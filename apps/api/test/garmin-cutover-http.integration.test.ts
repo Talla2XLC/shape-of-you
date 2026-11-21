@@ -10,6 +10,9 @@ import { IntegrationCutoverRepository } from "../src/storage/integration-cutover
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 import { GarminPersonalProvider } from "../src/integrations/garmin-personal/provider.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let database: DatabaseContext;
 let databaseUrl: string;
 let container: StartedPostgreSqlContainer | undefined;
@@ -36,8 +39,9 @@ beforeAll(async () => {
   await runMigrations(databaseUrl);
   database = createDatabase(loadConfig({ NODE_ENV: "test", PERSON_CONTEXT_MODE: "synthetic",
     SYNTHETIC_PERSON_ID: process.env.SYNTHETIC_PERSON_ID, DATABASE_URL: databaseUrl }));
+  closePool = trackPoolShutdown(database.pool);
 });
-afterAll(async () => { await database?.pool.end(); await container?.stop(); });
+afterAll(async () => { await closePool?.(); await container?.stop(); });
 
 async function fixture() {
   const personId = randomUUID(), sourceId = randomUUID();

@@ -18,6 +18,9 @@ import { CurrentRecoveryContextService } from "../src/coaching/current-recovery-
 import { readRecoveryBaselineDays } from "../src/recovery/personal-baseline-history.js";
 import { DailyAssessmentService } from "../src/coaching/daily-assessment.service.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let database: DatabaseContext;
 let container: StartedPostgreSqlContainer | undefined;
 let databaseUrl: string;
@@ -43,11 +46,12 @@ beforeAll(async () => {
   await runMigrations(databaseUrl);
   database = createDatabase(loadConfig({ NODE_ENV: "test", PERSON_CONTEXT_MODE: "synthetic",
     SYNTHETIC_PERSON_ID: process.env.SYNTHETIC_PERSON_ID, DATABASE_URL: databaseUrl }));
+  closePool = trackPoolShutdown(database.pool);
 });
 
 beforeEach(async () => { await database.pool.query("update integration_connections set next_attempt_at=now()+interval '1 day'"); });
 
-afterAll(async () => { await database?.pool.end(); await container?.stop(); });
+afterAll(async () => { await closePool?.(); await container?.stop(); });
 
 async function person(): Promise<string> {
   const id = randomUUID();

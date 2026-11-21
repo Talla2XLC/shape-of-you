@@ -13,6 +13,9 @@ import {
 } from "../src/import/fitness-tracker-sheets-reader.js";
 import { PostgresBodyTargetReader } from "../src/import/postgres-body-target-reader.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
 const sheetId = 303;
@@ -27,10 +30,11 @@ beforeAll(async () => {
     .start();
   await runMigrations(container.getConnectionUri());
   pool = new Pool({ connectionString: container.getConnectionUri() });
+  closePool = trackPoolShutdown(pool);
 }, 120_000);
 
 afterAll(async () => {
-  await pool?.end();
+  await closePool?.();
   await container?.stop();
 });
 

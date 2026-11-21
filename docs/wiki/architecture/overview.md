@@ -19,7 +19,7 @@ Nuxt client using the same backend contract.
 
 Current foundation:
 
-- one repository and 4DreamTeam workspace;
+- one repository and DreamTeam workspace;
 - Node.js, TypeScript, and pnpm workspaces;
 - PostgreSQL with Drizzle ORM/Kit;
 - Docker Compose for local development;

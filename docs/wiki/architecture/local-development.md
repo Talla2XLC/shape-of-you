@@ -152,6 +152,34 @@ runtime. `pnpm test:e2e` additionally builds and verifies the disposable local
 stack. `pnpm test:e2e:web` builds the static client and runs headless browser
 contracts. `pnpm test:unit` runs fast Docker-free checks.
 
+### Local push verification
+
+Install the local push guard explicitly once per clone:
+
+```sh
+pnpm hooks:install
+pnpm check:local
+```
+
+The installer refuses conflicting existing hooks. `check:local` requires running
+Docker and executes frozen dependency installation, push-guard tests, lint,
+typecheck, build, the full application test suite including PostgreSQL integration
+tests, and documentation validation. Missing Docker or a failed command stops
+verification without a unit-only fallback.
+
+Ordinary pushes run fresh verification through `.githooks/pre-push`. The hook
+requires a clean tracked and untracked working tree and checks that every
+non-deletion update names the current HEAD. It checks cleanliness and HEAD again
+after verification. Manual checks can inspect uncommitted changes but do not
+authorize a later push through a cached result. This hook is clone-local; browser,
+cross-service E2E, and deployment-specific CI checks remain additional gates.
+
+The pinned Testcontainers dependency has a test-only pnpm patch using an empty
+Docker `HostPort` for random-port allocation, addressing the observed Docker
+Desktop binding failure ([upstream report](https://github.com/docker/desktop-feedback/issues/338)).
+Explicit fixed ports, readiness checks, and test assertions remain unchanged.
+Service image builds copy `patches/` before frozen dependency installation.
+
 ## Evidence
 
 - Workspace manifests, service-owned `.env.example` files, Compose, service

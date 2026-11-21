@@ -69,6 +69,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Test local push guard
+        run: node --test scripts/check-push.test.mjs
+
       - name: Lint
         run: pnpm lint
 

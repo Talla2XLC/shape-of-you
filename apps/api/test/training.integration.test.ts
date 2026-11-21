@@ -28,6 +28,9 @@ import type { DailyAssessmentPersonalCalculation } from "../src/domain/personali
 import { TrainingService } from "../src/training/training.service.js";
 import { shiftLocalDate } from "../src/progress-overview/progress-data-coverage.policy.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
@@ -61,6 +64,7 @@ beforeAll(async () => {
   };
   testConfig = config;
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   await database.pool.query(
     `insert into persons (id, kind, status)
      values ($1, 'real', 'active'), ($2, 'real', 'active'), ($3, 'real', 'active'), ($4, 'real', 'active')`,
@@ -71,7 +75,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

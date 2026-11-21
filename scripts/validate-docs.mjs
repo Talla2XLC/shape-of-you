@@ -352,7 +352,7 @@ export function validateDocumentation(repositoryRoot) {
     }
   }
 
-  const managedExportRoot = path.join(root, ".4dt", "wiki", "pages");
+  const managedExportRoot = path.join(root, ".dreamteam", "wiki", "pages");
   for (const file of listMarkdownFiles(managedExportRoot)) {
     addViolation(
       file,

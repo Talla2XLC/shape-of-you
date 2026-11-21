@@ -4,6 +4,7 @@ WORKDIR /workspace
 RUN corepack enable && corepack prepare pnpm@11.9.0 --activate
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json ./
+COPY patches ./patches
 COPY apps/identity/package.json apps/identity/package.json
 RUN pnpm install --filter @shape-of-you/identity... --frozen-lockfile
 

@@ -13,3 +13,7 @@ allowBuilds:
   esbuild: true
   protobufjs: false
   ssh2: false
+
+# Test-only Docker Desktop random-port workaround: docker/desktop-feedback#338.
+patchedDependencies:
+  testcontainers@11.14.0: patches/testcontainers@11.14.0.patch

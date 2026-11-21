@@ -1,5 +1,5 @@
-# 4DreamTeam mutable local state
-.4dt/
+# DreamTeam mutable local state
+.dreamteam/
 
 # IDE and operating system
 .idea/

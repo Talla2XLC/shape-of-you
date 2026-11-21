@@ -7,9 +7,11 @@ import { FITNESS_TRACKER_SPREADSHEET_ID, type FitnessTrackerRecoverySnapshot, ty
 import { RecoveryImportApplyService } from "../src/import/recovery-import-apply.js";
 import { TrainingImportApplyService } from "../src/import/training-import-apply.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
-let isTearingDown = false;
 let unexpectedPoolError: Error | undefined;
 
 beforeAll(async () => {
@@ -22,16 +24,14 @@ beforeAll(async () => {
     .start();
   await runMigrations(container.getConnectionUri());
   pool = new Pool({ connectionString: container.getConnectionUri() });
-  pool.on("error", (error: Error & { code?: string }) => {
-    if (!(isTearingDown && error.code === "57P01")) {
-      unexpectedPoolError = error;
-    }
+  closePool = trackPoolShutdown(pool);
+  pool.on("error", (error: Error) => {
+    unexpectedPoolError = error;
   });
 }, 120_000);
 
 afterAll(async () => {
-  isTearingDown = true;
-  await pool?.end();
+  await closePool?.();
   await container?.stop();
   if (unexpectedPoolError) {
     throw unexpectedPoolError;

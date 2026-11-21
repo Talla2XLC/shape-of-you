@@ -10,6 +10,9 @@ import { WeightMeasurementRepository } from "../src/storage/weight-measurement-r
 import { WeightMeasurementService } from "../src/weight-measurements/weight-measurement.service.js";
 import { mcpMealServer, decimalMenuMeal } from "./fixtures/mcp-meal-server.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer | undefined;
 let database: DatabaseContext;
 beforeAll(async () => {
@@ -29,8 +32,9 @@ beforeAll(async () => {
   database = createDatabase({ NODE_ENV: "test", HOST: "127.0.0.1", PORT: 3000,
     DATABASE_URL: url, LOG_LEVEL: "silent", PERSON_CONTEXT_MODE: "synthetic",
     SYNTHETIC_PERSON_ID: randomUUID(), SHUTDOWN_TIMEOUT_MS: 1000 });
+  closePool = trackPoolShutdown(database.pool);
 });
-afterAll(async () => { await database?.pool.end(); await container?.stop(); vi.unstubAllEnvs(); });
+afterAll(async () => { await closePool?.(); await container?.stop(); vi.unstubAllEnvs(); });
 
 async function fixture() {
   const personId = randomUUID();

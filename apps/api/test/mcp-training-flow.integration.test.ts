@@ -25,6 +25,9 @@ import { MCP_RECOVERY_RETRY_POLICY, registerMcpRoutes, type McpRouteOptions } fr
 import { TrainingRepository } from "../src/storage/training-repository.js";
 import { TrainingService } from "../src/training/training.service.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer | undefined;
 let database: DatabaseContext;
 
@@ -43,10 +46,11 @@ beforeAll(async () => {
   database = createDatabase({ NODE_ENV: "test", HOST: "127.0.0.1", PORT: 3000,
     DATABASE_URL: connectionUri, LOG_LEVEL: "silent", PERSON_CONTEXT_MODE: "synthetic",
     SYNTHETIC_PERSON_ID: process.env.SYNTHETIC_PERSON_ID, SHUTDOWN_TIMEOUT_MS: 1000 });
+  closePool = trackPoolShutdown(database.pool);
 });
 
 afterAll(async () => {
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

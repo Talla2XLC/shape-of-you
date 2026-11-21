@@ -7,6 +7,9 @@ import { createDatabase, type DatabaseContext } from "../src/database/context.js
 import { runMigrations } from "../src/database/migrate.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
@@ -34,10 +37,11 @@ beforeAll(async () => {
   const config: AppConfig = { NODE_ENV: "test", HOST: "127.0.0.1", PORT: 3000, DATABASE_URL: databaseUrl,
     LOG_LEVEL: "silent", PERSON_CONTEXT_MODE: "synthetic", SYNTHETIC_PERSON_ID: person, SHUTDOWN_TIMEOUT_MS: 1000 };
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   app = await buildApp({ config, database });
   await database.pool.query("insert into persons (id,kind,status) values ($1,'real','active'), ($2,'real','active') on conflict do nothing", [person, another]);
 });
-afterAll(async () => { await app?.close(); await database?.pool.end(); await container?.stop(); });
+afterAll(async () => { await app?.close(); await closePool?.(); await container?.stop(); });
 
 describe("reported workout PostgreSQL V2", () => {
   it("preserves all reported facts, completes once, and rejects stale parallel corrections", async () => {

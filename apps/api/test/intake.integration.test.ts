@@ -25,6 +25,9 @@ import {
   type IntakeJob
 } from "../src/storage/intake-repository.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
@@ -105,6 +108,7 @@ beforeAll(async () => {
     SHUTDOWN_TIMEOUT_MS: 1_000
   };
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   repository = new IntakeRepository(database);
   worker = new IntakeWorker(repository, new SyntheticParser());
   app = await buildApp({ config, database });
@@ -112,7 +116,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

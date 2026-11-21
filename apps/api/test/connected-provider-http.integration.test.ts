@@ -12,6 +12,9 @@ import { ConnectedProviderRepository } from "../src/storage/connected-provider-r
 import { IntegrationRepository } from "../src/storage/integration-repository.js";
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let db: DatabaseContext;
 let container: StartedPostgreSqlContainer | undefined;
 let url: string;
@@ -25,8 +28,9 @@ beforeAll(async () => {
   process.env.SYNTHETIC_PERSON_ID = randomUUID();
   await runMigrations(url);
   db = createDatabase(loadConfig({ NODE_ENV: "test", PERSON_CONTEXT_MODE: "synthetic", SYNTHETIC_PERSON_ID: randomUUID(), DATABASE_URL: url }));
+  closePool = trackPoolShutdown(db.pool);
 });
-afterAll(async () => { await db?.pool.end(); await container?.stop(); });
+afterAll(async () => { await closePool?.(); await container?.stop(); });
 
 describe("connected provider public reads", () => {
   it("delivers nonempty typed facts through HTTP and daily consumers without summing imported intake or leaking another Person", async () => {

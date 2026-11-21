@@ -1,0 +1,12 @@
+diff --git a/build/generic-container/generic-container.js b/build/generic-container/generic-container.js
+--- a/build/generic-container/generic-container.js
++++ b/build/generic-container/generic-container.js
+@@ -285,7 +285,7 @@
+             }
+             else {
+                 const containerPort = (0, port_1.getContainerPort)(exposedPort);
+-                portBindings[`${containerPort}/${protocol}`] = [{ HostPort: "0" }];
++                portBindings[`${containerPort}/${protocol}`] = [{ HostPort: "" }];
+             }
+         }
+         this.hostConfig.PortBindings = {

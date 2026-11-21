@@ -20,6 +20,9 @@ import { loadRetrospectiveEvidence } from "../src/commands/run-daily-assessment-
 const personId = "00000000-0000-4000-8000-000000000001";
 const otherPersonId = "00000000-0000-4000-8000-000000000002";
 const wellbeingTestPersonId = "00000000-0000-4000-8000-000000000139";
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let app: NestFastifyApplication;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
@@ -61,6 +64,7 @@ beforeAll(async () => {
   };
   appConfig = config;
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   await database.pool.query(
     "insert into persons (id, kind, status) values ($1, 'real', 'active')",
     [otherPersonId]
@@ -70,7 +74,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

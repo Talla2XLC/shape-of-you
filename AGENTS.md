@@ -4,12 +4,12 @@
 
 This directory is both:
 
-- the single `4DreamTeam` workspace for Shape of You;
+- the single `DreamTeam` workspace for Shape of You;
 - the root of the Shape of You Git modular monorepo.
 
 Do not create `sources/shape-of-you` or another nested project root.
 Product, architecture, delivery, quality, and release work is performed through
-the installed `$4DreamTeam` workflow and its managed tools. Canonical Wiki and
+the installed `$dreamteam` workflow and its managed tools. Canonical Wiki and
 ADR documents are ordinary Markdown files in the repository and follow the
 rules below.
 
@@ -28,11 +28,11 @@ rules below.
 
 ## Session Start
 
-At the start of a session, use the installed 4DreamTeam wrappers to:
+At the start of a session, use the installed DreamTeam wrappers to:
 
-1. run `4dt-memory doctor` and load contract defaults;
+1. run `dreamteam-memory doctor` and load contract defaults;
 2. restore pending wake context without dumping all memory;
-3. check `4dt-board`, `4dt-sources`, and the local 4DreamTeam storage;
+3. check `dreamteam-board`, `dreamteam-sources`, and the local DreamTeam storage;
 4. run `node scripts/validate-docs.mjs` before using canonical documentation;
 5. report degraded state instead of inventing missing context.
 
@@ -46,14 +46,14 @@ Do not edit their internal storage directly.
 - Edit canonical pages with ordinary repository file tools.
 - Every agent and workflow uses canonical Markdown as the source of project
   knowledge.
-- The managed 4DreamTeam Wiki is a frozen legacy copy.
+- The managed DreamTeam Wiki is a frozen legacy copy.
 - Do not use the managed Wiki for discovery, reading, or writing project
   documentation or architecture decisions.
 - An exception requires an explicit operator decision for the specific
   operation and scope.
-- Do not register `docs/` in `4dt-sources`. The `sources/` directory remains
+- Do not register `docs/` in `dreamteam-sources`. The `sources/` directory remains
   the built-in runtime boundary for separately approved source materials.
-- If a future 4DreamTeam version supports this workflow natively, remove
+- If a future DreamTeam version supports this workflow natively, remove
   redundant workspace overrides instead of preserving them.
 - Do not create generated Wiki mirrors, synchronization pipelines, manifests,
   or a second documentation source of truth.
@@ -192,7 +192,7 @@ superseding ADR.
 ## Source Boundaries
 
 The workspace `sources/` directory is only a staging area for approved
-materials, not the project root. Register external paths through `4dt-sources`
+materials, not the project root. Register external paths through `dreamteam-sources`
 with operator approval. Do not read secrets or unrelated files.
 
 After the accepted TASK-0067 authority transfer, staging PostgreSQL through the

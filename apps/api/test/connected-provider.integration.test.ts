@@ -17,6 +17,9 @@ import { ConnectedProviderRepository } from "../src/storage/connected-provider-r
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 import type { CreateRecoveryObservation, GarminPersonalConnection, ProviderConnectedDayRecord } from "@shape-of-you/contracts";
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let db: DatabaseContext;
 let container: StartedPostgreSqlContainer | undefined;
 const cipher = new ConnectionCredentialCipher("synthetic", new Map([["synthetic", randomBytes(32)]]));
@@ -36,9 +39,10 @@ beforeAll(async () => {
     await runMigrations(url);
     await runMigrations(url);
     db = createDatabase(loadConfig({ DATABASE_URL: url, NODE_ENV: "test", PERSON_CONTEXT_MODE: "synthetic", SYNTHETIC_PERSON_ID: randomUUID() }));
+    closePool = trackPoolShutdown(db.pool);
 });
 afterAll(async () => {
-    await db?.pool.end();
+    await closePool?.();
     await container?.stop();
 });
 async function fixture() {

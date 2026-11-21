@@ -15,6 +15,9 @@ import {
 import { runMigrations } from "../src/database/migrate.js";
 import { NutritionRepository } from "../src/storage/nutrition-repository.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
@@ -42,6 +45,7 @@ beforeAll(async () => {
     SHUTDOWN_TIMEOUT_MS: 1_000
   };
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   await database.pool.query(
     `insert into persons (id, kind, status)
      values ($1, 'real', 'active')`,
@@ -52,7 +56,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

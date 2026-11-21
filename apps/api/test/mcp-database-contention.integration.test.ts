@@ -26,6 +26,9 @@ const personId = "00000000-0000-4000-8000-000000000169";
 const token = "synthetic-private-contention-token";
 const logs: string[] = [];
 const authorize = vi.fn(async () => ({ personId, roles: ["owner"] as const }));
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
@@ -43,6 +46,7 @@ beforeAll(async () => {
   };
   // Exercise deployed pool capacity while disabling background workers in the test app.
   database = createDatabase({ ...config, NODE_ENV: "production" });
+  closePool = trackPoolShutdown(database.pool);
   await database.pool.query("insert into persons (id, kind, status) values ($1, 'real', 'active')", [personId]);
   const personContext = new RequestPersonContext(personId);
   app = await buildApp({ config, database, personContext });
@@ -63,7 +67,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await server?.close();
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

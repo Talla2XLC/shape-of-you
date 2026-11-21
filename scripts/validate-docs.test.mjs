@@ -94,11 +94,11 @@ test("accepts a valid canonical documentation fixture", () => {
 test("reports representative metadata, section, and link violations", () => {
   const root = createFixture();
   try {
-    mkdirSync(path.join(root, ".4dt", "wiki", "pages"), {
+    mkdirSync(path.join(root, ".dreamteam", "wiki", "pages"), {
       recursive: true,
     });
     writeFileSync(
-      path.join(root, ".4dt", "wiki", "pages", "legacy.md"),
+      path.join(root, ".dreamteam", "wiki", "pages", "legacy.md"),
       "# Legacy\n",
     );
     writeFileSync(

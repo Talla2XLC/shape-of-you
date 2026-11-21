@@ -8,6 +8,9 @@ settings:
 overrides:
   find-my-way: 9.7.0
 
+patchedDependencies:
+  testcontainers@11.14.0: 22d9ebcdb5002836aad4fb53c1967d8409411add5a0e469bc7e22b515e77db43
+
 importers:
 
   .:
@@ -6722,7 +6725,7 @@ snapshots:
 
   '@testcontainers/postgresql@11.14.0':
     dependencies:
-      testcontainers: 11.14.0
+      testcontainers: 11.14.0(patch_hash=22d9ebcdb5002836aad4fb53c1967d8409411add5a0e469bc7e22b515e77db43)
     transitivePeerDependencies:
       - bare-abort-controller
       - bare-buffer
@@ -10102,7 +10105,7 @@ snapshots:
       commander: 2.20.3
       source-map-support: 0.5.21
 
-  testcontainers@11.14.0:
+  testcontainers@11.14.0(patch_hash=22d9ebcdb5002836aad4fb53c1967d8409411add5a0e469bc7e22b515e77db43):
     dependencies:
       '@balena/dockerignore': 1.0.2
       '@types/dockerode': 4.0.1

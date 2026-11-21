@@ -14,6 +14,9 @@ import { CoachingRepository } from "../src/storage/coaching-repository.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
 
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let container: StartedPostgreSqlContainer;
 let database: DatabaseContext;
 let app: NestFastifyApplication;
@@ -51,6 +54,7 @@ beforeAll(async () => {
   process.env.SYNTHETIC_PERSON_ID = personA;
   await runMigrations(databaseUrl);
   database = createDatabase(config);
+  closePool = trackPoolShutdown(database.pool);
   await database.pool.query(
     "insert into persons (id, kind, status) values ($1, 'real', 'active')",
     [personB]
@@ -205,7 +209,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await app?.close();
-  await database?.pool.end();
+  await closePool?.();
   await container?.stop();
 });
 

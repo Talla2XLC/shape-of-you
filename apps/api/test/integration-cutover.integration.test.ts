@@ -19,6 +19,9 @@ import { TrainingRepository, type ImportExternalActivity } from "../src/storage/
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 
 const directories: string[] = [];
+import { trackPoolShutdown } from "./support/pool-shutdown.js";
+
+let closePool: (() => Promise<void>) | undefined;
 let database: DatabaseContext;
 let container: StartedPostgreSqlContainer | undefined;
 const cipher = new ConnectionCredentialCipher("synthetic", new Map([["synthetic", randomBytes(32)]]));
@@ -36,8 +39,9 @@ beforeAll(async () => {
   await runMigrations(url);
   await runMigrations(url);
   database = createDatabase(loadConfig({ NODE_ENV: "test", PERSON_CONTEXT_MODE: "synthetic", SYNTHETIC_PERSON_ID: randomUUID(), DATABASE_URL: url }));
+  closePool = trackPoolShutdown(database.pool);
 });
-afterAll(async () => { await database?.pool.end(); await container?.stop(); await Promise.all(directories.map(path => rm(path, {recursive:true,force:true}))); });
+afterAll(async () => { await closePool?.(); await container?.stop(); await Promise.all(directories.map(path => rm(path, {recursive:true,force:true}))); });
 beforeEach(async () => { await database.pool.query("update integration_connections set next_attempt_at=now()+interval '1 day'"); });
 
 async function fixture(zone = "UTC") {

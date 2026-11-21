@@ -38,9 +38,9 @@ in the [Wiki](docs/wiki/).
 
 - `docs/wiki/**/*.md` is the canonical Wiki.
 - `docs/adr/**/*.md` is the canonical ADR collection.
-- `.4dt/db.sqlite3` stores local board, memory, source registry, and internal
+- `.dreamteam/db.sqlite3` stores local board, memory, source registry, and internal
   index state.
-- The managed 4DreamTeam Wiki is a frozen legacy copy and is not a source of
+- The managed DreamTeam Wiki is a frozen legacy copy and is not a source of
   truth.
 - Plans are written in Russian under `plans/YYYY/MM/`.
 - Completed plans move to the corresponding `completed/` directory.
