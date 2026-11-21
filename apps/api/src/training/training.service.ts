@@ -395,8 +395,8 @@ export class TrainingService {
       localDate === null ? Promise.resolve([]) : this.store.listExternalActivitiesForLocalDate(personId, localDate),
       localDate === null ? Promise.resolve([]) : this.store.listActivityLinkProgramContextForLocalDate(personId, localDate)
     ]);
-    const connectedDailyFitness = this.connectedData?.isConfigured()
-      ? (await this.connectedData.fitness(localDate ? { fromDate: localDate, toDate: localDate } : {})).items : [];
+    const connectedDailyFitness = localDate !== null && this.connectedData?.isConfigured()
+      ? (await this.connectedData.fitness({ fromDate: localDate, toDate: localDate })).items : [];
     const trustedExternalTitles = program?.activeVersionId
       ? await this.store.listTrustedExternalActivityTitles(personId, program.id, program.activeVersionId)
       : [];

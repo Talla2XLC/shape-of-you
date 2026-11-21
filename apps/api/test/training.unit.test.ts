@@ -113,7 +113,7 @@ describe("Training domain", () => {
 });
 
 describe("Training context", () => {
-  it("projects bounded connected activities without leaking persistence metadata", async () => {
+  it("projects bounded connected activities without requiring timezone for an undated history read", async () => {
     const personId = "00000000-0000-4000-8000-000000000020";
     const findActiveProgram = vi.fn()
       .mockResolvedValueOnce(null)
@@ -145,6 +145,7 @@ describe("Training context", () => {
       classification: null,
       sessionCovered: false
     }]);
+    const fitness = vi.fn().mockRejectedValue(new Error("Person timezone is required"));
     const service = new TrainingService(
       {
         findActiveProgram,
@@ -153,7 +154,8 @@ describe("Training context", () => {
         readActivityRecordingMode: vi.fn().mockResolvedValue({ title: null, lockVersion: 0, updatedAt: null }),
         listTrustedExternalActivityTitles: vi.fn().mockResolvedValue([])
       } as unknown as TrainingStore,
-      new SyntheticPersonContext(personId)
+      new SyntheticPersonContext(personId),
+      { isConfigured: () => true, fitness } as never
     );
 
     await expect(service.getTrainingContext({ historyLimit: 3 })).resolves.toEqual({
@@ -179,6 +181,7 @@ describe("Training context", () => {
       }],
       nextStep: { state: "no_active_program", policyVersion: "training-next-step-v5" }
     });
+    expect(fitness).not.toHaveBeenCalled();
     expect(findActiveProgram).toHaveBeenCalledWith(personId);
     expect(listWorkoutSessions).toHaveBeenCalledWith(personId, 3);
     expect(listExternalActivities).toHaveBeenCalledWith(personId, 3);
