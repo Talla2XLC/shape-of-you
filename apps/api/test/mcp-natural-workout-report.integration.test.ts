@@ -37,7 +37,7 @@ async function provider(f: Awaited<ReturnType<typeof fixture>>, time: string, id
   const providerId = randomUUID(), recoveryId = randomUUID(), consentId = randomUUID(), connectionId = randomUUID();
   await database.pool.query("insert into recovery_providers (id,key,name) values ($1,$2,'Synthetic provider')", [providerId, providerId]);
   await database.pool.query("insert into recovery_connections (id,person_id,provider_id,dedupe_key) values ($1,$2,$3,$4)", [recoveryId, f.personId, providerId, recoveryId]);
-  await database.pool.query("insert into recovery_consents (id,person_id,connection_id,purpose,retention_mode) values ($1,$2,$3,'training','indefinite')", [consentId, f.personId, recoveryId]);
+  await database.pool.query("insert into recovery_consents (id,person_id,connection_id,purpose,retention_mode, integration_import_scopes) values ($1,$2,$3,'training','indefinite', ARRAY['recovery','training'])", [consentId, f.personId, recoveryId]);
   await database.pool.query("insert into integration_connections (id,person_id,recovery_connection_id,consent_id,provider_key,external_user_id) values ($1,$2,$3,$4,$5,'synthetic-user')", [connectionId, f.personId, recoveryId, consentId, providerId]);
   const input: Parameters<typeof f.repository.importExternalActivity>[0] = { connectionId, personId: f.personId, consentId,
     providerIdentity: identity, normalizedChecksum: "a".repeat(64), occurredAt: time,

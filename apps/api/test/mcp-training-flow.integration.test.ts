@@ -60,7 +60,7 @@ async function fixture(lostAcknowledgementTool?: string) {
   const consentId = randomUUID(), connectionId = randomUUID();
   await database.pool.query("insert into recovery_providers (id, key, name) values ($1, $2, 'MCP flow test')", [providerId, personId]);
   await database.pool.query("insert into recovery_connections (id, person_id, provider_id, dedupe_key) values ($1, $2, $3, $4)", [recoveryConnectionId, personId, providerId, personId]);
-  await database.pool.query("insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')", [consentId, personId, recoveryConnectionId]);
+  await database.pool.query("insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode, integration_import_scopes) values ($1, $2, $3, 'training', 'indefinite', ARRAY['recovery','training'])", [consentId, personId, recoveryConnectionId]);
   await database.pool.query("insert into integration_connections (id, person_id, recovery_connection_id, consent_id, provider_key, external_user_id) values ($1, $2, $3, $4, 'intervals_icu', $5)", [connectionId, personId, recoveryConnectionId, consentId, personId]);
   const unavailable = async (): Promise<never> => { throw new Error("Unrelated service called"); };
   const fastify = Fastify();
@@ -530,7 +530,7 @@ describe("MCP training conversation flow with PostgreSQL", () => {
       expect(linked.sourceActivityVersion).toBe(activity.id);
       await expect(repository.readExternalActivityDetails(personId, activity.id)).rejects.toThrow("not found");
       const newConsent = randomUUID();
-      await database.pool.query("insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1,$2,$3,'training','indefinite')", [newConsent, personId, recoveryConnectionId]);
+      await database.pool.query("insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode, integration_import_scopes) values ($1,$2,$3,'training','indefinite', ARRAY['recovery','training'])", [newConsent, personId, recoveryConnectionId]);
       await database.pool.query("update integration_connections set consent_id=$2 where id=$1", [connectionId, newConsent]);
       expect(await call("get_external_activity_details", { activityId: current.id })).toMatchObject({ availability: "not_imported", latestImportIssue: null, records: [] });
       expect(await integrations.setActivityDetailsIssue(connectionId, consentId, receipt.receiptId, "invalid_fit")).toBe(false);

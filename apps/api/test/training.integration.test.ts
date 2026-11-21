@@ -584,7 +584,7 @@ describe("Training PostgreSQL vertical", () => {
       [recoveryConnectionId, personId, providerId]
     );
     await database.pool.query(
-      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')",
+      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode, integration_import_scopes) values ($1, $2, $3, 'training', 'indefinite', ARRAY['recovery','training'])",
       [consentId, personId, recoveryConnectionId]
     );
     await database.pool.query(
@@ -767,7 +767,7 @@ describe("Training PostgreSQL vertical", () => {
       [recoveryConnectionId, personE, providerId]
     );
     await database.pool.query(
-      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')",
+      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode, integration_import_scopes) values ($1, $2, $3, 'training', 'indefinite', ARRAY['recovery','training'])",
       [consentId, personE, recoveryConnectionId]
     );
     await database.pool.query(
@@ -984,7 +984,7 @@ describe("Training PostgreSQL vertical", () => {
       [recoveryConnectionId, personId, providerId]
     );
     await database.pool.query(
-      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')",
+      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode, integration_import_scopes) values ($1, $2, $3, 'training', 'indefinite', ARRAY['recovery','training'])",
       [consentId, personId, recoveryConnectionId]
     );
     await database.pool.query(
@@ -1172,7 +1172,7 @@ describe("Training PostgreSQL vertical", () => {
       [recoveryConnectionId, personD, providerId, "task-0130-connection"]
     );
     await database.pool.query(
-      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode) values ($1, $2, $3, 'training', 'indefinite')",
+      "insert into recovery_consents (id, person_id, connection_id, purpose, retention_mode, integration_import_scopes) values ($1, $2, $3, 'training', 'indefinite', ARRAY['recovery','training'])",
       [consentId, personD, recoveryConnectionId]
     );
     await database.pool.query(
