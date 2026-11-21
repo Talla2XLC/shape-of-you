@@ -23,8 +23,8 @@ contracts. Решение: `docs/adr/20261121-retire-intervals-browser-managemen
 API, contracts, история и настройки соединений не изменялись. Все действия
 Garmin сохранены, включая CSRF и passkey-подтверждение удаления.
 
-Web lint без предупреждений, typecheck, static build и 30 unit tests прошли.
-Полный Web Playwright: 33/33; отдельно проверены отсутствие legacy-запросов и
+Web lint без предупреждений, typecheck, static build и 31 unit tests прошли.
+Полный Web Playwright: 34/34; отдельно проверены отсутствие legacy-запросов и
 текстов, active/degraded, один submit нового пользователя, polling races,
 erasure и отсутствие browser persistence. Снимки 320/768/1440 px и экран
 первого подключения просмотрены. Верхний отступ 32 px, между заголовком и
@@ -33,3 +33,10 @@ erasure и отсутствие browser persistence. Снимки 320/768/1440 p
 Независимые Quality и Architecture Review приняты и записаны в TASK-0184.
 Affected canonical Wiki обновлена после приёмки. Полный pre-push, CI и
 staging delivery должны пройти до сообщения о завершении доставки.
+
+После первого push обнаружено динамическое отображение legacy provider metadata
+на Privacy. Добавлено нейтральное представление Historical import без изменения
+исходных metadata, ID и erasure target. Проверены Garmin и legacy privacy flows,
+CSRF и passkey redirect; независимые Quality/Architecture дополнения приняты.
+Промежуточный CI отменён; финальная доставка использует новый commit и новый
+полный CI. Уже опубликованная Git-история не переписывается.

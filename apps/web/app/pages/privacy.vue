@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   recoveryPrivacyApi,
+  recoveryConnectionLabels,
   type RecoveryConnectionSummary,
   type RecoveryErasureSummary
 } from "~/lib/recovery-privacy";
@@ -109,9 +110,9 @@ function formatDate(value: string | null): string {
         <p class="eyebrow">
           Wearable connection
         </p>
-        <h2>{{ connection.device.label || connection.device.modelVersion.name }}</h2>
+        <h2>{{ recoveryConnectionLabels(connection).label }}</h2>
         <p class="item-meta">
-          {{ connection.device.modelVersion.providerName }} · Connected
+          {{ recoveryConnectionLabels(connection).provider }} · Connected
           {{ formatDate(connection.connectedAt) }}
         </p>
         <p

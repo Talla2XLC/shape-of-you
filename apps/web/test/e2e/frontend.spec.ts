@@ -137,7 +137,8 @@ test("landing offers progress when the API session is active", async ({ page }) 
   await expect(page.getByRole("link", { name: "Continue with a passkey" })).toHaveCount(0);
 });
 
-test("privacy requires explicit confirmation and starts fresh passkey erasure", async ({ context, page }) => {
+for (const legacy of [false, true]) {
+test(`privacy preserves ${legacy ? "historical import" : "Garmin"} confirmation and fresh passkey erasure`, async ({ context, page }) => {
   await mockApiSession(page, 204);
   const csrf = opaqueValue();
   await context.addCookies([{
@@ -155,8 +156,8 @@ test("privacy requires explicit confirmation and starts fresh passkey erasure", 
       id: connectionId,
       status: "active",
       device: {
-        label: "Garmin watch",
-        modelVersion: { providerName: "Garmin", name: "Watch" }
+        label: legacy ? "Garmin via Intervals.icu" : "Garmin watch",
+        modelVersion: { providerName: legacy ? "Intervals.icu" : "Garmin", name: "Watch" }
       },
       connectedAt: "2026-09-01T12:00:00.000Z",
       erasureRequestedAt: null
@@ -170,6 +171,8 @@ test("privacy requires explicit confirmation and starts fresh passkey erasure", 
 
   await page.goto("/privacy");
   await expect(page.getByRole("heading", { name: "Your wearable data." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: legacy ? "Earlier imported history" : "Garmin watch", exact: true })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText(/Intervals/iu);
   const erase = page.getByRole("button", { name: "Confirm with passkey and erase" });
   await expect(erase).toBeDisabled();
   await page.getByRole("checkbox").check();
@@ -177,6 +180,7 @@ test("privacy requires explicit confirmation and starts fresh passkey erasure", 
   await erase.click();
   await expect(page).toHaveURL(/\/fresh-passkey-erasure$/u);
 });
+}
 
 test("privacy reports an accepted erasure without exposing deleted data", async ({ page }) => {
   await mockApiSession(page, 204);

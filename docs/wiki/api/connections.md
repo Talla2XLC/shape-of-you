@@ -198,6 +198,8 @@ synchronization timestamps, and separate key update, disconnect and historical
 import actions. The content has scoped responsive spacing and a bounded reading
 width. Imported-data deletion remains a distinct outlined danger action with
 fresh passkey confirmation. Browser storage never holds personal keys.
+Privacy labels retained legacy connections as historical imports while preserving
+their exact identity, timestamps and erasure target; stored provenance is unchanged.
 
 Connections remains the website surface for direct Garmin lifecycle management. Progress
 shows provider-neutral coverage of the resulting typed Person facts and does

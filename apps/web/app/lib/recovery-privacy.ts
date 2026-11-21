@@ -17,6 +17,14 @@ export interface RecoveryConnectionSummary {
   readonly erasureRequestedAt: string | null;
 }
 
+/** Presents retained legacy imports without restoring their retired website branding or changing connection identity. */
+export function recoveryConnectionLabels(connection: RecoveryConnectionSummary): { readonly label: string; readonly provider: string } {
+  if (/^intervals(?:\.icu)?$/iu.test(connection.device.modelVersion.providerName.trim())) {
+    return { label: "Earlier imported history", provider: "Historical import" };
+  }
+  return { label: connection.device.label || connection.device.modelVersion.name, provider: connection.device.modelVersion.providerName };
+}
+
 /** Minimal server-owned status of one Recovery erasure request. */
 export interface RecoveryErasureSummary {
   readonly id: string;

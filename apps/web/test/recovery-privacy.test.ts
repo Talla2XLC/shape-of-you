@@ -2,12 +2,25 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   RecoveryPrivacyApiError,
-  recoveryPrivacyApi
+  recoveryPrivacyApi,
+  recoveryConnectionLabels,
+  type RecoveryConnectionSummary
 } from "../app/lib/recovery-privacy";
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Recovery privacy API", () => {
+  it("keeps legacy history identifiable without its retired branding and preserves Garmin names", () => {
+    const connection: RecoveryConnectionSummary = {
+      id: "retained-connection", status: "disconnected", connectedAt: "2026-11-01T12:00:00.000Z", erasureRequestedAt: null,
+      device: { label: "Garmin via Intervals.icu", modelVersion: { providerName: "Intervals.icu", name: "Intervals wellness" } }
+    };
+    expect(recoveryConnectionLabels(connection)).toEqual({ label: "Earlier imported history", provider: "Historical import" });
+    expect(connection.id).toBe("retained-connection");
+    expect(connection.device.label).toBe("Garmin via Intervals.icu");
+    expect(recoveryConnectionLabels({ ...connection, device: { label: "My watch", modelVersion: { name: "Watch", providerName: "Garmin" } } }))
+      .toEqual({ label: "My watch", provider: "Garmin" });
+  });
   it("keeps reads same-origin and binds mutations to the API CSRF cookie", async () => {
     const fetch = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200 }))
