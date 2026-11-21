@@ -14,9 +14,51 @@ const disconnected = {
 
 async function session(page: Page): Promise<void> {
   await page.route("**/api/browser-auth/session", (route) => route.fulfill({ status: 204, body: "" }));
-  await page.route(/\/api\/v1\/integrations\/garmin-intervals$/u, (route) => json(route, {
-    ...disconnected, provider: "intervals_icu", displayName: "Garmin via Intervals.icu", lifecycle: "unavailable"
-  }));
+}
+
+for (const lifecycle of ["active", "degraded"] as const) {
+  test(`Garmin-only ${lifecycle} connection has a readable responsive layout and no legacy requests`, async ({ page }) => {
+    await session(page);
+    await page.clock.install();
+    const legacyRequests: string[] = [];
+    page.on("request", (request) => {
+      if (/garmin-intervals|\/cutover/u.test(request.url())) legacyRequests.push(request.url());
+    });
+    await page.route(/\/api\/v1\/integrations\/garmin-personal$/u, (route) => json(route, {
+      ...disconnected, lifecycle, recoveryConnectionId: randomUUID(),
+      failureCode: lifecycle === "degraded" ? "authorization_required" : null,
+      connectedAt: "2026-11-21T12:00:00.000Z", lastSuccessfulSyncAt: "2026-11-21T12:30:00.000Z",
+      lastAttemptAt: "2026-11-21T12:35:00.000Z", lastDataAt: "2026-11-21T12:25:00.000Z"
+    }));
+    await page.goto("/connections");
+    const card = page.getByRole("article", { name: "Garmin", exact: true });
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("Connections");
+    await expect(card.getByRole("status")).toContainText(lifecycle === "active" ? "syncs automatically" : "Update your Garmin API key");
+    await expect(page.locator("main")).not.toContainText(/Intervals|transition|cutover/iu);
+    for (const width of [320, 768, 1440]) {
+      await page.setViewportSize({ width, height: 1000 });
+      const layout = await page.evaluate(() => {
+        const header = document.querySelector(".site-header")!.getBoundingClientRect();
+        const heading = document.querySelector(".connections-heading")!.getBoundingClientRect();
+        const card = document.querySelector(".garmin-connection")!.getBoundingClientRect();
+        const details = document.querySelector(".garmin-sync-details")!.getBoundingClientRect();
+        const status = document.querySelector("[role=status]")!.getBoundingClientRect();
+        return { topGap: heading.top - header.bottom, cardGap: card.top - heading.bottom,
+          detailsGap: details.top - status.bottom, overflow: document.documentElement.scrollWidth > innerWidth };
+      });
+      expect(layout.topGap).toBeGreaterThanOrEqual(24);
+      expect(layout.topGap).toBeLessThanOrEqual(40);
+      expect(layout.cardGap).toBeGreaterThanOrEqual(24);
+      expect(layout.detailsGap).toBeGreaterThanOrEqual(16);
+      expect(layout.overflow).toBe(false);
+      await page.screenshot({ path: `/private/tmp/task0184-connections-${lifecycle}-${width}.png`, fullPage: true });
+    }
+    await page.clock.fastForward(30_000);
+    expect(legacyRequests).toEqual([]);
+    await page.route("**/api/browser-auth/recovery-erasure/start", (route) => json(route, { authorizationUrl: "/confirm-erasure" }));
+    await card.getByRole("button", { name: "Delete Garmin imported data…" }).click();
+    await expect(page).toHaveURL(/\/confirm-erasure$/u);
+  });
 }
 
 test("a new user connects an empty Garmin account with one submit and no browser persistence", async ({ context, page }) => {
@@ -54,6 +96,8 @@ test("a new user connects an empty Garmin account with one submit and no browser
   await expect(field).toHaveAttribute("type", "password");
   await expect(field).toHaveAttribute("autocomplete", "off");
   await expect(card.getByRole("link", { name: "Create a personal API key in Garmin" })).toHaveAttribute("rel", "noreferrer noopener");
+  await expect(page.locator("main")).not.toContainText(/Intervals|transition|cutover/iu);
+  await page.screenshot({ path: "/private/tmp/task0184-connections-new-user-320.png", fullPage: true });
   await field.fill(apiKey);
   await card.getByRole("button", { name: "Connect Garmin", exact: true }).click();
   await expect(card.getByRole("status")).toHaveText("Connected, no data yet.");

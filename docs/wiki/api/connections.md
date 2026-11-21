@@ -14,15 +14,13 @@ tags:
 
 ## Summary
 
-Provides authenticated browser controls for direct `Garmin` personal-key
-linking and the existing `Garmin via Intervals.icu` OAuth connection. Both
-reuse the API-owned typed import, consent, sync evidence and erasure boundaries.
+The website exposes authenticated direct `Garmin` personal-key linking only.
+It uses API-owned typed import, consent, sync evidence and erasure boundaries.
 Connecting enables rolling synchronization; older history is requested separately.
-Direct linking and the observed wellness mapping are accepted and deployed to
-staging with migrations, readiness and smoke verified. A bounded own-account
-read-only sample confirmed populated fields; live typed import remains
-unverified. Existing Intervals history is never automatically
-switched or merged.
+Direct linking, typed import and the sole-account operational transfer are
+verified on staging; see the [delivery evidence](../operations/temporary-vm-deployment.md).
+Legacy Intervals and transition APIs remain for compatibility and approved
+operations, but have no browser management surface or browser requests.
 
 ## Content
 
@@ -84,7 +82,7 @@ TASK-0181 adds an explicitly consented future-day transition while preserving
 existing facts, IDs, provenance and workout links. The implementation and its
 three API migrations are deployed to staging as release `47ba3f3`; journal v2,
 readiness and smoke are verified. See the [delivery evidence](../operations/temporary-vm-deployment.md).
-The ordinary public transition requires its owner-selected future date and
+The retained transition API requires its owner-selected future date and
 explicit coverage acknowledgement. TASK-0182 separately completed the approved
 sole-account operational transfer for the current day; the public future-day
 gate remains intact. See the delivery evidence above.
@@ -97,8 +95,8 @@ source drain deadline and explicit capability gaps. Capability version
 mapping. Intervals normalized load still has different semantics, and original
 FIT availability is verified per candidate; these remain explicit when relevant. Candidate inspection
 validates any available original FIT without storing domain facts. A refreshed
-`coverage_changed` preview clears consent and waivers; the masked key remains
-only in form memory. Failed activation can retry using the encrypted pending
+`coverage_changed` preview requires renewed consent and waivers. Failed activation
+can retry using the encrypted pending
 key. Expired or revoked keys use the ordinary authorization-required renewal flow.
 
 Wellness ownership follows the provider calendar date; activity ownership
@@ -120,9 +118,9 @@ approved operational recovery. See the [restore runbook](../operations/postgresq
 
 ### Garmin via Intervals.icu
 
-The user first connects Garmin to Intervals.icu through Garmin's hosted flow,
-then authorizes Shape of You through Intervals.icu OAuth with activity and
-wellness read access.
+These retained server contracts support legacy connections and approved
+operations. The website offers neither Intervals authorization nor transition
+management; new users connect Garmin directly.
 
 Endpoints:
 
@@ -182,7 +180,7 @@ Garmin Body Battery is not a standard Intervals field. The athlete must enable
 Garmin wellness download in Intervals.icu and configure custom wellness fields
 with the exact codes `BodyBatteryMin` and `BodyBatteryMax`. Historical values
 become available to Shape of You only after Intervals itself has downloaded
-them and the user starts `Import historical data…` in Shape of You.
+them and a historical-import job is explicitly requested through the retained API.
 
 Field presence in Garmin Connect does not guarantee delivery through
 Intervals.icu. Sleep stages, overnight minimum SpO2, Garmin readiness or stress,
@@ -195,14 +193,13 @@ separate fresh-passkey Recovery erasure action and follows the fail-closed
 journal lifecycle. Failed remote disconnect is retried independently while
 local import stays disabled.
 
-The Connections page presents the two-provider disclosure, safe degraded
-reason, synchronization timestamps, and a separate confirmed `Import
-historical data…` action. `Disconnect` is a normal connection control. The
-compact outlined `Delete imported data…` action is isolated in a danger zone
-and explains that a fresh passkey confirmation is required. Browser storage
-does not hold OAuth code, state, or token material.
+The Connections page presents only Garmin, safe degraded reasons, labelled
+synchronization timestamps, and separate key update, disconnect and historical
+import actions. The content has scoped responsive spacing and a bounded reading
+width. Imported-data deletion remains a distinct outlined danger action with
+fresh passkey confirmation. Browser storage never holds personal keys.
 
-Connections remains the only surface for import lifecycle management. Progress
+Connections remains the website surface for direct Garmin lifecycle management. Progress
 shows provider-neutral coverage of the resulting typed Person facts and does
 not expose connection controls or imported-record counts.
 
@@ -217,6 +214,7 @@ not expose connection controls or imported-record counts.
 
 ## Decisions
 
+- [Garmin-only browser management](../../adr/20261121-retire-intervals-browser-management.md)
 - [Future-day Intervals to Garmin transition](../../adr/20261120-switch-intervals-to-garmin-with-date-boundary.md)
 - [Compatible journal v2 restore bounds](../../adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md)
 - [Direct Garmin Personal API linking](../../adr/20261118-connect-garmin-personal-api.md)
@@ -230,11 +228,9 @@ not expose connection controls or imported-record counts.
 
 ## Open questions
 
-- A bounded live read confirmed populated wellness fields and original ZIP
-  availability with one declared FIT candidate. Actual FIT decoding, live typed
-  import and transition from retained Intervals history remain unverified.
-  The operator confirmed
-  Supplemental Terms agreement on 2026-11-18.
+- Long-running Garmin historical-backfill observation remains separate from
+  the verified sole-account transition and rolling typed import. Supplemental
+  Terms agreement was confirmed by the operator on 2026-11-18.
 - Intervals.icu history availability, Supporter/dormancy policy, provider rate
   limits, and live long-running backfill observation.
 - Production activation, migration application, deployment, and VM verification

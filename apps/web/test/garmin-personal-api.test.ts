@@ -57,13 +57,24 @@ describe("direct Garmin browser API", () => {
     expect(JSON.parse(fetch.mock.calls[0]![1].body as string)).toEqual({ apiKey });
   });
 
+  it("starts imported-data erasure through the existing passkey ceremony with CSRF", async () => {
+    const csrf = randomBytes(32).toString("base64url");
+    const fetch = vi.fn().mockResolvedValue(new Response('{"authorizationUrl":"/confirm-erasure"}', { status: 200 }));
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("document", { cookie: `__Host-shape_of_you_api_csrf=${csrf}` });
+    await expect(garminPersonalApi.startErasure("connection-id")).resolves.toEqual({ authorizationUrl: "/confirm-erasure" });
+    expect(fetch.mock.calls[0]?.[0]).toBe("/api/browser-auth/recovery-erasure/start");
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: "POST", credentials: "same-origin", headers: { "x-csrf-token": csrf } });
+    expect(JSON.parse(fetch.mock.calls[0]![1].body as string)).toEqual({ connectionId: "connection-id" });
+  });
+
   it("never reads or displays a rejected provider response body", async () => {
     const unsafe = randomBytes(32).toString("base64url");
     vi.stubGlobal("document", { cookie: "" });
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(unsafe, { status: 409 })));
     const error = await garminPersonalApi.connect(unsafe).catch((value: unknown) => value);
     expect(error).toEqual(new IntegrationApiError(409));
-    expect(garminPersonalRequestMessage(error)).toContain("Existing Intervals imports or retained history");
+    expect(garminPersonalRequestMessage(error)).toContain("Existing imports or retained history");
     expect(garminPersonalRequestMessage(error)).not.toContain(unsafe);
     expect(garminPersonalRequestMessage(new Error(unsafe))).not.toContain(unsafe);
     expect(garminPersonalRequestMessage(new IntegrationApiError(503))).toContain("could not be confirmed");

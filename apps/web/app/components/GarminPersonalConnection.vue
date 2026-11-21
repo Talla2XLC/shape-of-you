@@ -3,7 +3,6 @@ import {
   garminPersonalApi,
   garminPersonalFailureReason,
   garminPersonalRequestMessage,
-  integrationApi,
   type GarminPersonalStatus
 } from "~/lib/integration-api";
 
@@ -104,7 +103,7 @@ async function erase(): Promise<void> {
   message.value = "";
   apiKey.value = "";
   try {
-    const result = await integrationApi.startErasure(status.value.recoveryConnectionId);
+    const result = await garminPersonalApi.startErasure(status.value.recoveryConnectionId);
     if (!disposed && generation === requestGeneration) window.location.assign(result.authorizationUrl);
   } catch (error) {
     if (!disposed && generation === requestGeneration) {
@@ -123,19 +122,18 @@ function formatted(value: string | null): string {
 
 <template>
   <article
-    class="management-card"
+    class="management-card garmin-connection"
     aria-labelledby="garmin-personal-title"
     :aria-busy="busy"
   >
-    <p class="eyebrow">
-      Direct connection
-    </p>
-    <h2 id="garmin-personal-title">
-      Garmin
-    </h2>
-    <p class="item-meta">
-      Bring your own Garmin training and wellness data into Shape of You.
-    </p>
+    <header class="garmin-connection-heading">
+      <h2 id="garmin-personal-title">
+        Garmin
+      </h2>
+      <p class="item-meta">
+        Your Garmin account connects directly to Shape of You.
+      </p>
+    </header>
     <StatusNotice
       v-if="message"
       kind="error"
@@ -163,22 +161,19 @@ function formatted(value: string | null): string {
         </template>
       </p>
       <p v-else-if="status.lifecycle === 'connecting'">
-        Garmin access is prepared. Review the transition status for its start date.
+        Garmin access is being prepared. This page updates automatically.
       </p>
       <p v-else>
         Garmin is not connected.
       </p>
-      <template v-if="connected || status.connectedAt">
-        <p class="item-meta">
-          Garmin last sync attempt: {{ formatted(status.lastAttemptAt) }}
-        </p>
-        <p class="item-meta">
-          Garmin last successful sync: {{ formatted(status.lastSuccessfulSyncAt) }}
-        </p>
-        <p class="item-meta">
-          Garmin last new data: {{ formatted(status.lastDataAt) }}
-        </p>
-      </template>
+      <dl
+        v-if="connected || status.connectedAt"
+        class="garmin-sync-details"
+      >
+        <div><dt>Last successful sync</dt><dd>{{ formatted(status.lastSuccessfulSyncAt) }}</dd></div>
+        <div><dt>Last new data</dt><dd>{{ formatted(status.lastDataAt) }}</dd></div>
+        <div><dt>Last sync attempt</dt><dd>{{ formatted(status.lastAttemptAt) }}</dd></div>
+      </dl>
       <form
         v-if="(!connected && status.lifecycle !== 'connecting') || editing"
         autocomplete="off"
@@ -237,7 +232,7 @@ function formatted(value: string | null): string {
         class="connection-actions"
       >
         <button
-          class="button button-secondary compact-button"
+          class="button compact-button"
           type="button"
           :disabled="busy"
           @click="editing = true"
@@ -270,7 +265,7 @@ function formatted(value: string | null): string {
           v-if="status.historicalImport.scopeFromDate && status.historicalImport.scopeFromDate !== '2000-01-01'"
           class="item-meta"
         >
-          Garmin history begins on {{ status.historicalImport.scopeFromDate }}. Earlier history keeps its existing source.
+          Garmin imports cover dates from {{ status.historicalImport.scopeFromDate }}. Your earlier history is preserved.
         </p>
         <p
           v-if="status.historicalImport.status === 'running'"

@@ -374,6 +374,103 @@ button.button {
   font-size: 1.3rem;
 }
 
+.page-connections .main-content {
+  padding-top: 32px;
+  padding-bottom: 48px;
+}
+
+.connections-page {
+  display: grid;
+  gap: 28px;
+  max-width: 880px;
+  margin-inline: auto;
+}
+
+.connections-heading h1 {
+  margin-bottom: 12px;
+  font-size: clamp(2rem, 4vw, 2.75rem);
+  line-height: 1.12;
+  letter-spacing: -0.04em;
+}
+
+.connections-heading .lede {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.garmin-connection {
+  display: grid;
+  gap: 20px;
+  padding: clamp(20px, 4vw, 32px);
+  line-height: 1.6;
+}
+
+.garmin-connection p,
+.garmin-connection h2 {
+  margin: 0;
+}
+
+.garmin-connection-heading {
+  display: grid;
+  gap: 6px;
+}
+
+.garmin-connection form {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.garmin-connection .button-row,
+.garmin-connection .connection-actions,
+.garmin-connection .historical-import,
+.garmin-connection .connection-danger-zone {
+  margin-top: 0;
+}
+
+.garmin-connection .button-secondary {
+  color: var(--ink);
+  border-color: var(--line);
+  background: transparent;
+}
+
+.garmin-connection .button-danger-outline {
+  color: var(--coral);
+  border-color: var(--coral);
+  background: transparent;
+}
+
+.garmin-sync-details {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 20px 0;
+  border-block: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.garmin-sync-details > div {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 20px;
+}
+
+.garmin-sync-details dt {
+  color: var(--muted);
+}
+
+.garmin-sync-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 520px) {
+  .garmin-sync-details > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+}
+
 .item-list {
   display: grid;
   gap: 14px;
