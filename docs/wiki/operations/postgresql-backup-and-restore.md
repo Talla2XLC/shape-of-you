@@ -119,7 +119,10 @@ replaced and flushed the live file. A full sync produced a verified v2 seal
 through `2026-11-20T13:54:00.634Z` (sequence 2). The writer barrier was released
 only after seal verification; subsequent regular timer invocations succeeded.
 Live, forensic and sealed files remain owner-only mode `0600` under the
-operator's mode-`0700` directory. No account transition was created.
+operator's mode-`0700` directory. TASK-0181 created no account transition. TASK-0182 subsequently sealed an actual
+operator-approved ownership policy before activation; its current bounds, seal
+and runtime verification are recorded in the
+[delivery evidence](temporary-vm-deployment.md).
 
 Legacy `recovery-erasure:manifest` v1 contains only erasure markers. Export
 refuses any cutover policy, including cancelled policies, in the same snapshot.

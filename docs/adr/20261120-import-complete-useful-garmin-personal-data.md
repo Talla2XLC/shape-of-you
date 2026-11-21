@@ -205,7 +205,7 @@ HRV/score/stages/minSpO₂ используют существующие мод�
 
 ## Related material
 
-- [План TASK-0182](../../plans/2026/11/2026-11-20-task-0182-garmin-complete-data-and-manual-switch.md)
+- [План TASK-0182](../../plans/2026/11/completed/2026-11-20-task-0182-garmin-complete-data-and-manual-switch.md)
 - [Текущий cutover ADR](20261120-switch-intervals-to-garmin-with-date-boundary.md)
 - [Текущие mappings](20261120-garmin-observed-wellness-mapping.md)
 - [Official Swagger](https://developer.garmin.com/gc-developer-program/personal/swagger-docs/)

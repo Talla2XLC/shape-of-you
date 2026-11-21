@@ -84,8 +84,10 @@ TASK-0181 adds an explicitly consented future-day transition while preserving
 existing facts, IDs, provenance and workout links. The implementation and its
 three API migrations are deployed to staging as release `47ba3f3`; journal v2,
 readiness and smoke are verified. See the [delivery evidence](../operations/temporary-vm-deployment.md).
-An actual account transition still requires its owner-selected date and explicit
-coverage acknowledgement.
+The ordinary public transition requires its owner-selected future date and
+explicit coverage acknowledgement. TASK-0182 separately completed the approved
+sole-account operational transfer for the current day; the public future-day
+gate remains intact. See the delivery evidence above.
 
 Under `/v1/integrations/garmin-personal/cutover`, `GET` reads safe status and
 `POST preview`, `schedule`, `retry`, and `cancel` operate on the authenticated

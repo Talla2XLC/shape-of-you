@@ -25,8 +25,9 @@ consent scopes, additional Recovery/Training fields and precise constraints.
 It is verified on clean and older-prefix isolated PostgreSQL upgrades, including
 repeated execution. Enum checks compare text during same-transaction prefix
 upgrades. Generated PostgreSQL identifiers are statically bounded to 63 bytes.
-At this documentation update it is local-only; staging application and runtime
-smoke require exact publication/promotion evidence.
+It is committed, pushed and applied to staging by GitHub Actions; exact
+migration-hash, runtime and smoke verification are recorded in the
+[delivery evidence](../operations/temporary-vm-deployment.md).
 See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
 
 

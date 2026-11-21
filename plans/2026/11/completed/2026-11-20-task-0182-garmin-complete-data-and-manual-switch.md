@@ -1,24 +1,20 @@
 # TASK-0182 — Полные полезные данные Garmin и разовый перенос аккаунта
 
-Статус: read-only проверка API выполнена; оператор разрешил разовый перенос,
-затем уточнил обязательность всех доступных полезных данных без принятия
-искусственных gaps. Architecture proposal review пройден. Оператор 2026-11-21
-ответом «го» утвердил ADR, этот план, реализацию и последующий разовый перенос.
-Локальная реализация принята независимыми Quality и Architecture Review.
-Окончательная проверка: 19 PostgreSQL/HTTP tests, 45 targeted unit tests; ранее
-559 API unit tests и 116 широких PostgreSQL-регрессий. Staging delivery и
-реальное переключение ещё не состоялись.
+Статус: выполнено. ADR/план утверждены оператором, implementation и последующие
+узкие исправления приняты независимыми Quality/Architecture Review. Commit/push,
+полная публикация и staging delivery завершены; фактический разовый перенос
+аккаунта выполнен и независимо проверен. Production не затрагивался.
 
 ## Цель
 
 Архитектурное предложение:
-[полный полезный typed import](../../../docs/adr/20261120-import-complete-useful-garmin-personal-data.md).
+[полный полезный typed import](../../../../docs/adr/20261120-import-complete-useful-garmin-personal-data.md).
 
 Исправить неполный Garmin importer, затем перевести единственный реальный
 аккаунт руками, сохранив историю, provenance и ссылки. Новый мастер сайта,
 новые сервисы и универсальная платформа миграций в этот этап не входят.
 
-## Подтверждённое состояние
+## Исходное состояние и проверка до implementation
 
 - Единственный реальный Person использует Intervals; historical import completed.
   Garmin connection, сохранённого Garmin credential и cutover не было.
@@ -70,8 +66,8 @@
 - Новые сущности сначала описываются в ADR. Raw JSON dump, переписывание
   provenance и удаление/reimport старой истории не разрешены.
 - Предыдущие восемь посторонних dirty files не входят в scope.
-- Пока нет принятой новой модели и проверенного нового импорта, Intervals
-  остаётся действующим источником. Account switch не состоялся.
+- До принятия модели и проверки нового импорта Intervals оставался действующим
+  источником. Фактическое переключение выполнено только после этих gates.
 
 ## Источники
 
@@ -79,3 +75,27 @@
 - [Официальный client](https://github.com/garmin/connect-personal-api-python)
 - [Garmin HRV semantics](https://www.garmin.com/en-GB/garmin-technology/health-science/hrv-status/)
 - Timeline TASK-0182: результаты metadata-only API проверки и независимого review.
+
+## Результат
+
+- Реализованы согласованные typed categories, consent scopes, precise units,
+  partial-group semantics, corrections/erasure и API/MCP/Coach consumers.
+- Основной commit `2a14955`; совместимость undated Training read — `39ae1df`;
+  legacy synthetic grants — `9bf8f1c`. Последний SHA полностью опубликован и
+  выложен в staging: publication `44899869203`, Promote `44900742786`.
+- Pipeline применил API migration; exact hash подтверждён SQL-проверкой.
+  API/Identity/Web runtime-ready и smoke-verified. Подробные timestamps и
+  границы приведены в единственном canonical delivery evidence.
+- Разовый перенос использовал сохранённый encrypted key без повторного ввода,
+  реальный durable v2 seal до activation и normal typed importer. История,
+  ссылки и provenance сохранены; ранние source facts не переимпортированы.
+- После resume подтверждён следующий штатный автоматический pass. Connected
+  application независимо подтвердило HRV/sleep score/Body Battery с реальным
+  временем, а Daily Decision — новые Fitness facts. Пустые Nutrition/weight
+  ответы не превращались в нули.
+- Независимая приёмка: final core 19 PostgreSQL/HTTP; полный API suite 559 unit;
+  broad PostgreSQL 116 и affected legacy scenarios 44; финальный полный CI
+  прошёл, MCP discovery 44 tools/44 валидных output schemas.
+- Восемь прежних посторонних dirty files не включены в commits.
+
+[Canonical delivery evidence](../../../../docs/wiki/operations/temporary-vm-deployment.md).

@@ -522,6 +522,37 @@ This does not affect unrelated Compose/PostgreSQL.
   contracts source; the accepted build-input fix resolved it. A full publication
   was required because the push candidate's expected base was not deployed.
 
+- 2026-11-21: TASK-0182 delivered as exact release
+  `9bf8f1c4536b259854b55a62055dd1c83615cc2f` through
+  [full publication 44899869203](https://github.com/Talla2XLC/shape-of-you/actions/runs/44899869203)
+  and [Promote staging 44900742786](https://github.com/Talla2XLC/shape-of-you/actions/runs/44900742786).
+  GitHub Actions applied the API migration at `11:48:43Z`; the Identity runner
+  confirmed its existing journal current at `11:48:49Z`. Runtime readiness and
+  staging smoke passed at `11:49:59Z`. The operator-authorized agent matched the exact new API migration SHA-256
+  in staging PostgreSQL. Owner-only pre-transfer backups
+  were flushed and archive-checked before deployment.
+  The operator-approved sole-account transfer then used the existing API-owned
+  policy with local wellness boundary `2026-11-21` and activity boundary
+  `2026-11-21T11:54:20.481Z`, without relaxing the public future-day gate.
+  A shared staging writer barrier and stopped API workers preceded pending
+  credential preparation. The real journal-v2 checkpoint sealed through
+  `2026-11-21T11:56:41.296Z` before ordinary proof/CAS activation. First direct
+  import succeeded at `12:00:02.892Z`; existing activity/workout/link and pre-day
+  Recovery fingerprints matched exactly, with normal cross-provider corrections
+  retaining same-day history. Workers resumed and a later automatic Garmin
+  pass succeeded; no old target activity or wellness records crossed the bounds.
+  The journal timer is active and its last service result is successful.
+  Public Web/API/Identity checks returned 200. Fresh MCP discovery compiled all
+  44 output schemas, including the composition read tool. Independent connected
+  application reads confirmed HRV, overall sleep score and timestamped Body
+  Battery delivery plus Fitness in Daily Decision; absent Nutrition logs stayed
+  absent. Independent operational Quality accepted these results. Initial helper
+  launch/configuration errors failed closed before their affected writes;
+  subsequent recovery remained fenced;
+  no fake journal proof, repeated key input or rollback was used. Production
+  and release tags were not involved. See the
+  [typed import ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
 ## Decisions
 
 - [Temporary deployment ADR](../../adr/20260728-use-temporary-vm-deployment-with-shared-postgresql.md)
