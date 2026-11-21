@@ -17,7 +17,7 @@ import { IntegrationProviderError } from "./provider.js";
 import { parseFitActivityDetails } from "./intervals-icu/fit-activity-details.js";
 
 /** Mapping authority acknowledged by one explicit cutover command; changes invalidate pending waivers. */
-export const garminCutoverCapabilityVersion = "garmin-cutover-v1";
+export const garminCutoverCapabilityVersion = "garmin-cutover-v2";
 
 /** Optional API-owned persistence and ordinary encrypted Garmin runtime. */
 export interface GarminCutoverRuntime {
@@ -34,10 +34,10 @@ export class CutoverCoverageChangedError extends Error {
 }
 
 const descriptions: Record<GarminCutoverCapability, string> = {
-  "recovery.hrv_rmssd": "Direct Garmin HRV mapping is not yet confirmed.",
-  "recovery.sleep_score": "Direct Garmin overall sleep score mapping is not yet confirmed.",
+  "recovery.hrv_rmssd": "Direct Garmin overnight HRV is supported.",
+  "recovery.sleep_score": "Direct Garmin overall sleep score is supported.",
   "training.normalized_load": "Garmin load is not interchangeable with Intervals relative training stress.",
-  "training.device_attribution": "Direct activity summary device attribution is not yet confirmed.",
+  "training.device_attribution": "Device attribution uses actual Garmin manufacturer and model metadata when present.",
   "training.original_fit": "An original FIT has not been validated for this candidate account."
 };
 
@@ -179,7 +179,7 @@ function keyContext(personId: string, connectionId: string): string { return `ga
 function publicPreview(context: CutoverPreviewContext, validFit = false): GarminCutoverPreview {
   const used = new Set(context.usedCapabilities);
   const gaps: GarminCutoverGap[] = GarminCutoverCapabilitySchema.enum
-    .filter(capability => used.has(capability) && !(capability === "training.original_fit" && validFit))
+    .filter(capability => used.has(capability) && !capability.startsWith("recovery.") && capability !== "training.device_attribution" && !(capability === "training.original_fit" && validFit))
     .map(capability => ({ capability, status: capability.startsWith("recovery.") || capability === "training.normalized_load" ? "unsupported" : "unverified", description: descriptions[capability] }));
   return { expectedRevision: context.expectedRevision, startsOn: context.startsOn, timezone: context.timezone,
     startsAt: context.startsAt.toISOString(), sourceDrainsUntil: context.sourceDrainsUntil.toISOString(),

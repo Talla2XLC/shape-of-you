@@ -390,7 +390,7 @@ function formatted(value: string, timezone: string): string {
               @change="dedupeKey = ''"
             >
             <span>
-              I want to switch from this date, allow automatic Garmin imports and catch-up of its new period,
+              I want to switch from this date, allow automatic Garmin imports of wellness and recovery, training, weight and body composition, nutrition and hydration data and catch-up of the new period,
               and accept the limited time for refreshing old Intervals data.
             </span>
           </label>

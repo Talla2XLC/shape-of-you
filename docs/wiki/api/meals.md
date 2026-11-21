@@ -19,6 +19,14 @@ query-only daily nutrition totals.
 
 ## Content
 
+`GET /v1/connected-data/nutrition?localDate=YYYY-MM-DD` reads provider Nutrition
+and hydration totals as a distinct source. Day Projection `nutrition.connectedDay`
+and Daily Decision Context `connectedNutritionDay` retain their provenance.
+They never create Meals or add provider totals to the Meal ledger. Missing logs
+or goals never become measured zero; genuinely measured zero is retained.
+See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
+
 - `POST /v1/nutrition/meals` — idempotent create.
 - `GET /v1/nutrition/meals` — current facts with cursor/localDate.
 - `GET /v1/nutrition/meals/:id` — any immutable fact.

@@ -35,6 +35,21 @@ export const RecoveryMetricSchema = {
     "body_battery_min",
     "body_battery_max",
     "sleep_score",
+    "stress_average",
+    "stress_maximum",
+    "stress_rest_minutes",
+    "stress_low_minutes",
+    "stress_medium_minutes",
+    "stress_high_minutes",
+    "stress_activity_minutes",
+    "stress_uncategorized_minutes",
+    "body_battery_charged",
+    "body_battery_drained",
+    "daily_respiration_rate",
+    "daily_respiration_rate_minimum",
+    "daily_respiration_rate_maximum",
+    "daily_oxygen_saturation",
+    "daily_minimum_oxygen_saturation",
     "garmin_post_activity_recovery_time",
     "steps"
   ]
@@ -69,6 +84,21 @@ export type RecoveryMetric =
   | "body_battery_min"
   | "body_battery_max"
   | "sleep_score"
+  | "stress_average"
+  | "stress_maximum"
+  | "stress_rest_minutes"
+  | "stress_low_minutes"
+  | "stress_medium_minutes"
+  | "stress_high_minutes"
+  | "stress_activity_minutes"
+  | "stress_uncategorized_minutes"
+  | "body_battery_charged"
+  | "body_battery_drained"
+  | "daily_respiration_rate"
+  | "daily_respiration_rate_minimum"
+  | "daily_respiration_rate_maximum"
+  | "daily_oxygen_saturation"
+  | "daily_minimum_oxygen_saturation"
   | "garmin_post_activity_recovery_time"
   | "steps";
 export type RecoveryMetricUnit =
@@ -309,10 +339,19 @@ export const RevokeRecoveryConsentSchema = {
 
 export interface SleepObservationDetail {
   readonly type: "sleep";
+  /** Missing on legacy observations means main sleep; naps never replace overnight sleep evidence. */
+  readonly sleepKind?: "main_sleep" | "nap";
   readonly totalSleepMinutes: number;
   readonly deepSleepMinutes?: number | null;
   readonly remSleepMinutes?: number | null;
   readonly lightSleepMinutes?: number | null;
+  readonly awakeSleepMinutes?: number | null;
+  readonly sleepNeedMinutes?: number | null;
+  readonly sleepNeedBaselineMinutes?: number | null;
+  readonly nextSleepNeedMinutes?: number | null;
+  readonly nextSleepNeedBaselineMinutes?: number | null;
+  /** Provider qualifier; not a diagnosis. */
+  readonly breathingDisruptionSeverity?: "NONE" | "LOW" | "MEDIUM" | "HIGH" | "UNMEASURABLE" | null;
   readonly sleepQuality: number | null;
 }
 
@@ -349,10 +388,17 @@ export const SleepObservationDetailSchema = {
   required: ["type", "totalSleepMinutes", "sleepQuality"],
   properties: {
     type: { const: "sleep" },
+    sleepKind: { enum: ["main_sleep", "nap"] },
     totalSleepMinutes: { type: "integer", minimum: 0, maximum: 1440 },
     deepSleepMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
     remSleepMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
     lightSleepMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    awakeSleepMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    sleepNeedMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    sleepNeedBaselineMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    nextSleepNeedMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    nextSleepNeedBaselineMinutes: { anyOf: [{ type: "integer", minimum: 0, maximum: 1440 }, { type: "null" }] },
+    breathingDisruptionSeverity: { anyOf: [{ enum: ["NONE", "LOW", "MEDIUM", "HIGH", "UNMEASURABLE"] }, { type: "null" }] },
     sleepQuality: { anyOf: [{ type: "integer", minimum: 1, maximum: 5 }, { type: "null" }] }
   },
   allOf: [{
@@ -385,10 +431,12 @@ export const MetricObservationDetailSchema = {
   allOf: [
     { if: { properties: { metric: { const: "hrv_rmssd" } } }, then: { properties: { value: { exclusiveMinimum: 0 }, unit: { const: "ms" } } } },
     { if: { properties: { metric: { enum: ["resting_heart_rate", "night_heart_rate"] } } }, then: { properties: { value: { exclusiveMinimum: 0 }, unit: { const: "bpm" } } } },
-    { if: { properties: { metric: { enum: ["oxygen_saturation", "minimum_oxygen_saturation"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "percent" } } } },
+    { if: { properties: { metric: { enum: ["oxygen_saturation", "minimum_oxygen_saturation", "daily_oxygen_saturation", "daily_minimum_oxygen_saturation"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "percent" } } } },
     { if: { properties: { metric: { const: "temperature_deviation" } } }, then: { properties: { value: { minimum: -20, maximum: 20 }, unit: { const: "celsius" } } } },
-    { if: { properties: { metric: { const: "respiration_rate" } } }, then: { properties: { value: { exclusiveMinimum: 0, maximum: 100 }, unit: { const: "breaths_per_minute" } } } },
-    { if: { properties: { metric: { enum: ["body_battery", "body_battery_min", "body_battery_max", "sleep_score"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } },
+    { if: { properties: { metric: { enum: ["respiration_rate", "daily_respiration_rate", "daily_respiration_rate_minimum", "daily_respiration_rate_maximum"] } } }, then: { properties: { value: { exclusiveMinimum: 0, maximum: 100 }, unit: { const: "breaths_per_minute" } } } },
+    { if: { properties: { metric: { enum: ["body_battery", "body_battery_min", "body_battery_max", "sleep_score", "stress_average", "stress_maximum"] } } }, then: { properties: { value: { minimum: 0, maximum: 100 }, unit: { const: "score" } } } },
+    { if: { properties: { metric: { enum: ["body_battery_charged", "body_battery_drained"] } } }, then: { properties: { value: { minimum: 0, maximum: 1000 }, unit: { const: "score" } } } },
+    { if: { properties: { metric: { enum: ["stress_rest_minutes", "stress_low_minutes", "stress_medium_minutes", "stress_high_minutes", "stress_activity_minutes", "stress_uncategorized_minutes"] } } }, then: { properties: { value: { minimum: 0, maximum: 1440 }, unit: { const: "minute" } } } },
     { if: { properties: { metric: { const: "steps" } } }, then: { properties: { value: { type: "integer", minimum: 0, maximum: 1000000 }, unit: { const: "count" } } } },
     { if: { properties: { metric: { const: "garmin_post_activity_recovery_time" } } }, then: { properties: { value: { type: "integer", minimum: 0, maximum: 65534 }, unit: { const: "minute" } } } }
   ]
@@ -606,10 +654,16 @@ export type ConnectedRecoveryMetricDeliveryState =
 /** Public per-metric delivery state, including day-completeness only for steps. */
 export type ConnectedRecoveryMetricDelivery =
   | {
-    readonly metric: Exclude<ConnectedRecoveryMetricKey, "steps">;
+    readonly metric: Exclude<ConnectedRecoveryMetricKey, "steps" | "body_battery">;
     readonly state: ConnectedRecoveryMetricDeliveryState;
     readonly periodState: null;
     readonly asOf: null;
+  }
+  | {
+    readonly metric: "body_battery";
+    readonly state: ConnectedRecoveryMetricDeliveryState;
+    readonly periodState: null;
+    readonly asOf: string | null;
   }
   | {
     readonly metric: "steps";
@@ -665,13 +719,21 @@ export const ConnectedRecoveryMetricDeliverySchema = {
       }
     },
     {
+      type: "object", additionalProperties: false,
+      required: ["metric", "state", "periodState", "asOf"],
+      properties: {
+        metric: { const: "body_battery" }, state: ConnectedRecoveryMetricDeliveryStateSchema,
+        periodState: { type: "null" }, asOf: { anyOf: [dateTime, { type: "null" }] }
+      }
+    },
+    {
       type: "object",
       additionalProperties: false,
       required: ["metric", "state", "periodState", "asOf"],
       properties: {
         metric: {
           type: "string",
-          enum: ConnectedRecoveryMetricKeySchema.enum.filter((metric) => metric !== "steps")
+          enum: ConnectedRecoveryMetricKeySchema.enum.filter((metric) => metric !== "steps" && metric !== "body_battery")
         },
         state: ConnectedRecoveryMetricDeliveryStateSchema,
         periodState: { type: "null" },

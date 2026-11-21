@@ -1,4 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ConnectedProviderDataService } from "../connected-provider-data/connected-provider-data.service.js";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 import type {
   DailyProjection,
   DailyProjectionQuery,
@@ -26,7 +27,8 @@ export class DailyProjectionService {
     @Inject(RecoveryService) private readonly recovery: RecoveryService,
     @Inject(DailyContextNoteService)
     private readonly dailyContextNotes: DailyContextNoteService,
-    @Inject(CoachingService) private readonly coaching: CoachingService
+    @Inject(CoachingService) private readonly coaching: CoachingService,
+    @Optional() @Inject(ConnectedProviderDataService) private readonly connectedData: ConnectedProviderDataService | null = null
   ) {}
 
   /** Returns current owning-domain facts for one exact Person-local date. */
@@ -63,8 +65,15 @@ export class DailyProjectionService {
       this.recovery.listAssessmentsForLocalDate(localDate),
       this.coaching.listForLocalDate(localDate, timezone)
     ]);
+    const connected = this.connectedData?.isConfigured() ? this.connectedData : null;
+    const [fitness, nutrition, composition] = connected ? await Promise.all([
+      connected.fitness({ fromDate: localDate, toDate: localDate }),
+      connected.nutrition(localDate),
+      connected.bodyComposition({ fromDate: localDate, toDate: localDate, limit: 100 })
+    ]) : [{ items: [] }, { item: null }, { items: [] }];
     return {
       physical: {
+        ...(composition.items.length ? { bodyCompositionObservations: composition.items } : {}),
         weightMeasurements: weights.map((item) => ({
           id: item.id,
           measuredAt: item.measuredAt,
@@ -83,7 +92,7 @@ export class DailyProjectionService {
         }))
       },
       nutrition: {
-        totals: {
+        ...(nutrition.item ? { connectedDay: nutrition.item } : {}),        totals: {
           mealCount: dailyTotals.mealCount,
           caloriesKcal: dailyTotals.totals.caloriesKcal,
           proteinG: dailyTotals.totals.proteinG,
@@ -100,7 +109,7 @@ export class DailyProjectionService {
         }))
       },
       training: {
-        workoutSessions: workoutSessions.filter((item) => item.completionState !== "in_progress").map((item) => ({
+        ...(fitness.items.length ? { connectedDailyFitness: fitness.items } : {}),        workoutSessions: workoutSessions.filter((item) => item.completionState !== "in_progress").map((item) => ({
           id: item.id,
           occurredAt: item.occurredAt,
           temporalPrecision: item.temporalPrecision,

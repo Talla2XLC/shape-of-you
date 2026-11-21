@@ -1,3 +1,4 @@
+import { ConnectedDailyFitnessSummaryListSchema, ConnectedNutritionDayResultSchema, BodyCompositionObservationListSchema, ConnectedProviderDateQuerySchema, ConnectedNutritionDayQuerySchema } from "@shape-of-you/contracts";
 import {
   AcceptProgressionCandidateSchema,
   ActivityRecordingModeSchema,
@@ -1266,6 +1267,22 @@ function coachingPaths(): Record<string, object> {
   };
 }
 
+function connectedProviderDataPaths(): Record<string, object> {
+  return Object.fromEntries([
+    ["fitness", ConnectedProviderDateQuerySchema, ConnectedDailyFitnessSummaryListSchema, "Read imported Training day summaries"],
+    ["nutrition", ConnectedNutritionDayQuerySchema, ConnectedNutritionDayResultSchema, "Read external intake separately from recorded Meals"],
+    ["body-composition", ConnectedProviderDateQuerySchema, BodyCompositionObservationListSchema, "Read imported Physical State composition"]
+  ].map(([path, query, output, summary]) => [`/v1/connected-data/${path}`, { get: {
+    tags: ["connected-provider-data"], summary,
+    parameters: Object.entries((query as typeof ConnectedProviderDateQuerySchema).properties).map(([name, schema]) => schemaParameter(name, "query", path === "nutrition", schema)),
+    responses: {
+      "200": { description: "Current authorized source facts", content: { "application/json": { schema: output } } },
+      "400": { description: "Invalid query", content: { "application/json": { schema: ErrorResponseSchema } } },
+      "503": { description: "Source fact storage is unavailable", content: { "application/json": { schema: ErrorResponseSchema } } }
+    }
+  } }]));
+}
+
 function dailyProjectionPaths(): Record<string, object> {
   return {
     "/v1/day-projections": {
@@ -1728,6 +1745,7 @@ export function createOpenApiDocument(): object {
       ...coachingPaths(),
       ...dailyContextNotePaths(),
       ...dailyProjectionPaths(),
+      ...connectedProviderDataPaths(),
       ...dailyAssessmentPaths(),
       ...progressOverviewPaths(),
       ...intakePaths(),

@@ -116,7 +116,7 @@ export class IntegrationCutoverRepository {
         await transaction.update(recoveryConnections).set({ status: "active", disconnectedAt: null }).where(eq(recoveryConnections.id, targetRecoveryId));
         await transaction.update(recoveryConsents).set({ status: "revoked", revokedAt: sql`clock_timestamp()`, revocationReason: "Pending cutover authorization replaced" }).where(and(eq(recoveryConsents.id, previousTarget.consentId), eq(recoveryConsents.status, "active")));
       }
-      await transaction.insert(recoveryConsents).values({ id: consentId, personId, connectionId: targetRecoveryId, purpose: "Schedule forward-only Garmin import", retentionMode: "indefinite" });
+      await transaction.insert(recoveryConsents).values({ id: consentId, personId, connectionId: targetRecoveryId, purpose: "Import Recovery, Training, Physical State and Nutrition from Garmin Personal after forward-only transition", integrationImportScopes: ["recovery", "training", "physical_state", "nutrition"], retentionMode: "indefinite" });
       await transaction.insert(recoveryConsentKinds).values([{ consentId, kind: "sleep" }, { consentId, kind: "metric" }]);
       if (previousTarget?.externalUserId && input.externalUserId && previousTarget.externalUserId !== input.externalUserId) throw new ConflictError("Garmin account identity changed");
       const values = { consentId, externalUserId: input.externalUserId ?? previousTarget?.externalUserId ?? null, lifecycle: "active" as const, importEnabled: false,

@@ -174,7 +174,8 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
         id: input.consentId,
         personId: input.personId,
         connectionId: input.recoveryConnectionId,
-        purpose: `Import Recovery wellness from ${this.providerKey}`,
+        purpose: this.providerKey === "garmin_personal" ? "Import Recovery, Training, Physical State and Nutrition from Garmin Personal" : "Import Recovery and Training from Intervals.icu",
+        integrationImportScopes: this.providerKey === "garmin_personal" ? ["recovery", "training", "physical_state", "nutrition"] : ["recovery", "training"],
         retentionMode: "indefinite"
       });
       await transaction.insert(recoveryConsentKinds).values([
@@ -271,6 +272,12 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
   }
 
   /** Reads only safe sync and target-date delivery metadata for Recovery composition. */
+  /** Returns existing daily fact keys so complete authoritative endpoints can withdraw removed children. */
+  public async recoveryFactKeys(id: string, identity: string): Promise<readonly string[]> {
+    const rows=await this.database.db.query.integrationRecoveryFacts.findMany({where:and(eq(integrationRecoveryFacts.connectionId,id),eq(integrationRecoveryFacts.providerIdentity,identity))});
+    return rows.map(row=>row.factKey);
+  }
+
   public async connectedRecoveryDelivery(
     personId: string,
     localDate: string
@@ -302,11 +309,12 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
     const normalizedDeliveryIds = new Set(records.map((record) => record.id));
     const pointers = new Map(facts.map((fact) => [fact.factKey, fact]));
     const metricDelivery = CONNECTED_RECOVERY_METRIC_KEYS.map((metric) => {
-      if ((this.providerKey === "garmin_personal" && !["sleep", "resting_heart_rate", "night_heart_rate", "oxygen_saturation", "respiration_rate", "body_battery", "body_battery_min", "body_battery_max", "steps"].includes(metric)) ||
+      if ((this.providerKey === "garmin_personal" && !["sleep", "hrv_rmssd", "sleep_score", "resting_heart_rate", "night_heart_rate", "oxygen_saturation", "respiration_rate", "body_battery", "body_battery_min", "body_battery_max", "steps"].includes(metric)) ||
           (this.providerKey === "intervals_icu" && metric === "body_battery")) {
         return { metric, state: "unknown" as const, observationId: null };
       }
-      const pointer = pointers.get(metric);
+      const point = metric === "body_battery" ? pointers.get("body_battery_instant") : undefined;
+      const pointer = point && point.normalizedChecksum !== "removed" ? point : pointers.get(metric);
       if (
         pointer?.confirmedConsentId === connection.consentId
         && pointer.confirmedDeliveryId !== null

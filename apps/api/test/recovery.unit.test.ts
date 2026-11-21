@@ -49,6 +49,23 @@ const manualMetric: CreateRecoveryObservation = {
 };
 
 describe("Recovery domain", () => {
+  it("does not replace main sleep duration with a later nap", () => {
+    const training = { sessionIds: [], externalSetCount: 0, bodyweightSetCount: 0, assistedSetCount: 0 };
+    const result = evaluateRecovery(policy, [
+      { id: "night", quality: "reliable", detail: { type: "sleep", totalSleepMinutes: 480, sleepQuality: null } },
+      { id: "nap", quality: "reliable", detail: { type: "sleep", sleepKind: "nap", totalSleepMinutes: 20, sleepQuality: null } }
+    ], training);
+    expect(result.calculation.sleepRisk).toBe(0);
+    expect(evaluateRecovery(policy, [{ id: "nap", quality: "reliable", detail: { type: "sleep", sleepKind: "nap", totalSleepMinutes: 20, sleepQuality: null } }], training).calculation.sleepRisk).toBe(0);
+  });
+
+  it("validates objective daily metrics and sleep-kind units without using subjective stress", () => {
+    expect(() => validateRecoveryObservation({ ...manualMetric, detail: { type: "metric", metric: "stress_average", unit: "score", value: 101 } })).toThrow();
+    expect(() => validateRecoveryObservation({ ...manualMetric, detail: { type: "metric", metric: "stress_rest_minutes", unit: "minute", value: 1441 } })).toThrow();
+    expect(() => validateRecoveryObservation({ ...manualMetric, detail: { type: "metric", metric: "body_battery_charged", unit: "score", value: 130 } })).not.toThrow();
+    expect(() => validateRecoveryObservation({ ...manualMetric, kind: "sleep", detail: { type: "sleep", sleepKind: "nap", totalSleepMinutes: 20, awakeSleepMinutes: -1, sleepQuality: null } })).toThrow();
+  });
+
   it("accepts a date-only qualitative report without invented scales or absent answers", () => {
     const ajv = new Ajv({ strict: false });
     const installFormats = addFormats as unknown as (instance: Ajv) => Ajv;
@@ -84,6 +101,16 @@ describe("Recovery domain", () => {
     }], { sessionIds: [], externalSetCount: 0, bodyweightSetCount: 0, assistedSetCount: 0 });
     expect(reported).toEqual(empty);
   });
+  it("retains naps as evidence without replacing the main-night duration", () => {
+    const load = { sessionIds: [], externalSetCount: 0, bodyweightSetCount: 0, assistedSetCount: 0 };
+    const main = { id: "main", quality: "reliable" as const, detail: { type: "sleep" as const, totalSleepMinutes: 480, sleepQuality: null, sleepKind: "main_sleep" as const } };
+    const nap = { id: "nap", quality: "reliable" as const, detail: { type: "sleep" as const, totalSleepMinutes: 20, sleepQuality: null, sleepKind: "nap" as const } };
+    const expected = evaluateRecovery(policy, [main], load);
+    const actual = evaluateRecovery(policy, [main, nap], load);
+    expect(actual.calculation.sleepRisk).toBe(expected.calculation.sleepRisk);
+    expect(actual.hardStop).toBe(expected.hardStop);
+  });
+
   it("derives the local date from the observation-time timezone across DST", () => {
     expect(validateRecoveryObservation(manualMetric).localDate).toBe("2026-10-25");
   });

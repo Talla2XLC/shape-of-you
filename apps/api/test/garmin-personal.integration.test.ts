@@ -8,6 +8,7 @@ import { runMigrations } from "../src/database/migrate.js";
 import { SyntheticPersonContext } from "../src/application/person-context.js";
 import { IntegrationRepository } from "../src/storage/integration-repository.js";
 import { RecoveryRepository } from "../src/storage/recovery-repository.js";
+import { ConnectedProviderRepository } from "../src/storage/connected-provider-repository.js";
 import { TrainingRepository } from "../src/storage/training-repository.js";
 import { ConnectionCredentialCipher } from "../src/integrations/credential-cipher.js";
 import { GarminPersonalProvider } from "../src/integrations/garmin-personal/provider.js";
@@ -81,7 +82,7 @@ function setup(personId: string, provider = transport()) {
   const recovery = new RecoveryRepository(database);
   const training = new TrainingRepository(database);
   const context = new SyntheticPersonContext(personId);
-  const service = new GarminPersonalService(context, recovery, training, { store, provider, cipher });
+  const service = new GarminPersonalService(context, recovery, training, { store, provider, cipher }, null, new ConnectedProviderRepository(database));
   return { store, recovery, training, service, context, provider };
 }
 
@@ -143,7 +144,7 @@ describe("direct Garmin linking and typed import", () => {
     expect((await database.pool.query("select external_user_id from integration_connections where person_id=$1", [id])).rows[0].external_user_id).toBe("123");
     const delivery = await store.connectedRecoveryDelivery(id, today);
     expect(delivery?.metricDelivery.find((item) => item.metric === "resting_heart_rate")?.state).toBe("confirmed_present");
-    expect(delivery?.metricDelivery.find((item) => item.metric === "hrv_rmssd")?.state).toBe("unknown");
+    expect(delivery?.metricDelivery.find((item) => item.metric === "hrv_rmssd")?.state).toBe("confirmed_absent");
     await database.pool.query("update integration_connections set next_attempt_at=now() where person_id=$1", [id]);
     await service.processNext("typed-repeat", 60_000);
     expect((await database.pool.query("select count(*) from recovery_observations where person_id=$1", [id])).rows[0].count).toBe("4");

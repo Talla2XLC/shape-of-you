@@ -413,6 +413,25 @@ describe("MCP HTTP adapter", () => {
     } finally { await server.close(); }
   });
 
+  it("publishes and dispatches owner-authorized imported body composition with a valid SDK schema", async () => {
+    const server = Fastify();
+    const result = { items: [{ id: "00000000-0000-4000-8000-000000000201", personId: "00000000-0000-4000-8000-000000000001", provider: "garmin_personal", connectionId: "00000000-0000-4000-8000-000000000202", consentId: "00000000-0000-4000-8000-000000000203", sourceIdentity: "synthetic-sample", localDate: "2026-11-21", timezone: "UTC", version: 1, supersedesId: null, withdrawn: false, createdAt: "2026-11-21T10:00:00Z", measuredAt: null, temporalPrecision: "local_date", weightMeasurementId: null, values: { bodyFatPercent: 18, bodyWaterPercent: null, muscleMassKg: null, boneMassKg: null, bmi: 23 } }] };
+    const read = vi.fn().mockResolvedValue(result);
+    registerMcpRoutes({ fastify: server, issuer: "https://identity.example.test", resource: "https://api.example.test/api/mcp",
+      authorizer: { authorize: async () => ({ personId: result.items[0]!.personId, roles: ["owner"] }) }, personContext: new RequestPersonContext(),
+      services: { ...unavailableServices, connectedProviderData: { bodyComposition: read } } });
+    try {
+      const headers = { accept: "application/json, text/event-stream", authorization: "Bearer test" };
+      const listed = (await server.inject({ method: "POST", url: "/mcp", headers, payload: { jsonrpc: "2.0", id: 145, method: "tools/list", params: {} } })).json();
+      expect(() => ListToolsResultSchema.parse(listed.result)).not.toThrow();
+      const tool = listed.result.tools.find((item: { name: string }) => item.name === "list_body_composition_observations");
+      expect(tool.annotations).toMatchObject({ readOnlyHint: true });
+      const response = await server.inject({ method: "POST", url: "/mcp", headers, payload: { jsonrpc: "2.0", id: 146, method: "tools/call", params: { name: tool.name, arguments: { fromDate: "2026-11-21", limit: 10 } } } });
+      expect(response.json().result.structuredContent).toEqual(result);
+      expect(read).toHaveBeenCalledWith({ fromDate: "2026-11-21", limit: 10 });
+    } finally { await server.close(); }
+  });
+
   it("advertises the scoped tools without exposing domain data", async () => {
     const response = await fastify.inject({
       method: "POST",
@@ -757,7 +776,7 @@ describe("MCP HTTP adapter", () => {
     }) => detail.properties.type.const === "metric");
     expect(metricDetailSchema.properties.metric.enum).toContain("sleep_score");
     expect(metricDetailSchema.allOf).toContainEqual(expect.objectContaining({
-      if: { properties: { metric: { enum: ["body_battery", "body_battery_min", "body_battery_max", "sleep_score"] } } },
+      if: { properties: { metric: { enum: expect.arrayContaining(["body_battery", "body_battery_min", "body_battery_max", "sleep_score"]) } } },
       then: {
         properties: {
           value: { minimum: 0, maximum: 100 },
@@ -854,20 +873,11 @@ describe("MCP HTTP adapter", () => {
       expect(Object.keys(
         branch.properties.recentExternalActivities.items.properties
       ).sort()).toEqual([
-        "averageHeartRate",
-        "classification",
-        "deviceName",
-        "distanceMeters",
-        "durationSeconds",
-        "garminAttributed",
-        "id",
-        "localDate",
-        "maximumHeartRate",
-        "name",
-        "occurredAt",
-        "timezone",
-        "trainingLoad"
-      ]);
+        "aerobicTrainingEffect", "anaerobicTrainingEffect", "averageHeartRate", "averagePowerWatts", "bodyBatteryDelta", "caloriesKcal",
+        "classification", "deviceName", "distanceMeters", "durationSeconds", "garminAttributed", "id", "intensityFactor", "localDate",
+        "maximumHeartRate", "maximumPowerWatts", "name", "normalizedPowerWatts", "occurredAt", "providerExerciseLoad", "providerExerciseLoadBasis",
+        "timezone", "trainingLoad", "trainingStressScore"
+      ].sort());
       const classification = branch.properties.recentExternalActivities.items
         .properties.classification.anyOf[0];
       expect(Object.keys(classification.properties).sort()).toEqual([

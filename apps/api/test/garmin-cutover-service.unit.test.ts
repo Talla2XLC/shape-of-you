@@ -9,7 +9,7 @@ import type { CutoverRecord, IntegrationCutoverRepository } from "../src/storage
 import { CutoverJournalProofRequiredError } from "../src/storage/integration-cutover-repository.js";
 
 const key = "synthetic-cutover-key";
-function fixture(usedCapabilities: string[] = ["recovery.hrv_rmssd", "recovery.sleep_score"]) {
+function fixture(usedCapabilities: string[] = ["training.normalized_load", "training.original_fit"]) {
   const personId = randomUUID();
   const cipher = new ConnectionCredentialCipher("test", new Map([["test", randomBytes(32)]]));
   const base = { id: randomUUID(), personId, version: 1, state: "scheduled", startsOn: "2090-01-01", timezone: "UTC",
@@ -54,9 +54,14 @@ describe("Garmin cutover coordinator", () => {
   it("previews locally without requesting or persisting a credential", async () => {
     const f = fixture();
     expect(await f.service.preview({})).toMatchObject({ startsOn: "2090-01-01", sourceTailFromDate: "2089-12-18",
-      gaps: [{ capability: "recovery.hrv_rmssd" }, { capability: "recovery.sleep_score" }] });
+      gaps: [{ capability: "training.normalized_load" }, { capability: "training.original_fit" }] });
     expect(f.provider.inspectCutoverCandidate).not.toHaveBeenCalled();
     expect(f.store.schedule).not.toHaveBeenCalled();
+  });
+
+  it("does not advertise confirmed HRV and sleep score mapping as coverage gaps", async () => {
+    const f = fixture(["recovery.hrv_rmssd", "recovery.sleep_score", "training.device_attribution"]);
+    await expect(f.service.preview({})).resolves.toMatchObject({ capabilityVersion: "garmin-cutover-v2", gaps: [] });
   });
 
   it("returns a bounded refreshed preview before persistence when waivers are missing", async () => {

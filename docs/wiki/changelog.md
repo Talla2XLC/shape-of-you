@@ -20,6 +20,15 @@ parsing, rollback operations, and production deployment remain separate stages.
 
 ## Content
 
+### 2026-11-21 — Complete useful typed Garmin import accepted locally
+
+TASK-0182 adds confirmed HRV/sleep score and real latest Body Battery samples,
+typed connected fitness/Nutrition/Physical State facts, activity/FIT physiology
+and API/MCP/Coach reads with exact consent and erasure fences. Imported intake
+and expenditure remain separate from manual ledgers. Independent local Quality
+and Architecture Review passed; staging publication and the approved one-off
+account transfer remain pending. See the [typed Garmin data ADR](../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
 ### 2026-11-20 — Provider transition and journal v2 delivered to staging
 
 - TASK-0181 adds future-day Intervals to Garmin transition controls, one key

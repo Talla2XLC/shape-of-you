@@ -1,4 +1,5 @@
-import { Inject, Injectable } from "@nestjs/common";
+import { ConnectedProviderDataService } from "../connected-provider-data/connected-provider-data.service.js";
+import { Inject, Injectable, Optional } from "@nestjs/common";
 
 import type {
   CompleteTrainingProgram,
@@ -76,6 +77,7 @@ function toExternalActivitySummary(
     durationSeconds: activity.durationSeconds,
     distanceMeters: activity.distanceMeters,
     trainingLoad: activity.trainingLoad,
+    ...Object.fromEntries(["trainingStressScore", "providerExerciseLoad", "providerExerciseLoadBasis", "aerobicTrainingEffect", "anaerobicTrainingEffect", "caloriesKcal", "averagePowerWatts", "normalizedPowerWatts", "maximumPowerWatts", "intensityFactor", "bodyBatteryDelta"].flatMap(key => { const value = activity[key as keyof ExternalActivityFact]; return value === null || value === undefined ? [] : [[key, value]]; })),
     averageHeartRate: activity.averageHeartRate,
     maximumHeartRate: activity.maximumHeartRate,
     deviceName: activity.deviceName,
@@ -195,7 +197,8 @@ export class TrainingService {
     @Inject(TRAINING_STORE)
     private readonly store: TrainingStore,
     @Inject(PERSON_CONTEXT)
-    private readonly personContext: PersonContext
+    private readonly personContext: PersonContext,
+    @Optional() @Inject(ConnectedProviderDataService) private readonly connectedData: ConnectedProviderDataService | null = null
   ) {}
 
   /** Reads bounded owner-consolidated Training history for Coaching. */
@@ -392,6 +395,8 @@ export class TrainingService {
       localDate === null ? Promise.resolve([]) : this.store.listExternalActivitiesForLocalDate(personId, localDate),
       localDate === null ? Promise.resolve([]) : this.store.listActivityLinkProgramContextForLocalDate(personId, localDate)
     ]);
+    const connectedDailyFitness = this.connectedData?.isConfigured()
+      ? (await this.connectedData.fitness(localDate ? { fromDate: localDate, toDate: localDate } : {})).items : [];
     const trustedExternalTitles = program?.activeVersionId
       ? await this.store.listTrustedExternalActivityTitles(personId, program.id, program.activeVersionId)
       : [];
@@ -430,6 +435,7 @@ export class TrainingService {
           program,
           recentSessions,
           recentExternalActivities,
+          ...(connectedDailyFitness.length ? { connectedDailyFitness } : {}),
           trustedExternalTitles: [...trustedExternalTitles],
           activityRecordingMode,
           ...(pendingQuestion === null ? {} : { pendingActivityLinkQuestion: pendingQuestion }),
@@ -440,6 +446,7 @@ export class TrainingService {
           program: null,
           recentSessions,
           recentExternalActivities,
+          ...(connectedDailyFitness.length ? { connectedDailyFitness } : {}),
           trustedExternalTitles: [...trustedExternalTitles],
           activityRecordingMode,
           ...(pendingQuestion === null ? {} : { pendingActivityLinkQuestion: pendingQuestion }),

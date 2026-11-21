@@ -8,12 +8,14 @@ import type {
   IntegrationAuthorizationStart,
   StartGarminIntervalsAuthorization,
   CreateRecoveryObservation,
-  RecoveryObservationDetail
+  RecoveryObservationDetail,
+  RecoveryMetric, RecoveryMetricUnit
 } from "@shape-of-you/contracts";
 
-import { INTEGRATION_IMPORT_CONTEXT, PERSON_CONTEXT, INTEGRATION_CIPHER, INTEGRATION_PROVIDER, INTEGRATION_STORE, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
+import { CONNECTED_PROVIDER_DATA_STORE, INTEGRATION_IMPORT_CONTEXT, PERSON_CONTEXT, INTEGRATION_CIPHER, INTEGRATION_PROVIDER, INTEGRATION_STORE, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
 import type { PersonContext } from "../application/person-context.js";
 import type { RecoveryStore } from "../storage/recovery-repository.js";
+import type { ConnectedProviderRepository } from "../storage/connected-provider-repository.js";
 import type { TrainingStore } from "../storage/training-repository.js";
 import type { ConnectionCredentialCipher } from "./credential-cipher.js";
 import type { ActiveIntegrationConnection, IntegrationImportPolicy, IntegrationStore } from "./integration-store.js";
@@ -42,7 +44,8 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
     @Inject(INTEGRATION_CIPHER) private readonly cipher: ConnectionCredentialCipher | null,
     @Inject(RECOVERY_STORE) private readonly recovery: RecoveryStore,
     @Inject(TRAINING_STORE) private readonly training: TrainingStore,
-    @Optional() @Inject(INTEGRATION_IMPORT_CONTEXT) private readonly context: IntegrationImportContext = { providerKey: "intervals_icu", historicalWindowDays }
+    @Optional() @Inject(INTEGRATION_IMPORT_CONTEXT) private readonly context: IntegrationImportContext = { providerKey: "intervals_icu", historicalWindowDays },
+    @Optional() @Inject(CONNECTED_PROVIDER_DATA_STORE) private readonly connectedData: Pick<ConnectedProviderRepository, "importFitnessDay" | "importNutritionDay" | "importBodyMeasurement"> | null = null
   ) {}
 
   /** Indicates whether this coordinator can issue provider requests; policy cleanup needs no credentials. */
@@ -246,11 +249,25 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
     const options = policy || beforeRequest ? { ...(beforeRequest ? { beforeRequest } : {}),
       ...(policy ? { activityFromDate: addDays(oldest, -2), activityToDate: addDays(newest, 2) } : {}) } : undefined;
     const result = await this.provider!.reconcile(token, oldest, newest, `${connection.id}:${connection.consentId}`, options);
+    if ((result.connectedDays?.length || result.bodyMeasurements?.length) && !this.connectedData) throw new IntegrationProviderError("provider_unavailable");
     let changed = false;
     let timezone: string | null | undefined;
     for (const wellness of result.wellness) {
       if (!admitted(policy, wellness.localDate)) continue;
       changed = await this.importWellness(connection, wellness) || changed;
+    }
+    const connectedOwner = { id: connection.id, personId: connection.personId, consentId: connection.consentId, providerKey: this.context.providerKey };
+    for (const day of result.connectedDays ?? []) {
+      if (!admitted(policy, day.localDate)) continue;
+      if (day.fitness) { const outcome = await this.connectedData!.importFitnessDay(connectedOwner, day); changed = outcome === "created" || outcome === "corrected" || changed; }
+      if (day.nutrition) { const outcome = await this.connectedData!.importNutritionDay(connectedOwner, day); changed = outcome === "created" || outcome === "corrected" || changed; }
+    }
+    for (const measurement of result.bodyMeasurements ?? []) {
+      // Physical measurements use the snapshot policy timezone/date boundary, never the activity instant fence.
+      const date = measurement.measuredAt && policy ? dateAtTimezone(measurement.measuredAt, policy.timezone) : measurement.localDate;
+      if (!admitted(policy, date)) continue;
+      const outcome = await this.connectedData!.importBodyMeasurement(connectedOwner, measurement);
+      changed = outcome === "created" || outcome === "corrected" || changed;
     }
     for (const activity of result.activities) {
       if (!admitted(policy, activity.localDate, activity.occurredAt)) continue;
@@ -259,7 +276,7 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
       ));
       // Recheck FIT once per UTC day because the original file can change without summary changes.
       const inboxChecksum = activity.fileType === "fit"
-        ? normalizedChecksum({ activityChecksum, fitImportVersion: 2, fitReviewDate: isoDate(new Date()) })
+        ? normalizedChecksum({ activityChecksum, fitImportVersion: 2, fitNormalizationVersion: activityDetailsNormalizationVersion, fitReviewDate: isoDate(new Date()) })
         : activityChecksum;
       const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "activity", activity.identity, inboxChecksum,
         { localDate: activity.localDate, occurredAt: activity.occurredAt });
@@ -278,7 +295,13 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
         trainingLoadBasisVersion: activity.trainingLoadBasisVersion,
         averageHeartRate: activity.averageHeartRate,
         maximumHeartRate: activity.maximumHeartRate, deviceName: activity.deviceName,
-        sourceProvider: this.context.providerKey, garminAttributed: activity.garminAttributed
+        sourceProvider: this.context.providerKey, garminAttributed: activity.garminAttributed,
+        trainingStressScore: activity.trainingStressScore ?? null,
+        providerExerciseLoad: activity.providerExerciseLoad ?? null, providerExerciseLoadBasis: activity.providerExerciseLoadBasis ?? null,
+        aerobicTrainingEffect: activity.aerobicTrainingEffect ?? null, anaerobicTrainingEffect: activity.anaerobicTrainingEffect ?? null,
+        caloriesKcal: activity.caloriesKcal ?? null, averagePowerWatts: activity.averagePowerWatts ?? null,
+        normalizedPowerWatts: activity.normalizedPowerWatts ?? null, maximumPowerWatts: activity.maximumPowerWatts ?? null,
+        intensityFactor: activity.intensityFactor ?? null, bodyBatteryDelta: activity.bodyBatteryDelta ?? null
       });
       if (outcome === "stopped") continue;
       if (needsFit) {
@@ -288,7 +311,7 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
       await this.store!.completeInbox(connection.id, connection.consentId, inbox.receiptId);
       changed = outcome !== "unchanged" || changed;
     }
-    return { changed, complete: true };
+    return { changed, complete: !result.incomplete };
   }
 
   private async importActivityRecovery(
@@ -378,8 +401,8 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
     const inbox = await this.store!.recordInbox(connection.id, connection.consentId, "wellness", wellness.identity, recordChecksum,
       { localDate: wellness.localDate });
     if (inbox.state !== "process") return false;
-    const facts: readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] = [
-      ...(wellness.totalSleepMinutes === null ? [] : [{ key: "sleep", detail: { type: "sleep" as const, totalSleepMinutes: wellness.totalSleepMinutes, sleepQuality: null } }]),
+    const facts: readonly WellnessFact[] = [
+      ...(wellness.totalSleepMinutes === null ? [] : [{ key: "sleep", detail: wellness.sleepDetail ?? { type: "sleep" as const, totalSleepMinutes: wellness.totalSleepMinutes, sleepQuality: null } }]),
       ...metric("sleep_score", "score", wellness.sleepScore),
       ...metric("resting_heart_rate", "bpm", wellness.restingHeartRate),
       ...metric("night_heart_rate", "bpm", wellness.averageSleepingHeartRate),
@@ -389,11 +412,14 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
       ...metric("body_battery", "score", wellness.bodyBatteryLatest ?? null),
       ...metric("body_battery_min", "score", wellness.bodyBatteryMinimum),
       ...metric("body_battery_max", "score", wellness.bodyBatteryMaximum),
-      ...metric("steps", "count", wellness.steps ?? null)
+      ...metric("steps", "count", wellness.steps ?? null),
+      ...(wellness.extraMetrics ?? []).map((detail) => ({ key: detail.metric, detail })),
+      ...(wellness.bodyBatteryInstant ? [{ key: "body_battery_instant", detail: { type: "metric" as const, metric: "body_battery" as const, unit: "score" as const, value: wellness.bodyBatteryInstant.value }, observedFrom: wellness.bodyBatteryInstant.observedAt, observedUntil: wellness.bodyBatteryInstant.observedAt }] : []),
+      ...(wellness.naps ?? []).map((nap) => ({ key: `sleep_nap:${nap.identity}`, detail: { type: "sleep" as const, sleepKind: "nap" as const, totalSleepMinutes: nap.totalSleepMinutes, sleepQuality: null }, observedFrom: nap.observedFrom, observedUntil: nap.observedUntil }))
     ];
     let changed = false;
     for (const fact of facts) {
-      const checksum = normalizedChecksum({ localDate: wellness.localDate, detail: fact.detail });
+      const checksum = normalizedChecksum({ localDate: wellness.localDate, detail: fact.detail, ...(fact.observedFrom ? { observedFrom: fact.observedFrom, observedUntil: fact.observedUntil } : {}) });
       const current = await this.store!.recoveryFact(connection.id, wellness.identity, fact.key);
       if (current?.checksum === checksum) {
         await this.store!.linkRecoveryFact(connection.id, connection.consentId, wellness.identity, inbox.receiptId, fact.key, checksum, current.observationId);
@@ -401,10 +427,10 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
       }
       const base: CreateRecoveryObservation = {
         kind: fact.detail.type,
-        observedFrom: null,
-        observedUntil: null,
-        temporalPrecision: "local_date",
-        localDate: wellness.localDate,
+        observedFrom: fact.observedFrom ?? null,
+        observedUntil: fact.observedUntil ?? null,
+        temporalPrecision: fact.observedFrom ? "instant" : "local_date",
+        localDate: fact.observedFrom ? null : wellness.localDate,
         timezone: wellness.timezone,
         quality: "reliable",
         connectionId: connection.recoveryConnectionId,
@@ -414,7 +440,7 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
           channel: "account",
           externalSystem: `${this.context.providerKey}_wellness`,
           externalRecordId: `${wellness.identity}:${fact.key}:${checksum}`,
-          occurredAt: fact.key === "steps" ? wellness.updatedAt ?? null : null
+          occurredAt: fact.observedUntil ?? (fact.key === "steps" ? wellness.updatedAt ?? null : null)
         },
         detail: fact.detail
       };
@@ -425,19 +451,9 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
       changed = persisted.created || changed;
     }
     const present = new Set(facts.map((fact) => fact.key));
-    for (const factKey of [
-      "sleep",
-      "sleep_score",
-      "resting_heart_rate",
-      "night_heart_rate",
-      "hrv_rmssd",
-      "oxygen_saturation",
-      "respiration_rate",
-      "body_battery",
-      "body_battery_min",
-      "body_battery_max",
-      "steps"
-    ] as const) {
+    const previousKeys = wellness.naps !== undefined ? await this.store!.recoveryFactKeys?.(connection.id, wellness.identity) ?? [] : [];
+    const authoritative = wellness.authoritativeFactKeys ?? legacyWellnessFactKeys;
+    for (const factKey of [...authoritative, ...previousKeys.filter((key) => key.startsWith("sleep_nap:"))]) {
       if (present.has(factKey)) continue;
       const current = await this.store!.recoveryFact(connection.id, wellness.identity, factKey);
       if (!current) continue;
@@ -475,8 +491,8 @@ export class IntegrationService<Status extends IntegrationConnection = GarminInt
 }
 
 function metric(
-  metricName: "sleep_score" | "resting_heart_rate" | "night_heart_rate" | "hrv_rmssd" | "oxygen_saturation" | "respiration_rate" | "body_battery" | "body_battery_min" | "body_battery_max" | "steps",
-  unit: "score" | "bpm" | "ms" | "percent" | "breaths_per_minute" | "count",
+  metricName: RecoveryMetric,
+  unit: RecoveryMetricUnit,
   value: number | null
 ): readonly { readonly key: string; readonly detail: RecoveryObservationDetail }[] {
   return value === null ? [] : [{ key: metricName, detail: { type: "metric", metric: metricName, value, unit } }];
@@ -518,4 +534,12 @@ function unavailableStatus(lifecycle: "unavailable" | "disconnected" = "unavaila
       lastAttemptAt: null, completedAt: null, failureCode: null
     }
   };
+}
+
+interface WellnessFact { readonly key: string; readonly detail: RecoveryObservationDetail; readonly observedFrom?: string; readonly observedUntil?: string; }
+const legacyWellnessFactKeys = ["sleep", "sleep_score", "resting_heart_rate", "night_heart_rate", "hrv_rmssd", "oxygen_saturation", "respiration_rate", "body_battery", "body_battery_min", "body_battery_max", "steps"] as const;
+function dateAtTimezone(instant: string, timezone: string): string {
+  const parts = new Intl.DateTimeFormat("en", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(instant));
+  const part = (type: string) => parts.find((p) => p.type === type)!.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
 }

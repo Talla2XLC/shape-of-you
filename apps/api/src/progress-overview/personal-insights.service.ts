@@ -87,7 +87,7 @@ export class PersonalInsightsService {
       timezone: query.timezone,
       weights: weights.map((item) => ({ id: item.id, localDate: item.localDate, measuredAt: item.measuredAt, weightKg: item.weightKg })),
       trainingDays,
-      sleeps: observations.filter((item) => item.kind === "sleep" && item.detail.type === "sleep").map((item) => ({
+      sleeps: observations.filter((item) => item.kind === "sleep" && item.detail.type === "sleep" && item.detail.sleepKind !== "nap").map((item) => ({
         id: item.id, localDate: item.localDate, totalSleepMinutes: item.detail.type === "sleep" ? item.detail.totalSleepMinutes : 0,
         quality: item.quality
       })),

@@ -3,7 +3,7 @@ import type { ActivityDetailsPayload, ActivityMetrics } from "@shape-of-you/cont
 import { ActivityDetailsReadError } from "../provider.js";
 
 /** Stable interpretation of standard FIT channels; independent of Recovery Time private mapping. */
-export const activityDetailsNormalizationVersion = "standard-fit-details-v1";
+export const activityDetailsNormalizationVersion = "standard-fit-details-v2";
 
 type Message = Record<string, unknown>;
 const channels: Record<keyof ActivityMetrics, readonly [string, number, number]> = {
@@ -63,6 +63,14 @@ export function parseFitActivityDetails(file: Uint8Array): ActivityDetailsPayloa
     return { sessions: ranges.map(({ session, start, end }, index) => {
       const include = (at: number) => at >= start && (at < end || (at === end && ranges[index + 1]?.start !== end));
       return {
+        summary: {
+          caloriesKcal: number(session.totalCalories, 0, 100000), trainingStressScore: number(session.trainingStressScore, 0, 10000),
+          aerobicTrainingEffect: number(session.totalTrainingEffect, 0, 5), anaerobicTrainingEffect: number(session.totalAnaerobicTrainingEffect, 0, 5),
+          averagePowerWatts: number(session.avgPower, 0, 10000), maximumPowerWatts: number(session.maxPower, 0, 10000),
+          normalizedPowerWatts: number(session.normalizedPower, 0, 10000), intensityFactor: number(session.intensityFactor, 0, 10),
+          manufacturer: safeText(messages.fileIdMesgs?.[0]?.manufacturer),
+          deviceName: safeText((messages.deviceInfoMesgs ?? []).find((device) => device.deviceIndex === "creator" || device.deviceIndex === 0)?.productName)
+        },
         startTimestamp: new Date(start).toISOString(), elapsedSeconds: (end - start) / 1000,
         timerSeconds: number(session.totalTimerTime, 0, 604800), sport: typeof session.sport === "string" ? session.sport.slice(0, 64) : null,
         records: dated.filter(({ at }) => include(at)).map(({ record, at }) => ({
@@ -107,3 +115,5 @@ function time(value: unknown): number | null {
 }
 function invalid(): never { throw new ActivityDetailsReadError("invalid_fit"); }
 function limit(): never { throw new ActivityDetailsReadError("limit_exceeded"); }
+
+function safeText(value: unknown): string | null { return typeof value === "string" && value.length > 0 && value.length <= 128 ? value : null; }

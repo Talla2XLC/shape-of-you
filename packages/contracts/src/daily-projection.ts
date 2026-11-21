@@ -1,3 +1,4 @@
+import { BodyCompositionObservationSchema, ConnectedDailyFitnessSummarySchema, ConnectedNutritionDaySchema } from "./connected-provider-data.js";
 import type { FromSchema } from "json-schema-to-ts";
 
 const uuid = { type: "string", format: "uuid" } as const;
@@ -37,6 +38,7 @@ export const DaySnapshotSchema = {
       additionalProperties: false,
       required: ["weightMeasurements", "bodyMeasurementSessions"],
       properties: {
+        bodyCompositionObservations: { type: "array", items: BodyCompositionObservationSchema, maxItems: 100 },
         weightMeasurements: {
           type: "array",
           items: {
@@ -84,6 +86,7 @@ export const DaySnapshotSchema = {
       additionalProperties: false,
       required: ["totals", "meals"],
       properties: {
+        connectedDay: ConnectedNutritionDaySchema,
         totals: nutritionTotalsSummarySchema,
         meals: {
           type: "array",
@@ -106,6 +109,7 @@ export const DaySnapshotSchema = {
       additionalProperties: false,
       required: ["workoutSessions"],
       properties: {
+        connectedDailyFitness: { type: "array", items: ConnectedDailyFitnessSummarySchema, maxItems: 366 },
         workoutSessions: {
           type: "array",
           items: {

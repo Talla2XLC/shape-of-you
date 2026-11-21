@@ -1,3 +1,5 @@
+import { ConnectedProviderRepository } from "./storage/connected-provider-repository.js";
+import { ConnectedProviderDataService } from "./connected-provider-data/connected-provider-data.service.js";
 import "reflect-metadata";
 
 import { NestFactory } from "@nestjs/core";
@@ -330,6 +332,7 @@ export async function buildApp(
       database,
       integrationStore,
       garminPersonalRuntime,
+      connectedProviderDataStore: database ? new ConnectedProviderRepository(database) : null,
       garminCutoverRuntime: database ? { store: new IntegrationCutoverRepository(database), garmin: garminPersonalRuntime } : null,
       integrationProvider,
       integrationCipher,
@@ -361,6 +364,7 @@ export async function buildApp(
       ),
       personContext,
       services: {
+        connectedProviderData: app.get(ConnectedProviderDataService),
         weights: app.get(WeightMeasurementService),
         bodyMeasurements: app.get(BodyMeasurementSessionService),
         nutrition: app.get(NutritionService),

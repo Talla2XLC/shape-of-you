@@ -32,8 +32,8 @@ The user creates a Personal API key in Garmin settings, pastes it into the
 masked field, and connects with explicit import consent. Successful token
 exchange and an authenticated profile read are sufficient: an account without
 health or activity records remains connected with no data. No initial watch
-sync or external account ID is required from the user. The external identity
-is bound from documented record IDs before domain writes; a different account
+sync or external account ID is required from the user. When documented record IDs are available, external identity
+is bound before domain writes; a different account
 after key rotation cannot silently merge with retained facts.
 
 Endpoints under `/v1/integrations/garmin-personal` are `GET` status and `POST`
@@ -52,15 +52,23 @@ it. Local disconnect stops import and discards the key; revoking the key in
 Garmin remains the account owner's separate action. Imported-data deletion
 continues through the existing fresh-passkey erasure flow.
 
-Current direct normalization covers sleep duration, explicit resting heart rate,
-sleep-average heart rate, SpO2 and respiration, separate daily Body Battery
-latest/minimum/maximum, steps with provider chronology, and activity
-summaries/original FIT details. Body Battery latest is a `local_date` snapshot,
-not an instant reading; no fetch/sync timestamp is assigned as measurement time.
-HRV and overall sleep score mappings remain unconfirmed; their delivery state
-is `unknown`. The [observed mapping ADR](../../adr/20261120-garmin-observed-wellness-mapping.md)
-defines the exact interpretation and consumer constraints.
-Garmin training load is not mapped to Intervals relative training stress.
+Direct normalization includes confirmed overnight HRV, overall sleep score,
+sleep stages/need/naps, night minimum SpO2, stress, daily respiration/SpO2,
+energy/movement, fitness-age and VO2max summaries, typed Nutrition totals,
+weight/body composition, and activity/FIT measurements. Only verified wire
+units are mapped; absent categories remain unknown. Body Battery prefers the
+latest real timestamped sample; a separate date-only latest remains available
+without an invented measurement time. Garmin exercise load has its own basis,
+separate from Intervals relative training stress and TSS. See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
+Fresh Garmin consent explicitly names Recovery, Training, Physical State and
+Nutrition. Legacy integration grants retain only Recovery/Training scopes.
+Every writer fences the exact Person, connection, consent generation, source
+bounds and accepted erasure. Failed primary-source groups preserve prior
+facts and prevent historical checkpoint advancement; authoritative empty groups
+clear only their own fields. Account identity is checked whenever documented
+record IDs are available; authenticated identityless categories never invent ID.
+
 History uses bounded fourteen-day windows with complete activity pagination;
 ZIP files are validated and decoded in memory. Empty windows do not end the
 entire historical scan.
@@ -82,9 +90,10 @@ coverage acknowledgement.
 Under `/v1/integrations/garmin-personal/cutover`, `GET` reads safe status and
 `POST preview`, `schedule`, `retry`, and `cancel` operate on the authenticated
 Person. The preview fixes the future local date and timezone, the fourteen-day
-source drain deadline and explicit capability gaps. HRV rMSSD, overall sleep
-score, normalized training load, device attribution and original FIT are closed
-capability keys, acknowledged individually when relevant. Candidate inspection
+source drain deadline and explicit capability gaps. Capability version
+`garmin-cutover-v2` recognizes confirmed HRV, sleep-score and manufacturer
+mapping. Intervals normalized load still has different semantics, and original
+FIT availability is verified per candidate; these remain explicit when relevant. Candidate inspection
 validates any available original FIT without storing domain facts. A refreshed
 `coverage_changed` preview clears consent and waivers; the masked key remains
 only in form memory. Failed activation can retry using the encrypted pending

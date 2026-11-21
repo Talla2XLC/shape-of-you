@@ -433,8 +433,12 @@ export class RecoveryRepository implements RecoveryStore {
     if (!rows[0]) {
       throw new ConflictError("Connected observation is not permitted by active consent and retention");
     }
+    if (input.sourceReference.channel === "account") {
+      const integration = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.recoveryConnectionId, input.connectionId!)) });
+      if (integration && (!rows[0].consent.integrationImportScopes.includes("recovery") || integration.consentId !== input.consentId || !integration.importEnabled)) throw new ConflictError("Recovery import scope or generation is not permitted");
+    }
     if (input.sourceReference.channel === "account" && !await integrationRecoveryRecordAllowed(transaction, personId, input.connectionId!, input.consentId!, {
-      localDate: input.localDate ?? null, externalRecordId: input.sourceReference.externalRecordId ?? null, externalSystem: input.sourceReference.externalSystem ?? null
+      localDate: input.localDate ?? null, observedAt: input.temporalPrecision === "instant" ? input.observedUntil ?? input.observedFrom ?? null : null, externalRecordId: input.sourceReference.externalRecordId ?? null, externalSystem: input.sourceReference.externalSystem ?? null
     })) throw new ConflictError("Observation falls outside provider cutover authority");
   }
 
@@ -498,6 +502,14 @@ export class RecoveryRepository implements RecoveryStore {
         deepSleepMinutes: detail.deepSleepMinutes ?? null,
         remSleepMinutes: detail.remSleepMinutes ?? null,
         lightSleepMinutes: detail.lightSleepMinutes ?? null,
+        awakeSleepMinutes: detail.awakeSleepMinutes ?? null,
+        sleepNeedMinutes: detail.sleepNeedMinutes ?? null,
+        sleepNeedBaselineMinutes: detail.sleepNeedBaselineMinutes ?? null,
+        nextSleepNeedMinutes: detail.nextSleepNeedMinutes ?? null,
+        nextSleepNeedBaselineMinutes: detail.nextSleepNeedBaselineMinutes ?? null,
+        breathingDisruptionSeverity: detail.breathingDisruptionSeverity ?? null,
+        sleepKind: detail.sleepKind ?? null,
+
         sleepQuality: detail.sleepQuality
       });
     } else if (detail.type === "metric") {
@@ -762,6 +774,14 @@ export class RecoveryRepository implements RecoveryStore {
         deepSleepMinutes: item.deepSleepMinutes,
         remSleepMinutes: item.remSleepMinutes,
         lightSleepMinutes: item.lightSleepMinutes,
+        awakeSleepMinutes: item.awakeSleepMinutes,
+        sleepNeedMinutes: item.sleepNeedMinutes,
+        sleepNeedBaselineMinutes: item.sleepNeedBaselineMinutes,
+        nextSleepNeedMinutes: item.nextSleepNeedMinutes,
+        nextSleepNeedBaselineMinutes: item.nextSleepNeedBaselineMinutes,
+        ...(item.sleepKind === null ? {} : {sleepKind: item.sleepKind as "main_sleep" | "nap"}),
+        breathingDisruptionSeverity: item.breathingDisruptionSeverity as "NONE" | "LOW" | "MEDIUM" | "HIGH" | "UNMEASURABLE" | null,
+
         sleepQuality: item.sleepQuality
       };
     } else if (row.kind === "metric") {
@@ -1171,6 +1191,7 @@ export class RecoveryRepository implements RecoveryStore {
         eq(integrationConnections.personId, personId)
       ));
       await quarantineCutoverForErasure(transaction, personId, connectionId);
+      await this.eraseConnectedWeightRecommendations(transaction, personId, connectionId);
       return this.toErasureRequest(request);
     });
   }
@@ -1423,6 +1444,16 @@ export class RecoveryRepository implements RecoveryStore {
     });
   }
 
+  /** Removes cached weight-derived health payloads at accepted erasure, before asynchronous raw-fact deletion. */
+  private async eraseConnectedWeightRecommendations(transaction: DatabaseTransaction, personId: string, connectionId: string): Promise<void> {
+    await transaction.execute(sql`delete from coaching_recommendations where person_id=${personId} and id in(
+      select detail.recommendation_id from coaching_daily_assessment_details detail
+      where detail.person_id=${personId} and exists(select 1 from weight_measurements weight
+        join integration_connections connection on connection.id=weight.integration_connection_id and connection.person_id=weight.person_id
+        where weight.person_id=${personId} and connection.recovery_connection_id=${connectionId}
+          and detail.used_facts->'weightMeasurementIds' ? weight.id::text))`);
+  }
+
   private async eraseConnectionGraph(
     transaction: DatabaseTransaction,
     personId: string,
@@ -1558,6 +1589,21 @@ export class RecoveryRepository implements RecoveryStore {
             where person_id = ${personId} and connection_id = ${connectionId}
          )
     `);
+    // Erasure cannot make an older account value current again after its cross-connection successor disappears.
+    await transaction.execute(sql`with recursive ancestors as (
+      select parent.id,parent.supersedes_id,parent.connection_id,parent.withdrawn_at
+      from recovery_observations erased join recovery_observations parent on parent.id=erased.supersedes_id and parent.person_id=erased.person_id
+      where erased.person_id=${personId} and erased.connection_id=${connectionId}
+      union
+      select parent.id,parent.supersedes_id,parent.connection_id,parent.withdrawn_at
+      from ancestors child join recovery_observations parent on parent.id=child.supersedes_id
+      where parent.person_id=${personId} and (child.withdrawn_at is null or child.connection_id=${connectionId})
+    ) update recovery_observations retained set withdrawn_at=coalesce(retained.withdrawn_at,clock_timestamp())
+      where retained.person_id=${personId} and retained.source='account' and retained.connection_id is distinct from ${connectionId}
+        and retained.id in(select id from ancestors)`);
+    await transaction.execute(sql`update recovery_observations retained set supersedes_id=null,correction_reason=null
+      where retained.person_id=${personId} and retained.connection_id is distinct from ${connectionId}
+        and retained.supersedes_id in(select id from recovery_observations where person_id=${personId} and connection_id=${connectionId})`);
     await transaction.execute(sql`
       update recovery_observations
          set supersedes_id = null, correction_reason = null
@@ -1567,12 +1613,22 @@ export class RecoveryRepository implements RecoveryStore {
       eq(recoveryObservations.personId, personId),
       eq(recoveryObservations.connectionId, connectionId)
     ));
+    await this.eraseConnectedWeightRecommendations(transaction, personId, connectionId);
+    const connectedWeightSourceRows=await transaction.execute(sql`select source_reference_id as id from weight_measurements where person_id=${personId} and integration_connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId})`);
+    await transaction.execute(sql`update intake_weight_details set measurement_id=null where person_id=${personId} and measurement_id in(select id from weight_measurements where integration_connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId}))`);
+    await transaction.execute(sql`delete from weight_import_records where person_id=${personId} and target_measurement_id in(select id from weight_measurements where integration_connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId}))`);
+    await transaction.execute(sql`delete from body_composition_observations where person_id=${personId} and connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId})`);
+    await transaction.execute(sql`delete from connected_daily_fitness where person_id=${personId} and connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId})`);
+    await transaction.execute(sql`delete from connected_nutrition_days where person_id=${personId} and connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId})`);
+    await transaction.execute(sql`delete from coaching_daily_completion_assessments where person_id=${personId} and id in(select assessment_id from coaching_daily_completion_results where person_id=${personId} and weight_measurement_id in(select id from weight_measurements where integration_connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId})))`);
+    await transaction.execute(sql`update weight_measurements set supersedes_id=null,correction_reason=null where person_id=${personId} and (integration_connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId}) or supersedes_id in(select id from weight_measurements where integration_connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId})))`);
+    await transaction.execute(sql`delete from weight_measurements where person_id=${personId} and integration_connection_id in(select id from integration_connections where recovery_connection_id=${connectionId} and person_id=${personId})`);
     await transaction.delete(recoveryConnections).where(and(
       eq(recoveryConnections.personId, personId),
       eq(recoveryConnections.id, connectionId)
     ));
 
-    for (const sourceId of new Set(sourceRows.map((row) => row.id))) {
+    for (const sourceId of new Set([...sourceRows.map((row) => row.id), ...connectedWeightSourceRows.rows.map(row=>row.id as string)])) {
       await transaction.execute(sql`
         delete from source_references source
          where source.id = ${sourceId}

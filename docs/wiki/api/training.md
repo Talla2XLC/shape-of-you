@@ -21,6 +21,16 @@ personal records, progression candidates, and confirmed working-weight changes.
 
 ## Content
 
+Imported activity summaries expose TSS, Garmin exercise load with the explicit
+`garmin_activity_training_load_v1` basis, training effects, energy, power,
+intensity ratio and Body Battery delta when present. Existing Intervals
+`trainingLoad` is unchanged and is never added to Garmin load. FIT results
+identify direct Garmin versus Intervals and expose measured session summaries.
+`GET /v1/connected-data/fitness` reads bounded daily fitness facts; Training
+context and Day Projection include them separately from activity energy.
+See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
+
 MCP program lifecycle now includes:
 
 - `complete_training_program`: expects exact active program/version/lock;

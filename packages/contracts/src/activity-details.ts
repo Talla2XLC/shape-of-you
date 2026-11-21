@@ -40,6 +40,18 @@ const lapSchema = {
     maximumHeartRateBpm: nullableNumber, averageSpeedMps: nullableNumber, averagePowerW: nullableNumber
   }
 } as const;
+/** Standard recorded FIT session summaries; missing measurements remain null. */
+export const ActivitySessionSummarySchema = {
+  type: "object", additionalProperties: false,
+  required: ["caloriesKcal", "trainingStressScore", "aerobicTrainingEffect", "anaerobicTrainingEffect", "averagePowerWatts", "maximumPowerWatts", "normalizedPowerWatts", "intensityFactor", "manufacturer", "deviceName"],
+  properties: {
+    caloriesKcal: nullableNumber, trainingStressScore: nullableNumber,
+    aerobicTrainingEffect: nullableNumber, anaerobicTrainingEffect: nullableNumber,
+    averagePowerWatts: nullableNumber, maximumPowerWatts: nullableNumber, normalizedPowerWatts: nullableNumber, intensityFactor: nullableNumber,
+    manufacturer: { anyOf: [{ type: "string", maxLength: 128 }, { type: "null" }] },
+    deviceName: { anyOf: [{ type: "string", maxLength: 128 }, { type: "null" }] }
+  }
+} as const;
 /** Closed normalized FIT storage shape; excludes raw messages, identifiers, and coordinates. */
 export const ActivityDetailsPayloadSchema = {
   type: "object", additionalProperties: false, required: ["sessions"],
@@ -49,6 +61,7 @@ export const ActivityDetailsPayloadSchema = {
         type: "object", additionalProperties: false,
         required: ["startTimestamp", "elapsedSeconds", "timerSeconds", "sport", "records", "laps", "timerEvents"],
         properties: {
+          summary: ActivitySessionSummarySchema,
           startTimestamp: instant, elapsedSeconds: { type: "number", minimum: 0, maximum: 604800 },
           timerSeconds: nullableNumber, sport: { anyOf: [{ type: "string", maxLength: 64 }, { type: "null" }] },
           records: { type: "array", maxItems: 200000, items: ActivityRecordSchema },
@@ -101,11 +114,11 @@ export const ExternalActivityDetailsResultSchema = {
     availability: { enum: ["available", "not_imported", "no_supported_data", "unavailable", "version_changed"] },
     latestImportIssue: { anyOf: [ActivityDetailsIssueSchema, { type: "null" }] },
     activityId: uuid, detailsVersion: { anyOf: [uuid, { type: "null" }] }, sourceActivityVersion: { anyOf: [uuid, { type: "null" }] },
-    normalizationVersion: { anyOf: [{ type: "string" }, { type: "null" }] }, source: { const: "intervals_icu_original_fit" },
+    normalizationVersion: { anyOf: [{ type: "string" }, { type: "null" }] }, source: { enum: ["intervals_icu_original_fit", "garmin_personal_original_fit"] },
     fileChecksum: { anyOf: [{ type: "string", pattern: "^[0-9a-f]{64}$" }, { type: "null" }] }, importedAt: { anyOf: [instant, { type: "null" }] },
     sessions: { type: "array", maxItems: 100, items: {
       type: "object", additionalProperties: false, required: ["index", "startTimestamp", "elapsedSeconds", "timerSeconds", "sport", "recordCount", "lapCount"],
-      properties: { index: { type: "integer" }, startTimestamp: instant, elapsedSeconds: { type: "number" }, timerSeconds: nullableNumber,
+      properties: { summary: ActivitySessionSummarySchema, index: { type: "integer" }, startTimestamp: instant, elapsedSeconds: { type: "number" }, timerSeconds: nullableNumber,
         sport: { anyOf: [{ type: "string" }, { type: "null" }] }, recordCount: { type: "integer" }, lapCount: { type: "integer" } }
     } },
     session: { type: "integer" }, records: { type: "array", maxItems: 1000, items: ActivityRecordSchema },

@@ -119,10 +119,41 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
     body_battery_max: "score",
     sleep_score: "score",
     garmin_post_activity_recovery_time: "minute",
+    stress_average: "score",
+    stress_maximum: "score",
+    stress_rest_minutes: "minute",
+    stress_low_minutes: "minute",
+    stress_medium_minutes: "minute",
+    stress_high_minutes: "minute",
+    stress_activity_minutes: "minute",
+    stress_uncategorized_minutes: "minute",
+    body_battery_charged: "score",
+    body_battery_drained: "score",
+    daily_respiration_rate: "breaths_per_minute",
+    daily_respiration_rate_minimum: "breaths_per_minute",
+    daily_respiration_rate_maximum: "breaths_per_minute",
+    daily_oxygen_saturation: "percent",
+    daily_minimum_oxygen_saturation: "percent",
     steps: "count"
   } as const;
   if (input.detail.type === "metric" && input.detail.unit !== expectedUnits[input.detail.metric]) {
     throw new DomainValidationError("Recovery metric unit is incompatible");
+  }
+  if (input.detail.type === "metric") {
+    const metric = input.detail.metric, value = input.detail.value;
+    const minuteKeys = ["stress_rest_minutes", "stress_low_minutes", "stress_medium_minutes", "stress_high_minutes", "stress_activity_minutes", "stress_uncategorized_minutes"];
+    const maximum = minuteKeys.includes(metric) ? 1440 : ["body_battery_charged", "body_battery_drained"].includes(metric) ? 1000 :
+      ["stress_average", "stress_maximum", "daily_oxygen_saturation", "daily_minimum_oxygen_saturation", "daily_respiration_rate", "daily_respiration_rate_minimum", "daily_respiration_rate_maximum"].includes(metric) ? 100 : null;
+    if (maximum !== null && (!Number.isFinite(value) || value < 0 || value > maximum || (metric.startsWith("daily_respiration") && value === 0))) {
+      throw new DomainValidationError("Connected Recovery metric range is invalid");
+    }
+  }
+  if (input.detail.type === "sleep") {
+    if (input.detail.sleepKind !== undefined && input.detail.sleepKind !== "main_sleep" && input.detail.sleepKind !== "nap") throw new DomainValidationError("Sleep kind is invalid");
+    for (const key of ["awakeSleepMinutes", "sleepNeedMinutes", "sleepNeedBaselineMinutes", "nextSleepNeedMinutes", "nextSleepNeedBaselineMinutes"] as const) {
+      const value = input.detail[key];
+      if (value != null && (!Number.isInteger(value) || value < 0 || value > 1440)) throw new DomainValidationError("Sleep duration is invalid");
+    }
   }
   if (
     input.detail.type === "metric" && input.detail.metric === "steps" &&
@@ -139,7 +170,7 @@ function validateRecoveryObservationContent(input: CreateRecoveryObservation): v
   if (
     input.detail.type === "metric" && input.detail.metric === "garmin_post_activity_recovery_time" &&
     (input.sourceReference.channel !== "account" ||
-      input.sourceReference.externalSystem !== "intervals_icu_activity_fit:garmin_140_9_v1" ||
+      !["intervals_icu_activity_fit:garmin_140_9_v1", "garmin_personal_activity_fit:garmin_140_9_v1"].includes(input.sourceReference.externalSystem ?? "") ||
       input.sourceReference.occurredAt !== input.observedUntil)
   ) {
     throw new DomainValidationError("Garmin post-activity recovery time requires verified FIT provenance");
@@ -173,7 +204,7 @@ export function evaluateRecovery(
     );
   const sleep = [...scoredObservations]
     .reverse()
-    .find((item) => item.detail.type === "sleep")?.detail;
+    .find((item) => item.detail.type === "sleep" && item.detail.sleepKind !== "nap")?.detail;
 
   const subjectiveRisk =
     subjective?.type === "subjective"

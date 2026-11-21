@@ -18,6 +18,16 @@ and explicit correction history using shared runtime/OpenAPI schemas.
 
 ## Content
 
+Garmin weight uses documented kilograms, canonical 0.001 kg precision and
+actual measurement time when known. Date-only measurements retain null time.
+Imported ownership is fenced to connection/consent and erasure; manual facts
+retain their existing lifecycle. `GET /v1/connected-data/body-composition` and
+readonly MCP `list_body_composition_observations` expose typed composition with
+provenance, without creating a weight when only composition is present.
+Unverified source units remain null.
+See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
+
 - `POST /v1/weight-measurements` — `201` new, `200` existing Person/source/
   `dedupeKey` fact.
 - `POST /v1/weight-measurements/:id/corrections` — `201` replacement, `200`

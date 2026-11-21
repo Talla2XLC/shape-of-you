@@ -148,6 +148,16 @@ export interface WeightMeasurementStore {
   ): Promise<WeightMeasurementHistory | null>;
 }
 
+/** Accepted source erasure immediately hides owned weight; ordinary disconnection retains history. */
+function visibleWeight() {
+  return sql`(${weightMeasurements.integrationConnectionId} is null or exists(
+    select 1 from integration_connections owner join recovery_connections recovery
+      on recovery.id=owner.recovery_connection_id and recovery.person_id=owner.person_id
+    where owner.id=${weightMeasurements.integrationConnectionId} and owner.person_id=${weightMeasurements.personId}
+      and recovery.erasure_requested_at is null and not exists(select 1 from recovery_erasure_requests erasure
+        where erasure.person_id=owner.person_id and erasure.connection_id=recovery.id)))`;
+}
+
 function serializeJoined(row: JoinedMeasurement): WeightMeasurement {
   return toWeightMeasurement(row.measurement, row.sourceReference);
 }
@@ -212,7 +222,7 @@ export async function createWeightMeasurementInTransaction(
     )
     .where(
       and(
-        eq(weightMeasurements.personId, personId),
+        eq(weightMeasurements.personId, personId), visibleWeight(),
         eq(
           weightMeasurements.source,
           input.sourceReference.channel
@@ -269,7 +279,7 @@ export class WeightMeasurementRepository
       const original = await transaction.query.weightMeasurements.findFirst({
         where: and(
           eq(weightMeasurements.id, id),
-          eq(weightMeasurements.personId, personId)
+          eq(weightMeasurements.personId, personId), visibleWeight()
         )
       });
       if (!original) {
@@ -346,7 +356,7 @@ export class WeightMeasurementRepository
         )
         .where(
           and(
-            eq(weightMeasurements.personId, personId),
+            eq(weightMeasurements.personId, personId), visibleWeight(),
             eq(
               weightMeasurements.source,
               input.sourceReference.channel
@@ -387,7 +397,7 @@ export class WeightMeasurementRepository
       .where(
         and(
           eq(weightMeasurements.id, id),
-          eq(weightMeasurements.personId, personId)
+          eq(weightMeasurements.personId, personId), visibleWeight()
         )
       )
       .limit(1);
@@ -414,7 +424,7 @@ export class WeightMeasurementRepository
       )
       .where(
         and(
-          eq(weightMeasurements.personId, personId),
+          eq(weightMeasurements.personId, personId), visibleWeight(),
           notExists(
             this.database.db
               .select({ id: successor.id })
@@ -481,7 +491,7 @@ export class WeightMeasurementRepository
       .innerJoin(sourceReferences, eq(weightMeasurements.sourceReferenceId, sourceReferences.id))
       .where(
         and(
-          eq(weightMeasurements.personId, personId),
+          eq(weightMeasurements.personId, personId), visibleWeight(),
           eq(weightMeasurements.localDate, localDate),
           notExists(
             this.database.db
@@ -510,7 +520,7 @@ export class WeightMeasurementRepository
       .from(weightMeasurements)
       .innerJoin(sourceReferences, eq(weightMeasurements.sourceReferenceId, sourceReferences.id))
       .where(and(
-        eq(weightMeasurements.personId, personId),
+        eq(weightMeasurements.personId, personId), visibleWeight(),
         gte(weightMeasurements.localDate, from),
         lte(weightMeasurements.localDate, to),
         isPersonContextEvidence(),
@@ -531,7 +541,7 @@ export class WeightMeasurementRepository
   public async getDataCoverage(personId: string, from: string, to: string, asOf: string): Promise<DataCoverageEvidence> {
     const successor = alias(weightMeasurements, "coverage_weight_successor");
     const current = and(
-      eq(weightMeasurements.personId, personId),
+      eq(weightMeasurements.personId, personId), visibleWeight(),
       isPersonContextEvidence(),
       lte(weightMeasurements.localDate, asOf),
       notExists(this.database.db.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, weightMeasurements.id)))
@@ -565,6 +575,7 @@ export class WeightMeasurementRepository
     personId: string,
     id: string
   ): Promise<WeightMeasurementHistory | null> {
+    if (!await this.findById(personId, id)) return null;
     const result = await this.database.pool.query<{ id: string }>(
       `with recursive ancestors as (
          select id, supersedes_id
@@ -610,10 +621,11 @@ export class WeightMeasurementRepository
       )
       .where(
         and(
-          eq(weightMeasurements.personId, personId),
+          eq(weightMeasurements.personId, personId), visibleWeight(),
           inArray(weightMeasurements.id, ids)
         )
       );
+    if (rows.length !== ids.length) return null;
     const byId = new Map(
       rows.map((row) => [row.measurement.id, serializeJoined(row)])
     );

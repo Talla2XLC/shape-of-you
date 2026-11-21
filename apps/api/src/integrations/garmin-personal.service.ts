@@ -2,9 +2,10 @@ import { randomUUID } from "node:crypto";
 import { HttpException, Inject, Injectable, Optional } from "@nestjs/common";
 import type { ConnectGarminPersonal, GarminPersonalConnection } from "@shape-of-you/contracts";
 
-import { GARMIN_CUTOVER_RUNTIME, GARMIN_PERSONAL_RUNTIME, PERSON_CONTEXT, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
+import { CONNECTED_PROVIDER_DATA_STORE, GARMIN_CUTOVER_RUNTIME, GARMIN_PERSONAL_RUNTIME, PERSON_CONTEXT, RECOVERY_STORE, TRAINING_STORE } from "../application/tokens.js";
 import type { PersonContext } from "../application/person-context.js";
 import type { RecoveryStore } from "../storage/recovery-repository.js";
+import type { ConnectedProviderRepository } from "../storage/connected-provider-repository.js";
 import type { TrainingStore } from "../storage/training-repository.js";
 import type { IntegrationRepository } from "../storage/integration-repository.js";
 import type { ConnectionCredentialCipher } from "./credential-cipher.js";
@@ -32,13 +33,21 @@ export class GarminPersonalService {
     @Inject(RECOVERY_STORE) recovery: RecoveryStore,
     @Inject(TRAINING_STORE) training: TrainingStore,
     @Optional() @Inject(GARMIN_PERSONAL_RUNTIME) private readonly runtime: GarminPersonalRuntime | null = null,
-    @Optional() @Inject(GARMIN_CUTOVER_RUNTIME) private readonly cutover: GarminCutoverRuntime | null = null
+    @Optional() @Inject(GARMIN_CUTOVER_RUNTIME) private readonly cutover: GarminCutoverRuntime | null = null,
+    @Optional() @Inject(CONNECTED_PROVIDER_DATA_STORE) connectedData: Pick<ConnectedProviderRepository, "importFitnessDay" | "importNutritionDay" | "importBodyMeasurement"> | null = null
   ) {
     const reader: HealthDataReader | null = runtime ? {
       reconcile: async (key, from, to, scope, options) => {
         const result = await runtime.provider.reconcile(key, from, to, scope, options);
-        if (result.wellness.length === 0 && result.activities.length === 0) return result;
-        if (!result.externalUserId || !scope) throw new IntegrationProviderError("provider_response_invalid");
+        const legacyFacts = result.wellness.length > 0 || result.activities.length > 0;
+        const connectedFacts = Boolean(result.connectedDays?.length || result.bodyMeasurements?.length);
+        if (!legacyFacts && !connectedFacts) return result;
+        // Some primary Nutrition/Weight DTOs carry no account ID. Never invent an ID or require watch data to connect.
+        if (!result.externalUserId) {
+          if (legacyFacts) throw new IntegrationProviderError("provider_response_invalid");
+          return result;
+        }
+        if (!scope) throw new IntegrationProviderError("provider_response_invalid");
         const [id, consent] = scope.split(":");
         if (!id || !consent) throw new IntegrationProviderError("provider_response_invalid");
         try {
@@ -51,7 +60,7 @@ export class GarminPersonalService {
       originalActivityFile: (key, id, scope, options) => runtime.provider.originalActivityFile(key, id, scope, options)
     } : null;
     this.importer = new IntegrationService(person, runtime?.store ?? null, reader, runtime?.cipher ?? null,
-      recovery, training, { providerKey: "garmin_personal", historicalWindowDays: 14 });
+      recovery, training, { providerKey: "garmin_personal", historicalWindowDays: 14 }, connectedData);
   }
 
   /** Returns only safe connection status; a connected empty account is successful. */

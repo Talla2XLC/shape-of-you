@@ -1,3 +1,4 @@
+import { connectedImportAllowed } from "./connected-provider-repository.js";
 import { integrationParentRecordAllowed, integrationRecordAllowed, readIntegrationImportPolicy } from "./integration-cutover-policy.js";
 import {
   and,
@@ -184,6 +185,17 @@ export interface ImportExternalActivity {
   readonly deviceName: string | null;
   readonly sourceProvider: string;
   readonly garminAttributed: boolean;
+  readonly trainingStressScore?: number | null;
+  readonly providerExerciseLoad?: number | null;
+  readonly aerobicTrainingEffect?: number | null;
+  readonly anaerobicTrainingEffect?: number | null;
+  readonly caloriesKcal?: number | null;
+  readonly averagePowerWatts?: number | null;
+  readonly normalizedPowerWatts?: number | null;
+  readonly maximumPowerWatts?: number | null;
+  readonly intensityFactor?: number | null;
+  readonly bodyBatteryDelta?: number | null;
+  readonly providerExerciseLoadBasis?: "garmin_activity_training_load_v1" | null;
 }
 
 /** Current immutable external activity projection owned by Training. */
@@ -247,6 +259,7 @@ export interface ImportActivityDetails {
 
 /** Local immutable detail version returned only after activity and consent authorization. */
 export interface StoredActivityDetails {
+  readonly sourceProvider?: string;
   readonly id: string;
   readonly sourceActivityVersion: string;
   readonly normalizationVersion: string;
@@ -637,7 +650,7 @@ export class TrainingRepository implements TrainingStore {
       const connection = await transaction.query.integrationConnections.findFirst({ columns: { id: true }, where: and(
         eq(integrationConnections.id, input.connectionId), eq(integrationConnections.personId, input.personId),
         eq(integrationConnections.consentId, input.consentId), eq(integrationConnections.importEnabled, true), inArray(integrationConnections.lifecycle, ["active", "degraded"]),
-        sql`exists (select 1 from recovery_consents consent join recovery_connections recovery on recovery.id = consent.connection_id where consent.id = ${input.consentId} and consent.person_id = ${input.personId} and consent.status = 'active' and recovery.status = 'active' and recovery.erasure_requested_at is null)`
+        sql`exists (select 1 from recovery_consents consent join recovery_connections recovery on recovery.id = consent.connection_id where consent.id = ${input.consentId} and consent.person_id = ${input.personId} and consent.status = 'active' and consent.integration_import_scopes @> ARRAY['training']::text[] and recovery.status = 'active' and recovery.erasure_requested_at is null)`
       ) });
       if (!connection || !await integrationParentRecordAllowed(transaction, input.connectionId, input.consentId, input.providerIdentity)) return false;
       const activitySuccessor = alias(integrationActivityFacts, "details_activity_successor");
@@ -666,14 +679,14 @@ export class TrainingRepository implements TrainingStore {
   public readExternalActivityDetails(personId: string, activityId: string): Promise<ActivityDetailsRead> {
     return this.database.db.transaction(async (transaction) => {
       const successor = alias(integrationActivityFacts, "details_read_activity_successor");
-      const [activity] = await transaction.select({ connectionId: integrationActivityFacts.connectionId, providerIdentity: integrationActivityFacts.providerIdentity }).from(integrationActivityFacts)
+      const [activity] = await transaction.select({ connectionId: integrationActivityFacts.connectionId, providerIdentity: integrationActivityFacts.providerIdentity, sourceProvider: integrationActivityFacts.sourceProvider }).from(integrationActivityFacts)
         .where(and(eq(integrationActivityFacts.id, activityId), eq(integrationActivityFacts.personId, personId),
           notExists(transaction.select({ id: successor.id }).from(successor).where(eq(successor.supersedesId, integrationActivityFacts.id))))).limit(1);
       if (!activity) throw new NotFoundError("External activity was not found");
       const connection = await transaction.query.integrationConnections.findFirst({ columns: { consentId: true }, where: and(
         eq(integrationConnections.id, activity.connectionId), eq(integrationConnections.personId, personId),
         inArray(integrationConnections.lifecycle, ["active", "degraded"]), eq(integrationConnections.importEnabled, true),
-        sql`exists (select 1 from recovery_consents consent join recovery_connections recovery on recovery.id = consent.connection_id where consent.id = ${integrationConnections.consentId} and consent.person_id = ${personId} and consent.status = 'active' and recovery.status = 'active' and recovery.erasure_requested_at is null)`
+        sql`exists (select 1 from recovery_consents consent join recovery_connections recovery on recovery.id = consent.connection_id where consent.id = ${integrationConnections.consentId} and consent.person_id = ${personId} and consent.status = 'active' and consent.integration_import_scopes @> ARRAY['training']::text[] and recovery.status = 'active' and recovery.erasure_requested_at is null)`
       ) });
       if (!connection) return { details: null, latestImportIssue: null };
       const lineage = await readActivityLineageClassification(transaction, personId, activityId);
@@ -689,7 +702,7 @@ export class TrainingRepository implements TrainingStore {
         eq(integrationInbox.kind, "activity"), eq(integrationInbox.providerIdentity, activity.providerIdentity),
         sql`${integrationInbox.activityDetailsAttemptedAt} is not null`
       ), orderBy: [desc(integrationInbox.activityDetailsAttemptedAt), desc(integrationInbox.id)] });
-      return { details: details ?? null, latestImportIssue: receipt?.activityDetailsIssue ?? null };
+      return { details: details ? { ...details, sourceProvider: activity.sourceProvider } : null, latestImportIssue: receipt?.activityDetailsIssue ?? null };
     });
   }
 
@@ -1146,7 +1159,7 @@ export class TrainingRepository implements TrainingStore {
     return this.database.db.transaction(async (transaction) => {
       await lockPerson(transaction, input.personId);
       const enabled = await transaction.query.integrationConnections.findFirst({
-        columns: { id: true },
+        columns: { id: true, providerKey: true },
         where: and(
           eq(integrationConnections.id, input.connectionId),
           eq(integrationConnections.personId, input.personId),
@@ -1154,7 +1167,7 @@ export class TrainingRepository implements TrainingStore {
           eq(integrationConnections.importEnabled, true)
         )
       });
-      if (!enabled) return "stopped";
+      if (!enabled || !await connectedImportAllowed(transaction, { id: input.connectionId, personId: input.personId, consentId: input.consentId, providerKey: enabled.providerKey }, "training", input.localDate, input.occurredAt, "activity")) return "stopped";
       const policy = await readIntegrationImportPolicy(transaction, input.connectionId, input.consentId);
       if (!integrationRecordAllowed(policy, "activity", { localDate: input.localDate, occurredAt: input.occurredAt })) return "stopped";
       const currentRows = await transaction.execute(sql<{ id: string; normalized_checksum: string; local_date: string }>`select id, normalized_checksum, local_date::text from integration_activity_facts current where current.connection_id = ${input.connectionId} and current.provider_identity = ${input.providerIdentity} and not exists (select 1 from integration_activity_facts successor where successor.supersedes_id = current.id) limit 1`);
@@ -1172,6 +1185,17 @@ export class TrainingRepository implements TrainingStore {
         normalizedChecksum: input.normalizedChecksum, occurredAt: new Date(input.occurredAt), localDate: input.localDate,
         timezone: input.timezone, name: input.name, durationSeconds: input.durationSeconds,
         distanceMeters: input.distanceMeters?.toFixed(3), trainingLoad: input.trainingLoad?.toFixed(3),
+        trainingStressScore: input.trainingStressScore?.toFixed(3) ?? null,
+        providerExerciseLoad: input.providerExerciseLoad?.toFixed(3) ?? null,
+        aerobicTrainingEffect: input.aerobicTrainingEffect?.toFixed(3) ?? null,
+        anaerobicTrainingEffect: input.anaerobicTrainingEffect?.toFixed(3) ?? null,
+        caloriesKcal: input.caloriesKcal?.toFixed(3) ?? null,
+        averagePowerWatts: input.averagePowerWatts?.toFixed(3) ?? null,
+        normalizedPowerWatts: input.normalizedPowerWatts?.toFixed(3) ?? null,
+        maximumPowerWatts: input.maximumPowerWatts?.toFixed(3) ?? null,
+        intensityFactor: input.intensityFactor?.toFixed(3) ?? null,
+        bodyBatteryDelta: input.bodyBatteryDelta?.toFixed(3) ?? null,
+        providerExerciseLoadBasis: input.providerExerciseLoadBasis ?? null,
         trainingLoadBasis: input.trainingLoadBasis,
         trainingLoadBasisVersion: input.trainingLoadBasisVersion,
         averageHeartRate: input.averageHeartRate?.toFixed(3), maximumHeartRate: input.maximumHeartRate?.toFixed(3),
@@ -1224,6 +1248,17 @@ export class TrainingRepository implements TrainingStore {
         trainingLoad: numberOrNull(row.trainingLoad), averageHeartRate: numberOrNull(row.averageHeartRate),
         trainingLoadBasis: row.trainingLoadBasis as "relative_training_stress" | null,
         trainingLoadBasisVersion: row.trainingLoadBasisVersion,
+        trainingStressScore: numberOrNull(row.trainingStressScore),
+        providerExerciseLoad: numberOrNull(row.providerExerciseLoad),
+        aerobicTrainingEffect: numberOrNull(row.aerobicTrainingEffect),
+        anaerobicTrainingEffect: numberOrNull(row.anaerobicTrainingEffect),
+        caloriesKcal: numberOrNull(row.caloriesKcal),
+        averagePowerWatts: numberOrNull(row.averagePowerWatts),
+        normalizedPowerWatts: numberOrNull(row.normalizedPowerWatts),
+        maximumPowerWatts: numberOrNull(row.maximumPowerWatts),
+        intensityFactor: numberOrNull(row.intensityFactor),
+        bodyBatteryDelta: numberOrNull(row.bodyBatteryDelta),
+        providerExerciseLoadBasis: row.providerExerciseLoadBasis as "garmin_activity_training_load_v1" | null,
         maximumHeartRate: numberOrNull(row.maximumHeartRate), deviceName: row.deviceName,
         sourceProvider: row.sourceProvider, garminAttributed: row.garminAttributed,
         supersedesId: row.supersedesId,

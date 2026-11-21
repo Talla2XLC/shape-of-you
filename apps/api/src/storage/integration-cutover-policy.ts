@@ -51,7 +51,7 @@ export async function integrationParentRecordAllowed(transaction: DatabaseTransa
 }
 
 /** Guards an account-derived Recovery write; the caller already holds the Person evidence lock. */
-export async function integrationRecoveryRecordAllowed(transaction: DatabaseTransaction, personId: string, recoveryConnectionId: string, consentId: string, source: { readonly localDate: string | null; readonly externalRecordId: string | null; readonly externalSystem: string | null }): Promise<boolean> {
+export async function integrationRecoveryRecordAllowed(transaction: DatabaseTransaction, personId: string, recoveryConnectionId: string, consentId: string, source: { readonly localDate: string | null; readonly observedAt?: string | null; readonly externalRecordId: string | null; readonly externalSystem: string | null }): Promise<boolean> {
   const connection = await transaction.query.integrationConnections.findFirst({ where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.recoveryConnectionId, recoveryConnectionId)) });
   if (!connection) return true;
   const policy = await readIntegrationImportPolicy(transaction, connection.id, consentId);
@@ -61,7 +61,8 @@ export async function integrationRecoveryRecordAllowed(transaction: DatabaseTran
     if (!match?.[1]) return false;
     return integrationParentRecordAllowed(transaction, connection.id, consentId, match[1]);
   }
-  return source.localDate !== null && integrationRecordAllowed(policy, "wellness", { localDate: source.localDate });
+  const localDate = source.observedAt && policy ? new Intl.DateTimeFormat("en-CA", { timeZone: policy.timezone, year:"numeric", month:"2-digit", day:"2-digit" }).format(new Date(source.observedAt)) : source.localDate;
+  return localDate !== null && integrationRecordAllowed(policy, "wellness", { localDate });
 }
 
 /** Quarantines pending activation and clears only connection audit references, preserving effective bounds after erasure. */

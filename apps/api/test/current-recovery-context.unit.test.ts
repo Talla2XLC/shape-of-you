@@ -28,6 +28,17 @@ describe("CurrentRecoveryContextService", () => {
       metricDelivery: [{ metric: "body_battery" }] });
   });
 
+  it("prefers the latest measured Body Battery instant over a daily value and exposes its real asOf", async () => {
+    const id = "00000000-0000-4000-8000-000000000090";
+    const point = { id, connectionId: "connected", observedFrom: "2026-11-21T10:15:00Z", observedUntil: "2026-11-21T10:15:00Z", temporalPrecision: "instant", kind: "metric", localDate: "2026-11-21", timezone: "Europe/Belgrade", quality: "reliable", sourceReference: { channel: "account" }, detail: { type: "metric", metric: "body_battery", value: 42, unit: "score" } };
+    const daily = { ...point, id: "daily", temporalPrecision: "local_date", observedFrom: null, observedUntil: null };
+    const service = new CurrentRecoveryContextService(personContext,
+      { getPreferences: async () => ({ timezone: "Europe/Belgrade" }) } as never,
+      { connectedRecoveryDelivery: async () => ({ recoveryConnectionId: "connected", lifecycle: "active", importEnabled: true, failureCode: null, lastAttemptAt: null, lastSuccessfulSyncAt: null, targetDateRecordReceived: true, targetDateSupportedFactsPresent: true, metricDelivery: [{ metric: "body_battery", state: "confirmed_present", observationId: id }] }) } as never,
+      { listObservations: async () => ({ items: [daily, point] }) } as never);
+    await expect(service.read(new Date("2026-11-21T11:00:00Z"))).resolves.toMatchObject({ metricDelivery: [{ metric: "body_battery", state: "confirmed_present", asOf: "2026-11-21T10:15:00Z", periodState: null }] });
+  });
+
   it("fails closed before reading evidence when Person timezone is unset", async () => {
     const connectedRecoveryDelivery = vi.fn();
     const listObservations = vi.fn();

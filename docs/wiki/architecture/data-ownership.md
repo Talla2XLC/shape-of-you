@@ -18,6 +18,18 @@ cross-service database access.
 
 ## Content
 
+ConnectedDailyFitnessSummary belongs to Training; ConnectedNutritionDay belongs
+to Nutrition; BodyCompositionObservation and imported WeightMeasurement belong
+to Physical State. They remain API-owned tables in the existing deployment.
+Typed daily primary-source groups publish immutable successors and preserve
+omitted groups. Current reads hide accepted source erasures immediately; raw
+removal remains journal-backed. Weight-derived cached recommendations are
+invalidated in the accepted request transaction. Cross-connection Recovery
+correction erasure detaches surviving successors and tombstones retained
+account ancestors so deleted successors cannot revive superseded values.
+See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
+
 TASK-0067 completed the approved authority transfer after reconciliation,
 exclusive-writer switch, and bounded observation. Google Sheets is now a
 non-authoritative frozen legacy source; governance still prohibits writes, and

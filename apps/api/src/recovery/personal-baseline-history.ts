@@ -221,7 +221,7 @@ export async function readRecoveryBaselineDays(
      ), sleep_daily as (
        select observation.local_date, max(sleep.total_sleep_minutes) as sleep_minutes
        from current_recovery observation
-       join recovery_sleep_details sleep on sleep.observation_id = observation.id
+       join recovery_sleep_details sleep on sleep.observation_id = observation.id and coalesce(sleep.sleep_kind, 'main_sleep') <> 'nap'
        group by observation.local_date
      ), metric_values as (
        select distinct observation.local_date, metric.metric, metric.value

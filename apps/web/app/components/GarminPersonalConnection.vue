@@ -211,7 +211,7 @@ function formatted(value: string | null): string {
           id="garmin-personal-consent"
           class="item-meta"
         >
-          By connecting, you allow Shape of You to read and sync your Garmin training and wellness data.
+          By connecting, you allow Shape of You to read and sync your Garmin wellness and recovery, training, weight and body composition, nutrition and hydration data.
           Your key is stored securely and is never shown again.
         </p>
         <div class="button-row">

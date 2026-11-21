@@ -19,6 +19,17 @@ SQL live under `apps/api/`; Identity schema and SQL live under
 
 ## Content
 
+TASK-0182 authors API migration `20261121010000_connected_provider_data.sql`:
+typed connected fitness/nutrition/composition tables, imported-weight ownership,
+consent scopes, additional Recovery/Training fields and precise constraints.
+It is verified on clean and older-prefix isolated PostgreSQL upgrades, including
+repeated execution. Enum checks compare text during same-transaction prefix
+upgrades. Generated PostgreSQL identifiers are statically bounded to 63 bytes.
+At this documentation update it is local-only; staging application and runtime
+smoke require exact publication/promotion evidence.
+See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+
+
 ```powershell
 pnpm db:generate:api
 pnpm db:migrate:api

@@ -142,6 +142,7 @@ export interface IntegrationStore<Status extends IntegrationConnection = GarminI
   completeInbox(id: string, consentId: string, receiptId: string): Promise<boolean>;
   /** Records a closed detail outcome on an existing activity receipt under the current enabled consent. */
   setActivityDetailsIssue(id: string, consentId: string, receiptId: string, issue: ActivityDetailsIssue | null): Promise<boolean>;
+  recoveryFactKeys?(id: string, identity: string): Promise<readonly string[]>;
   recoveryFact(id: string, identity: string, factKey: string): Promise<RecoveryFactPointer | null>;
   linkRecoveryFact(id: string, consentId: string, identity: string, receiptId: string, factKey: string, checksum: string, observationId: string): Promise<boolean>;
 }

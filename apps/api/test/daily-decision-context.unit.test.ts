@@ -93,7 +93,7 @@ const training = {
   nextStep: step
 };
 
-function fixture() {
+function fixture(connectedData: unknown = null) {
   const summary = Object.fromEntries(Object.entries(assessment.usedFacts.summary).filter(
     ([key]) => key !== "recoveryRiskLevel" && key !== "recoveryHardStop"
   ));
@@ -118,7 +118,7 @@ function fixture() {
   const trainingService = { getTrainingContext: vi.fn().mockResolvedValue(training) };
   return {
     daily, currentRecovery, trainingService,
-    service: new DailyDecisionContextService(daily as never, currentRecovery as never, trainingService as never)
+    service: new DailyDecisionContextService(daily as never, currentRecovery as never, trainingService as never, connectedData as never)
   };
 }
 
@@ -140,6 +140,26 @@ describe("daily decision context", () => {
     expect(result.facts.summary).not.toHaveProperty("recoveryRiskLevel");
     expect(trainingService.getTrainingContext).toHaveBeenCalledWith({ localDate, historyLimit: 20 });
     expect(daily.read).not.toHaveBeenCalled();
+  });
+
+  it("includes current imported nutrition separately and invalidates the evidence checksum on correction", async () => {
+    const nutrition = { id: "00000000-0000-4000-8000-000000000201", values: { consumedCaloriesKcal: 650 } };
+    const connected = { isConfigured: () => true, nutrition: vi.fn().mockResolvedValue({ item: nutrition }), fitness: vi.fn().mockResolvedValue({ items: [] }) };
+    const { service } = fixture(connected);
+    const first = await service.read();
+    expect(first).toMatchObject({ connectedNutritionDay: nutrition, facts: { summary: { caloriesKcal: null } } });
+    expect(first).not.toHaveProperty("connectedDailyFitness");
+    const corrected = { ...nutrition, id: "00000000-0000-4000-8000-000000000202" };
+    connected.nutrition.mockResolvedValue({ item: corrected });
+    const second = await service.read();
+    expect(first.state === "available" && second.state === "available" && first.evidenceChecksum !== second.evidenceChecksum).toBe(true);
+  });
+
+  it("fails closed if imported source facts change throughout the consistency check", async () => {
+    let version = 0;
+    const connected = { isConfigured: () => true, nutrition: vi.fn().mockImplementation(async () => ({ item: { id: String(version++) } })), fitness: vi.fn().mockResolvedValue({ items: [] }) };
+    const { service } = fixture(connected);
+    await expect(service.read()).rejects.toBeInstanceOf(DailyAssessmentEvidenceChangedError);
   });
 
   it("preserves timezone absence without inventing a local day", async () => {

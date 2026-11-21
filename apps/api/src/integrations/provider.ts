@@ -1,4 +1,4 @@
-import type { ActivityDetailsIssue } from "@shape-of-you/contracts";
+import type { ActivityDetailsIssue, MetricObservationDetail, SleepObservationDetail, ProviderConnectedDayRecord, ProviderBodyMeasurementRecord } from "@shape-of-you/contracts";
 
 /** Safe provider failure classes persisted in the connection projection. */
 export type IntegrationFailureCode =
@@ -33,6 +33,12 @@ export interface ProviderWellnessRecord {
   /** Last known value for localDate; does not imply a known measurement timestamp. */
   readonly bodyBatteryLatest?: number | null;
   readonly steps?: number | null;
+  readonly sleepDetail?: SleepObservationDetail | null;
+  readonly extraMetrics?: readonly MetricObservationDetail[];
+  readonly bodyBatteryInstant?: { readonly observedAt: string; readonly value: number } | null;
+  readonly naps?: readonly { readonly identity: string; readonly observedFrom: string; readonly observedUntil: string; readonly totalSleepMinutes: number }[];
+  /** Only successful authoritative groups may withdraw absent fields. Omitted means legacy daily fields. */
+  readonly authoritativeFactKeys?: readonly string[];
 }
 
 /** Narrow provider-neutral activity summary; detailed routes/FIT remain excluded. */
@@ -52,12 +58,27 @@ export interface ProviderActivityRecord {
   readonly maximumHeartRate: number | null;
   readonly deviceName: string | null;
   readonly garminAttributed: boolean;
+  readonly trainingStressScore?: number | null;
+  readonly providerExerciseLoad?: number | null;
+  readonly providerExerciseLoadBasis?: "garmin_activity_training_load_v1" | null;
+  readonly aerobicTrainingEffect?: number | null;
+  readonly anaerobicTrainingEffect?: number | null;
+  readonly caloriesKcal?: number | null;
+  readonly averagePowerWatts?: number | null;
+  readonly normalizedPowerWatts?: number | null;
+  readonly maximumPowerWatts?: number | null;
+  readonly intensityFactor?: number | null;
+  readonly bodyBatteryDelta?: number | null;
 }
 
 /** One bounded reconciliation response from an external health provider. */
 export interface ProviderReconciliation {
   readonly wellness: readonly ProviderWellnessRecord[];
   readonly activities: readonly ProviderActivityRecord[];
+  readonly connectedDays?: readonly ProviderConnectedDayRecord[];
+  readonly bodyMeasurements?: readonly ProviderBodyMeasurementRecord[];
+  /** Failed optional source groups remain untouched and historical cursors must not advance. */
+  readonly incomplete?: boolean;
 }
 
 /** Per-read transport bounds and current authorization guard; never grants write authority. */

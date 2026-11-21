@@ -16,10 +16,11 @@ export function projectActivityDetails(input: GetExternalActivityDetails, stored
   const result: ExternalActivityDetailsResult = {
     availability: stored ? stored.payload ? "available" : "no_supported_data" : latestImportIssue ? "unavailable" : "not_imported", latestImportIssue, activityId: input.activityId,
     detailsVersion: stored?.id ?? null, sourceActivityVersion: stored?.sourceActivityVersion ?? null,
-    normalizationVersion: stored?.normalizationVersion ?? null, source: "intervals_icu_original_fit",
+    normalizationVersion: stored?.normalizationVersion ?? null, source: stored?.sourceProvider === "garmin_personal" ? "garmin_personal_original_fit" : "intervals_icu_original_fit",
     fileChecksum: stored?.fileChecksum ?? null, importedAt: stored?.importedAt.toISOString() ?? null,
     sessions: stored?.payload?.sessions.map((session, index) => ({ index, startTimestamp: session.startTimestamp,
       elapsedSeconds: session.elapsedSeconds, timerSeconds: session.timerSeconds, sport: session.sport,
+      ...(session.summary ? { summary: session.summary } : {}),
       recordCount: session.records.length, lapCount: session.laps.length })) ?? [],
     session: sessionIndex, records: [], buckets: [], laps: [], nextCursor: null, zoneBasis: input.zoneBoundariesBpm ? "analysis_supplied" : "unavailable",
     channels: [], coveragePolicy: "previous_record_max_10s_active_only_v1", timerEventsAvailable: false

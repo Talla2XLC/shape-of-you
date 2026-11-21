@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 import type { ProviderActivityRecord, ProviderReadOptions, ProviderReconciliation, ProviderWellnessRecord } from "../provider.js";
 import { ActivityDetailsReadError, IntegrationProviderError } from "../provider.js";
+import type { ProviderConnectedDayRecord } from "@shape-of-you/contracts";
+import { sleepDetails, naps, dailyMetrics, bodyBatteryPoint, connectedDay, nutritionIntake, bodyMeasurements, instant, localDateAt } from "./normalizers.js";
 import { extractOriginalFit } from "./zip.js";
 
 const origin = "https://personal.connectapi.garmin.com";
@@ -113,6 +115,15 @@ export class GarminPersonalProvider {
       this.assertScope(scope);
       return value;
     };
+    let incomplete = false;
+    const optionalGet = async (path: string): Promise<unknown | undefined> => {
+      try { return await get(path); }
+      catch (error) {
+        if (!(error instanceof IntegrationProviderError) || !["provider_unavailable", "provider_timeout"].includes(error.failureCode)) throw error;
+        incomplete = true;
+        return undefined;
+      }
+    };
     const profile = asRecord(await get("/userprofile-service/userprofile/settings"));
     const timezone = profile.timeZone == null ? null : validTimezone(profile.timeZone);
     const document = asRecord(await get(`/usersummary-service/v2/dailysummaries?startDate=${fromDate}&endDate=${toDate}`));
@@ -126,11 +137,79 @@ export class GarminPersonalProvider {
       accountIds.add(profileId(record.userProfilePk));
       daily.set(date, record);
     }
+    const hrvResponse = await optionalGet(`/hrv-service/hrv/daily/${fromDate}/${toDate}`);
+    const hrvByDate = new Map<string, RecordValue>();
+    if (hrvResponse != null) {
+      const row = asRecord(hrvResponse); accountIds.add(profileId(row.userProfilePk));
+      if (!Array.isArray(row.hrvSummaries) || row.hrvSummaries.length > dates.length) invalid();
+      for (const item of row.hrvSummaries) {
+        const summary = asRecord(item), date = requiredString(summary.calendarDate, 10);
+        if (!dates.includes(date) || hrvByDate.has(date)) invalid();
+        hrvByDate.set(date, summary);
+      }
+    }
+    const maxmetResponse = await optionalGet(`/metrics-service/metrics/maxmet/daily/${fromDate}/${toDate}`);
+    const vo2ByDate = new Map<string, { vo2Max: number | null; vo2MaxCycling: number | null; vo2MaxRowing: number | null }>();
+    if (maxmetResponse != null) {
+      if (!Array.isArray(maxmetResponse) || maxmetResponse.length > dates.length * 3) invalid();
+      for (const item of maxmetResponse) {
+        const row = asRecord(item);
+        for (const [kind, key] of [["generic", "vo2Max"], ["cycling", "vo2MaxCycling"], ["rowing", "vo2MaxRowing"]] as const) {
+          if (row[kind] == null) continue;
+          const metric = asRecord(row[kind]), date = requiredString(metric.calendarDate, 10);
+          if (!dates.includes(date)) invalid();
+          const values = vo2ByDate.get(date) ?? { vo2Max: null, vo2MaxCycling: null, vo2MaxRowing: null };
+          if (values[key] !== null) invalid();
+          values[key] = numberOrNull(metric.vo2MaxPreciseValue ?? metric.vo2MaxValue, 0, 150);
+          vo2ByDate.set(date, values);
+        }
+      }
+    }
+    const weightResponse = await optionalGet(`/weight-service/weight/all/${fromDate}/${toDate}`);
+    const batteryReports = await optionalGet(`/wellness-service/wellness/bodyBattery/reports/daily?startDate=${fromDate}&endDate=${toDate}`);
+    const batteriesByDate = new Map<string, unknown>();
+    if (batteryReports != null) {
+      if (!Array.isArray(batteryReports) || batteryReports.length > dates.length) invalid();
+      for (const raw of batteryReports) {
+        const report = asRecord(raw), date = requiredString(report.date, 10);
+        if (!dates.includes(date) || batteriesByDate.has(date)) invalid();
+        batteriesByDate.set(date, report);
+      }
+    }
+    const connectedDays: ProviderConnectedDayRecord[] = [];
     const wellness: ProviderWellnessRecord[] = [];
     for (const date of dates) {
-      const sleep = await get(`/sleep-service/sleep/dailySleep?date=${date}`);
-      const heartRate = await get(`/wellness-service/wellness/dailyHeartRate?date=${date}`);
+      // Four independent, consent-guarded reads at a time; range endpoints above avoid per-day chart calls.
+      const [sleep, heartRate, nutritionResponse, fitnessAgeResponse] = await Promise.all([
+        get(`/sleep-service/sleep/dailySleep?date=${date}`), get(`/wellness-service/wellness/dailyHeartRate?date=${date}`),
+        optionalGet(`/nutrition-service/food/logs/${date}`), optionalGet(`/fitnessage-service/fitnessage/v2/${date}`)
+      ]);
       const summary = daily.get(date);
+      const batteryResponse = batteryReports === undefined ? undefined : batteriesByDate.has(date) ? [batteriesByDate.get(date)] : null;
+      if (timezone === null && !summary && sleep == null && heartRate == null && !hrvByDate.has(date) && !vo2ByDate.has(date) &&
+        (nutritionResponse == null) && (fitnessAgeResponse == null || Array.isArray(fitnessAgeResponse) && fitnessAgeResponse.length === 0) &&
+        (batteryResponse == null || Array.isArray(batteryResponse) && batteryResponse.length === 0)) continue;
+      const zone = timezone ?? invalid();
+      const day = summary ? connectedDay(summary, date, zone) : { identity: date, localDate: date, timezone: zone };
+      let fitnessAge: NonNullable<ProviderConnectedDayRecord["fitness"]>["fitnessAge"] | undefined;
+      if (fitnessAgeResponse !== undefined) {
+        fitnessAge = null;
+        if (fitnessAgeResponse !== null) {
+          // Live Personal API returns one DTO; the public Swagger also permits a DTO array.
+          const candidates = Array.isArray(fitnessAgeResponse) ? fitnessAgeResponse : [fitnessAgeResponse];
+          if (candidates.length > 100) invalid();
+          const rows = candidates.map(asRecord).filter((r) => r.fitnessAge != null || r.achievableFitnessAge != null);
+          rows.sort((a, b) => String(b.lastUpdated ?? "").localeCompare(String(a.lastUpdated ?? "")));
+          const age = rows[0];
+          if (age) {
+            const computedAt = age.lastUpdated == null ? null : instant(age.lastUpdated);
+            fitnessAge = { fitnessAgeYears: numberOrNull(age.fitnessAge, 0, 150), achievableFitnessAgeYears: numberOrNull(age.achievableFitnessAge, 0, 150), fitnessAgeAsOf: computedAt == null ? null : localDateAt(computedAt, zone), fitnessAgeComputedAt: computedAt };
+          }
+        }
+      }
+      connectedDays.push({ ...day,
+        fitness: { ...day.fitness, ...(fitnessAge !== undefined ? { fitnessAge } : {}), ...(maxmetResponse !== undefined ? { vo2Max: vo2ByDate.get(date) ?? null } : {}) },
+        nutrition: { ...day.nutrition, ...(nutritionResponse !== undefined ? { intake: nutritionIntake(nutritionResponse, date) } : {}) } });
       const sleepRecord = optionalRecord(sleep);
       const heartRecord = optionalRecord(heartRate);
       for (const item of [sleepRecord, heartRecord]) {
@@ -139,7 +218,7 @@ export class GarminPersonalProvider {
           accountIds.add(profileId(item.userProfilePK));
         }
       }
-      if (!summary && !Object.keys(sleepRecord).length && !Object.keys(heartRecord).length) continue;
+      if (!summary && !Object.keys(sleepRecord).length && !Object.keys(heartRecord).length && !hrvByDate.has(date) && !(Array.isArray(batteryResponse) && batteryResponse.length)) continue;
       const battery = optionalRecord(summary?.bodyBattery);
       const movement = optionalRecord(summary?.movement);
       const chronology = optionalRecord(summary?.wellnessChronology);
@@ -148,18 +227,27 @@ export class GarminPersonalProvider {
       const bodyBatteryLatest = numberOrNull(battery.latestValue, 5, 100);
       if (bodyBatteryLatest !== null && !Number.isInteger(bodyBatteryLatest)) invalid();
       if (bodyBatteryMinimum !== null && bodyBatteryMaximum !== null && bodyBatteryMinimum > bodyBatteryMaximum) invalid();
-      const sleepSeconds = numberOrNull(sleepRecord.sleepTimeSeconds, 0, 172_800);
+      if (Array.isArray(sleepRecord.dailyNapDTOS)) for (const value of sleepRecord.dailyNapDTOS) {
+        const nap = asRecord(value); if (nap.userProfilePK != null) accountIds.add(profileId(nap.userProfilePK));
+      }
+      const sleepDetail = sleepDetails(sleepRecord);
+      const sleepSeconds = numberOrNull(sleepRecord.sleepTimeSeconds, 0, 86_400);
       const steps = numberOrNull(optionalRecord(movement.steps).value, 0, 1_000_000);
       if (steps !== null && !Number.isInteger(steps)) invalid();
       wellness.push({
         identity: date, localDate: date, timezone: timezone ?? invalid(),
         updatedAt: chronology.endTimestampGmt == null ? null : gmtTimestamp(chronology.endTimestampGmt),
         totalSleepMinutes: sleepSeconds === null ? null : Math.round(sleepSeconds / 60),
-        sleepScore: null, restingHeartRate: numberOrNull(heartRecord.restingHeartRate, 1, 300),
-        averageSleepingHeartRate: numberOrNull(sleepRecord.avgHeartRate, 1, 300), hrvRmssd: null,
+        sleepScore: numberOrNull(optionalRecord(optionalRecord(sleepRecord.sleepScores).overall).value, 0, 100), restingHeartRate: numberOrNull(heartRecord.restingHeartRate, 1, 300),
+        averageSleepingHeartRate: numberOrNull(sleepRecord.avgHeartRate, 1, 300), hrvRmssd: numberOrNull(hrvByDate.get(date)?.lastNightAvg, 1, 1000),
         oxygenSaturation: numberOrNull(sleepRecord.averageSpO2Value, 1, 100),
         respirationRate: numberOrNull(sleepRecord.averageRespirationValue, 1, 100),
-        bodyBatteryMinimum, bodyBatteryMaximum, bodyBatteryLatest, steps
+        bodyBatteryMinimum, bodyBatteryMaximum, bodyBatteryLatest, steps, sleepDetail,
+        extraMetrics: [...dailyMetrics(summary ?? {}), ...(sleepRecord.lowestSpO2Value == null ? [] : [{ type: "metric" as const, metric: "minimum_oxygen_saturation" as const, unit: "percent" as const, value: numberOrNull(sleepRecord.lowestSpO2Value, 0, 100)! }])],
+        naps: naps(sleepRecord, date, zone),
+        ...(batteryResponse !== undefined ? { bodyBatteryInstant: bodyBatteryPoint(batteryResponse, date, zone) } : {}),
+        authoritativeFactKeys: ["sleep", "sleep_score", "resting_heart_rate", "night_heart_rate", "oxygen_saturation", "minimum_oxygen_saturation", "respiration_rate", "body_battery", "body_battery_min", "body_battery_max", "steps",
+          ...dailyMetricKeys, ...(hrvResponse !== undefined ? ["hrv_rmssd"] : []), ...(batteryResponse !== undefined ? ["body_battery_instant"] : [])]
       });
     }
     const activities: ProviderActivityRecord[] = [];
@@ -192,14 +280,22 @@ export class GarminPersonalProvider {
           distanceMeters: numberOrNull(data.distance, 0, 10_000_000),
           trainingLoad: null, trainingLoadBasis: null, trainingLoadBasisVersion: null,
           averageHeartRate: numberOrNull(data.averageHR, 0, 300), maximumHeartRate: numberOrNull(data.maxHR, 0, 300),
-          deviceName: null, garminAttributed: false
+          deviceName: null, garminAttributed: isGarminManufacturer(optionalRecord(detail.metadataDTO).manufacturer ?? summary.manufacturer),
+          trainingStressScore: numberOrNull(data.trainingStressScore, 0, 10_000),
+          providerExerciseLoad: numberOrNull(data.activityTrainingLoad, 0, 100_000),
+          providerExerciseLoadBasis: data.activityTrainingLoad == null ? null : "garmin_activity_training_load_v1",
+          aerobicTrainingEffect: numberOrNull(data.trainingEffect, 0, 5), anaerobicTrainingEffect: numberOrNull(data.anaerobicTrainingEffect, 0, 5),
+          caloriesKcal: numberOrNull(data.calories, 0, 100_000), averagePowerWatts: numberOrNull(data.averagePower, 0, 10_000),
+          normalizedPowerWatts: numberOrNull(data.normalizedPower, 0, 10_000), maximumPowerWatts: numberOrNull(data.maxPower, 0, 10_000),
+          intensityFactor: data.intensityFactor == null ? null : numberOrNull(data.intensityFactor, 0, 1000)! / 100,
+          bodyBatteryDelta: numberOrNull(data.differenceBodyBattery, -100, 100)
         });
       }
       if (pageData.length < pageSize) { complete = true; break; }
     }
     if (!complete || accountIds.size > 1) invalid();
     this.assertScope(scope);
-    return { wellness, activities, externalUserId: accountIds.values().next().value ?? null };
+    return { wellness, activities, connectedDays, bodyMeasurements: weightResponse == null || Array.isArray(weightResponse) && weightResponse.length === 0 ? [] : bodyMeasurements(weightResponse, dates, timezone ?? invalid()), incomplete, externalUserId: accountIds.values().next().value ?? null };
   }
 
   /** Downloads and validates the original ZIP; returns null only for an absent file or a valid ZIP without FIT. */
@@ -338,3 +434,6 @@ function dateRange(from: string, to: string): string[] {
   return Array.from({ length: (end - start) / dayMs + 1 }, (_, index) => new Date(start + index * dayMs).toISOString().slice(0, 10));
 }
 function invalid(): never { throw new IntegrationProviderError("provider_response_invalid"); }
+
+const dailyMetricKeys = ["stress_average", "stress_maximum", "stress_rest_minutes", "stress_low_minutes", "stress_medium_minutes", "stress_high_minutes", "stress_activity_minutes", "stress_uncategorized_minutes", "body_battery_charged", "body_battery_drained", "daily_respiration_rate", "daily_respiration_rate_minimum", "daily_respiration_rate_maximum", "daily_oxygen_saturation", "daily_minimum_oxygen_saturation"] as const;
+function isGarminManufacturer(value: unknown): boolean { return typeof value === "string" && value.trim().toLowerCase() === "garmin"; }

@@ -1,3 +1,4 @@
+import { ConnectedDailyFitnessSummarySchema } from "./connected-provider-data.js";
 import type { FromSchema } from "json-schema-to-ts";
 
 import {
@@ -1347,6 +1348,10 @@ export const ExternalActivitySummarySchema = {
     "garminAttributed",
     "classification"
   ],
+  allOf: [{
+    if: { required: ["providerExerciseLoad"], properties: { providerExerciseLoad: { type: "number" } } },
+    then: { required: ["providerExerciseLoadBasis"], properties: { providerExerciseLoadBasis: { const: "garmin_activity_training_load_v1" } } }
+  }],
   properties: {
     id: uuidSchema,
     occurredAt: { type: "string", format: "date-time" },
@@ -1370,6 +1375,17 @@ export const ExternalActivitySummarySchema = {
         { type: "null" }
       ]
     },
+    trainingStressScore: { type: ["number", "null"], minimum: 0, maximum: 10000 },
+    providerExerciseLoad: { type: ["number", "null"], minimum: 0, maximum: 100000 },
+    providerExerciseLoadBasis: { enum: ["garmin_activity_training_load_v1", null] },
+    aerobicTrainingEffect: { type: ["number", "null"], minimum: 0, maximum: 5 },
+    anaerobicTrainingEffect: { type: ["number", "null"], minimum: 0, maximum: 5 },
+    caloriesKcal: { type: ["number", "null"], minimum: 0, maximum: 100000 },
+    averagePowerWatts: { type: ["number", "null"], minimum: 0, maximum: 10000 },
+    normalizedPowerWatts: { type: ["number", "null"], minimum: 0, maximum: 10000 },
+    maximumPowerWatts: { type: ["number", "null"], minimum: 0, maximum: 10000 },
+    intensityFactor: { type: ["number", "null"], minimum: 0, maximum: 10 },
+    bodyBatteryDelta: { type: ["number", "null"], minimum: -100, maximum: 100 },
     trainingLoad: {
       anyOf: [
         {
@@ -1714,6 +1730,7 @@ export const TrainingContextSchema = {
           type: "array",
           items: ExternalActivitySummarySchema
         },
+        connectedDailyFitness: { type: "array", items: ConnectedDailyFitnessSummarySchema, maxItems: 366 },
         trustedExternalTitles: TrustedExternalActivityTitleListSchema,
         activityRecordingMode: ActivityRecordingModeSchema,
         pendingActivityLinkQuestion: PendingActivityLinkQuestionSchema,
@@ -1738,6 +1755,7 @@ export const TrainingContextSchema = {
           type: "array",
           items: ExternalActivitySummarySchema
         },
+        connectedDailyFitness: { type: "array", items: ConnectedDailyFitnessSummarySchema, maxItems: 366 },
         trustedExternalTitles: TrustedExternalActivityTitleListSchema,
         activityRecordingMode: ActivityRecordingModeSchema,
         pendingActivityLinkQuestion: PendingActivityLinkQuestionSchema,

@@ -459,7 +459,7 @@ export class DailyAssessmentService {
       )[0];
     const currentStepsAsOf = currentStepsObservation?.sourceReference.occurredAt ?? null;
     const currentStepsEligible = currentStepsObservation !== undefined;
-    const sleep = currentRecovery.find((item) => item.detail.type === "sleep" && item.quality !== "poor");
+    const sleep = currentRecovery.find((item) => item.detail.type === "sleep" && item.detail.sleepKind !== "nap" && item.quality !== "poor");
     const hrvValues = sortedObservations.filter((item) => item.detail.type === "metric" && item.detail.metric === "hrv_rmssd" && item.quality !== "poor").map((item) => item.detail.type === "metric" ? item.detail.value : 0);
     const rhrValues = sortedObservations.filter((item) => item.detail.type === "metric" && item.detail.metric === "resting_heart_rate" && item.quality !== "poor").map((item) => item.detail.type === "metric" ? item.detail.value : 0);
     const activeVersionId = training.status === "active" ? training.program.activeVersionId : null;
@@ -791,7 +791,7 @@ export function evaluateCompletionCriterion(
     const fact = facts.observations.find((item) => isFresh(item.createdAt) && (
       criterion.type === "steps_threshold_reached"
         ? item.detail.type === "metric" && item.detail.metric === "steps"
-        : item.detail.type === "sleep"
+        : item.detail.type === "sleep" && item.detail.sleepKind !== "nap"
     ));
     if (!fact) return unknownCriterion(criterion);
     const value = fact.detail.type === "sleep" ? fact.detail.totalSleepMinutes

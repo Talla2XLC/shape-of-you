@@ -22,11 +22,94 @@ function fake(overrides: (url: URL, init: RequestInit | undefined) => Response |
     if (url.pathname.endsWith("/dailysummaries")) return json({ data: [] });
     if (url.pathname.endsWith("/search/activities")) return json([]);
     if (url.pathname.endsWith("/dailySleep") || url.pathname.endsWith("/dailyHeartRate")) return new Response(null, { status: 204 });
+    if (["/hrv-service/", "/metrics-service/", "/weight-service/", "/fitnessage-service/", "/nutrition-service/", "/wellness-service/wellness/bodyBattery/"].some(path => url.pathname.startsWith(path))) return new Response(null, { status: 204 });
     throw new Error("Unexpected test request");
   });
 }
 
 describe("Garmin Personal API transport", () => {
+  it.each(["object", "array"])("accepts the %s Fitness Age DTO while retaining stale source as-of", async shape => {
+    const age = { fitnessAge: 32, achievableFitnessAge: 30, lastUpdated: "2026-10-15T12:00:00Z" };
+    const request = fake(url => url.pathname.includes("/fitnessage-service/") ? json(shape === "object" ? age : [age]) : undefined);
+    const result = await new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01");
+    expect(result.connectedDays?.[0]?.fitness?.fitnessAge).toEqual({ fitnessAgeYears: 32, achievableFitnessAgeYears: 30,
+      fitnessAgeAsOf: "2026-10-15", fitnessAgeComputedAt: "2026-10-15T12:00:00.000Z" });
+  });
+
+  it.each([42, "invalid", [null], { fitnessAge: "32" }, { fitnessAge: 32, lastUpdated: "invalid" }])("rejects malformed Fitness Age DTOs", async value => {
+    const request = fake(url => url.pathname.includes("/fitnessage-service/") ? json(value) : undefined);
+    await expect(new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01"))
+      .rejects.toMatchObject({ failureCode: "provider_response_invalid" });
+  });
+
+  it("imports primary endpoint groups and keeps Garmin load distinct from historical relative stress", async () => {
+    const request = fake(url => {
+      if (url.pathname.includes("/hrv-service/")) return json({ userProfilePk: 42, hrvSummaries: [{ calendarDate: "2026-11-01", lastNightAvg: 60, weeklyAvg: 70, lastNight5MinHigh: 110 }] });
+      if (url.pathname.endsWith("/dailysummaries")) return json({ data: [{ userProfilePk: 42, calendarDate: "2026-11-01", calories: { burnedActive: 500 }, hydration: { consumedInFractionalMl: 1500 } }] });
+      if (url.pathname.includes("/metrics-service/")) return json([{ cycling: { calendarDate: "2026-11-01", vo2MaxPreciseValue: 45.5 } }]);
+      if (url.pathname.includes("/nutrition-service/")) return json({ mealDate: "2026-11-01", dailyNutritionContent: { calories: 300, protein: 20 } });
+      if (url.pathname.includes("/fitnessage-service/")) return json([{ fitnessAge: 30, achievableFitnessAge: 28, lastUpdated: "2026-10-28T12:00:00Z" }]);
+      if (url.pathname.endsWith("/search/activities")) return json([{ activityId: 101, ownerId: 42, manufacturer: "GARMIN" }]);
+      if (url.pathname.endsWith("/activity/101")) return json({ activityId: 101, userProfileId: 42, activityName: "Synthetic", timeZoneUnitDTO: { timeZone: "Europe/Moscow" }, summaryDTO: { startTimeGMT: "2026-11-01T06:00:00", startTimeLocal: "2026-11-01T09:00:00", duration: 3600, activityTrainingLoad: 100, trainingStressScore: 50, intensityFactor: 80, calories: 400 }, metadataDTO: { manufacturer: "GARMIN" } });
+      return undefined;
+    });
+    const result = await new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01");
+    expect(result.wellness[0]).toMatchObject({ hrvRmssd: 60 });
+    expect(result.connectedDays?.[0]).toMatchObject({ fitness: { energyMovement: { activeExpenditureKcal: 500 }, vo2Max: { vo2MaxCycling: 45.5 }, fitnessAge: { fitnessAgeAsOf: "2026-10-28", fitnessAgeYears: 30 } }, nutrition: { hydration: { consumedFluidMl: 1500 }, intake: { consumedCaloriesKcal: 300, proteinGrams: 20 } } });
+    expect(result.activities[0]).toMatchObject({ trainingLoad: null, trainingLoadBasis: null, providerExerciseLoad: 100, providerExerciseLoadBasis: "garmin_activity_training_load_v1", trainingStressScore: 50, intensityFactor: 0.8, caloriesKcal: 400, garminAttributed: true, deviceName: null });
+  });
+
+  it("omits failed source groups without authorizing removal or advancing a complete pass", async () => {
+    const request = fake(url => {
+      if (url.pathname.endsWith("/dailysummaries")) return json({ data: [{ userProfilePk: 42, calendarDate: "2026-11-01", hydration: { consumedInFractionalMl: 500 } }] });
+      if (url.pathname.includes("/hrv-service/") || url.pathname.includes("/nutrition-service/") || url.pathname.includes("/bodyBattery/")) return new Response(null, { status: 503 });
+      return undefined;
+    });
+    const result = await new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01");
+    expect(result.incomplete).toBe(true);
+    expect(result.wellness[0]?.authoritativeFactKeys).not.toContain("hrv_rmssd");
+    expect(result.wellness[0]?.authoritativeFactKeys).not.toContain("body_battery_instant");
+    expect(result.connectedDays?.[0]?.nutrition).toEqual({ hydration: { consumedFluidMl: 500 } });
+  });
+
+  it("stops the pass on a rate-limited added endpoint so worker backoff remains effective", async () => {
+    const request = fake(url => url.pathname.includes("/hrv-service/") ? new Response(null, { status: 429 }) : undefined);
+    await expect(new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01"))
+      .rejects.toMatchObject({ failureCode: "provider_rate_limited" });
+    expect(request.mock.calls.some(([url]) => String(url).includes("/nutrition-service/"))).toBe(false);
+  });
+
+  it("checks current read authority immediately before every added endpoint", async () => {
+    let checks = 0, requests = 0;
+    const request = fake();
+    const guarded = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      requests++;
+      expect(checks).toBeGreaterThanOrEqual(requests);
+      return request(input, init);
+    });
+    await new GarminPersonalProvider({ fetch: guarded }).reconcile(key, "2026-11-01", "2026-11-01", "scope", { beforeRequest: async () => { checks++; } });
+    expect(guarded.mock.calls.some(([url]) => String(url).includes("/hrv-service/"))).toBe(true);
+    expect(guarded.mock.calls.some(([url]) => String(url).includes("/weight-service/"))).toBe(true);
+    expect(guarded.mock.calls.some(([url]) => String(url).includes("/nutrition-service/"))).toBe(true);
+  });
+
+  it("fits an ordinary multi-day pass inside its fixed deadline using bounded independent reads", async () => {
+    vi.useFakeTimers();
+    try {
+      const start = Date.now();
+      const upstream = fake();
+      const request = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        await new Promise<void>(resolve => setTimeout(resolve, 1000));
+        return upstream(input, init);
+      });
+      const pass = new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-15");
+      await vi.runAllTimersAsync();
+      await expect(pass).resolves.toMatchObject({ incomplete: false });
+      expect(Date.now() - start).toBeLessThan(45_000);
+      expect(request.mock.calls.filter(([url]) => String(url).includes("/bodyBattery/"))).toHaveLength(1);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("inspects an empty cutover candidate without inventing an account ID or retaining its token", async () => {
     const request = fake();
     const provider = new GarminPersonalProvider({ fetch: request });
@@ -79,7 +162,7 @@ describe("Garmin Personal API transport", () => {
     const request = fake((url) => url.pathname.endsWith("/settings") ? json({}) : undefined);
     const provider = new GarminPersonalProvider({ fetch: request });
     await expect(provider.reconcile(key, "2026-11-01", "2026-11-01", "connection:consent-1"))
-      .resolves.toEqual({ wellness: [], activities: [], externalUserId: null });
+      .resolves.toMatchObject({ wellness: [], activities: [], externalUserId: null, incomplete: false });
     await provider.reconcile(key, "2026-11-01", "2026-11-01", "connection:consent-1");
     expect(request.mock.calls.filter(([url]) => String(url).endsWith("/token"))).toHaveLength(1);
     await provider.reconcile(key, "2026-11-01", "2026-11-01", "connection:consent-2");
@@ -117,9 +200,9 @@ describe("Garmin Personal API transport", () => {
     });
     const result = await new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01");
     expect(result.externalUserId).toBe("42");
-    expect(result.wellness).toEqual([{
+    expect(result.wellness).toMatchObject([{
       identity: "2026-11-01", localDate: "2026-11-01", timezone: "Europe/Moscow", updatedAt: "2026-11-01T10:00:00.000Z",
-      totalSleepMinutes: 450, sleepScore: null, restingHeartRate: 51, averageSleepingHeartRate: 54.5, hrvRmssd: null,
+      totalSleepMinutes: 450, sleepScore: 90, restingHeartRate: 51, averageSleepingHeartRate: 54.5, hrvRmssd: null,
       oxygenSaturation: 97.2, respirationRate: 14.3, bodyBatteryMinimum: 18, bodyBatteryMaximum: 91, bodyBatteryLatest: 60, steps: 1234
     }]);
   });
@@ -164,10 +247,10 @@ describe("Garmin Personal API transport", () => {
       return undefined;
     });
     const result = await new GarminPersonalProvider({ fetch: request }).reconcile(key, "2026-11-01", "2026-11-01");
-    expect(result.activities).toEqual([{
+    expect(result.activities).toMatchObject([{
       identity: "101", fileType: "fit", occurredAt: "2026-11-01T06:00:00.000Z", localDate: "2026-11-01", timezone: "Europe/Moscow",
       name: "Synthetic run", durationSeconds: 123, distanceMeters: 10000, trainingLoad: null, trainingLoadBasis: null,
-      trainingLoadBasisVersion: null, averageHeartRate: 145, maximumHeartRate: 170, deviceName: null, garminAttributed: false
+      trainingLoadBasisVersion: null, trainingStressScore: 90, providerExerciseLoad: null, averageHeartRate: 145, maximumHeartRate: 170, deviceName: null, garminAttributed: false
     }]);
   });
 

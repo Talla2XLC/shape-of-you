@@ -1,5 +1,7 @@
 import { DynamicModule, Global, Module } from "@nestjs/common";
 
+import { ConnectedProviderDataModule } from "../connected-provider-data/connected-provider-data.module.js";
+import type { ConnectedProviderRepository } from "../storage/connected-provider-repository.js";
 import type { DatabaseContext } from "../database/context.js";
 import { DatabaseLifecycle } from "../database/lifecycle.js";
 import type { ReadinessProbe } from "../system/system.controller.js";
@@ -36,6 +38,7 @@ import type { GarminPersonalRuntime } from "../integrations/garmin-personal.serv
 import type { GarminCutoverRuntime } from "../integrations/garmin-cutover.service.js";
 import { IntegrationModule } from "../integrations/integration.module.js";
 import {
+  CONNECTED_PROVIDER_DATA_STORE,
   PERSON_CONTEXT,
   BODY_MEASUREMENT_SESSION_STORE,
   PHYSICAL_GOAL_STORE,
@@ -96,6 +99,8 @@ export interface AppModuleOptions {
   readonly database: DatabaseContext | undefined;
   /** Durable state for external account integrations, null when disabled. */
   readonly integrationStore: IntegrationStore | null;
+  /** Owner-scoped imported fitness, nutrition and composition facts. */
+  readonly connectedProviderDataStore?: ConnectedProviderRepository | null;
   /** Optional direct Garmin dependencies with separate provider scope. */
   readonly garminPersonalRuntime?: GarminPersonalRuntime | null;
   /** API-owned pending policy and optional ordinary Garmin runtime. */
@@ -177,6 +182,7 @@ class RuntimeDependenciesModule {
           provide: READINESS_PROBE,
           useValue: options.readinessProbe
         },
+        { provide: CONNECTED_PROVIDER_DATA_STORE, useValue: options.connectedProviderDataStore ?? null },
         { provide: INTEGRATION_STORE, useValue: options.integrationStore },
         { provide: GARMIN_PERSONAL_RUNTIME, useValue: options.garminPersonalRuntime ?? null },
         { provide: GARMIN_PERSONAL_STORE, useValue: options.garminPersonalRuntime?.store ?? null },
@@ -193,6 +199,7 @@ class RuntimeDependenciesModule {
         }
       ],
       exports: [
+        CONNECTED_PROVIDER_DATA_STORE,
         PERSON_CONTEXT,
         BODY_MEASUREMENT_SESSION_STORE,
         PHYSICAL_GOAL_STORE,
@@ -236,6 +243,7 @@ export class AppModule {
       imports: [
         RuntimeDependenciesModule.register(options),
         SystemModule,
+        ConnectedProviderDataModule,
         WeightMeasurementModule,
         BodyMeasurementSessionModule,
         PhysicalGoalModule,

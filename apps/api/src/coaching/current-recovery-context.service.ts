@@ -78,6 +78,9 @@ export class CurrentRecoveryContextService {
         delivery?.recoveryConnectionId ?? null
       );
       const state = reconcileDeliveryState(item.state, item.observationId, observation);
+      if (item.metric === "body_battery") {
+        return { metric: item.metric, state, periodState: null, asOf: observation?.temporalPrecision === "instant" ? observation.observedUntil : null };
+      }
       if (item.metric !== "steps") {
         return { metric: item.metric, state, periodState: null, asOf: null };
       }
@@ -136,12 +139,16 @@ function findConnectedObservation(
   recoveryConnectionId: string | null
 ): RecoveryObservation | undefined {
   if (recoveryConnectionId === null) return undefined;
-  return observations.find((observation) => (
+  const candidates = observations.filter((observation) => (
     observation.connectionId === recoveryConnectionId
     && (metric === "sleep"
-      ? observation.detail.type === "sleep"
+      ? observation.detail.type === "sleep" && observation.detail.sleepKind !== "nap"
       : observation.detail.type === "metric" && observation.detail.metric === metric)
   ));
+  if (metric === "body_battery") {
+    return candidates.filter(item => item.temporalPrecision === "instant").sort((a, b) => (b.observedUntil ?? "").localeCompare(a.observedUntil ?? "")) [0] ?? candidates[0];
+  }
+  return candidates[0];
 }
 
 function reconcileDeliveryState(

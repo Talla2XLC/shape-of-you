@@ -1,3 +1,4 @@
+import { ConnectedDailyFitnessSummarySchema, ConnectedNutritionDaySchema, type ConnectedDailyFitnessSummary, type ConnectedNutritionDay } from "./connected-provider-data.js";
 import {
   DailyAssessmentFactSummarySchema,
   DailyAssessmentV5UsedFactsSchema,
@@ -58,6 +59,8 @@ export type DailyDecisionContextResult =
       readonly timezone: string;
       readonly evidenceChecksum: string;
       readonly facts: DailyDecisionFacts;
+      readonly connectedNutritionDay?: ConnectedNutritionDay;
+      readonly connectedDailyFitness?: readonly ConnectedDailyFitnessSummary[];
       readonly recovery: CurrentRecoveryContext;
       readonly training: {
         readonly activeProgramVersionId: string | null;
@@ -83,6 +86,8 @@ export const DailyDecisionContextResultSchema = {
         timezone: { type: "string", minLength: 1, maxLength: 64 },
         evidenceChecksum: { type: "string", minLength: 64, maxLength: 64 },
         facts: DailyDecisionFactsSchema,
+        connectedNutritionDay: ConnectedNutritionDaySchema,
+        connectedDailyFitness: { type: "array", items: ConnectedDailyFitnessSummarySchema, maxItems: 366 },
         recovery: CurrentRecoveryContextResultSchema.oneOf[0],
         training: {
           type: "object",

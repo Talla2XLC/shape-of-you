@@ -110,21 +110,20 @@ Device observations require active matching consent; revocation stops future
 collection but is not erasure. Corrections replace full observations.
 
 Direct Garmin ingestion uses `garmin_personal_wellness` account provenance
-and the same typed observations, immutable corrections, consent fencing,
-receipts and journal-backed erasure. Current mappings cover sleep duration,
-explicit resting heart rate, sleep-average heart rate/SpO2/respiration,
-separate daily Body Battery latest and extrema, and steps with provider
-chronology. Body Battery latest uses `body_battery` with `local_date` precision;
-its measurement instant remains unknown. Corrections replace the daily snapshot,
-and missing latest withdraws only that fact. Consent-scoped delivery reports
-latest independently of extrema, with `asOf/periodState: null`. Legacy
-DailyAssessment and its personal baseline use only instant `body_battery`
-samples, preserving the existing extrema fallback; raw daily observations remain
-available to focused Coach reads. See the
-[observed mapping ADR](../../adr/20261120-garmin-observed-wellness-mapping.md).
-Unconfirmed HRV/overall sleep score remain `unknown`, rather than false confirmed
-absence. Connection activation does not require records; account identity is
-bound internally before the first typed writes. The
+with immutable corrections, exact consent-generation fencing, receipts and
+journal-backed erasure. Confirmed mappings include overnight HRV, overall
+sleep score, sleep stages/need, night minimum SpO2, stress, daily respiration/
+SpO2, Body Battery and steps. `sleepKind: nap` retains measured nap intervals
+without replacing main-night sleep in assessment, baseline or insights; absent
+legacy `sleepKind` means main sleep.
+
+Body Battery has separate daily and timestamped facts. Current Recovery delivery
+prefers the latest measured point and reports its actual `asOf`; date-only
+fallback keeps `asOf` null. Legacy DailyAssessment/baseline consume instant
+points only and retain extrema fallback. New endpoint failures cannot withdraw
+another group's facts. See the [typed Garmin data ADR](../../adr/20261120-import-complete-useful-garmin-personal-data.md).
+Connection activation does not require records; account identity, when documented IDs are available, is
+bound internally before typed writes. The
 [Connections contract](../api/connections.md) defines exact linking, coverage
 and the refusal to overlap retained Intervals evidence. Local implementation
 is accepted and deployed to staging with pipeline migration/readiness/smoke

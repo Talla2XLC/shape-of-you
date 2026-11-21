@@ -18,7 +18,16 @@ describe("Measured activity details", () => {
     new JsonSchemaPipe(ActivityDetailsPayloadSchema).transform(payload);
     expect(payload.sessions[0]?.records[1]?.metrics).toMatchObject({ heartRateBpm: 180, speedMps: 3, altitudeM: 100, cadenceRpm: 90, powerW: 150 });
     expect(payload.sessions[0]?.laps[0]).toMatchObject({ timerSeconds: 22, maximumHeartRateBpm: 180 });
-    expect(JSON.stringify(payload)).not.toMatch(/position|serialNumber|manufacturer/);
+    expect(JSON.stringify(payload)).not.toMatch(/position|serialNumber/);
+    expect(payload.sessions[0]?.summary).toMatchObject({ manufacturer: "garmin", deviceName: null });
+  });
+
+  it("retains the direct Garmin FIT source and measured session metadata", () => {
+    const result = projectActivityDetails({ activityId }, { ...stored(), sourceProvider: "garmin_personal" });
+    new JsonSchemaPipe(ExternalActivityDetailsResultSchema).transform(result);
+    expect(result.source).toBe("garmin_personal_original_fit");
+    expect(result.sessions[0]?.summary).toMatchObject({ manufacturer: "garmin", deviceName: null });
+    expect(projectActivityDetails({ activityId }, stored()).source).toBe("intervals_icu_original_fit");
   });
 
   it("weights irregular samples by covered active seconds, keeps the one-second peak and excludes gaps and pauses", () => {

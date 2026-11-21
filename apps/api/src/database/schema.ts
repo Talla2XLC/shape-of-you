@@ -216,7 +216,8 @@ export const recoveryMetric = pgEnum("recovery_metric", [
   "sleep_score",
   "garmin_post_activity_recovery_time",
   "steps"
-]);
+,
+"stress_average","stress_maximum","stress_rest_minutes","stress_low_minutes","stress_medium_minutes","stress_high_minutes","stress_activity_minutes","stress_uncategorized_minutes","body_battery_charged","body_battery_drained","daily_respiration_rate","daily_respiration_rate_minimum","daily_respiration_rate_maximum","daily_oxygen_saturation","daily_minimum_oxygen_saturation"]);
 export const recoveryMetricUnit = pgEnum("recovery_metric_unit", [
   "ms",
   "bpm",
@@ -738,6 +739,9 @@ export const weightMeasurements = pgTable(
     localDate: date("local_date", { mode: "string" }).notNull(),
     timezone: varchar("timezone", { length: 64 }).notNull(),
     weightKg: numeric("weight_kg", { precision: 6, scale: 3 }).notNull(),
+    integrationConnectionId: uuid("integration_connection_id"),
+    integrationConsentId: uuid("integration_consent_id"),
+    integrationSourceIdentity: varchar("integration_source_identity", { length: 256 }),
     source: sourceChannel("source").notNull(),
     sourceReferenceId: uuid("source_reference_id").notNull(),
     dedupeKey: varchar("dedupe_key", { length: 256 }).notNull(),
@@ -752,6 +756,8 @@ export const weightMeasurements = pgTable(
       .notNull()
   },
   (table) => [
+    foreignKey({name:"weight_integration_connection_fk",columns:[table.integrationConnectionId,table.personId],foreignColumns:[integrationConnections.id,integrationConnections.personId]}),
+    foreignKey({name:"weight_integration_consent_fk",columns:[table.integrationConsentId,table.personId],foreignColumns:[recoveryConsents.id,recoveryConsents.personId]}),
     unique("weight_measurements_id_person_uq").on(table.id, table.personId),
     foreignKey({
       name: "weight_measurements_supersedes_same_person_fk",
@@ -2923,6 +2929,7 @@ export const recoveryConsents = pgTable(
     personId: uuid("person_id").notNull(),
     connectionId: uuid("connection_id").notNull(),
     purpose: varchar("purpose", { length: 512 }).notNull(),
+    integrationImportScopes: text("integration_import_scopes").array().$type<("recovery" | "training" | "physical_state" | "nutrition")[]>().default([]).notNull(),
     retentionMode: recoveryRetentionMode("retention_mode").notNull(),
     retainUntil: timestamp("retain_until", { withTimezone: true, mode: "date" }),
     status: recoveryConsentStatus("status").default("active").notNull(),
@@ -2933,6 +2940,8 @@ export const recoveryConsents = pgTable(
     revocationReason: varchar("revocation_reason", { length: 512 })
   },
   (table) => [
+    unique("recovery_consent_id_person_uq").on(table.id,table.personId),
+    check("consent_import_scopes_valid",sql`${table.integrationImportScopes} <@ ARRAY['recovery','training','physical_state','nutrition']::text[]`),
     foreignKey({
       name: "recovery_consent_connection_person_fk",
       columns: [table.connectionId, table.personId],
@@ -3131,6 +3140,13 @@ export const recoverySleepDetails = pgTable(
     deepSleepMinutes: smallint("deep_sleep_minutes"),
     remSleepMinutes: smallint("rem_sleep_minutes"),
     lightSleepMinutes: smallint("light_sleep_minutes"),
+    awakeSleepMinutes: smallint("awake_sleep_minutes"),
+    sleepNeedMinutes: smallint("sleep_need_minutes"),
+    sleepNeedBaselineMinutes: smallint("sleep_need_baseline_minutes"),
+    nextSleepNeedMinutes: smallint("next_sleep_need_minutes"),
+    nextSleepNeedBaselineMinutes: smallint("next_sleep_need_baseline_minutes"),
+    breathingDisruptionSeverity: varchar("breathing_disruption_severity", { length: 16 }),
+    sleepKind: varchar("sleep_kind", { length: 16 }),
     sleepQuality: smallint("sleep_quality")
   },
   (table) => [
@@ -3174,6 +3190,11 @@ export const recoveryMetricDetails = pgTable(
             OR (${table.metric} = 'respiration_rate' AND ${table.value} > 0 AND ${table.value} <= 100 AND ${table.unit} = 'breaths_per_minute')
             OR (${table.metric} IN ('body_battery', 'body_battery_min', 'body_battery_max', 'sleep_score') AND ${table.value} >= 0 AND ${table.value} <= 100 AND ${table.unit} = 'score')
             OR (${table.metric} = 'steps' AND ${table.value} >= 0 AND ${table.value} <= 1000000 AND trunc(${table.value}) = ${table.value} AND ${table.unit} = 'count')
+            OR (${table.metric}::text IN ('stress_average','stress_maximum') AND ${table.value} BETWEEN 0 AND 100 AND ${table.unit}::text='score')
+            OR (${table.metric}::text IN ('stress_rest_minutes','stress_low_minutes','stress_medium_minutes','stress_high_minutes','stress_activity_minutes','stress_uncategorized_minutes') AND ${table.value} BETWEEN 0 AND 1440 AND ${table.unit}::text='minute')
+            OR (${table.metric}::text IN ('body_battery_charged','body_battery_drained') AND ${table.value} BETWEEN 0 AND 1000 AND ${table.unit}::text='score')
+            OR (${table.metric}::text IN ('daily_respiration_rate','daily_respiration_rate_minimum','daily_respiration_rate_maximum') AND ${table.value}>0 AND ${table.value}<=100 AND ${table.unit}::text='breaths_per_minute')
+            OR (${table.metric}::text IN ('daily_oxygen_saturation','daily_minimum_oxygen_saturation') AND ${table.value} BETWEEN 0 AND 100 AND ${table.unit}::text='percent')
             OR (${table.metric}::text = 'garmin_post_activity_recovery_time' AND ${table.value} >= 0 AND ${table.value} <= 65534 AND trunc(${table.value}) = ${table.value} AND ${table.unit}::text = 'minute'))`
     )
   ]
@@ -3332,6 +3353,7 @@ export const integrationConnections = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).defaultNow().notNull()
   },
   (table) => [
+    unique("integration_connection_id_person_uq").on(table.id,table.personId),
     foreignKey({
       name: "integration_connection_recovery_person_fk",
       columns: [table.recoveryConnectionId, table.personId],
@@ -3535,6 +3557,17 @@ export const integrationActivityFacts = pgTable(
     trainingLoad: numeric("training_load", { precision: 12, scale: 3 }),
     trainingLoadBasis: varchar("training_load_basis", { length: 64 }),
     trainingLoadBasisVersion: varchar("training_load_basis_version", { length: 128 }),
+    trainingStressScore: numeric("training_stress_score", { precision: 14, scale: 3 }),
+    providerExerciseLoad: numeric("provider_exercise_load", { precision: 14, scale: 3 }),
+    aerobicTrainingEffect: numeric("aerobic_training_effect", { precision: 14, scale: 3 }),
+    anaerobicTrainingEffect: numeric("anaerobic_training_effect", { precision: 14, scale: 3 }),
+    caloriesKcal: numeric("calories_kcal", { precision: 14, scale: 3 }),
+    averagePowerWatts: numeric("average_power_watts", { precision: 14, scale: 3 }),
+    normalizedPowerWatts: numeric("normalized_power_watts", { precision: 14, scale: 3 }),
+    maximumPowerWatts: numeric("maximum_power_watts", { precision: 14, scale: 3 }),
+    intensityFactor: numeric("intensity_factor", { precision: 14, scale: 3 }),
+    bodyBatteryDelta: numeric("body_battery_delta", { precision: 14, scale: 3 }),
+    providerExerciseLoadBasis: varchar("provider_exercise_load_basis", { length: 64 }),
     averageHeartRate: numeric("average_heart_rate", { precision: 8, scale: 3 }),
     maximumHeartRate: numeric("maximum_heart_rate", { precision: 8, scale: 3 }),
     deviceName: varchar("device_name", { length: 256 }),
@@ -3563,6 +3596,8 @@ export const integrationActivityFacts = pgTable(
     uniqueIndex("integration_activity_supersedes_uq").on(table.supersedesId).where(sql`${table.supersedesId} IS NOT NULL`),
     unique("integration_activity_id_person_uq").on(table.id, table.personId),
     index("integration_activity_person_date_idx").on(table.personId, table.localDate),
+    check("activity_physiology_ranges",sql`(${table.trainingStressScore} IS NULL OR ${table.trainingStressScore} BETWEEN 0 AND 10000) AND (${table.providerExerciseLoad} IS NULL OR ${table.providerExerciseLoad} BETWEEN 0 AND 100000) AND (${table.aerobicTrainingEffect} IS NULL OR ${table.aerobicTrainingEffect} BETWEEN 0 AND 5) AND (${table.anaerobicTrainingEffect} IS NULL OR ${table.anaerobicTrainingEffect} BETWEEN 0 AND 5) AND (${table.caloriesKcal} IS NULL OR ${table.caloriesKcal} BETWEEN 0 AND 100000) AND (${table.averagePowerWatts} IS NULL OR ${table.averagePowerWatts} BETWEEN 0 AND 10000) AND (${table.normalizedPowerWatts} IS NULL OR ${table.normalizedPowerWatts} BETWEEN 0 AND 10000) AND (${table.maximumPowerWatts} IS NULL OR ${table.maximumPowerWatts} BETWEEN 0 AND 10000) AND (${table.intensityFactor} IS NULL OR ${table.intensityFactor} BETWEEN 0 AND 10) AND (${table.bodyBatteryDelta} IS NULL OR ${table.bodyBatteryDelta} BETWEEN -100 AND 100)`),
+    check("activity_provider_load_basis",sql`(${table.providerExerciseLoad} IS NULL AND ${table.providerExerciseLoadBasis} IS NULL) OR (${table.providerExerciseLoad} IS NOT NULL AND ${table.providerExerciseLoadBasis} IS NOT NULL AND ${table.providerExerciseLoadBasis}='garmin_activity_training_load_v1')`),
     check("integration_activity_duration_nonnegative", sql`${table.durationSeconds} >= 0`),
     check(
       "integration_activity_load_semantics_shape",
@@ -4734,3 +4769,104 @@ export type WorkoutSessionRow = typeof workoutSessions.$inferSelect;
 export type PerformedExerciseRow = typeof performedExercises.$inferSelect;
 /** Persisted immutable individual performed set. */
 export type PerformedSetRow = typeof performedSets.$inferSelect;
+
+/** Immutable, integration-owned typed connected_daily_fitness facts. */
+export const connectedDailyFitnessSummaries = pgTable("connected_daily_fitness",{
+
+ id: uuid("id").defaultRandom().primaryKey(),
+ personId: uuid("person_id").notNull(),
+ connectionId: uuid("connection_id").notNull(),
+ consentId: uuid("consent_id").notNull(),
+ provider: varchar("provider",{length:64}).notNull(),sourceIdentity: varchar("source_identity",{length:256}).notNull(),
+ localDate: date("local_date",{mode:"string"}).notNull(),timezone:varchar("timezone",{length:64}).notNull(),
+ normalizedChecksum:varchar("normalized_checksum",{length:64}).notNull(),
+ version:integer("version").notNull(),supersedesId:uuid("supersedes_id"),withdrawn:boolean("withdrawn").default(false).notNull(),
+ createdAt:timestamp("created_at",{withTimezone:true,mode:"date"}).defaultNow().notNull(),
+ restingExpenditureKcal:numeric("resting_expenditure_kcal",{precision:14,scale:3}),
+ activeExpenditureKcal:numeric("active_expenditure_kcal",{precision:14,scale:3}),
+ totalExpenditureKcal:numeric("total_expenditure_kcal",{precision:14,scale:3}),
+ movementDistanceMeters:numeric("movement_distance_meters",{precision:14,scale:3}),
+ floorsUp:numeric("floors_up",{precision:14,scale:3}),
+ floorsDown:numeric("floors_down",{precision:14,scale:3}),
+ moderateMinutes:numeric("moderate_minutes",{precision:14,scale:3}),
+ vigorousMinutes:numeric("vigorous_minutes",{precision:14,scale:3}),
+ fitnessAgeYears:numeric("fitness_age_years",{precision:14,scale:3}),
+ achievableFitnessAgeYears:numeric("achievable_fitness_age_years",{precision:14,scale:3}),
+ vo2Max:numeric("vo2_max",{precision:14,scale:3}),
+ vo2MaxCycling:numeric("vo2_max_cycling",{precision:14,scale:3}),
+ vo2MaxRowing:numeric("vo2_max_rowing",{precision:14,scale:3}),
+ fitnessAgeAsOf:date("fitness_age_as_of",{mode:"string"}),fitnessAgeComputedAt:timestamp("fitness_age_computed_at",{withTimezone:true,mode:"date"}),
+},(t)=>[
+ unique("connected_daily_fitness_id_person_uq").on(t.id,t.personId),
+ foreignKey({name:"connected_daily_fitness_person_fk",columns:[t.personId],foreignColumns:[persons.id]}).onDelete("cascade"),
+ foreignKey({name:"connected_daily_fitness_connection_fk",columns:[t.connectionId,t.personId],foreignColumns:[integrationConnections.id,integrationConnections.personId]}).onDelete("cascade"),
+ foreignKey({name:"connected_daily_fitness_consent_fk",columns:[t.consentId,t.personId],foreignColumns:[recoveryConsents.id,recoveryConsents.personId]}).onDelete("cascade"),
+
+ uniqueIndex("connected_daily_fitness_successor_uq").on(t.supersedesId).where(sql`${t.supersedesId} IS NOT NULL`),
+ index("connected_daily_fitness_person_date_idx").on(t.personId,t.localDate),
+ foreignKey({name:"connected_daily_fitness_supersedes_fk",columns:[t.supersedesId,t.personId],foreignColumns:[t.id,t.personId]}),
+ check("connected_daily_fitness_version_positive",sql`${t.version} > 0`),
+ check("connected_daily_fitness_values_nonnegative",sql`(${t.restingExpenditureKcal} IS NULL OR (${t.restingExpenditureKcal} >= 0 AND ${t.restingExpenditureKcal} <= 1000000)) AND (${t.activeExpenditureKcal} IS NULL OR (${t.activeExpenditureKcal} >= 0 AND ${t.activeExpenditureKcal} <= 1000000)) AND (${t.totalExpenditureKcal} IS NULL OR (${t.totalExpenditureKcal} >= 0 AND ${t.totalExpenditureKcal} <= 1000000)) AND (${t.movementDistanceMeters} IS NULL OR (${t.movementDistanceMeters} >= 0 AND ${t.movementDistanceMeters} <= 1000000)) AND (${t.floorsUp} IS NULL OR (${t.floorsUp} >= 0 AND ${t.floorsUp} <= 1000000)) AND (${t.floorsDown} IS NULL OR (${t.floorsDown} >= 0 AND ${t.floorsDown} <= 1000000)) AND (${t.moderateMinutes} IS NULL OR (${t.moderateMinutes} >= 0 AND ${t.moderateMinutes} <= 1440)) AND (${t.vigorousMinutes} IS NULL OR (${t.vigorousMinutes} >= 0 AND ${t.vigorousMinutes} <= 1440)) AND (${t.fitnessAgeYears} IS NULL OR (${t.fitnessAgeYears} >= 0 AND ${t.fitnessAgeYears} <= 150)) AND (${t.achievableFitnessAgeYears} IS NULL OR (${t.achievableFitnessAgeYears} >= 0 AND ${t.achievableFitnessAgeYears} <= 150)) AND (${t.vo2Max} IS NULL OR (${t.vo2Max} >= 0 AND ${t.vo2Max} <= 150)) AND (${t.vo2MaxCycling} IS NULL OR (${t.vo2MaxCycling} >= 0 AND ${t.vo2MaxCycling} <= 150)) AND (${t.vo2MaxRowing} IS NULL OR (${t.vo2MaxRowing} >= 0 AND ${t.vo2MaxRowing} <= 150))`)
+]);
+
+/** Immutable, integration-owned typed connected_nutrition_days facts. */
+export const connectedNutritionDays = pgTable("connected_nutrition_days",{
+
+ id: uuid("id").defaultRandom().primaryKey(),
+ personId: uuid("person_id").notNull(),
+ connectionId: uuid("connection_id").notNull(),
+ consentId: uuid("consent_id").notNull(),
+ provider: varchar("provider",{length:64}).notNull(),sourceIdentity: varchar("source_identity",{length:256}).notNull(),
+ localDate: date("local_date",{mode:"string"}).notNull(),timezone:varchar("timezone",{length:64}).notNull(),
+ normalizedChecksum:varchar("normalized_checksum",{length:64}).notNull(),
+ version:integer("version").notNull(),supersedesId:uuid("supersedes_id"),withdrawn:boolean("withdrawn").default(false).notNull(),
+ createdAt:timestamp("created_at",{withTimezone:true,mode:"date"}).defaultNow().notNull(),
+ consumedCaloriesKcal:numeric("consumed_calories_kcal",{precision:14,scale:3}),
+ proteinGrams:numeric("protein_grams",{precision:14,scale:3}),
+ fatGrams:numeric("fat_grams",{precision:14,scale:3}),
+ carbohydrateGrams:numeric("carbohydrate_grams",{precision:14,scale:3}),
+ consumedFluidMl:numeric("consumed_fluid_ml",{precision:14,scale:3}),
+},(t)=>[
+ unique("connected_nutrition_days_id_person_uq").on(t.id,t.personId),
+ foreignKey({name:"connected_nutrition_days_person_fk",columns:[t.personId],foreignColumns:[persons.id]}).onDelete("cascade"),
+ foreignKey({name:"connected_nutrition_days_connection_fk",columns:[t.connectionId,t.personId],foreignColumns:[integrationConnections.id,integrationConnections.personId]}).onDelete("cascade"),
+ foreignKey({name:"connected_nutrition_days_consent_fk",columns:[t.consentId,t.personId],foreignColumns:[recoveryConsents.id,recoveryConsents.personId]}).onDelete("cascade"),
+
+ uniqueIndex("connected_nutrition_days_successor_uq").on(t.supersedesId).where(sql`${t.supersedesId} IS NOT NULL`),
+ index("connected_nutrition_days_person_date_idx").on(t.personId,t.localDate),
+ foreignKey({name:"connected_nutrition_days_supersedes_fk",columns:[t.supersedesId,t.personId],foreignColumns:[t.id,t.personId]}),
+ check("connected_nutrition_days_version_positive",sql`${t.version} > 0`),
+ check("connected_nutrition_days_values_nonnegative",sql`(${t.consumedCaloriesKcal} IS NULL OR (${t.consumedCaloriesKcal} >= 0 AND ${t.consumedCaloriesKcal} <= 1000000)) AND (${t.proteinGrams} IS NULL OR (${t.proteinGrams} >= 0 AND ${t.proteinGrams} <= 1000000)) AND (${t.fatGrams} IS NULL OR (${t.fatGrams} >= 0 AND ${t.fatGrams} <= 1000000)) AND (${t.carbohydrateGrams} IS NULL OR (${t.carbohydrateGrams} >= 0 AND ${t.carbohydrateGrams} <= 1000000)) AND (${t.consumedFluidMl} IS NULL OR (${t.consumedFluidMl} >= 0 AND ${t.consumedFluidMl} <= 1000000))`)
+]);
+
+/** Immutable, integration-owned typed body_composition_observations facts. */
+export const bodyCompositionObservations = pgTable("body_composition_observations",{
+
+ id: uuid("id").defaultRandom().primaryKey(),
+ personId: uuid("person_id").notNull(),
+ connectionId: uuid("connection_id").notNull(),
+ consentId: uuid("consent_id").notNull(),
+ provider: varchar("provider",{length:64}).notNull(),sourceIdentity: varchar("source_identity",{length:256}).notNull(),
+ localDate: date("local_date",{mode:"string"}).notNull(),timezone:varchar("timezone",{length:64}).notNull(),
+ normalizedChecksum:varchar("normalized_checksum",{length:64}).notNull(),
+ version:integer("version").notNull(),supersedesId:uuid("supersedes_id"),withdrawn:boolean("withdrawn").default(false).notNull(),
+ createdAt:timestamp("created_at",{withTimezone:true,mode:"date"}).defaultNow().notNull(),
+ bodyFatPercent:numeric("body_fat_percent",{precision:14,scale:3}),
+ bodyWaterPercent:numeric("body_water_percent",{precision:14,scale:3}),
+ muscleMassKg:numeric("muscle_mass_kg",{precision:14,scale:3}),
+ boneMassKg:numeric("bone_mass_kg",{precision:14,scale:3}),
+ bmi:numeric("bmi",{precision:14,scale:3}),
+ measuredAt:timestamp("measured_at",{withTimezone:true,mode:"date"}),weightMeasurementId:uuid("weight_measurement_id"),
+},(t)=>[
+ unique("body_composition_observations_id_person_uq").on(t.id,t.personId),
+ foreignKey({name:"body_composition_weight_fk",columns:[t.weightMeasurementId,t.personId],foreignColumns:[weightMeasurements.id,weightMeasurements.personId]}),
+ foreignKey({name:"body_composition_observations_person_fk",columns:[t.personId],foreignColumns:[persons.id]}).onDelete("cascade"),
+ foreignKey({name:"body_composition_observations_connection_fk",columns:[t.connectionId,t.personId],foreignColumns:[integrationConnections.id,integrationConnections.personId]}).onDelete("cascade"),
+ foreignKey({name:"body_composition_observations_consent_fk",columns:[t.consentId,t.personId],foreignColumns:[recoveryConsents.id,recoveryConsents.personId]}).onDelete("cascade"),
+
+ uniqueIndex("body_composition_observations_successor_uq").on(t.supersedesId).where(sql`${t.supersedesId} IS NOT NULL`),
+ index("body_composition_observations_person_date_idx").on(t.personId,t.localDate),
+ foreignKey({name:"body_composition_observations_supersedes_fk",columns:[t.supersedesId,t.personId],foreignColumns:[t.id,t.personId]}),
+ check("body_composition_observations_version_positive",sql`${t.version} > 0`),
+ check("body_composition_observations_values_nonnegative",sql`(${t.bodyFatPercent} IS NULL OR (${t.bodyFatPercent} >= 0 AND ${t.bodyFatPercent} <= 100)) AND (${t.bodyWaterPercent} IS NULL OR (${t.bodyWaterPercent} >= 0 AND ${t.bodyWaterPercent} <= 100)) AND (${t.muscleMassKg} IS NULL OR (${t.muscleMassKg} >= 0 AND ${t.muscleMassKg} <= 700)) AND (${t.boneMassKg} IS NULL OR (${t.boneMassKg} >= 0 AND ${t.boneMassKg} <= 700)) AND (${t.bmi} IS NULL OR (${t.bmi} >= 0 AND ${t.bmi} <= 200))`)
+]);

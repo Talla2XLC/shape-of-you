@@ -1,3 +1,5 @@
+import { ConnectedProviderDateQuerySchema, BodyCompositionObservationListSchema, type ConnectedProviderDateQuery } from "@shape-of-you/contracts";
+import type { ConnectedProviderDataService } from "../connected-provider-data/connected-provider-data.service.js";
 import { randomUUID } from "node:crypto";
 import { Ajv, type ValidateFunction } from "ajv";
 import addFormats from "ajv-formats";
@@ -169,6 +171,7 @@ import {
 } from "./oauth.js";
 
 interface McpServices {
+  readonly connectedProviderData?: Pick<ConnectedProviderDataService, "bodyComposition">;
   readonly weights: Pick<WeightMeasurementService, "list" | "create" | "correct">;
   readonly bodyMeasurements: Pick<BodyMeasurementSessionService, "list" | "create" | "correct">;
   readonly nutrition: Pick<NutritionService, "listMeals" | "createMeal" | "correctMeal">;
@@ -805,6 +808,12 @@ function createTools(services: McpServices, now: () => Date): readonly ToolDefin
       MCP_READ_SCOPE,
       (input) => services.personFactTimeline!.read(input as PersonFactTimelineQuery),
       () => personFactTimelineResultContent
+    )] : []),
+    ...(services.connectedProviderData ? [defineTool(
+      "list_body_composition_observations",
+      "Read current imported body composition observations for the authorized Person. Units and source provenance are explicit; missing measurements are unknown.",
+      ConnectedProviderDateQuerySchema, BodyCompositionObservationListSchema, false, MCP_READ_SCOPE,
+      input => services.connectedProviderData!.bodyComposition(input as ConnectedProviderDateQuery)
     )] : []),
     defineTool(
       "list_weight_measurements",
