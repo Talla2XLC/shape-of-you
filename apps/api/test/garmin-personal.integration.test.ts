@@ -100,6 +100,76 @@ async function activateIntervals(personId: string) {
 }
 
 describe("direct Garmin linking and typed import", () => {
+  it("coalesces manual syncs, preserves history and leases, and reports actual worker state", async () => {
+    const id = await person();
+    const current = setup(id);
+    await current.service.connect({ apiKey: key, consent: true });
+    await database.pool.query(`update integration_connections set next_attempt_at=now()+interval '5 minutes',
+      historical_import_status='completed', historical_cursor_before=historical_scope_from_date,
+      historical_requested_at=now(), historical_completed_at=now() where person_id=$1`, [id]);
+    const reconcile = vi.spyOn(current.provider, "reconcile");
+    const results = await Promise.all(Array.from({ length: 5 }, () => current.service.requestSync()));
+    expect(results.every(result => result.sync.state === "queued")).toBe(true);
+    expect(reconcile).not.toHaveBeenCalled();
+    const claims = await Promise.all([current.store.claimDue("one", 60_000), current.store.claimDue("two", 60_000)]);
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    const claim = claims.find(Boolean)!;
+    expect((await current.service.status()).sync.state).toBe("running");
+    const before = (await database.pool.query("select lease_owner,lease_until,historical_import_status,historical_cursor_before from integration_connections where person_id=$1", [id])).rows[0];
+    expect((await current.service.requestSync()).sync.state).toBe("running");
+    expect((await database.pool.query("select lease_owner,lease_until,historical_import_status,historical_cursor_before from integration_connections where person_id=$1", [id])).rows[0]).toEqual(before);
+    await current.store.markSyncSucceeded(claim.id, claim.consentId, false);
+    await current.store.releaseClaim(claim.id, claim.consentId);
+    const scheduled = await current.service.requestSync();
+    expect(scheduled.sync.state).toBe("scheduled");
+    expect(Date.parse(scheduled.sync.nextAttemptAt!) - Date.parse(scheduled.lastAttemptAt!)).toBe(60_000);
+    const repeated = await current.service.requestSync();
+    expect(repeated.sync.nextAttemptAt).toBe(scheduled.sync.nextAttemptAt);
+    await database.pool.query("update integration_connections set last_attempt_at=now()-interval '2 minutes' where person_id=$1", [id]);
+    expect((await current.service.requestSync()).sync.state).toBe("queued");
+    expect(await current.service.processNext("manual-worker", 60_000)).toBe(true);
+    expect(reconcile).toHaveBeenCalled();
+    expect((await current.service.status()).sync.state).toBe("scheduled");
+  });
+
+  it("preserves provider backoff and rejects disconnected, revoked and erasing syncs", async () => {
+    const id = await person();
+    const { service, store } = setup(id);
+    await service.connect({ apiKey: key, consent: true });
+    const active = (await store.findActive(id))!;
+    await store.markSyncFailed(active.id, active.consentId, "provider_rate_limited");
+    const before = await service.status();
+    expect((await service.requestSync()).sync).toEqual(before.sync);
+    await database.pool.query("update recovery_connections set status='disconnected', disconnected_at=now(), erasure_requested_at=now() where id=$1", [active.recoveryConnectionId]);
+    expect((await service.status()).sync.state).toBe("blocked");
+    await expect(service.requestSync()).rejects.toThrow("not available");
+    await database.pool.query("update recovery_connections set status='active', disconnected_at=null, erasure_requested_at=null where id=$1", [active.recoveryConnectionId]);
+    await database.pool.query("update recovery_consents set status='revoked', revoked_at=now(), revocation_reason='synthetic revoked consent' where id=$1", [active.consentId]);
+    await expect(service.requestSync()).rejects.toThrow("not available");
+    await service.disconnect("test disconnect");
+    expect((await service.status()).sync).toEqual({ state: "blocked", nextAttemptAt: null });
+    await expect(service.requestSync()).rejects.toThrow("not available");
+    expect((await setup(await person()).service.status()).sync.state).toBe("blocked");
+  });
+
+  it("isolates manual scheduling by Person and preserves authorization backoff", async () => {
+    const first = await person(), second = await person();
+    const one = setup(first), two = setup(second);
+    await one.service.connect({ apiKey: key, consent: true });
+    await two.service.connect({ apiKey: key, consent: true });
+    await database.pool.query("update integration_connections set next_attempt_at=now()+interval '5 minutes' where person_id=any($1)", [[first, second]]);
+    const otherBefore = (await two.service.status()).sync;
+    await one.service.requestSync();
+    expect((await two.service.status()).sync).toEqual(otherBefore);
+    const active = (await one.store.findActive(first))!;
+    await one.store.markSyncFailed(active.id, active.consentId, "authorization_required");
+    expect((await one.service.status()).sync.state).toBe("blocked");
+    await expect(one.service.requestSync()).rejects.toThrow("not available");
+    await one.service.connect({ apiKey: "rotated-synthetic-key", consent: true });
+    expect((await one.service.requestSync()).sync.state).toBe("queued");
+    expect(await one.store.assertReadAllowed(active.id, active.consentId)).toBe(false);
+  });
+
   it("connects an empty account without external identity and keeps the key encrypted", async () => {
     const id = await person();
     const { service, store } = setup(id);
@@ -328,6 +398,12 @@ describe("direct Garmin linking and typed import", () => {
       expect(connected.json()).toMatchObject({ provider: "garmin_personal", lifecycle: "active", lastDataAt: null });
       expect(connected.headers["cache-control"]).toBe("no-store");
       expect(connected.body).not.toContain(key);
+      const sync = await http.inject({ method: "POST", url: "/v1/integrations/garmin-personal/sync" });
+      expect(sync.statusCode).toBe(202);
+      expect(sync.json().sync.state).toBe("queued");
+      expect(sync.headers["cache-control"]).toBe("no-store");
+      expect(sync.body).not.toContain(key);
+      expect((await http.inject({ method: "POST", url: "/v1/integrations/garmin-personal/sync", payload: { personId: randomUUID(), apiKey: key } })).statusCode).toBe(400);
       const unknown = await http.inject({ method: "POST", url: "/v1/integrations/garmin-personal/connect", payload: { apiKey: key, consent: true, personId: randomUUID() } });
       expect(unknown.statusCode).toBe(400);
       expect(unknown.body).not.toContain(key);

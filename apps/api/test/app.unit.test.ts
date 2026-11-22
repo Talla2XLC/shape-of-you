@@ -374,6 +374,10 @@ describe("API bootstrap", () => {
       "/v1/coaching/recommendations/training-adjustments"
     );
     expect(openapi.json().paths).toHaveProperty("/v1/intake/requests");
+    const manualSync = openapi.json().paths["/v1/integrations/garmin-personal/sync"].post;
+    expect(manualSync.responses["202"].content["application/json"].schema.required).toContain("sync");
+    expect(manualSync.requestBody).toMatchObject({ required: false, content: { "application/json": { schema: { additionalProperties: false } } } });
+    expect(manualSync.parameters).toContainEqual(expect.objectContaining({ name: "X-CSRF-Token", required: true }));
     expect(openapi.json().paths).toHaveProperty("/v1/day-projections");
     expect(openapi.json().paths).toHaveProperty("/v1/daily-context-notes");
     expect(openapi.json().paths).toHaveProperty("/v1/progress-overview");
@@ -392,6 +396,10 @@ describe("API bootstrap", () => {
       recoveryConnectionId: null,
       historicalImport: { status: "not_requested", processedThroughDate: null }
     });
+    const direct = await fastify.inject({ method: "GET", url: "/v1/integrations/garmin-personal" });
+    expect(direct.statusCode).toBe(200);
+    expect(direct.json().sync).toEqual({ state: "blocked", nextAttemptAt: null });
+    expect((await fastify.inject({ method: "POST", url: "/v1/integrations/garmin-personal/sync" })).statusCode).toBe(503);
 
     await app.close();
   });

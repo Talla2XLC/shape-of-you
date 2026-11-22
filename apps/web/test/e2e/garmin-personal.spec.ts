@@ -69,7 +69,7 @@ test("a new user connects an empty Garmin account with one submit and no browser
   const apiKey = randomBytes(32).toString("base64url");
   await context.addCookies([{ name: "__Host-shape_of_you_api_csrf", value: csrf, domain: "localhost", path: "/", secure: true, sameSite: "Lax" }]);
   let connected = false;
-  const active = { ...disconnected, lifecycle: "active", recoveryConnectionId: randomUUID(), connectedAt: "2026-11-20T12:00:00.000Z" };
+  const active = { ...disconnected, lifecycle: "active", recoveryConnectionId: randomUUID(), connectedAt: "2026-11-20T12:00:00.000Z", sync: { state: "queued", nextAttemptAt: "2026-11-20T12:00:00.000Z" } };
   await page.route(/\/api\/v1\/integrations\/garmin-personal$/u, (route) => json(route, connected ? active : disconnected));
   let submissions = 0;
   await page.route("**/api/v1/integrations/garmin-personal/connect", async (route) => {
@@ -102,7 +102,7 @@ test("a new user connects an empty Garmin account with one submit and no browser
   await page.screenshot({ path: join(tmpdir(), "task0184-connections-new-user-320.png"), fullPage: true });
   await field.fill(apiKey);
   await card.getByRole("button", { name: "Connect Garmin", exact: true }).click();
-  await expect(card.getByRole("status")).toHaveText("Connected, no data yet.");
+  await expect(card.getByRole("status")).toHaveText("Connected. Waiting to sync with Garmin…");
   expect(submissions).toBe(1);
   await card.getByRole("button", { name: "Update Garmin key", exact: true }).click();
   await expect(field).toHaveValue("");

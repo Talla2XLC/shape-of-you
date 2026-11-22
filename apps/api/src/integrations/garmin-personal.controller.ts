@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Header, HttpCode, Inject, Post, UseInterceptors } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Header, HttpCode, Inject, Post, UseInterceptors } from "@nestjs/common";
 import {
   CheckGarminPersonalKeySchema, ConnectGarminPersonalSchema, DisconnectIntegrationSchema,
   GarminPersonalConnectionSchema, GarminPersonalKeyCheckSchema,
@@ -17,6 +17,18 @@ export class GarminPersonalController {
   @Header("cache-control", "no-store")
   @UseInterceptors(new JsonSchemaResponseInterceptor(GarminPersonalConnectionSchema))
   public status() { return this.service.status(); }
+
+  /** Schedules or joins a rolling import without receiving or exposing a key. */
+  @HttpCode(202)
+  @Post("sync")
+  @Header("cache-control", "no-store")
+  @UseInterceptors(new JsonSchemaResponseInterceptor(GarminPersonalConnectionSchema))
+  public sync(@Body() input: unknown) {
+    if (input !== undefined && (input === null || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length > 0)) {
+      throw new BadRequestException("Sync request accepts no input");
+    }
+    return this.service.requestSync();
+  }
 
   /** Verifies access without activating imports. */
   @HttpCode(200)

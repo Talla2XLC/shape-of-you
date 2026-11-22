@@ -11,7 +11,10 @@ const busy = ref(false);
 const message = ref("");
 const apiKey = ref("");
 const editing = ref(false);
+const requestedAfterAttempt = ref<string | null | undefined>(undefined);
+const syncResult = ref("");
 const connected = computed(() => status.value?.lifecycle === "active" || status.value?.lifecycle === "degraded");
+const syncPending = computed(() => requestedAfterAttempt.value !== undefined || status.value?.sync?.state === "queued" || status.value?.sync?.state === "running");
 let refreshTimer: ReturnType<typeof setInterval> | undefined;
 let disposed = false;
 let requestGeneration = 0;
@@ -29,8 +32,49 @@ async function refresh(silent = false): Promise<void> {
 
 onMounted(async () => {
   await refresh();
-  if (!disposed) refreshTimer = setInterval(() => void refresh(true), 30_000);
+  let nextIdleRefresh = Date.now() + 30_000;
+  if (!disposed) refreshTimer = setInterval(() => {
+    if (syncPending.value || Date.now() >= nextIdleRefresh) {
+      nextIdleRefresh = Date.now() + 30_000;
+      void refresh(true);
+    }
+  }, 5_000);
 });
+
+watch(() => [status.value?.lastAttemptAt, status.value?.sync?.state], () => {
+  const current = status.value;
+  if (current?.sync?.state === "running" || current?.sync?.state === "queued" || current?.sync?.state === "blocked") syncResult.value = "";
+  if (!current || requestedAfterAttempt.value === undefined || current.sync?.state === "running" || current.sync?.state === "queued") return;
+  if (current.sync?.state === "blocked") {
+    requestedAfterAttempt.value = undefined;
+    syncResult.value = "Sync is unavailable. Check the connection status and Garmin key.";
+  } else if (current.lastAttemptAt && current.lastAttemptAt !== requestedAfterAttempt.value) {
+    requestedAfterAttempt.value = undefined;
+    syncResult.value = current.failureCode ? `Sync did not complete. ${garminPersonalFailureReason(current.failureCode)}`
+      : current.lastSuccessfulSyncAt === current.lastAttemptAt ? "Sync completed successfully."
+      : "Sync checked available data, but some imports remain incomplete. An automatic retry is scheduled.";
+  }
+});
+
+async function syncNow(): Promise<void> {
+  if (busy.value || syncPending.value || status.value?.sync?.state !== "scheduled") return;
+  const generation = ++requestGeneration;
+  requestedAfterAttempt.value = status.value.lastAttemptAt;
+  syncResult.value = "";
+  message.value = "";
+  busy.value = true;
+  try {
+    const result = await garminPersonalApi.sync();
+    if (!disposed && generation === requestGeneration) status.value = result;
+  } catch {
+    if (!disposed && generation === requestGeneration) {
+      requestedAfterAttempt.value = undefined;
+      message.value = "The sync request could not be confirmed. Check the connection status before trying again.";
+    }
+  } finally {
+    if (!disposed && generation === requestGeneration) busy.value = false;
+  }
+}
 
 onBeforeUnmount(() => {
   disposed = true;
@@ -49,6 +93,8 @@ async function connect(): Promise<void> {
   const generation = ++requestGeneration;
   busy.value = true;
   message.value = "";
+  requestedAfterAttempt.value = undefined;
+  syncResult.value = "";
   try {
     const result = await garminPersonalApi.connect(apiKey.value.trim());
     if (!disposed && generation === requestGeneration) {
@@ -68,6 +114,8 @@ async function disconnect(): Promise<void> {
   const generation = ++requestGeneration;
   busy.value = true;
   message.value = "";
+  requestedAfterAttempt.value = undefined;
+  syncResult.value = "";
   apiKey.value = "";
   editing.value = false;
   try {
@@ -150,7 +198,13 @@ function formatted(value: string | null): string {
         v-if="connected"
         role="status"
       >
-        <template v-if="status.lifecycle === 'degraded'">
+        <template v-if="status.sync?.state === 'running'">
+          Connected. Syncing with Garmin…
+        </template>
+        <template v-else-if="status.sync?.state === 'queued'">
+          Connected. Waiting to sync with Garmin…
+        </template>
+        <template v-else-if="status.lifecycle === 'degraded'">
           Garmin needs attention. {{ garminPersonalFailureReason(status.failureCode) }}
         </template>
         <template v-else-if="!status.lastDataAt">
@@ -234,6 +288,15 @@ function formatted(value: string | null): string {
         <button
           class="button compact-button"
           type="button"
+          :disabled="busy || syncPending || status.sync?.state !== 'scheduled'"
+          aria-describedby="garmin-sync-progress"
+          @click="syncNow"
+        >
+          {{ status.sync?.state === 'running' ? 'Syncing…' : syncPending ? 'Sync requested…' : 'Sync now' }}
+        </button>
+        <button
+          class="button button-secondary compact-button"
+          type="button"
           :disabled="busy"
           @click="editing = true"
         >
@@ -248,6 +311,31 @@ function formatted(value: string | null): string {
           Disconnect Garmin
         </button>
       </div>
+      <p
+        v-if="connected"
+        id="garmin-sync-progress"
+        class="item-meta"
+        aria-live="polite"
+      >
+        <template v-if="syncResult">
+          {{ syncResult }}
+        </template>
+        <template v-else-if="status.sync?.state === 'running'">
+          Import is in progress. This page updates automatically.
+        </template>
+        <template v-else-if="status.sync?.state === 'queued'">
+          Your sync is queued. This page updates automatically.
+        </template>
+        <template v-else-if="status.sync?.state === 'scheduled'">
+          {{ syncPending ? 'Sync requested. Next attempt:' : 'Next automatic sync:' }} {{ formatted(status.sync.nextAttemptAt) }}
+        </template>
+        <template v-else-if="status.sync?.state === 'blocked'">
+          Sync is unavailable. Check your Garmin access.
+        </template>
+        <template v-else>
+          Sync status is temporarily unavailable. This page will retry automatically.
+        </template>
+      </p>
       <p
         v-if="status.recoveryConnectionId"
         class="item-meta"

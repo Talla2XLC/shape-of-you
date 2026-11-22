@@ -1,5 +1,5 @@
 import { and, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
-import type { ActivityDetailsIssue, GarminIntervalsConnection, IntegrationConnection } from "@shape-of-you/contracts";
+import type { ActivityDetailsIssue, GarminIntervalsConnection, GarminSyncStatus, IntegrationConnection } from "@shape-of-you/contracts";
 
 import type { DatabaseContext } from "../database/context.js";
 import {
@@ -229,11 +229,19 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
   }
 
   public async status(personId: string): Promise<Status | null> {
-    const row = await this.database.db.query.integrationConnections.findFirst({
+    if (this.providerKey === "garmin_personal") return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
+      return this.readStatus(transaction.query, personId, transaction);
+    });
+    return this.readStatus(this.database.db.query, personId);
+  }
+
+  private async readStatus(query: DatabaseContext["db"]["query"], personId: string, transaction?: DatabaseTransaction): Promise<Status | null> {
+    const row = await query.integrationConnections.findFirst({
       where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, this.providerKey))
     });
     if (!row) {
-      const pending = await this.database.db.query.integrationAuthorizationTransactions.findFirst({
+      const pending = await query.integrationAuthorizationTransactions.findFirst({
         where: and(
           eq(integrationAuthorizationTransactions.personId, personId),
           eq(integrationAuthorizationTransactions.providerKey, this.providerKey),
@@ -259,6 +267,7 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
       lastDataAt: row.lastDataAt?.toISOString() ?? null,
       connectedAt: row.connectedAt.toISOString(),
       disconnectedAt: row.disconnectedAt?.toISOString() ?? null,
+      ...(transaction ? { sync: await this.syncMetadata(transaction, row) } : {}),
       historicalImport: {
         status: row.historicalImportStatus,
         scopeFromDate: row.historicalScopeFromDate,
@@ -269,6 +278,35 @@ export class IntegrationRepository<Status extends IntegrationConnection = Garmin
         failureCode: row.historicalFailureCode
       }
     } as Status;
+  }
+
+  /** Coalesces a direct Garmin rolling sync under the Person lock without replacing leases, history or provider backoff. */
+  public async requestSync(personId: string): Promise<boolean> {
+    if (this.providerKey !== "garmin_personal") return false;
+    return this.database.db.transaction(async (transaction) => {
+      await lockPersonEvidenceMutation(transaction, personId);
+      const row = await transaction.query.integrationConnections.findFirst({
+        where: and(eq(integrationConnections.personId, personId), eq(integrationConnections.providerKey, this.providerKey))
+      });
+      if (!row || (await this.syncMetadata(transaction, row)).state === "blocked") return false;
+      const now = new Date();
+      if ((row.leaseUntil && row.leaseUntil > now) || row.nextAttemptAt <= now) return true;
+      if (row.failureCode) return true;
+      const earliest = new Date(Math.max(now.valueOf(), (row.lastAttemptAt?.valueOf() ?? 0) + 60_000));
+      if (earliest < row.nextAttemptAt) await transaction.update(integrationConnections)
+        .set({ nextAttemptAt: earliest, updatedAt: now })
+        .where(and(eq(integrationConnections.id, row.id), eq(integrationConnections.consentId, row.consentId)));
+      return true;
+    });
+  }
+
+  private async syncMetadata(transaction: DatabaseTransaction, row: typeof integrationConnections.$inferSelect): Promise<GarminSyncStatus> {
+    if (!row.credentialCiphertext || row.failureCode === "authorization_required" || !await this.writable(transaction, row.id, row.consentId)) {
+      return { state: "blocked", nextAttemptAt: null };
+    }
+    const now = new Date();
+    return { state: row.leaseUntil && row.leaseUntil > now ? "running" : row.nextAttemptAt <= now ? "queued" : "scheduled",
+      nextAttemptAt: row.nextAttemptAt.toISOString() };
   }
 
   /** Reads only safe sync and target-date delivery metadata for Recovery composition. */

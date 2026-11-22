@@ -149,6 +149,7 @@ function integrationPaths(): Record<string, object> {
     ["/connect", "post", ConnectGarminPersonalSchema, GarminPersonalConnectionSchema, "Connect or renew a personal Garmin key"],
     ["/disconnect", "post", DisconnectIntegrationSchema, GarminPersonalConnectionSchema, "Stop local Garmin imports and discard the personal key"],
     ["/historical-import", "post", null, GarminPersonalConnectionSchema, "Request historical Garmin import"],
+    ["/sync", "post", null, GarminPersonalConnectionSchema, "Request or join a current Garmin sync; requires browser session, same-origin and X-CSRF-Token"],
     ["/cutover", "get", null, GarminCutoverStatusSchema, "Read a Person-owned future cutover"],
     ["/cutover/preview", "post", PreviewGarminCutoverSchema, GarminCutoverPreviewSchema, "Preview a future import boundary and mapping gaps"],
     ["/cutover/schedule", "post", ScheduleGarminCutoverSchema, GarminCutoverStatusSchema, "Verify a candidate key and schedule the acknowledged boundary"],
@@ -157,9 +158,12 @@ function integrationPaths(): Record<string, object> {
   ].map(([suffix, method, input, output, summary]) => [`/v1/integrations/garmin-personal${suffix}`, {
     [method as string]: {
       tags: ["integrations"], summary,
+      ...(suffix === "/sync" ? { parameters: [{ name: "X-CSRF-Token", in: "header", required: true, schema: { type: "string" } }],
+        requestBody: { required: false, content: { "application/json": { schema: { type: "object", additionalProperties: false, properties: {} } } } } } : {}),
       ...(input ? { requestBody: { required: true, content: { "application/json": { schema: input } } } } : {}),
       responses: {
-        "200": { description: "Safe connection result", content: { "application/json": { schema: output } } },
+        [suffix === "/sync" ? "202" : "200"]: { description: suffix === "/sync" ? "Sync requested or already pending; not proof of successful import" : "Safe connection result", content: { "application/json": { schema: output } } },
+        ...(suffix === "/sync" ? { "409": { description: "This connection cannot currently import" }, "503": { description: "Direct Garmin sync is unavailable" } } : {}),
         ...(suffix === "/cutover/schedule" || suffix === "/cutover/retry" ? {
           "409": { description: "Stale state or newly discovered coverage requiring explicit confirmation", content: {
             "application/json": { schema: { anyOf: [ErrorResponseSchema, GarminCutoverCoverageChangedSchema] } }

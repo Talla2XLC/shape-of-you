@@ -431,6 +431,7 @@ describe("API browser session boundary", () => {
     auth().guardApiRoutes(fastify, personContext);
     fastify.get("/v1/person", () => ({ personId: personContext.getPersonId() }));
     fastify.post("/v1/person", () => ({ personId: personContext.getPersonId() }));
+    fastify.post("/v1/integrations/garmin-personal/sync", () => ({ personId: personContext.getPersonId() }));
     fastify.get("/v1/chat-assistant/launch", () => ({ ok: true }));
 
     const cookie = `__Host-shape_of_you_api_session=${await session()}; __Host-shape_of_you_api_csrf=csrf-value`;
@@ -456,6 +457,13 @@ describe("API browser session boundary", () => {
     const write = await fastify.inject({ method: "POST", url: "/v1/person", headers: { cookie, origin, "x-csrf-token": "csrf-value" } });
     expect(write.statusCode).toBe(200);
     expect(write.json()).toEqual({ personId: "00000000-0000-4000-8000-000000000001" });
+    const syncUrl = "/v1/integrations/garmin-personal/sync";
+    expect((await fastify.inject({ method: "POST", url: syncUrl })).statusCode).toBe(401);
+    expect((await fastify.inject({ method: "POST", url: syncUrl, headers: { cookie } })).statusCode).toBe(401);
+    expect((await fastify.inject({ method: "POST", url: syncUrl, headers: { cookie, origin: "https://evil.example.test", "x-csrf-token": "csrf-value" } })).statusCode).toBe(401);
+    const sync = await fastify.inject({ method: "POST", url: syncUrl, headers: { cookie, origin, "x-csrf-token": "csrf-value" } });
+    expect(sync.statusCode).toBe(200);
+    expect(sync.json()).toEqual({ personId: "00000000-0000-4000-8000-000000000001" });
     await fastify.close();
   });
 });

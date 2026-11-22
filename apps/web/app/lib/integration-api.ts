@@ -6,6 +6,8 @@ const csrfCookieName = "__Host-shape_of_you_api_csrf";
 export interface GarminPersonalStatus {
   readonly provider: "garmin_personal";
   readonly displayName: "Garmin";
+  /** Absent only during a rolling deployment against an older API. */
+  readonly sync?: { readonly state: "scheduled" | "queued" | "running" | "blocked"; readonly nextAttemptAt: string | null };
   readonly recoveryConnectionId: string | null;
   readonly lifecycle: "unavailable" | "connecting" | "active" | "degraded" | "disconnected";
   readonly failureCode: "authorization_required" | "provider_rate_limited" | "provider_timeout" | "provider_unavailable" | "provider_response_invalid" | "cutover_source_stopped" | null;
@@ -77,6 +79,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 /** Same-origin direct Garmin management; keys are sent only in mutation bodies. */
 export const garminPersonalApi = {
   status() { return request<GarminPersonalStatus>("/api/v1/integrations/garmin-personal"); },
+  sync() { return request<GarminPersonalStatus>("/api/v1/integrations/garmin-personal/sync", { method: "POST" }); },
   check(apiKey: string) {
     return request<{ readonly verified: true }>("/api/v1/integrations/garmin-personal/check", {
       method: "POST", body: JSON.stringify({ apiKey })

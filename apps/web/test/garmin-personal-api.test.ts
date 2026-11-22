@@ -11,6 +11,16 @@ import {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("direct Garmin browser API", () => {
+  it("requests current sync with CSRF and no key, scope or historical-import input", async () => {
+    const csrf = randomBytes(32).toString("base64url");
+    const fetch = vi.fn().mockResolvedValue(new Response("{}", { status: 202 }));
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("document", { cookie: `__Host-shape_of_you_api_csrf=${csrf}` });
+    await garminPersonalApi.sync();
+    expect(fetch.mock.calls[0]?.[0]).toBe("/api/v1/integrations/garmin-personal/sync");
+    expect(fetch.mock.calls[0]?.[1]).toMatchObject({ method: "POST", cache: "no-store", credentials: "same-origin", headers: { "x-csrf-token": csrf } });
+    expect(fetch.mock.calls[0]?.[1].body).toBeUndefined();
+  });
   it("sends a personal key only in the protected connect body with explicit consent", async () => {
     const apiKey = randomBytes(32).toString("base64url");
     const csrf = randomBytes(32).toString("base64url");

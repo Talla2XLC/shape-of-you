@@ -10,7 +10,7 @@ import type { TrainingStore } from "../storage/training-repository.js";
 import type { IntegrationRepository } from "../storage/integration-repository.js";
 import type { ConnectionCredentialCipher } from "./credential-cipher.js";
 import type { GarminPersonalProvider } from "./garmin-personal/provider.js";
-import { DomainValidationError } from "../domain/errors.js";
+import { ConflictError, DomainValidationError } from "../domain/errors.js";
 import { IntegrationProviderError, type HealthDataReader } from "./provider.js";
 import { IntegrationService } from "./integration.service.js";
 import type { GarminCutoverRuntime } from "./garmin-cutover.service.js";
@@ -67,8 +67,18 @@ export class GarminPersonalService {
   public async status(): Promise<GarminPersonalConnection> {
     const status = await this.importer.status();
     const policy = await this.cutover?.store.find(this.person.getPersonId());
+    const safe = { ...status, sync: status.sync ?? { state: "blocked" as const, nextAttemptAt: null } };
     return policy && ["scheduled", "failed"].includes(policy.state) && policy.targetRecoveryConnectionId !== null &&
-      policy.targetRecoveryConnectionId === status.recoveryConnectionId ? { ...status, lifecycle: "connecting" } : status;
+      policy.targetRecoveryConnectionId === status.recoveryConnectionId ? { ...safe, lifecycle: "connecting", sync: { state: "blocked", nextAttemptAt: null } } : safe;
+  }
+
+  /** Requests the current Person's rolling import; acceptance is distinct from eventual provider success. */
+  public async requestSync(): Promise<GarminPersonalConnection> {
+    if (!this.runtime) throw new HttpException("Direct Garmin sync is unavailable", 503);
+    if (!await this.runtime.store.requestSync(this.person.getPersonId())) {
+      throw new ConflictError("Garmin sync is not available for this connection");
+    }
+    return this.status();
   }
 
   /** Checks access without persistence, consent activation or domain writes. */

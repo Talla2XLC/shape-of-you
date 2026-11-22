@@ -81,6 +81,15 @@ function activity(personId: string, connectionId: string, consentId: string, occ
 }
 
 describe("future-only Garmin cutover persistence", () => {
+  it("does not let manual sync bypass scheduled or restore-suppressed target authority", async () => {
+    const f = await fixture();
+    const row = await f.cutovers.schedule(f.personId, f.input);
+    expect(await f.targetStore.requestSync(f.personId)).toBe(false);
+    await database.pool.query("update integration_cutovers set restore_suppressed=true where id=$1", [row.id]);
+    expect(await f.targetStore.requestSync(f.personId)).toBe(false);
+    const status = await f.targetStore.status(f.personId);
+    if (status) expect(status.sync.state).toBe("blocked");
+  });
   it("refuses legacy manifest export for any cutover policy, including cancelled schedules", async () => {
     const f = await fixture();
     const row = await f.cutovers.schedule(f.personId, f.input);
@@ -328,6 +337,7 @@ describe("future-only Garmin cutover persistence", () => {
     await applyRecoveryErasureJournal(recovery, checkpointPath, through);
     const denied = await f.cutovers.find(f.personId);
     expect(denied).toMatchObject({ startsOn: scheduled.startsOn, restoreSuppressed: true, state: "active" });
+    expect(await f.targetStore.requestSync(f.personId)).toBe(false);
     expect(await f.sourceStore.findActive(f.personId)).toBeNull();
     expect((await f.cutovers.nextDue())?.id).not.toBe(scheduled.id);
     const version = denied!.version;

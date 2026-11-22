@@ -97,14 +97,28 @@ export const DisconnectIntegrationSchema = {
 /** Explicit local disconnect intent; imported facts are retained. */
 export type DisconnectIntegration = FromSchema<typeof DisconnectIntegrationSchema>;
 
+/** Derived scheduling evidence without credentials or worker ownership identifiers. */
+export const GarminSyncStatusSchema = {
+  type: "object", additionalProperties: false, required: ["state", "nextAttemptAt"],
+  properties: {
+    state: { enum: ["scheduled", "queued", "running", "blocked"] },
+    nextAttemptAt: nullableDateTime
+  }
+} as const;
+
+/** Safe scheduling evidence; queued or running never implies a successful import. */
+export type GarminSyncStatus = FromSchema<typeof GarminSyncStatusSchema>;
+
 /** Browser-safe projection for direct Garmin Personal API access. */
 export const GarminPersonalConnectionSchema = {
   ...GarminIntervalsConnectionSchema,
   $id: "GarminPersonalConnection",
+  required: [...GarminIntervalsConnectionSchema.required, "sync"],
   properties: {
     ...GarminIntervalsConnectionSchema.properties,
     provider: { const: "garmin_personal" },
-    displayName: { const: "Garmin" }
+    displayName: { const: "Garmin" },
+    sync: GarminSyncStatusSchema
   }
 } as const;
 

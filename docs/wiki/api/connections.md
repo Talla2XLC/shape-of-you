@@ -41,6 +41,26 @@ bodies are Person-bound and CSRF-protected. Safe responses are `no-store` and
 never contain credentials or external account IDs. Key checking is bounded to
 five attempts per Person per minute within one API process.
 
+`POST /v1/integrations/garmin-personal/sync` accepts no input (an empty JSON
+object is also allowed), requires the existing browser session/same-origin CSRF
+guard, and returns `202` with the safe connection projection. It advances the
+existing rolling-import due time under the Person lock; it never runs provider
+requests inside HTTP or restarts historical import. Repeated requests join
+queued/running work without replacing the lease. A new manual attempt observes
+a minimum 60 seconds after the previous completed attempt and preserves provider
+failure backoff. Disconnected, revoked, erasing or otherwise denied connections
+cannot schedule work; unavailable runtime returns `503`.
+
+Direct status includes `sync.state` (`scheduled`, `queued`, `running`, `blocked`)
+and nullable `sync.nextAttemptAt`, derived from existing admission/due-time/lease
+state. A running lease is scheduling evidence, not proof of successful import.
+The website exposes **Sync now**, refreshes status every five seconds while
+waiting/running and every thirty seconds otherwise, and distinguishes acceptance
+from an actual newer attempt's success/failure. Queue/worker state survives page
+reload. During a rolling deployment an older API without this metadata leaves
+manual sync disabled instead of inventing availability. See the
+[manual sync ADR](../../adr/20261122-request-garmin-sync-through-existing-worker.md).
+
 Database plus the integration encryption key ring/active key ID enable direct
 linking independently of Intervals OAuth settings. Personal keys are encrypted
 at rest; access tokens stay in a bounded memory cache scoped to connection and
@@ -216,6 +236,7 @@ not expose connection controls or imported-record counts.
 
 ## Decisions
 
+- [Request direct Garmin sync through the existing worker](../../adr/20261122-request-garmin-sync-through-existing-worker.md)
 - [Garmin-only browser management](../../adr/20261121-retire-intervals-browser-management.md)
 - [Future-day Intervals to Garmin transition](../../adr/20261120-switch-intervals-to-garmin-with-date-boundary.md)
 - [Compatible journal v2 restore bounds](../../adr/20261120-preserve-cutover-bounds-in-erasure-journal-v2.md)
